@@ -91,3 +91,11 @@ export function sortDataframe(dfId: string, column: string, direction: 'asc' | '
 export function filterRows(dfId: string, column: string, value: any) {
   return postJSON(`${DATAFRAME_OPERATIONS_API}/filter_rows`, { df_id: dfId, column, value });
 }
+
+export function applyFormula(dfId: string, target_column: string, formula: string) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/apply_formula`, {
+    df_id: dfId,
+    target_column,
+    formula,
+  });
+}

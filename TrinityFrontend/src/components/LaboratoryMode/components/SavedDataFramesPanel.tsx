@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { VALIDATE_API, SESSION_API } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
+import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 
 interface Props {
   isOpen: boolean;
@@ -24,6 +25,15 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
   const [openDirs, setOpenDirs] = useState<Record<string, boolean>>({});
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<
+    { type: 'one'; target: string } | { type: 'all' } | null
+  >(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    target: string;
+    frame: Frame;
+  } | null>(null);
 
   const { user } = useAuth();
 
@@ -151,14 +161,25 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     window.open(`/dataframe?name=${encodeURIComponent(obj)}`, '_blank');
   };
 
-  const deleteAll = async () => {
-    await fetch(`${VALIDATE_API}/delete_all_dataframes`, { method: 'DELETE' });
-    setFiles([]);
-  };
+  const promptDeleteAll = () => setConfirmDelete({ type: 'all' });
 
-  const deleteOne = async (obj: string) => {
-    await fetch(`${VALIDATE_API}/delete_dataframe?object_name=${encodeURIComponent(obj)}`, { method: 'DELETE' });
-    setFiles(prev => prev.filter(f => f.object_name !== obj));
+  const promptDeleteOne = (obj: string) =>
+    setConfirmDelete({ type: 'one', target: obj });
+
+  const performDelete = async () => {
+    if (!confirmDelete) return;
+    if (confirmDelete.type === 'all') {
+      await fetch(`${VALIDATE_API}/delete_all_dataframes`, { method: 'DELETE' });
+      setFiles([]);
+    } else {
+      const obj = confirmDelete.target;
+      await fetch(
+        `${VALIDATE_API}/delete_dataframe?object_name=${encodeURIComponent(obj)}`,
+        { method: 'DELETE' }
+      );
+      setFiles(prev => prev.filter(f => f.object_name !== obj));
+    }
+    setConfirmDelete(null);
   };
 
   const startRename = (obj: string, currentName: string) => {
@@ -191,6 +212,28 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
       );
     }
     setRenameTarget(null);
+  };
+
+  const handleContextMenu = (e: React.MouseEvent, frame: Frame) => {
+    e.preventDefault();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      target: frame.object_name,
+      frame: frame
+    });
+  };
+
+  const handleContextMenuAction = (action: 'edit' | 'delete') => {
+    if (!contextMenu) return;
+    
+    if (action === 'edit') {
+      startRename(contextMenu.target, contextMenu.frame.arrow_name || contextMenu.frame.csv_name);
+    } else if (action === 'delete') {
+      promptDeleteOne(contextMenu.target);
+    }
+    
+    setContextMenu(null);
   };
 
   const buildTree = (frames: Frame[], pref: string): TreeNode[] => {
@@ -255,6 +298,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
           ) : (
             <button
               onClick={() => handleOpen(f.object_name)}
+              onContextMenu={(e) => handleContextMenu(e, f)}
               className="text-sm text-blue-600 hover:underline flex-1 text-left"
             >
               {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
@@ -267,7 +311,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             />
             <Trash2
               className="w-4 h-4 text-gray-400 cursor-pointer"
-              onClick={() => deleteOne(f.object_name)}
+              onClick={() => promptDeleteOne(f.object_name)}
             />
           </div>
         </div>
@@ -308,7 +352,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
           <span>Saved DataFrames</span>
         </h3>
         <div className="flex items-center space-x-2">
-          <Button variant="ghost" size="sm" onClick={deleteAll} className="p-1 h-8 w-8" title="Delete all">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={promptDeleteAll}
+            className="p-1 h-8 w-8"
+            title="Delete all"
+          >
             <Trash2 className="w-4 h-4" />
           </Button>
           <Button variant="ghost" size="sm" onClick={onToggle} className="p-1 h-8 w-8">
@@ -320,6 +370,53 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
         {tree.length === 0 && <p className="text-sm text-gray-600">No saved dataframes</p>}
         {tree.map(node => renderNode(node))}
       </div>
+      <ConfirmationDialog
+        open={!!confirmDelete}
+        onOpenChange={open => {
+          if (!open) setConfirmDelete(null);
+        }}
+        onConfirm={performDelete}
+        onCancel={() => setConfirmDelete(null)}
+        title={
+          confirmDelete?.type === 'all' ? 'Delete All DataFrames' : 'Delete DataFrame'
+        }
+        description={
+          confirmDelete?.type === 'all'
+            ? 'Delete all saved dataframes? This may impact existing projects.'
+            : 'Are you sure you want to delete this dataframe? This may impact existing projects.'
+        }
+        icon={<Trash2 className="w-5 h-5 text-white" />}
+        confirmLabel="Yes, Delete"
+        iconBgClass="bg-red-500"
+        confirmButtonClass="bg-red-500 hover:bg-red-600"
+      />
+      
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          className="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50"
+          style={{
+            left: contextMenu.x,
+            top: contextMenu.y,
+          }}
+          onMouseLeave={() => setContextMenu(null)}
+        >
+          <button
+            onClick={() => handleContextMenuAction('edit')}
+            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+          >
+            <Pencil className="w-4 h-4" />
+            <span>Rename</span>
+          </button>
+          <button
+            onClick={() => handleContextMenuAction('delete')}
+            className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Delete</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 };

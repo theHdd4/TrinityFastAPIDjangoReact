@@ -20,10 +20,15 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import D3LineChart from "./D3LineChart";
+// Import chart template components
+import RechartsChartRenderer from "@/templates/charts/RechartsChartRenderer";
+import "@/templates/charts/chart.css";
+// Comment out current D3LineChart implementation
+// import D3LineChart from "./D3LineChart";
 import { useAuth } from "@/contexts/AuthContext";
 import { logSessionState, addNavigationItem } from "@/lib/session";
 import { useLaboratoryStore } from "@/components/LaboratoryMode/store/laboratoryStore";
+import { useToast } from "@/hooks/use-toast";
 
 interface ColumnInfo {
   column: string;
@@ -51,6 +56,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   atomId,
 }) => {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [dimensionMap, setDimensionMap] = useState<Record<string, string[]>>(
     filterUnattributed(settings.dimensionMap || {}),
   );
@@ -81,6 +87,14 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const [sortColumn, setSortColumn] = useState<string>('unique_count');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+
+  // Chart type and theme state for chart type changes
+  const [chartType, setChartType] = useState<string>('line_chart');
+  const [chartTheme, setChartTheme] = useState<string>('default');
+  
+  // Chart display options state
+  const [showDataLabels, setShowDataLabels] = useState<boolean>(false);
+  const [showAxisLabels, setShowAxisLabels] = useState<boolean>(true);
 
   // Get atom settings to access the input file name
   const atom = useLaboratoryStore(state => atomId ? state.getAtom(atomId) : undefined);
@@ -222,18 +236,29 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     return Array.from(new Set(values)).sort();
   };
 
-  const handleSort = (column: string, direction?: 'asc' | 'desc') => {
-    if (sortColumn === column) {
-      if (sortDirection === 'asc') {
-        setSortDirection('desc');
-      } else if (sortDirection === 'desc') {
-        setSortColumn('');
-        setSortDirection('asc');
-      }
-    } else {
-      setSortColumn(column);
-      setSortDirection(direction || 'asc');
-    }
+  const handleSort = (column: string, direction: 'asc' | 'desc') => {
+    setSortColumn(column);
+    setSortDirection(direction);
+  };
+
+  // Handle chart type change
+  const handleChartTypeChange = (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
+    setChartType(newType);
+  };
+
+  // Handle chart theme change
+  const handleChartThemeChange = (newTheme: string) => {
+    setChartTheme(newTheme);
+  };
+
+  // Handle data labels toggle
+  const handleDataLabelsToggle = (show: boolean) => {
+    setShowDataLabels(show);
+  };
+
+  // Handle axis labels toggle
+  const handleAxisLabelsToggle = (show: boolean) => {
+    setShowAxisLabels(show);
   };
 
   const handleColumnFilter = (column: string, values: string[]) => {
@@ -519,7 +544,14 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       .forEach((d) => {
         combo[d] = row[d.toLowerCase()];
       });
-    if (!settings.yAxes || settings.yAxes.length === 0) return;
+    if (!settings.yAxes || settings.yAxes.length === 0) {
+      toast({
+        title:
+          "Can not display trend - configure Dependant Variables in properties section to view stat.",
+        variant: "destructive",
+      });
+      return;
+    }
     setError(null);
     try {
       const result: Record<
@@ -577,8 +609,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       )}
       {summaryList.length > 0 && (
         <div className="mb-8">
-          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <Table
+          <Table
               headers={[
                 <ContextMenu key="Columns">
                   <ContextMenuTrigger asChild>
@@ -769,7 +800,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                   </tr>
                 ))}
             </Table>
-          </div>
         </div>
       )}
 
@@ -908,8 +938,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                     {activeRow === row.id && (
                       <tr className="table-row">
                         <td className="table-cell" colSpan={colSpan}>
-                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mt-6">
-                            <div className="xl:col-span-1">
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6 w-full">
+                            <div className="lg:col-span-1">
                               <Card className="border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] hover:-translate-y-1 transition-all duration-300 relative flex flex-col group hover:shadow-2xl h-[460px]">
                                 <div className="bg-white border-b border-black p-4 flex items-center justify-between relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
                                   <h4 className="font-bold text-gray-900 text-lg flex items-center">
@@ -922,28 +952,59 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                         <Maximize2 className="w-5 h-5 text-gray-900" />
                                       </button>
                                     </DialogTrigger>
-                                    <DialogContent className="max-w-4xl">
-                                      <D3LineChart
-                                        data={statDataMap[activeMetric]?.timeseries || []}
-                                        width={900}
-                                        height={500}
-                                        xLabel={settings.xAxis || "Date"}
-                                        yLabel={activeMetric || "Value"}
-                                      />
+                                    <DialogContent className="max-w-7xl w-[95vw] h-[90vh]">
+                                      <div className="w-full h-full flex flex-col">
+                                        <div className="flex-1 min-h-0">
+                                          {/* New RechartsChartRenderer implementation */}
+                                          <RechartsChartRenderer
+                                            type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
+                                            data={statDataMap[activeMetric]?.timeseries || []}
+                                            xField="date"
+                                            yField="value"
+                                            width={undefined}
+                                            height={undefined}
+                                            title=""
+                                            xAxisLabel={settings.xAxis || "Date"}
+                                            yAxisLabel={activeMetric || "Value"}
+                                            showDataLabels={showDataLabels}
+                                            showAxisLabels={showAxisLabels}
+                                            theme={chartTheme}
+                                            onChartTypeChange={handleChartTypeChange}
+                                            onThemeChange={handleChartThemeChange}
+                                            onDataLabelsToggle={handleDataLabelsToggle}
+                                            onAxisLabelsToggle={handleAxisLabelsToggle}
+                                          />
+                                        </div>
+                                      </div>
                                     </DialogContent>
                                   </Dialog>
                                 </div>
-                                <div className="p-6 flex-1 flex items-center justify-center">
-                                  <D3LineChart
-                                    data={statDataMap[activeMetric]?.timeseries || []}
-                                    height={360}
-                                    xLabel={settings.xAxis || "Date"}
-                                    yLabel={activeMetric || "Value"}
-                                  />
+                                <div className="p-4 flex-1 flex items-center justify-center min-h-0">
+                                  <div className="w-full h-full min-h-[300px] flex items-center justify-center">
+                                    {/* New RechartsChartRenderer implementation */}
+                                    <RechartsChartRenderer
+                                      type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
+                                      data={statDataMap[activeMetric]?.timeseries || []}
+                                      xField="date"
+                                      yField="value"
+                                      width={undefined}
+                                      height={undefined}
+                                      title=""
+                                      xAxisLabel={settings.xAxis || "Date"}
+                                      yAxisLabel={activeMetric || "Value"}
+                                      showDataLabels={showDataLabels}
+                                      showAxisLabels={showAxisLabels}
+                                      theme={chartTheme}
+                                      onChartTypeChange={handleChartTypeChange}
+                                      onThemeChange={handleChartThemeChange}
+                                      onDataLabelsToggle={handleDataLabelsToggle}
+                                      onAxisLabelsToggle={handleAxisLabelsToggle}
+                                    />
+                                  </div>
                                 </div>
                               </Card>
                             </div>
-                            <div className="xl:col-span-1">
+                            <div className="lg:col-span-1">
                               <Card className="border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] hover:-translate-y-1 transition-all duration-300 flex flex-col hover:shadow-2xl h-[460px]">
                                 <div className="bg-white border-b border-black p-4 relative flex-shrink-0">
                                   <h5 className="font-bold text-gray-900 text-sm flex items-center">

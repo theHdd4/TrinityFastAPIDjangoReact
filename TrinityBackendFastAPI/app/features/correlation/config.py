@@ -37,7 +37,7 @@ class Settings(BaseSettings):
             pass
             
         # Fallback default
-        return "trinity_dev"
+        return "trinity_db"
 
 settings = Settings()
 print("MONGO_URI:", settings.MONGO_URI)

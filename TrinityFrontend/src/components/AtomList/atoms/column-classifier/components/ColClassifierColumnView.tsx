@@ -16,7 +16,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import Table from '@/templates/tables/table';
-import { FEATURE_OVERVIEW_API } from '@/lib/api';
+import { FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import columnClassifier from '../index';
 
@@ -71,15 +71,20 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
     if (!objectName) return;
     const fetchSummary = async () => {
       try {
-        const res = await fetch(
-          `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(objectName)}`
-        );
-        if (!res.ok) {
-          setSummary([]);
-          return;
-        }
+        const formData = new FormData();
+        formData.append('validator_atom_id', '');
+        formData.append('file_key', objectName);
+        formData.append('bucket_name', 'trinity');
+        formData.append('object_names', objectName);
+        
+        const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
         const data = await res.json();
-        setSummary(Array.isArray(data.summary) ? data.summary.filter(Boolean) : []);
+        
+        if (data.status === 'SUCCESS' && data.cardinality) {
+          setSummary(data.cardinality);
+        } else {
+          setSummary([]);
+        }
       } catch {
         setSummary([]);
       }
@@ -237,8 +242,7 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
 
   return (
     <div className="w-full">
-      <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <Table
+      <Table
           headers={[
             <ContextMenu key="Column">
               <ContextMenuTrigger asChild>
@@ -415,7 +419,6 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
             </tr>
           ))}
         </Table>
-      </div>
     </div>
   );
 };

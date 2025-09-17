@@ -12,13 +12,27 @@ except ModuleNotFoundError:  # pragma: no cover
     asyncpg = None
 
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
-POSTGRES_DB = os.getenv("POSTGRES_DB", "trinity_prod")
+POSTGRES_DB = os.getenv("POSTGRES_DB", "trinity_db")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "trinity_user")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "trinity_pass")
 
 # MongoDB Configuration
-MONGODB_URL = settings.mongo_uri
+# Support both dedicated CLASSIFY_MONGO_URI and fallback MONGO_URI so the
+# service connects in dev and prod environments without additional tweaks.
+MONGODB_URL = (
+    os.getenv("CLASSIFY_MONGO_URI")
+    or os.getenv("MONGO_URI")
+    or settings.mongo_uri
+)
+# Accept both MONGO_USERNAME and legacy MONGO_USER for credentials
+MONGO_USER = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER")
+MONGO_PASSWORD = os.getenv("MONGO_PASSWORD")
+MONGO_AUTH_DB = os.getenv("MONGO_AUTH_DB", "admin")
+
 DATABASE_NAME = settings.classification_database
+CONFIG_DB_NAME = os.getenv(
+    "CLASSIFIER_CONFIG_DB", settings.classifier_configs_database
+)
 
 # Collection Names - ONLY the ones you specified
 # Use settings for consistency
@@ -31,14 +45,40 @@ COLLECTIONS = {
 
 # Initialize MongoDB client with timeout
 try:
-    mongo_client = MongoClient(MONGODB_URL, serverSelectionTimeoutMS=5000)
+    auth_kwargs = (
+        {
+            "username": MONGO_USER,
+            "password": MONGO_PASSWORD,
+            "authSource": MONGO_AUTH_DB,
+        }
+        if MONGO_USER and MONGO_PASSWORD
+        else {}
+    )
+    mongo_client = MongoClient(
+        MONGODB_URL,
+        **auth_kwargs,
+        serverSelectionTimeoutMS=5000,
+    )
     db = mongo_client[DATABASE_NAME]
-    config_db = mongo_client[settings.classifier_configs_database]
-    
+    config_db = mongo_client[CONFIG_DB_NAME]
+
     # Test connection
     mongo_client.admin.command('ping')
     print(f"✅ Connected to MongoDB: {DATABASE_NAME}")
-    print(f"✅ Config DB: {settings.classifier_configs_database}")
+    print(f"✅ Config DB: {CONFIG_DB_NAME}")
+    try:  # pragma: no cover - best effort to ensure collection exists
+        if (
+            COLLECTIONS["CLASSIFIER_CONFIGS"]
+            not in config_db.list_collection_names()
+        ):
+            config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
+            print(
+                f"✅ Created collection {COLLECTIONS['CLASSIFIER_CONFIGS']} in {CONFIG_DB_NAME}"
+            )
+    except Exception as exc:
+        logging.warning(
+            f"Could not verify/create {COLLECTIONS['CLASSIFIER_CONFIGS']}: {exc}"
+        )
     
 except Exception as e:
     print(f"❌ MongoDB connection failed: {e}")
@@ -46,9 +86,61 @@ except Exception as e:
     db = None
     config_db = None
 
-def check_mongodb_connection():
-    """Check if MongoDB is available"""
-    return mongo_client is not None and db is not None and config_db is not None
+def ensure_mongo_connection() -> bool:
+    """Ensure a live connection to MongoDB.
+
+    The initial connection attempt happens at import time. However, services
+    like MongoDB might not be ready yet when the module is imported. This
+    helper retries the connection on demand so that later requests (e.g. when
+    the user clicks *Save Configuration*) can still succeed and automatically
+    create the necessary collection.
+    """
+
+    global mongo_client, db, config_db
+
+    if mongo_client is not None and db is not None and config_db is not None:
+        return True
+
+    try:
+        auth_kwargs = (
+            {
+                "username": MONGO_USER,
+                "password": MONGO_PASSWORD,
+                "authSource": MONGO_AUTH_DB,
+            }
+            if MONGO_USER and MONGO_PASSWORD
+            else {}
+        )
+        mongo_client = MongoClient(
+            MONGODB_URL,
+            **auth_kwargs,
+            serverSelectionTimeoutMS=5000,
+        )
+        db = mongo_client[DATABASE_NAME]
+        config_db = mongo_client[CONFIG_DB_NAME]
+        mongo_client.admin.command("ping")
+        try:  # pragma: no cover - best effort to ensure collection exists
+            if (
+                COLLECTIONS["CLASSIFIER_CONFIGS"]
+                not in config_db.list_collection_names()
+            ):
+                config_db.create_collection(COLLECTIONS["CLASSIFIER_CONFIGS"])
+        except Exception as exc:
+            logging.warning(
+                f"Could not verify/create {COLLECTIONS['CLASSIFIER_CONFIGS']}: {exc}"
+            )
+        return True
+    except Exception as exc:  # pragma: no cover - best effort
+        logging.error(f"MongoDB reconnection failed: {exc}")
+        mongo_client = None
+        db = None
+        config_db = None
+        return False
+
+
+def check_mongodb_connection() -> bool:
+    """Check if MongoDB is available, attempting reconnection if necessary."""
+    return ensure_mongo_connection()
 
 def get_validator_atom_from_mongo(validator_atom_id: str):
     """Get validator atom data from MongoDB - USED BY classify_columns endpoint"""
@@ -376,31 +468,54 @@ def get_project_dimension_mapping(project_id: int):
 
 
 def save_classifier_config_to_mongo(config: dict):
-    """Persist column classifier configuration."""
-    if not check_mongodb_connection():
+    """Persist column classifier configuration in MongoDB.
+
+    The document is stored in the shared ``trinity_db`` database under the
+    ``column_classifier_config`` collection and keyed by the combination of
+    client, app and project names. If the collection does not yet exist it is
+    created automatically before the document is written.
+    """
+
+    if not ensure_mongo_connection():
         return {"status": "error", "error": "MongoDB not connected"}
 
+    assert config_db is not None  # nosec - ensured by ensure_mongo_connection
     try:
         document_id = (
-            f"{config.get('client_name','')}/"
-            f"{config.get('app_name','')}/"
-            f"{config.get('project_name','')}"
+            f"{config.get('client_name', '')}/"
+            f"{config.get('app_name', '')}/"
+            f"{config.get('project_name', '')}"
         )
         document = {
             "_id": document_id,
-            **config,
+            "client_name": config.get("client_name", ""),
+            "app_name": config.get("app_name", ""),
+            "project_name": config.get("project_name", ""),
+            "identifiers": config.get("identifiers", []),
+            "measures": config.get("measures", []),
+            "dimensions": config.get("dimensions", {}),
+            # Preserve any extra metadata such as environment variables
+            **{k: v for k, v in config.items() if k not in {"client_name", "app_name", "project_name", "identifiers", "measures", "dimensions"}},
             "updated_at": datetime.utcnow(),
         }
-        result = config_db[COLLECTIONS["CLASSIFIER_CONFIGS"]].replace_one(
-            {"_id": document_id}, document, upsert=True
-        )
+
+        coll_name = COLLECTIONS["CLASSIFIER_CONFIGS"]
+        coll = config_db[coll_name]
+        try:  # pragma: no cover - best effort to ensure collection exists
+            if coll_name not in config_db.list_collection_names():
+                config_db.create_collection(coll_name)
+        except Exception as exc:
+            logging.warning(
+                f"Could not verify/create {coll_name}: {exc}"
+            )
+        result = coll.replace_one({"_id": document_id}, document, upsert=True)
         return {
             "status": "success",
             "mongo_id": document_id,
             "operation": "inserted" if result.upserted_id else "updated",
-            "collection": COLLECTIONS["CLASSIFIER_CONFIGS"],
+            "collection": coll_name,
         }
-    except Exception as exc:
+    except Exception as exc:  # pragma: no cover - best effort logging
         logging.error(f"MongoDB save error for classifier config: {exc}")
         return {"status": "error", "error": str(exc)}
 

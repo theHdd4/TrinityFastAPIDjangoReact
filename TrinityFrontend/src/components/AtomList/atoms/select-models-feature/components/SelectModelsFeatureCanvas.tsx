@@ -9,11 +9,12 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Checkbox } from '@/components/ui/checkbox';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, ScatterChart, Scatter, Legend } from 'recharts';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { SELECT_API, EXPLORE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
+import { SELECT_API, EXPLORE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import Table from '@/templates/tables/table';
+import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 
 interface SelectModelsFeatureCanvasProps {
   atomId: string;
@@ -57,9 +58,13 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
   // State for filter variables collapsible section
   const [filterVariablesOpen, setFilterVariablesOpen] = useState(false);
   // State for combination status
-  const [combinationStatus, setCombinationStatus] = useState<any>(null);
+  const [combinationStatus, setCombinationStatus] = useState<any>(() => {
+    return data.combinationStatus || null;
+  });
   const [isLoadingCombinationStatus, setIsLoadingCombinationStatus] = useState(false);
-  const [combinationStatusMinimized, setCombinationStatusMinimized] = useState(false);
+  const [combinationStatusMinimized, setCombinationStatusMinimized] = useState(() => {
+    return data.combinationStatusMinimized || false;
+  });
   // Refs to track previous values for auto-update
   const prevSelectedVariable = useRef<any>(null);
   const prevSelectedMethod = useRef<string | null>(null);
@@ -77,10 +82,161 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
 
+  // Chart settings for contribution chart
+  const [contributionChartType, setContributionChartType] = useState<'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'>('pie_chart');
+  const [contributionChartTheme, setContributionChartTheme] = useState<string>('default');
+  const [contributionChartDataLabels, setContributionChartDataLabels] = useState<boolean>(false);
+  const [contributionChartSortOrder, setContributionChartSortOrder] = useState<'asc' | 'desc' | null>(null);
+
+  // Chart settings for Y-O-Y chart
+  const [yoyChartType, setYoyChartType] = useState<'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'>('bar_chart');
+  const [yoyChartTheme, setYoyChartTheme] = useState<string>('default');
+  const [yoyChartDataLabels, setYoyChartDataLabels] = useState<boolean>(false);
+  const [yoyChartSortOrder, setYoyChartSortOrder] = useState<'asc' | 'desc' | null>(null);
+
+  // Chart settings for predicted vs actual chart
+  const [predictedVsActualChartType, setPredictedVsActualChartType] = useState<'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'>('scatter_chart');
+  const [predictedVsActualChartTheme, setPredictedVsActualChartTheme] = useState<string>('default');
+  const [predictedVsActualChartDataLabels, setPredictedVsActualChartDataLabels] = useState<boolean>(false);
+  const [predictedVsActualChartSortOrder, setPredictedVsActualChartSortOrder] = useState<'asc' | 'desc' | null>(null);
+
+  // Chart settings for method by model chart
+  const [methodByModelChartType, setMethodByModelChartType] = useState<'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'>('bar_chart');
+  const [methodByModelChartTheme, setMethodByModelChartTheme] = useState<string>('default');
+  const [methodByModelChartDataLabels, setMethodByModelChartDataLabels] = useState<boolean>(false);
+  const [methodByModelChartSortOrder, setMethodByModelChartSortOrder] = useState<'asc' | 'desc' | null>(null);
+
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
 
   const handleDataChange = (newData: Partial<any>) => {
     updateSettings(atomId, newData);
+  };
+
+  // Chart settings handlers
+  const handleContributionChartTypeChange = (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
+    setContributionChartType(newType);
+  };
+
+  const handleContributionChartThemeChange = (newTheme: string) => {
+    setContributionChartTheme(newTheme);
+  };
+
+  const handleContributionChartDataLabelsChange = (newShowDataLabels: boolean) => {
+    setContributionChartDataLabels(newShowDataLabels);
+  };
+
+  const handleContributionChartSortOrderChange = (newSortOrder: 'asc' | 'desc' | null) => {
+    setContributionChartSortOrder(newSortOrder);
+  };
+
+  // Y-O-Y chart settings handlers
+  const handleYoyChartTypeChange = (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
+    setYoyChartType(newType);
+  };
+
+  const handleYoyChartThemeChange = (newTheme: string) => {
+    setYoyChartTheme(newTheme);
+  };
+
+  const handleYoyChartDataLabelsChange = (newShowDataLabels: boolean) => {
+    setYoyChartDataLabels(newShowDataLabels);
+  };
+
+  const handleYoyChartSortOrderChange = (newSortOrder: 'asc' | 'desc' | null) => {
+    setYoyChartSortOrder(newSortOrder);
+  };
+
+  // Predicted vs actual chart settings handlers
+  const handlePredictedVsActualChartTypeChange = (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
+    setPredictedVsActualChartType(newType);
+  };
+
+  const handlePredictedVsActualChartThemeChange = (newTheme: string) => {
+    setPredictedVsActualChartTheme(newTheme);
+  };
+
+  const handlePredictedVsActualChartDataLabelsChange = (newShowDataLabels: boolean) => {
+    setPredictedVsActualChartDataLabels(newShowDataLabels);
+  };
+
+  const handlePredictedVsActualChartSortOrderChange = (newSortOrder: 'asc' | 'desc' | null) => {
+    setPredictedVsActualChartSortOrder(newSortOrder);
+  };
+
+  // Method by model chart settings handlers
+  const handleMethodByModelChartTypeChange = (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
+    setMethodByModelChartType(newType);
+  };
+
+  const handleMethodByModelChartThemeChange = (newTheme: string) => {
+    setMethodByModelChartTheme(newTheme);
+  };
+
+  const handleMethodByModelChartDataLabelsChange = (newShowDataLabels: boolean) => {
+    setMethodByModelChartDataLabels(newShowDataLabels);
+  };
+
+  const handleMethodByModelChartSortOrderChange = (newSortOrder: 'asc' | 'desc' | null) => {
+    setMethodByModelChartSortOrder(newSortOrder);
+  };
+
+  // Helper function to transform data for method by model chart
+  const transformMethodByModelData = () => {
+    if (!data.elasticityData || data.elasticityData.length === 0 || !Array.isArray(data.selectedVariable)) {
+      return [];
+    }
+
+    // Get the chart data (including ensemble if enabled)
+    const chartData = (() => {
+      if (data.ensembleMethod && data.weightedEnsembleData && data.weightedEnsembleData.length > 0) {
+        const ensemble = data.weightedEnsembleData[0];
+        const ensembleData = { name: 'Ensemble' };
+        
+        if (Array.isArray(data.selectedVariable)) {
+          data.selectedVariable.forEach(variable => {
+            let value = null;
+            
+            if (data.selectedMethod === 'elasticity') {
+              value = ensemble.weighted_metrics[`${variable}_elasticity`] || 
+                     ensemble.weighted_metrics[`Weighted_Elasticity_${variable}`] || 
+                     ensemble.weighted_metrics[`Elasticity_${variable}`] ||
+                     ensemble.weighted_metrics[variable];
+            } else if (data.selectedMethod === 'beta') {
+              value = ensemble.weighted_metrics[`${variable}_beta`] || 
+                     ensemble.weighted_metrics[`Weighted_Beta_${variable}`] || 
+                     ensemble.weighted_metrics[`Beta_${variable}`] ||
+                     ensemble.weighted_metrics[variable];
+            } else if (data.selectedMethod === 'average') {
+              value = ensemble.weighted_metrics[`${variable}_avg`] || 
+                     ensemble.weighted_metrics[`Weighted_Avg_${variable}`] || 
+                     ensemble.weighted_metrics[`Avg_${variable}`] ||
+                     ensemble.weighted_metrics[variable];
+            }
+            
+            ensembleData[variable] = value;
+          });
+        }
+        
+        return [ensembleData, ...data.elasticityData];
+      }
+      return data.elasticityData;
+    })();
+
+    // Transform data for RechartsChartRenderer with legend support
+    // Convert from wide format to long format for legend support
+    const transformedData: any[] = [];
+    
+    chartData.forEach((model: any) => {
+      data.selectedVariable.forEach((variable: string) => {
+        transformedData.push({
+          name: model.name, // X-axis (model name)
+          variable: variable, // Legend field (variable name)
+          value: model[variable] || 0 // Y-axis (value)
+        });
+      });
+    });
+
+    return transformedData;
   };
 
   // Initialize default method if not set
@@ -89,6 +245,19 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       handleDataChange({ selectedMethod: 'elasticity' });
     }
   }, [data.selectedMethod]);
+
+  // Sync with global store changes
+  useEffect(() => {
+    if (data.combinationStatus !== undefined) {
+      setCombinationStatus(data.combinationStatus);
+    }
+  }, [data.combinationStatus]);
+
+  useEffect(() => {
+    if (data.combinationStatusMinimized !== undefined) {
+      setCombinationStatusMinimized(data.combinationStatusMinimized);
+    }
+  }, [data.combinationStatusMinimized]);
 
   // Fetch combination status when dataset changes
   useEffect(() => {
@@ -1043,6 +1212,9 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       const result = await response.json();
       setCombinationStatus(result);
       
+      // Save to global store
+      handleDataChange({ combinationStatus: result });
+      
     } catch (error) {
       setCombinationStatus(null);
     } finally {
@@ -1611,24 +1783,34 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     setCardinalityError(null);
     
     try {
-      // Add .arrow extension if not present, like other atoms do
-      const objectName = data.selectedDataset.endsWith('.arrow') ? data.selectedDataset : `${data.selectedDataset}.arrow`;
-      const response = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(objectName)}`);
-      if (response.ok) {
-        const summary = await response.json();
-        const summaryData = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : [];
-        
-        // Transform the data to match the cardinality format expected by the table
-        const cardinalityFormatted = summaryData.map((col: any) => ({
-          column: col.column,
-          data_type: col.data_type,
-          unique_count: col.unique_count,
-          unique_values: col.unique_values || []
-        }));
-        
-        setCardinalityData(cardinalityFormatted);
+      // Extract the object name by removing the prefix (default_client/default_app/default_project/)
+      // The groupby endpoint will add the prefix back, so we need to pass the path without the prefix
+      let objectName = data.selectedDataset;
+      if (data.selectedDataset.includes('/')) {
+        const parts = data.selectedDataset.split('/');
+        // Remove the first 3 parts (default_client/default_app/default_project)
+        if (parts.length > 3) {
+          objectName = parts.slice(3).join('/');
+        } else {
+          // If less than 3 parts, just use the last part
+          objectName = parts[parts.length - 1];
+        }
+      }
+      
+      // Use GROUPBY_API cardinality endpoint instead of FEATURE_OVERVIEW_API
+      const formData = new FormData();
+      formData.append('validator_atom_id', atomId); // Use atomId as validator_atom_id
+      formData.append('file_key', objectName);
+      formData.append('bucket_name', 'trinity');
+      formData.append('object_names', objectName);
+      
+      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
+      const data_result = await res.json();
+      
+      if (data_result.status === 'SUCCESS' && data_result.cardinality) {
+        setCardinalityData(data_result.cardinality);
       } else {
-        setCardinalityError('Failed to fetch cardinality data');
+        setCardinalityError(data_result.error || 'Failed to fetch cardinality data');
       }
     } catch (e: any) {
       setCardinalityError(e.message || 'Error fetching cardinality data');
@@ -1885,8 +2067,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
             ) : cardinalityError ? (
               <div className="p-4 text-red-600">{cardinalityError}</div>
             ) : cardinalityData && cardinalityData.length > 0 ? (
-              <div className="w-full">
-                <Table
+              <Table
                   headers={[
                     <ContextMenu key="Column">
                       <ContextMenuTrigger asChild>
@@ -2129,7 +2310,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     </tr>
                   ))}
                 </Table>
-              </div>
             ) : (
               <div className="p-4 text-gray-500">No cardinality data available</div>
             )}
@@ -2267,109 +2447,28 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       </h4>
               
               {data.elasticityData && data.elasticityData.length > 0 ? (
-                <div>
-                  {/* Custom Legend above the chart */}
-                  <div className="flex flex-wrap gap-4 mb-3 justify-center">
-                    {Array.isArray(data.selectedVariable) && data.selectedVariable.map((variable: string, index: number) => (
-                      <div key={variable} className="flex items-center gap-2">
-                        <div 
-                          className="w-3 h-3 rounded-sm" 
-                          style={{ backgroundColor: getColor(index) }}
-                        ></div>
-                        <span className="text-xs text-gray-600">{variable}</span>
-                      </div>
-                    ))}
-                  </div>
-                  
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart 
-                      data={(() => {
-                        // If ensemble method is enabled and we have ensemble data, add it as the first item
-                        if (data.ensembleMethod && data.weightedEnsembleData && data.weightedEnsembleData.length > 0) {
-                          const ensemble = data.weightedEnsembleData[0];
-                          // Create ensemble data with the same structure as individual models
-                          const ensembleData = {
-                            name: 'Ensemble'
-                          };
-                          
-                          // Add values for each selected variable using the selected method
-                          if (Array.isArray(data.selectedVariable)) {
-                            data.selectedVariable.forEach(variable => {
-                              // Look for the variable in weighted metrics based on the selected method
-                              let value = null;
-                              
-                                                             if (data.selectedMethod === 'elasticity') {
-                                 // Look for elasticity values in weighted metrics
-                                 value = ensemble.weighted_metrics[`${variable}_elasticity`] || 
-                                        ensemble.weighted_metrics[`Weighted_Elasticity_${variable}`] || 
-                                        ensemble.weighted_metrics[`Elasticity_${variable}`] ||
-                                        ensemble.weighted_metrics[variable];
-                               } else if (data.selectedMethod === 'beta') {
-                                 // Look for beta values in weighted metrics
-                                 value = ensemble.weighted_metrics[`${variable}_beta`] || 
-                                        ensemble.weighted_metrics[`Weighted_Beta_${variable}`] || 
-                                        ensemble.weighted_metrics[`Beta_${variable}`] ||
-                                        ensemble.weighted_metrics[variable];
-                               } else if (data.selectedMethod === 'average') {
-                                 // Look for average values in weighted metrics
-                                 value = ensemble.weighted_metrics[`${variable}_avg`] || 
-                                        ensemble.weighted_metrics[`Weighted_Avg_${variable}`] || 
-                                        ensemble.weighted_metrics[`Avg_${variable}`] ||
-                                        ensemble.weighted_metrics[variable];
-                               }
-                              
-                              ensembleData[variable] = value;
-                            });
-                          }
-                          
-                          return [ensembleData, ...data.elasticityData];
-                        }
-                        return data.elasticityData;
-                      })()} 
-                      margin={{ top: 5, right: 30, left: 20, bottom: 80 }}
-                    >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                      <XAxis 
-                        dataKey="name" 
-                        stroke="#000" 
-                        angle={-45}
-                        textAnchor="end"
-                        height={80}
-                        fontSize={11}
-                        // fontWeight="bold"
-                      />
-                  <YAxis stroke="#000" fontSize={9} />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: 'white', 
-                      border: '1px solid #f0f0f0',
-                      borderRadius: '8px'
-                    }}
-                    formatter={(value: any, name: any, props: any) => {
-                      // For all bars, keep the variable name with method name as it was before
-                      return [value.toFixed(2), `${name} ${data.selectedMethod}`];
-                    }}
-                    labelFormatter={(label: any) => {
-                      // For ensemble bar, always show 'Ensemble' header
-                      if (label === 'Ensemble') {
-                        return 'Ensemble';
-                      }
-                      // For other models, keep the original label
-                      return label;
-                    }}
+                <div className="w-full h-[300px]">
+                  <RechartsChartRenderer
+                    type={methodByModelChartType}
+                    data={transformMethodByModelData()}
+                    xField="name"
+                    yField="value"
+                    legendField="variable"
+                    xAxisLabel="Model"
+                    yAxisLabel={data.selectedMethod ? data.selectedMethod.charAt(0).toUpperCase() + data.selectedMethod.slice(1) : 'Value'}
+                    theme={methodByModelChartTheme}
+                    enableScroll={false}
+                    width="100%"
+                    height={300}
+                    showDataLabels={methodByModelChartDataLabels}
+                    showLegend={true}
+                    sortOrder={methodByModelChartSortOrder}
+                    onThemeChange={handleMethodByModelChartThemeChange}
+                    onChartTypeChange={handleMethodByModelChartTypeChange}
+                    onDataLabelsToggle={handleMethodByModelChartDataLabelsChange}
+                    onSortChange={handleMethodByModelChartSortOrderChange}
                   />
-                    {Array.isArray(data.selectedVariable) && data.selectedVariable.map((variable: string, index: number) => (
-                      <Bar 
-                        key={variable}
-                        dataKey={variable} 
-                        fill={getColor(index)} 
-                        radius={[4, 4, 0, 0]}
-                        name={variable}
-                      />
-                    ))}
-                </BarChart>
-              </ResponsiveContainer>
-              </div>
+                </div>
               ) : (
                 <div className="h-[300px] bg-gray-50 rounded-lg flex items-center justify-center border border-gray-200">
                   <p className="text-gray-500 text-sm">
@@ -3302,36 +3401,33 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
               )}
             </div>
 
-            {/* Predicted vs Actual Scatter */}
+            {/* Predicted vs Actual */}
             <div className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
               <h5 className="text-sm font-medium text-orange-800 mb-3">Predicted vs Actual</h5>
               {data.actualVsPredictedData && data.actualVsPredictedData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={150}>
-                  <ScatterChart 
+                <div className="w-full h-[300px]">
+                  <RechartsChartRenderer
+                    type={predictedVsActualChartType}
                     data={data.actualVsPredictedData}
-                    key={`scatter-${Date.now()}-${data.actualVsPredictedData.length}`}
-                  >
-                    <XAxis 
-                      dataKey="actual" 
-                      domain={data.scatterChartDomains?.x || ['dataMin', 'dataMax']} 
-                      fontSize={10}
-                      tickFormatter={(value) => Math.round(value).toString()}
-                    />
-                    <YAxis 
-                      dataKey="predicted" 
-                      domain={data.scatterChartDomains?.y || ['dataMin', 'dataMax']} 
-                      fontSize={10}
-                      tickFormatter={(value) => Math.round(value).toString()}
-                    />
-                    <Scatter dataKey="predicted" fill={getColor(1)} />
-                    <Tooltip 
-                      formatter={(value: any, name: any) => [value.toFixed(2), name]}
-                      labelFormatter={(label) => `Data Point`}
-                    />
-                  </ScatterChart>
-                </ResponsiveContainer>
+                    xField="actual"
+                    yField="predicted"
+                    xAxisLabel="Actual"
+                    yAxisLabel="Predicted"
+                    theme={predictedVsActualChartTheme}
+                    enableScroll={false}
+                    width="100%"
+                    height={300}
+                    showDataLabels={predictedVsActualChartDataLabels}
+                    showLegend={predictedVsActualChartType === 'pie_chart'}
+                    sortOrder={predictedVsActualChartSortOrder}
+                    onThemeChange={handlePredictedVsActualChartThemeChange}
+                    onChartTypeChange={handlePredictedVsActualChartTypeChange}
+                    onDataLabelsToggle={handlePredictedVsActualChartDataLabelsChange}
+                    onSortChange={handlePredictedVsActualChartSortOrderChange}
+                  />
+                </div>
               ) : (
-                <div className="h-[150px] flex items-center justify-center">
+                <div className="h-[300px] flex items-center justify-center">
                   <p className="text-xs text-orange-600 text-center">
                     {data.selectedModel && data.selectedModel !== 'no-models' 
                       ? 'Loading actual vs predicted data...' 
@@ -3342,49 +3438,35 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
               )}
             </div>
 
-            {/* Contribution Pie Chart */}
+            {/* Contribution Chart */}
             <div className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
                 <h5 className="text-sm font-medium text-orange-800 mb-3">
                   Contribution
                 </h5>
                 {data.contributionData && data.contributionData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={150}>
-                <PieChart>
-                  <Pie
-                        data={data.contributionData}
-                    dataKey="value"
-                        outerRadius={65}
-                        label={({ name, percent }) => `${(percent * 100).toFixed(1)}%`}
-                        labelLine={false}
-                        fontSize={10}
-                  >
-                        {data.contributionData.map((entry: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={getColor(index)} />
-                    ))}
-                  </Pie>
-                      <Tooltip 
-                        formatter={(value: any, name: any) => [
-                          `${(value * 100).toFixed(2)}%`, 
-                          `Variable: ${name}`
-                        ]}
-                        labelFormatter={(label) => `Variable: ${label}`}
-                      />
-                      <Legend 
-                        fontSize={5}
-                        iconSize={6}
-                        layout="vertical"
-                        verticalAlign="middle"
-                        align="left"
-                        wrapperStyle={{ 
-                          maxHeight: '120px', 
-                          overflowY: 'auto',
-                          fontSize: '10px'
-                        }}
-                      />
-                </PieChart>
-              </ResponsiveContainer>
+                  <div className="w-full h-[300px]">
+                    <RechartsChartRenderer
+                      type={contributionChartType}
+                      data={data.contributionData}
+                      xField="name"
+                      yField="value"
+                      xAxisLabel="Variable"
+                      yAxisLabel="Contribution"
+                      theme={contributionChartTheme}
+                      enableScroll={false}
+                      width="100%"
+                      height={300}
+                      showDataLabels={contributionChartDataLabels}
+                      showLegend={contributionChartType === 'pie_chart'}
+                      sortOrder={contributionChartSortOrder}
+                      onThemeChange={handleContributionChartThemeChange}
+                      onChartTypeChange={handleContributionChartTypeChange}
+                      onDataLabelsToggle={handleContributionChartDataLabelsChange}
+                      onSortChange={handleContributionChartSortOrderChange}
+                    />
+                  </div>
                 ) : (
-                  <div className="h-[150px] flex items-center justify-center">
+                  <div className="h-[300px] flex items-center justify-center">
                     <p className="text-xs text-orange-600 text-center">
                       {data.selectedModel && data.selectedModel !== 'no-models' 
                         ? 'Loading contribution data...' 
@@ -3399,23 +3481,29 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
             <div className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
               <h5 className="text-sm font-medium text-orange-800 mb-3">Y-O-Y Growth</h5>
               {data.yoyData && data.yoyData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={150}>
-                  <BarChart data={data.yoyData}>
-                    <Bar 
-                      dataKey="value" 
-                      fill={getColor(2)}
-                      radius={4} 
-                    />
-                    <XAxis dataKey="name" fontSize={10} />
-                    <YAxis fontSize={10} />
-                    <Tooltip 
-                      formatter={(value: any) => [value.toFixed(2), 'Value']}
-                      labelFormatter={(label) => `Period: ${label}`}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
+                <div className="w-full h-[300px]">
+                  <RechartsChartRenderer
+                    type={yoyChartType}
+                    data={data.yoyData}
+                    xField="name"
+                    yField="value"
+                    xAxisLabel="Period"
+                    yAxisLabel="Growth Value"
+                    theme={yoyChartTheme}
+                    enableScroll={false}
+                    width="100%"
+                    height={300}
+                    showDataLabels={yoyChartDataLabels}
+                    showLegend={yoyChartType === 'pie_chart'}
+                    sortOrder={yoyChartSortOrder}
+                    onThemeChange={handleYoyChartThemeChange}
+                    onChartTypeChange={handleYoyChartTypeChange}
+                    onDataLabelsToggle={handleYoyChartDataLabelsChange}
+                    onSortChange={handleYoyChartSortOrderChange}
+                  />
+                </div>
               ) : (
-                <div className="h-[150px] flex items-center justify-center">
+                <div className="h-[300px] flex items-center justify-center">
                   <p className="text-xs text-orange-600 text-center">
                     {data.selectedModel && data.selectedModel !== 'no-models' 
                       ? 'Loading YoY data...' 
@@ -3483,7 +3571,11 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setCombinationStatusMinimized(!combinationStatusMinimized)}
+                    onClick={() => {
+                      const newMinimized = !combinationStatusMinimized;
+                      setCombinationStatusMinimized(newMinimized);
+                      handleDataChange({ combinationStatusMinimized: newMinimized });
+                    }}
                     className="text-xs p-1 h-6 w-6"
                   >
                     {combinationStatusMinimized ? (

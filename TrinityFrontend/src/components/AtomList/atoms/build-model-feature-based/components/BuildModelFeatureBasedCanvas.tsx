@@ -81,6 +81,13 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     }
   };
 
+  // Settings modification functions for Laboratory Mode
+  const handleSettingsChange = (newSettings: any) => {
+    if (atomId && updateSettings) {
+      updateSettings(atomId, newSettings);
+    }
+  };
+
   const addXVariable = () => {
     handleDataChange({
       xVariables: [...(finalData?.xVariables || []), []],
@@ -190,6 +197,9 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     // Reset previous results and errors
     setModelResult(null);
     setModelError(null);
+    
+    // Save to global store
+    handleSettingsChange({ modelResult: null, modelError: null });
     setIsRunningModel(true);
     
         // Initialize progress tracking
@@ -240,6 +250,9 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         setModelResult(result);
         setModelError(null);
         
+        // Save to global store
+        handleSettingsChange({ modelResult: result, modelError: null });
+        
         // Automatically minimize all combinations by default
         if (result.combination_results && result.combination_results.length > 0) {
           const allIndices = Array.from({ length: result.combination_results.length }, (_, i) => i);
@@ -247,12 +260,20 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         }
       } else {
         const errorText = await response.text();
-        setModelError(`Model training failed: ${response.status} - ${errorText}`);
+        const errorMessage = `Model training failed: ${response.status} - ${errorText}`;
+        setModelError(errorMessage);
         setModelResult(null);
+        
+        // Save to global store
+        handleSettingsChange({ modelResult: null, modelError: errorMessage });
       }
     } catch (error) {
-      setModelError(`Error running model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMessage = `Error running model: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      setModelError(errorMessage);
       setModelResult(null);
+      
+      // Save to global store
+      handleSettingsChange({ modelResult: null, modelError: errorMessage });
     } finally {
       // Clear progress polling interval and reset
       if (progressPollingInterval) {
@@ -346,8 +367,12 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
   const [isLoadingColumns, setIsLoadingColumns] = useState(false);
   const [openPopovers, setOpenPopovers] = useState<{ [key: number]: boolean }>({});
   const [isRunningModel, setIsRunningModel] = useState(false);
-  const [modelResult, setModelResult] = useState<any>(null);
-  const [modelError, setModelError] = useState<string | null>(null);
+  const [modelResult, setModelResult] = useState<any>(() => {
+    return data.modelResult || null;
+  });
+  const [modelError, setModelError] = useState<string | null>(() => {
+    return data.modelError || null;
+  });
   const [modelProgress, setModelProgress] = useState<{ 
     current: number; 
     total: number; 
@@ -451,6 +476,19 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
       addXVariable();
     }
   }, [finalData?.xVariables?.length]);
+
+  // Sync with global store changes
+  useEffect(() => {
+    if (data.modelResult !== undefined) {
+      setModelResult(data.modelResult);
+    }
+  }, [data.modelResult]);
+
+  useEffect(() => {
+    if (data.modelError !== undefined) {
+      setModelError(data.modelError);
+    }
+  }, [data.modelError]);
 
   // Automatically minimize all combinations by default when model results are available
   useEffect(() => {

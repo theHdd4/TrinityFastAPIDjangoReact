@@ -4,7 +4,7 @@ import { sanitizeLabConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X } from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
@@ -40,6 +40,11 @@ import AutoRegressiveModelsAtom from '@/components/AtomList/atoms/auto-regressiv
 import SelectModelsAutoRegressiveAtom from '@/components/AtomList/atoms/select-models-auto-regressive/SelectModelsAutoRegressiveAtom';
 import EvaluateModelsAutoRegressiveAtom from '@/components/AtomList/atoms/evaluate-models-auto-regressive/EvaluateModelsAutoRegressiveAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
+import { useToast } from '@/hooks/use-toast';
+import {
+  registerPrefillController,
+  cancelPrefillController,
+} from '@/components/AtomList/atoms/column-classifier/prefillManager';
 
 import {
   useLaboratoryStore,
@@ -77,9 +82,9 @@ const LLM_MAP: Record<string, string> = {
   concat: 'Agent Concat',
   'chart-maker': 'Agent Chart Maker',
   merge: 'Agent Merge',
-  clustering: 'Agent Clustering',
   'create-column': 'Agent Create Transform',
   'groupby-wtg-avg': 'Agent GroupBy',
+  'explore': 'Agent Explore',
 };
 
 const CanvasArea: React.FC<CanvasAreaProps> = ({
@@ -95,10 +100,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
   const [addDragTarget, setAddDragTarget] = useState<string | null>(null);
+  const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const prevLayout = React.useRef<LayoutCard[] | null>(null);
   const initialLoad = React.useRef(true);
-  
+
   const { updateCard, setCards } = useExhibitionStore();
+  const { toast } = useToast();
 
   interface ColumnInfo {
     column: string;
@@ -107,11 +114,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     unique_values: string[];
   }
 
-  const fetchColumnSummary = async (csv: string) => {
+  const fetchColumnSummary = async (csv: string, signal?: AbortSignal) => {
     try {
       console.log('🔎 fetching column summary for', csv);
       const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(csv)}`
+        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(csv)}`,
+        { signal }
       );
       if (!res.ok) {
         console.warn('⚠️ column summary request failed', res.status);
@@ -133,22 +141,28 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
   };
 
-  const prefetchDataframe = async (name: string) => {
+  const prefetchDataframe = async (
+    name: string,
+    signal?: AbortSignal,
+    statusCb?: (s: string) => void,
+  ) => {
     if (!name || !/\.[^/]+$/.test(name.trim())) return;
     try {
+      statusCb?.('Fetching flight table');
       console.log('✈️ fetching flight table', name);
       const fr = await fetch(
         `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(name)}`,
-        { credentials: 'include' }
+        { credentials: 'include', signal }
       );
       if (fr.ok) {
         await fr.arrayBuffer();
         console.log('✅ fetched flight table', name);
       }
+      statusCb?.('Prefetching Dataframe');
       console.log('🔎 prefetching dataframe', name);
       const res = await fetch(
         `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(name)}`,
-        { credentials: 'include' }
+        { credentials: 'include', signal }
       );
       if (res.ok) {
         await res.text();
@@ -157,12 +171,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         console.warn('⚠️ prefetch dataframe failed', res.status);
       }
     } catch (err) {
-      console.error('⚠️ prefetch dataframe error', err);
+      if ((err as any)?.name !== 'AbortError') {
+        console.error('⚠️ prefetch dataframe error', err);
+      }
     }
   };
 
 
-  const findLatestDataSource = async () => {
+  const findLatestDataSource = async (signal?: AbortSignal) => {
     console.log('🔎 searching for latest data source');
     if (!Array.isArray(layoutCards)) return null;
     for (let i = layoutCards.length - 1; i >= 0; i--) {
@@ -171,8 +187,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         const a = card.atoms[j];
         if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
           console.log('✔️ found feature overview data source', a.settings.dataSource);
-          await prefetchDataframe(a.settings.dataSource);
-          const cols = await fetchColumnSummary(a.settings.dataSource);
+          await prefetchDataframe(a.settings.dataSource, signal);
+          const cols = await fetchColumnSummary(a.settings.dataSource, signal);
           return {
             csv: a.settings.dataSource,
             display: a.settings.csvDisplay || a.settings.dataSource,
@@ -186,17 +202,17 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           if (req) {
             try {
               const [ticketRes, confRes] = await Promise.all([
-                fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`),
+                fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`, { signal }),
                 validatorId
-                  ? fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`)
+                  ? fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`, { signal })
                   : Promise.resolve(null as any),
               ]);
               if (ticketRes.ok) {
                 const ticket = await ticketRes.json();
                 if (ticket.arrow_name) {
                   console.log('✔️ using validated data source', ticket.arrow_name);
-                  await prefetchDataframe(ticket.arrow_name);
-                  const cols = await fetchColumnSummary(ticket.arrow_name);
+                  await prefetchDataframe(ticket.arrow_name, signal);
+                  const cols = await fetchColumnSummary(ticket.arrow_name, signal);
                   let ids: string[] = [];
                   if (confRes && confRes.ok) {
                     const cfg = await confRes.json();
@@ -239,7 +255,9 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           /* ignore */
         }
       }
-      const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
+      const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`, {
+        signal,
+      });
       if (res.ok) {
         const data = await res.json();
         const files = Array.isArray(data.files) ? data.files : [];
@@ -251,8 +269,8 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         const file = validFiles[validFiles.length - 1];
         if (file && file.object_name) {
           console.log('✔️ defaulting to latest saved dataframe', file.object_name);
-          await prefetchDataframe(file.object_name);
-          const cols = await fetchColumnSummary(file.object_name);
+          await prefetchDataframe(file.object_name, signal);
+          const cols = await fetchColumnSummary(file.object_name, signal);
           return { csv: file.object_name, display: file.csv_name, ...(cols || {}) };
         }
       }
@@ -264,61 +282,120 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   };
 
   const prefillFeatureOverview = async (cardId: string, atomId: string) => {
-    const prev = await findLatestDataSource();
-    if (!prev || !prev.csv) {
-      console.warn('⚠️ no data source found for feature overview');
-      return;
-    }
-    console.log('ℹ️ prefill data source details', prev);
-    await prefetchDataframe(prev.csv);
-    const rawMapping = await fetchDimensionMapping();
-    const mapping = Object.fromEntries(
-      Object.entries(rawMapping).filter(
-        ([key]) => key.toLowerCase() !== 'unattributed',
-      ),
-    );
-    console.log('✅ pre-filling feature overview with', prev.csv);
-    const summary = Array.isArray(prev.summary) ? prev.summary : [];
-    const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
-    const filtered =
-      identifiers.length > 0
-        ? summary.filter(s => identifiers.includes(s.column))
-        : summary;
-    const selected =
-      identifiers.length > 0
-        ? identifiers
-        : (Array.isArray(summary) ? summary : []).map(cc => cc.column);
-
+    const controller = new AbortController();
+    registerPrefillController(atomId, controller);
     updateAtomSettings(atomId, {
-      dataSource: prev.csv,
-      csvDisplay: prev.display || prev.csv,
-      allColumns: summary,
-      columnSummary: filtered,
-      selectedColumns: selected,
-      numericColumns: Array.isArray(prev.numeric) ? prev.numeric : [],
-      dimensionMap: mapping,
-      xAxis: prev.xField || 'date',
+      isLoading: true,
+      loadingMessage: 'Loading',
+      loadingStatus: 'Fetching flight table',
     });
+    try {
+      const prev = await findLatestDataSource(controller.signal);
+      if (!prev || !prev.csv) {
+        console.warn('⚠️ no data source found for feature overview');
+        updateAtomSettings(atomId, { isLoading: false, loadingStatus: '', loadingMessage: '' });
+        return;
+      }
+      console.log('ℹ️ prefill data source details', prev);
+      await prefetchDataframe(prev.csv, controller.signal, status =>
+        updateAtomSettings(atomId, { loadingStatus: status }),
+      );
+      const rawMapping = await fetchDimensionMapping(controller.signal);
+      const mapping = Object.fromEntries(
+        Object.entries(rawMapping).filter(
+          ([key]) => key.toLowerCase() !== 'unattributed',
+        ),
+      );
+      console.log('✅ pre-filling feature overview with', prev.csv);
+      const summary = Array.isArray(prev.summary) ? prev.summary : [];
+      const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
+      const filtered =
+        identifiers.length > 0
+          ? summary.filter(s => identifiers.includes(s.column))
+          : summary;
+      const selected =
+        identifiers.length > 0
+          ? identifiers
+          : (Array.isArray(summary) ? summary : []).map(cc => cc.column);
+
+      updateAtomSettings(atomId, {
+        dataSource: prev.csv,
+        csvDisplay: prev.display || prev.csv,
+        allColumns: summary,
+        columnSummary: filtered,
+        selectedColumns: selected,
+        numericColumns: Array.isArray(prev.numeric) ? prev.numeric : [],
+        dimensionMap: mapping,
+        xAxis: prev.xField || 'date',
+        isLoading: false,
+        loadingStatus: '',
+        loadingMessage: '',
+      });
+    } catch (err) {
+      if ((err as any)?.name === 'AbortError') {
+        console.log('ℹ️ prefill feature overview aborted');
+      } else {
+        console.error('⚠️ prefill feature overview error', err);
+      }
+      updateAtomSettings(atomId, { isLoading: false, loadingStatus: '', loadingMessage: '' });
+    } finally {
+      cancelPrefillController(atomId);
+    }
   };
 
   const prefillColumnClassifier = async (atomId: string) => {
-    const prev = await findLatestDataSource();
-    if (!prev || !prev.csv) {
-      console.warn('⚠️ no dataframe found for column classifier');
-      return;
-    }
-    console.log('ℹ️ prefill column classifier with', prev.csv);
-    await prefetchDataframe(prev.csv);
+    const quotes = [
+      'To deny our own impulses is to deny the very thing that makes us human. Select the file in properties if you want to exercise choice.',
+      'Working the Trinity Magic!',
+      'Choice is an illusion created between those with power and those without',
+      'Choice. The problem is choice',
+    ];
+    let quoteIndex = 1;
+    const showQuote = () => {
+      toast({ title: quotes[quoteIndex % quotes.length] });
+      quoteIndex++;
+    };
+    const controller = new AbortController();
+    registerPrefillController(atomId, controller);
+    updateAtomSettings(atomId, {
+      isLoading: true,
+      loadingMessage: quotes[0],
+      loadingStatus: 'Fetching flight table',
+    });
+    showQuote();
+    const quoteTimer = setInterval(showQuote, 5000);
+
     try {
+      const prev = await findLatestDataSource(controller.signal);
+      if (!prev || !prev.csv) {
+        console.warn('⚠️ no dataframe found for column classifier');
+        updateAtomSettings(atomId, {
+          isLoading: false,
+          loadingStatus: '',
+          loadingMessage: '',
+        });
+        return;
+      }
+      console.log('ℹ️ prefill column classifier with', prev.csv);
+      await prefetchDataframe(prev.csv, controller.signal, status =>
+        updateAtomSettings(atomId, { loadingStatus: status }),
+      );
       const form = new FormData();
       form.append('dataframe', prev.csv);
+      updateAtomSettings(atomId, { loadingStatus: 'Classifying Dataframe' });
       const res = await fetch(`${CLASSIFIER_API}/classify_columns`, {
         method: 'POST',
         body: form,
         credentials: 'include',
+        signal: controller.signal,
       });
       if (!res.ok) {
         console.warn('⚠️ auto classification failed', res.status);
+        updateAtomSettings(atomId, {
+          isLoading: false,
+          loadingStatus: '',
+          loadingMessage: '',
+        });
         return;
       }
       const data = await res.json();
@@ -349,9 +426,21 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           ],
           activeFileIndex: 0,
         },
+        isLoading: false,
+        loadingStatus: '',
+        loadingMessage: '',
       });
+      toast({ title: 'Success! We are still here!' });
     } catch (err) {
-      console.error('⚠️ prefill column classifier error', err);
+      if ((err as any)?.name === 'AbortError') {
+        console.log('ℹ️ prefill column classifier aborted');
+      } else {
+        console.error('⚠️ prefill column classifier error', err);
+      }
+      updateAtomSettings(atomId, { isLoading: false, loadingStatus: '', loadingMessage: '' });
+    } finally {
+      clearInterval(quoteTimer);
+      cancelPrefillController(atomId);
     }
   };
 
@@ -904,6 +993,10 @@ const handleAddDragLeave = (e: React.DragEvent) => {
     setCollapsedCards(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const toggleCardExpand = (id: string) => {
+    setExpandedCard(expandedCard === id ? null : id);
+  };
+
   const handleExhibitionToggle = (cardId: string, isExhibited: boolean) => {
     const updated = (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
       card.id === cardId ? { ...card, isExhibited } : card
@@ -1012,6 +1105,16 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                               >
                                 <Trash2 className="w-4 h-4 text-gray-400" />
                               </button>
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  toggleCardExpand(card.id);
+                                }}
+                                className="p-1 hover:bg-gray-100 rounded"
+                                title="Expand Card"
+                              >
+                                <Maximize2 className="w-4 h-4 text-gray-400" />
+                              </button>
                             </div>
                           </div>
 
@@ -1108,7 +1211,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                       >
                         <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `m-${molecule.moleculeId}` ? 'scale-125 mb-2' : ''}`} />
                         <span
-                          className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
+                          className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                         >
                           Add New Card
                         </span>
@@ -1196,6 +1299,16 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                   className="p-1 hover:bg-gray-100 rounded"
                 >
                   <Trash2 className="w-4 h-4 text-gray-400" />
+                </button>
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    toggleCardExpand(card.id);
+                  }}
+                  className="p-1 hover:bg-gray-100 rounded"
+                  title="Expand Card"
+                >
+                  <Maximize2 className="w-4 h-4 text-gray-400" />
                 </button>
                 <button
                   onClick={e => {
@@ -1339,7 +1452,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
               >
                 <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `p-${index}` ? 'scale-125 mb-2' : ''}`} />
                 <span
-                  className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
+                  className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                 >
                   Add New Card
                 </span>
@@ -1362,7 +1475,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
           >
             <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === 'end' ? 'scale-125 mb-2' : ''}`} />
             <span
-              className="max-w-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:max-w-[120px] text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
+              className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
             >
               Add New Card
             </span>
@@ -1370,6 +1483,137 @@ const handleAddDragLeave = (e: React.DragEvent) => {
         </div>
       </div>
       </div>
+
+      {/* Fullscreen Card Modal */}
+      {expandedCard && (
+        <div className="fixed inset-0 z-50 bg-gray-50 flex flex-col h-screen w-screen">
+            {/* Fullscreen Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
+              <div className="flex items-center space-x-2">
+                <Eye className={`w-4 h-4 ${layoutCards.find(c => c.id === expandedCard)?.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
+                <span className="text-lg font-semibold text-gray-900">
+                  {(() => {
+                    const card = layoutCards.find(c => c.id === expandedCard);
+                    if (!card) return 'Card';
+                    return card.moleculeTitle
+                      ? (card.atoms.length > 0 ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
+                      : card.atoms.length > 0
+                        ? card.atoms[0].title
+                        : 'Card';
+                  })()}
+                </span>
+              </div>
+              <div className="flex items-center space-x-2">
+                <span className="text-sm text-gray-500">Exhibit the Card</span>
+                <Switch
+                  checked={layoutCards.find(c => c.id === expandedCard)?.isExhibited || false}
+                  onCheckedChange={(checked) => handleExhibitionToggle(expandedCard, checked)}
+                  className="data-[state=checked]:bg-[#458EE2]"
+                />
+                <button
+                  onClick={() => setExpandedCard(null)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="Close Fullscreen"
+                >
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+            </div>
+
+            {/* Fullscreen Content */}
+            <div className="flex-1 flex flex-col px-8 py-4 space-y-4 overflow-auto">
+              {(() => {
+                const card = layoutCards.find(c => c.id === expandedCard);
+                if (!card) return null;
+
+                return card.atoms.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[400px]">
+                    <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-6">
+                      <Grid3X3 className="w-10 h-10 text-gray-400" />
+                    </div>
+                    <p className="text-gray-500 text-lg mb-2">No atoms in this section</p>
+                    <p className="text-sm text-gray-400">Configure this atom for your application</p>
+                  </div>
+                ) : (
+                  <div className={`grid gap-6 w-full ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
+                    {card.atoms.map((atom) => (
+                      <AtomBox
+                        key={`${atom.id}-expanded`}
+                        className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col"
+                      >
+                        {/* Atom Header */}
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center space-x-2">
+                            <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                            <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeAtom(card.id, atom.id);
+                            }}
+                            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4 text-gray-400" />
+                          </button>
+                        </div>
+                        
+                        {/* Atom Content */}
+                        <div className="w-full flex-1 overflow-hidden">
+                          {atom.atomId === 'text-box' ? (
+                            <TextBoxEditor textId={atom.id} />
+                          ) : atom.atomId === 'data-upload-validate' ? (
+                            <DataUploadValidateAtom atomId={atom.id} />
+                          ) : atom.atomId === 'feature-overview' ? (
+                            <FeatureOverviewAtom atomId={atom.id} />
+                          ) : atom.atomId === 'clustering' ? (
+                            <ClusteringAtom atomId={atom.id} />
+                          ) : atom.atomId === 'explore' ? (
+                            <ExploreAtom atomId={atom.id} />
+                          ) : atom.atomId === 'chart-maker' ? (
+                            <ChartMakerAtom atomId={atom.id} />
+                          ) : atom.atomId === 'concat' ? (
+                            <ConcatAtom atomId={atom.id} />
+                          ) : atom.atomId === 'merge' ? (
+                            <MergeAtom atomId={atom.id} />
+                          ) : atom.atomId === 'column-classifier' ? (
+                            <ColumnClassifierAtom atomId={atom.id} />
+                          ) : atom.atomId === 'dataframe-operations' ? (
+                            <DataFrameOperationsAtom atomId={atom.id} />
+                          ) : atom.atomId === 'create-column' ? (
+                            <CreateColumnAtom atomId={atom.id} />
+                          ) : atom.atomId === 'groupby-wtg-avg' ? (
+                            <GroupByAtom atomId={atom.id} />
+                          ) : atom.atomId === 'build-model-feature-based' ? (
+                            <BuildModelFeatureBasedAtom atomId={atom.id} />
+                          ) : atom.atomId === 'scenario-planner' ? (
+                            <ScenarioPlannerAtom atomId={atom.id} />
+                          ) : atom.atomId === 'select-models-feature' ? (
+                            <SelectModelsFeatureAtom atomId={atom.id} />
+                          ) : atom.atomId === 'evaluate-models-feature' ? (
+                            <EvaluateModelsFeatureAtom atomId={atom.id} />
+                          ) : atom.atomId === 'scope-selector' ? (
+                            <ScopeSelectorAtom atomId={atom.id} />
+                          ) : atom.atomId === 'correlation' ? (
+                            <CorrelationAtom atomId={atom.id} />
+                          ) : (
+                            <div>
+                              <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
+                              <p className="text-sm text-gray-600 mb-3">{atom.category}</p>
+                              <p className="text-sm text-gray-500">
+                                Configure this atom for your application
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </AtomBox>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+        </div>
+      )}
     </div>
   );
 };

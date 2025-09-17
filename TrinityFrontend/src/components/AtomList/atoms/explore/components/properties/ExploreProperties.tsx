@@ -112,4 +112,3 @@ const ExploreProperties: React.FC<Props> = ({ atomId }) => {
 };
 
 export default ExploreProperties;
-

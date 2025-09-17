@@ -1,5 +1,6 @@
 import React from 'react';
 import { useToast } from '@/hooks/use-toast';
+import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
 import ColumnClassifierDimensionMapping from './components/ColumnClassifierDimensionMapping';
@@ -27,10 +28,11 @@ interface Props {
 const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: SettingsType = (atom?.settings as SettingsType) || {
-    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS
+  const settings: SettingsType = {
+    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
+    ...(atom?.settings as SettingsType)
   };
-  const classifierData = settings.data;
+  const classifierData = settings.data || DEFAULT_COLUMN_CLASSIFIER_SETTINGS.data;
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -198,48 +200,42 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       dimensions: currentFile.customDimensions
     };
 
-    const key = `${payload.client_name}/${payload.app_name}/${payload.project_name}/column_classifier_config`;
-    console.log('🆔 identifiers', identifiers);
-    console.log('🏷️ dimensions', payload.dimensions);
-    console.log('📁 will save configuration to', key);
-    console.log('📦 saving configuration', payload);
-    const res = await fetch(`${CLASSIFIER_API}/save_config`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      credentials: 'include'
-    });
-    console.log('✅ save configuration response', res.status);
-    if (res.ok) {
-      toast({ title: 'Configuration Saved Successfully' });
-      try {
-        const json = await res.json();
-        console.log('📝 configuration save result', json);
-        console.log('🔑 redis namespace', json.key);
-        console.log('📂 saved data', json.data);
-      } catch (err) {
-        console.warn('assignment save result parse error', err);
+    try {
+      const res = await fetch(`${CLASSIFIER_API}/save_config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'include'
+      });
+
+      if (res.ok) {
+        toast({ title: 'Configuration Saved Successfully' });
+        localStorage.setItem('column-classifier-config', JSON.stringify(payload));
+        updateSessionState(user?.id, {
+          identifiers,
+          measures,
+          dimensions: currentFile.customDimensions,
+        });
+        addNavigationItem(user?.id, {
+          atom: 'column-classifier',
+          identifiers,
+          measures,
+          dimensions: currentFile.customDimensions,
+        });
+        logSessionState(user?.id);
+      } else {
+        toast({ title: 'Unable to Save Configuration', variant: 'destructive' });
+        try {
+          const txt = await res.text();
+          console.warn('assignment save error response', txt);
+        } catch (err) {
+          console.warn('assignment save error parse fail', err);
+        }
+        logSessionState(user?.id);
       }
-      updateSessionState(user?.id, {
-        identifiers,
-        measures,
-        dimensions: currentFile.customDimensions,
-      });
-      addNavigationItem(user?.id, {
-        atom: 'column-classifier',
-        identifiers,
-        measures,
-        dimensions: currentFile.customDimensions,
-      });
-      logSessionState(user?.id);
-    } else {
+    } catch (err) {
       toast({ title: 'Unable to Save Configuration', variant: 'destructive' });
-      try {
-        const txt = await res.text();
-        console.warn('assignment save error response', txt);
-      } catch (err) {
-        console.warn('assignment save error parse fail', err);
-      }
+      console.warn('assignment save request failed', err);
       logSessionState(user?.id);
     }
   };
@@ -257,19 +253,23 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   return (
     <div className="w-full h-full bg-white flex flex-col">
         <div className="flex flex-1">
-          <div className="w-full p-4">
-            <ColumnClassifierCanvas
-              data={classifierData}
-              onColumnMove={handleColumnMove}
-              onActiveFileChange={setActiveFile}
-              showColumnView={settings.enableColumnView ?? true}
-              filterUnique={settings.filterColumnViewUnique || false}
-              onFilterToggle={handleFilterToggle}
-              atomId={atomId}
-            />
+          <div className="relative w-full h-full p-4 min-h-[450px]">
+            {settings.isLoading ? (
+              <LoadingAnimation status={settings.loadingStatus} />
+            ) : (
+              <ColumnClassifierCanvas
+                data={classifierData}
+                onColumnMove={handleColumnMove}
+                onActiveFileChange={setActiveFile}
+                showColumnView={settings.enableColumnView ?? true}
+                filterUnique={settings.filterColumnViewUnique || false}
+                onFilterToggle={handleFilterToggle}
+                atomId={atomId}
+              />
+            )}
           </div>
         </div>
-      {settings.enableDimensionMapping && (
+      {!settings.isLoading && settings.enableDimensionMapping && (
         <div className="border-t p-4 overflow-y-auto">
           <ColumnClassifierDimensionMapping
             customDimensions={

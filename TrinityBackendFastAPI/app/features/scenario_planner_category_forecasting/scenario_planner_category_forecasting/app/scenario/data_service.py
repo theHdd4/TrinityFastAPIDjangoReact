@@ -21,7 +21,7 @@ from ..config import (
     MINIO_BUCKET,
     MINIO_OUTPUT_BUCKET,
     select_models_collection,
-    column_classifier_configs,
+    column_classifier_config,
     build_collection,
 )
 from ..utils.file_loader import FileLoader
@@ -143,7 +143,7 @@ class DataService:
         Fetch column classifier metadata using the model_id to get identifier structure.
         """
         try:
-            cursor = column_classifier_configs.find({"_id": model_id})
+            cursor = column_classifier_config.find({"_id": model_id})
             docs = await cursor.to_list(length=None)
             
             if not docs:

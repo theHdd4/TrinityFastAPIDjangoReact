@@ -72,7 +72,7 @@ export interface CorrelationResults {
   filtered_file_path?: string;
   correlation_method: string;
   correlation_results: any;
-  correlation_file_path: string;
+  correlation_id?: string;
   preview_data?: any[];
   date_analysis?: DateAnalysisResponse;
   date_filtered_rows?: number;
@@ -324,6 +324,7 @@ export class CorrelationAPI {
       showAxisLabels: true,
       showDataLabels: true,
       showLegend: true,
+      showGrid: true,
       ...saved,
     };
   }

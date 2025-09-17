@@ -33,7 +33,14 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
   useEffect(() => {
     fetch(`${VALIDATE_API}/list_saved_dataframes`)
       .then(r => r.json())
-      .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
+      .then(d => {
+        // Filter to only show Arrow files, exclude CSV and XLSX files
+        const allFiles = Array.isArray(d.files) ? d.files : [];
+        const arrowFiles = allFiles.filter(f => 
+          f.object_name && f.object_name.endsWith('.arrow')
+        );
+        setFrames(arrowFiles);
+      })
       .catch(() => setFrames([]));
   }, []);
 
