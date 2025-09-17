@@ -18,7 +18,7 @@ Formula Library & Usage Guide
 
 Available Operations
 --------------------
-The library lists the existing math, correlation, and aggregation helpers alongside the requested additions (IF variants, LOWER/UPPER, LEN, `SUBSTR`, `STR_REPLACE`, `DATE_DIFF`, `ABS`, `ROUND`, `FLOOR`, `CEIL`, `EXP`, `LOG`, `SQRT`, exponentiation, `BIN`, `MAP`, `ISNULL`, and `FILLNA`). Each operation’s syntax, description, and example appear in both the library cards and the usage guide for quick reference.【F:TrinityFrontend/src/components/AtomList/atoms/dataframe-operations/components/FormularBar.tsx†L53-L380】
+The library lists the existing math, correlation, and aggregation helpers alongside the requested additions (IF variants, LOWER/UPPER, LEN, `SUBSTR`, `STR_REPLACE`, `DATE_DIFF`, `ABS`, `ROUND`, `FLOOR`, `CEIL`, `EXP`, `LOG`, `SQRT`, exponentiation, Z-score normalisation, `BIN`, `MAP`, `ISNULL`, and `FILLNA`). Each operation’s syntax, description, and example appear in both the library cards and the usage guide for quick reference.【F:TrinityFrontend/src/components/AtomList/atoms/dataframe-operations/components/FormularBar.tsx†L53-L380】
 
 Backend Evaluation
 ------------------

@@ -285,14 +285,21 @@ const formulaLibrary: FormulaItem[] = [
     key: 'zscore',
     name: 'Z-Score (Normalize)',
     syntax: 'ZSCORE(column)',
-    description: 'Standardizes a numeric column (alias: NORM(column)).',
+    description: 'Standardizes a numeric column by subtracting the mean and dividing by the standard deviation.',
     example: '=ZSCORE(colA)',
     category: 'statistical',
-    matcher: (value) => {
-      const { uppercase } = normalizeFormula(value);
-      return uppercase.startsWith('=ZSCORE(') || uppercase.startsWith('=NORM(');
-    },
+    matcher: createFunctionMatcher('ZSCORE'),
     priority: 12,
+  },
+  {
+    key: 'normalize',
+    name: 'Normalize (Alias)',
+    syntax: 'NORM(column)',
+    description: 'Alias of ZSCORE that produces the same standardized values for the selected column.',
+    example: '=NORM(colA)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('NORM'),
+    priority: 13,
   },
   // Logical & binning
   {
