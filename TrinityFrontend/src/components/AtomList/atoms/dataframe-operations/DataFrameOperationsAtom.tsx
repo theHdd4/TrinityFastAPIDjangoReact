@@ -130,6 +130,9 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
 
   // Only show table/chart after file selection (like concat atom)
   const fileSelected = settings.selectedFile;
+  const hasRenderableData = Boolean(
+    data && Array.isArray(data.headers) && data.headers.length > 0 && Array.isArray(data.rows)
+  );
 
   // Automatically load dataframe if a file is selected but no table data exists
   useEffect(() => {
@@ -137,10 +140,17 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     setLoading(true);
     loadDataframeByKey(settings.selectedFile)
       .then(resp => {
-        const columnTypes: Record<string, string> = {};
+        const columnTypes: Record<string, 'text' | 'number' | 'date'> = {};
         resp.headers.forEach(h => {
-          const t = resp.types[h];
-          columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+          const rawType = resp.types[h];
+          const normalized = (typeof rawType === 'string' ? rawType : String(rawType || '')).toLowerCase();
+          if (['float', 'double', 'int', 'decimal', 'numeric', 'number'].some(token => normalized.includes(token))) {
+            columnTypes[h] = 'number';
+          } else if (['datetime', 'date', 'time', 'timestamp'].some(token => normalized.includes(token))) {
+            columnTypes[h] = 'date';
+          } else {
+            columnTypes[h] = 'text';
+          }
         });
         const fileName = settings.selectedFile!.split('/').pop() || settings.selectedFile!;
         const newData: DataFrameData = {
@@ -167,7 +177,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     <ErrorBoundary>
       <div className="w-full h-full bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden min-h-0">
         <div className="h-full flex flex-col min-h-0">
-          {fileSelected && data && data.headers && data.rows && data.headers.length > 0 && data.rows.length > 0 ? (
+          {fileSelected && hasRenderableData ? (
             <div className="h-full flex flex-col min-h-0">
               {viewMode === 'table' && (
                 <DataFrameOperationsCanvas

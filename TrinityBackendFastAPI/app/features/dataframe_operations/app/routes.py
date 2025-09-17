@@ -11,7 +11,8 @@ import re
 import datetime
 import math
 from bisect import bisect_right
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
+from numbers import Real
 from pydantic import BaseModel
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
 from app.features.data_upload_validate.app.routes import get_object_prefix
@@ -360,6 +361,66 @@ SAFE_EVAL_GLOBALS: Dict[str, Any] = {
     "FILLNA": _fn_fillna,
 }
 
+SAFE_EVAL_FUNCTIONS = {
+    name for name in SAFE_EVAL_GLOBALS if name not in {"__builtins__", "True", "False", "None"}
+}
+
+
+def _normalize_formula_functions(expr: str) -> str:
+    """Normalize function names to match the casing expected by SAFE_EVAL_GLOBALS."""
+
+    result: List[str] = []
+    i = 0
+    in_quote: str | None = None
+    length = len(expr)
+
+    while i < length:
+        ch = expr[i]
+
+        if in_quote:
+            result.append(ch)
+            if ch == "\\" and i + 1 < length:
+                # Preserve escaped characters within strings
+                result.append(expr[i + 1])
+                i += 2
+                continue
+            if ch == in_quote:
+                in_quote = None
+            i += 1
+            continue
+
+        if ch in {'"', "'"}:
+            in_quote = ch
+            result.append(ch)
+            i += 1
+            continue
+
+        if ch.isalpha() or ch == "_":
+            start = i
+            while i < length and (expr[i].isalnum() or expr[i] == "_"):
+                i += 1
+            name = expr[start:i]
+            j = i
+            while j < length and expr[j].isspace():
+                j += 1
+            if j < length and expr[j] == "(":
+                canonical = name.upper()
+                if canonical in SAFE_EVAL_FUNCTIONS:
+                    result.append(canonical)
+                else:
+                    result.append(name)
+            else:
+                result.append(name)
+            if j > i:
+                result.append(expr[i:j])
+            i = j
+            continue
+
+        result.append(ch)
+        i += 1
+
+    return "".join(result)
+
 
 def _fetch_df_from_object(object_name: str) -> pl.DataFrame:
     """Fetch a DataFrame from the Flight server or MinIO given an object key."""
@@ -616,13 +677,102 @@ async def apply_formula(
                 raise HTTPException(status_code=400, detail=str(e))
             df = df.with_columns(pl.lit(corr_val).alias(target_column))
         else:
+            zscore_pattern = re.compile(r"(?i)\b(ZSCORE|NORM)\s*\(([^)]+)\)")
+            zscore_placeholders: List[Tuple[str, str]] = []
+
+            def _capture_zscore(match: re.Match) -> str:
+                column_name = match.group(2).strip()
+                if (column_name.startswith("\"") and column_name.endswith("\"")) or (
+                    column_name.startswith("'") and column_name.endswith("'")
+                ):
+                    column_name = column_name[1:-1]
+                placeholder = f"__ZFUNC_{len(zscore_placeholders)}__"
+                zscore_placeholders.append((placeholder, column_name))
+                return placeholder
+
+            expr_body_processed = zscore_pattern.sub(_capture_zscore, expr_body)
+            expr_body_processed = _normalize_formula_functions(expr_body_processed)
+
+            zscore_values: Dict[str, List[Any]] = {}
+            if zscore_placeholders:
+                for column_name in {col for _, col in zscore_placeholders}:
+                    if column_name not in df.columns:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Column '{column_name}' not found for ZSCORE/NORM",
+                        )
+                    try:
+                        series = df.get_column(column_name)
+                    except Exception as e:
+                        raise HTTPException(status_code=400, detail=str(e))
+                    try:
+                        numeric_series = series.cast(pl.Float64, strict=False)
+                        numeric_series = numeric_series.fill_nan(None)
+                    except Exception as e:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Column '{column_name}' could not be converted to numeric values for ZSCORE/NORM: {e}",
+                        )
+
+                    values = numeric_series.to_list()
+                    valid_values = [
+                        float(v)
+                        for v in values
+                        if v is not None and isinstance(v, Real) and math.isfinite(float(v))
+                    ]
+
+                    if not valid_values:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Column '{column_name}' has no numeric values for ZSCORE/NORM",
+                        )
+
+                    mean_val = numeric_series.mean()
+                    std_val = numeric_series.std()
+
+                    mean_val_f: float | None = None
+                    if isinstance(mean_val, Real) and math.isfinite(float(mean_val)):
+                        mean_val_f = float(mean_val)
+
+                    std_val_f: float | None = None
+                    if isinstance(std_val, Real) and math.isfinite(float(std_val)):
+                        std_val_f = float(std_val)
+
+                    if mean_val_f is None:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Unable to compute mean for column '{column_name}'",
+                        )
+
+                    if std_val_f is None or math.isclose(std_val_f, 0.0, rel_tol=1e-12, abs_tol=1e-12):
+                        zscore_values[column_name] = [
+                            None if v is None else 0.0
+                            for v in values
+                        ]
+                    else:
+                        zscore_values[column_name] = [
+                            None
+                            if v is None
+                            else (float(v) - mean_val_f) / std_val_f
+                            for v in values
+                        ]
+
             headers_pattern = "|".join(re.escape(h) for h in df.columns if h)
             regex = re.compile(f"\\b({headers_pattern})\\b") if headers_pattern else None
             new_vals: List[Any] = []
-            for r in rows:
-                replaced = expr_body
+            for row_idx, r in enumerate(rows):
+                replaced = expr_body_processed
                 if regex:
                     replaced = regex.sub(lambda m: _format_value(r.get(m.group(0))), replaced)
+                if zscore_placeholders:
+                    for placeholder, column_name in zscore_placeholders:
+                        column_series = zscore_values.get(column_name)
+                        z_val = (
+                            column_series[row_idx]
+                            if column_series is not None and row_idx < len(column_series)
+                            else None
+                        )
+                        replaced = replaced.replace(placeholder, _format_value(z_val))
                 try:
                     val = eval(replaced, SAFE_EVAL_GLOBALS, {})
                 except Exception:
