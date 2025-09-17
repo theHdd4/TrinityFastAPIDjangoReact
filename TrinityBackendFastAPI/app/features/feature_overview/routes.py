@@ -2,7 +2,7 @@ from minio import Minio
 from minio.error import S3Error
 import os
 from fastapi import APIRouter, Form, HTTPException
-from urllib.parse import unquote
+from urllib.parse import unquote, quote
 from fastapi.responses import JSONResponse, Response
 import pandas as pd
 import io
@@ -264,6 +264,7 @@ class DimensionMappingRequest(BaseModel):
     client_name: str
     app_name: str
     project_name: str
+    object_name: str | None = None
 
 
 @router.post("/dimension_mapping")
@@ -281,14 +282,25 @@ async def dimension_mapping(req: DimensionMappingRequest):
     client = req.client_name
     app = req.app_name
     project = req.project_name
+    object_name = req.object_name or ""
 
     env_key = f"env:{client}:{app}:{project}"
-    cached_env = redis_client.get(env_key)
+    cached_env = None
+    file_env_key = None
+    if object_name:
+        safe_file = quote(object_name, safe="")
+        file_env_key = f"{env_key}:file:{safe_file}"
+        cached_env = redis_client.get(file_env_key)
+    if cached_env is None:
+        cached_env = redis_client.get(env_key)
     if cached_env:
         print("✅ found env in redis")
         try:
             env = json.loads(cached_env)
-            dims = env.get("dimensions")
+            if object_name and env.get("file_name") and env["file_name"] != object_name:
+                dims = None
+            else:
+                dims = env.get("dimensions")
             if isinstance(dims, dict):
                 return {"mapping": dims, "source": "env"}
         except Exception as exc:  # pragma: no cover
@@ -296,11 +308,18 @@ async def dimension_mapping(req: DimensionMappingRequest):
     else:
         print("🔍 env not in redis")
 
-    mongo_cfg = get_classifier_config_from_mongo(client, app, project)
+    mongo_cfg = get_classifier_config_from_mongo(
+        client,
+        app,
+        project,
+        object_name or None,
+    )
     if mongo_cfg and mongo_cfg.get("dimensions"):
         print("📦 loaded mapping from MongoDB")
         try:
             redis_client.setex(env_key, 3600, json.dumps(mongo_cfg, default=str))
+            if file_env_key:
+                redis_client.setex(file_env_key, 3600, json.dumps(mongo_cfg, default=str))
         except Exception:
             pass
         return {"mapping": mongo_cfg["dimensions"], "config": mongo_cfg}

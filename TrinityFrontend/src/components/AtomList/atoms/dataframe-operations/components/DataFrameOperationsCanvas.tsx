@@ -40,7 +40,6 @@ import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
 } from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
 import '@/templates/tables/table.css';
-import DataFrameCardinalityView from './DataFrameCardinalityView';
 import FormularBar from './FormularBar';
 
 interface DataFrameOperationsCanvasProps {
@@ -52,7 +51,6 @@ interface DataFrameOperationsCanvasProps {
   onClearAll: () => void;
   fileId?: string | null;
   originalData?: DataFrameData | null;
-  atomId?: string;
 }
 
 function safeToString(val: any): string {
@@ -104,8 +102,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   onDataChange,
   onClearAll,
   fileId,
-  originalData,
-  atomId
+  originalData
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -121,7 +118,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: string } | null>(null);
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
   const [formulaInput, setFormulaInput] = useState('');
-  const [isFormulaMode, setIsFormulaMode] = useState(false);
+  const [columnFormulas, setColumnFormulas] = useState<Record<string, string>>({});
+  const headersKey = useMemo(() => (data?.headers || []).join('|'), [data?.headers]);
+  const [isFormulaMode, setIsFormulaMode] = useState(true);
   const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter'>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; col: string; colIdx: number } | null>(null);
   const [insertMenuOpen, setInsertMenuOpen] = useState(false);
@@ -131,6 +130,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const editingHeaderRef = useRef<string | null>(null);
   // Track mapping from duplicated columns to their original source
   const [duplicateMap, setDuplicateMap] = useState<{ [key: string]: string }>({});
+  const previousSelectedColumnRef = useRef<string | null>(null);
+  const previousStoredFormulaRef = useRef<string | undefined>(undefined);
 
   // Ref to store header cell elements for context-menu positioning
   const headerRefs = useRef<{ [key: string]: HTMLTableCellElement | null }>({});
@@ -194,6 +195,60 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, [selectedColumn]);
+
+  useEffect(() => {
+    if (!data?.headers?.length) {
+      setColumnFormulas(prev => (Object.keys(prev).length ? {} : prev));
+      return;
+    }
+    setColumnFormulas(prev => {
+      const allowed = new Set(data.headers);
+      const next: Record<string, string> = {};
+      let changed = false;
+
+      Object.entries(prev).forEach(([col, formula]) => {
+        if (allowed.has(col)) {
+          next[col] = formula;
+        } else {
+          changed = true;
+        }
+      });
+
+      if (!changed && Object.keys(next).length === Object.keys(prev).length) {
+        return prev;
+      }
+      return next;
+    });
+  }, [headersKey]);
+
+  useEffect(() => {
+    const stored = selectedColumn ? columnFormulas[selectedColumn] : undefined;
+    if (selectedColumn !== previousSelectedColumnRef.current) {
+      previousSelectedColumnRef.current = selectedColumn;
+      previousStoredFormulaRef.current = stored;
+      if (selectedColumn) {
+        if (stored !== undefined) {
+          setFormulaInput(stored);
+        } else {
+          setFormulaInput('');
+        }
+      }
+      return;
+    }
+
+    if (selectedColumn && stored !== previousStoredFormulaRef.current) {
+      previousStoredFormulaRef.current = stored;
+      if (stored !== undefined) {
+        setFormulaInput(stored);
+      } else {
+        setFormulaInput('');
+      }
+    }
+
+    if (!selectedColumn) {
+      previousStoredFormulaRef.current = undefined;
+    }
+  }, [selectedColumn, columnFormulas]);
   // 1. Add state for filter range
   const [filterRange, setFilterRange] = useState<{ min: number; max: number; value: [number, number] } | null>(null);
 
@@ -266,15 +321,19 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       const baseName = data.fileName ? data.fileName.replace(/\.[^/.]+$/, '') : `dataframe_${Date.now()}`;
       const filename = `DF_OPS_${nextSerial}_${baseName}.arrow`;
 
+      const payload: Record<string, unknown> = { csv_data, filename };
+      if (fileId) {
+        payload.df_id = fileId;
+      }
       const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv_data, filename }),
+        body: JSON.stringify(payload),
       });
       if (!response.ok) {
         throw new Error(`Save failed: ${response.statusText}`);
       }
-      await response.json();
+      const result = await response.json();
       setSaveSuccess(true);
       if (saveSuccessTimeout.current) clearTimeout(saveSuccessTimeout.current);
       saveSuccessTimeout.current = setTimeout(() => setSaveSuccess(false), 2000);
@@ -283,10 +342,11 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         tableData: { ...data, fileName: filename },
         columnWidths: settings.columnWidths,
         rowHeights: settings.rowHeights,
+        fileId: (result?.df_id as string | undefined) ?? fileId ?? settings.fileId ?? null,
       });
       toast({
         title: 'DataFrame Saved',
-        description: `${filename} saved successfully.`,
+        description: result?.message ?? `${filename} saved successfully.`,
         variant: 'default',
       });
     } catch (err) {
@@ -566,6 +626,16 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
     });
+    setColumnFormulas(prev => {
+      if (!Object.prototype.hasOwnProperty.call(prev, oldHeader)) {
+        return prev;
+      }
+      const { [oldHeader]: stored, ...rest } = prev;
+      if (stored === undefined) {
+        return rest;
+      }
+      return { ...rest, [newHeader]: stored };
+    });
   } catch (err) {
     handleApiError('Rename column failed', err);
   }
@@ -791,8 +861,10 @@ const handleHeaderClick = (header: string) => {
 const handleFormulaSubmit = async () => {
   resetSaveSuccess();
   if (!data || !selectedColumn || !fileId) return;
+  const trimmedFormula = formulaInput.trim();
+  if (!trimmedFormula) return;
   try {
-    const resp = await apiApplyFormula(fileId, selectedColumn, formulaInput.trim());
+    const resp = await apiApplyFormula(fileId, selectedColumn, trimmedFormula);
     const columnTypes: any = {};
     resp.headers.forEach(h => {
       const t = resp.types[h];
@@ -807,11 +879,10 @@ const handleFormulaSubmit = async () => {
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
     });
+    setColumnFormulas(prev => ({ ...prev, [selectedColumn]: trimmedFormula }));
+    setFormulaInput(trimmedFormula);
   } catch (err) {
     handleApiError('Apply formula failed', err);
-  } finally {
-    setFormulaInput('');
-    setIsFormulaMode(false);
   }
 };
 
@@ -1006,6 +1077,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     const el = containerRef.current;
     if (el) {
       // Reset any phantom scroll area after heavy table mount
+      el.style.height = 'auto';
       el.scrollTop = 0;
     }
   }, [data]);
@@ -1020,243 +1092,241 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         className="hidden"
       />
 
-      <div ref={containerRef} className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto" style={{position: 'relative'}}>
+      <div ref={containerRef} className="flex flex-col h-full min-h-0">
         {data?.fileName && (
-          <div className="mb-4">
-            <div className="flex items-center px-6 py-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="flex items-center space-x-2 px-5 py-3 rounded-t-xl text-sm font-medium border-t border-l border-r border-slate-200 bg-white -mb-px shadow-lg">
-                <FileText className="w-4 h-4" />
-                <span>{data.fileName.split('/').pop()}</span>
+          <div className="border-b border-blue-200 bg-blue-50">
+            <div className="flex items-center px-6 py-4">
+              <div className="relative">
+                <div className="flex items-center space-x-2 px-5 py-3 rounded-t-xl text-sm font-medium border-t border-l border-r border-slate-200 bg-white -mb-px shadow-lg">
+                  <FileText className="w-4 h-4" />
+                  <span>{data.fileName.split('/').pop()}</span>
+                </div>
               </div>
             </div>
           </div>
         )}
-        
-        {/* Cardinality View */}
-        <DataFrameCardinalityView data={data} atomId={atomId} />
-        
-        <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
-            {/* Controls section */}
-            <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
-              <div className="flex items-center space-x-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    type="text"
-                    placeholder="Search..."
-                    value={settings.searchTerm || ''}
-                    onChange={(e) => onSettingsChange({ searchTerm: e.target.value })}
-                    className="pl-9 w-64"
-                  />
-                </div>
-                <Button variant="outline" size="sm" onClick={onClearAll}>
-                  <RotateCcw className="w-4 h-4 mr-1" />
-                  Reset
-                </Button>
+        <div className="flex-1 p-4 overflow-hidden min-h-0">
+          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col h-full min-h-0">
+        {/* Controls section */}
+        <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
+            <div className="flex items-center space-x-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="text"
+                  placeholder="Search..."
+                  value={settings.searchTerm || ''}
+                  onChange={(e) => onSettingsChange({ searchTerm: e.target.value })}
+                  className="pl-9 w-64"
+                />
               </div>
-              <div className="relative flex flex-col items-center" style={{ minWidth: 180 }}>
-                <Button
-                  onClick={handleSaveDataFrame}
-                  disabled={saveLoading}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  {saveLoading ? 'Saving...' : 'Save DataFrame'}
-                </Button>
-              </div>
+              <Button variant="outline" size="sm" onClick={onClearAll}>
+                <RotateCcw className="w-4 h-4 mr-1" />
+                Reset
+              </Button>
             </div>
+            <div className="relative flex flex-col items-center" style={{ minWidth: 180 }}>
+              <Button
+                onClick={handleSaveDataFrame}
+                disabled={saveLoading}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {saveLoading ? 'Saving...' : 'Save DataFrame'}
+              </Button>
+            </div>
+          </div>
 
-            {/* Table section - Excel-like appearance */}
-            <div className="overflow-auto">
+          {/* Table section - Excel-like appearance */}
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+            {data && (
+              <FormularBar
+                data={data}
+                selectedCell={selectedCell}
+                selectedColumn={selectedColumn}
+                formulaInput={formulaInput}
+                isFormulaMode={isFormulaMode}
+                onSelectedCellChange={setSelectedCell}
+                onSelectedColumnChange={setSelectedColumn}
+                onFormulaInputChange={setFormulaInput}
+                onFormulaModeChange={setIsFormulaMode}
+                onFormulaSubmit={handleFormulaSubmit}
+              />
+            )}
+            <div className="flex-1 overflow-auto min-h-0">
               {/* Placeholder for when no data is loaded */}
               {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
-                <div className="flex items-center justify-center bg-gray-50 p-8">
+                <div className="flex flex-1 items-center justify-center bg-gray-50">
                   <div className="border border-gray-200 bg-white rounded-lg p-4 text-center max-w-md w-full mx-auto">
                     <p className="p-4 text-center text-gray-500">No results to display. Upload a CSV or Excel file to see results here.</p>
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 flex flex-col overflow-hidden">
-                  {data && (
-                    <FormularBar
-                      data={data}
-                      selectedColumn={selectedColumn}
-                      formulaInput={formulaInput}
-                      isFormulaMode={isFormulaMode}
-                      onSelectedColumnChange={setSelectedColumn}
-                      onFormulaInputChange={setFormulaInput}
-                      onFormulaModeChange={setIsFormulaMode}
-                      onFormulaSubmit={handleFormulaSubmit}
-                    />
-                  )}
-                  <div className="flex-1 overflow-auto">
-                    <div className="table-wrapper">
-                      <div className="table-edge-left" />
-                      <div className="table-edge-right" />
-                      <div className="table-overflow relative">
-                        {operationLoading && (
-                          <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10 text-sm text-slate-700">
-                            Operation Loading...
-                          </div>
-                        )}
-                        <Table className="table-base">
-                          <TableHeader className="table-header">
-                            <TableRow className="table-header-row">
-                              {settings.showRowNumbers && (
-                                <TableHead className="table-header-cell w-16 text-center">#</TableHead>
-                              )}
-                              {Array.isArray(data?.headers) && data.headers.map((header, colIdx) => (
-                                <TableHead
-                                  key={header + '-' + colIdx}
-                                  data-col={header}
-                                  className={`table-header-cell text-center bg-white border-r border-gray-200 relative ${selectedColumn === header ? 'border-2 border-black' : ''}`}
-                                  style={settings.columnWidths?.[header] ? { width: settings.columnWidths[header], minWidth: settings.columnWidths[header] } : undefined}
-                                  draggable
-                                  onDragStart={() => handleDragStart(header)}
-                                  onDragOver={e => handleDragOver(e, header)}
-                                  onDragEnd={handleDragEnd}
-                                  onContextMenu={e => {
-                                    e.preventDefault();
-                                    let rect = undefined;
-                                    if (headerRefs.current && headerRefs.current[header]) {
-                                      rect = headerRefs.current[header].getBoundingClientRect?.();
-                                    }
-                                    setContextMenu({
-                                      x: rect ? rect.right : e.clientX,
-                                      y: rect ? rect.top : e.clientY,
-                                      col: header,
-                                      colIdx: colIdx
-                                    });
-                                    setRowContextMenu(null);
-                                  }}
-                                  onClick={() => handleHeaderClick(header)}
-                                  onDoubleClick={() => {
-                                    // Always allow header editing regardless of enableEditing setting
-                                    setEditingHeader(colIdx);
-                                    setEditingHeaderValue(header);
-                                  }}
-                                  ref={el => {
-                                    if (headerRefs.current) {
-                                      headerRefs.current[header] = el;
-                                    }
-                                  }}
-                                >
-                                  {editingHeader === colIdx ? (
-                                    <input
-                                      type="text"
-                                      className="h-7 text-xs outline-none border-none bg-white px-0 font-bold text-gray-800 truncate text-center w-full"
-                                      style={{ width: '100%', boxSizing: 'border-box', background: 'inherit', textAlign: 'center', padding: 0, margin: 0 }}
-                                      value={editingHeaderValue}
-                                      autoFocus
-                                      onChange={e => setEditingHeaderValue(e.target.value)}
-                                      onKeyDown={e => {
-                                        if (e.key === 'Enter') commitHeaderEdit(colIdx, (e.target as HTMLInputElement).value);
-                                        if (e.key === 'Escape') setEditingHeader(null);
-                                      }}
-                                      onBlur={e => commitHeaderEdit(colIdx, (e.target as HTMLInputElement).value)}
-                                    />
-                                  ) : (
-                                    <div
-                                      className="flex items-center justify-center cursor-pointer w-full h-full"
-                                      onDoubleClick={() => {
-                                        // Always allow header editing regardless of enableEditing setting
-                                        setEditingHeader(colIdx);
-                                        setEditingHeaderValue(header);
-                                      }}
-                                      title="Double-click to edit column name"
-                                      style={{ width: '100%', height: '100%' }}
-                                    >
-                                      {headerDisplayNames[header] ?? header}
-                                    </div>
-                                  )}
-                                  <div
-                                    className="absolute top-0 right-0 h-full w-1 cursor-col-resize"
-                                    onMouseDown={e => startColResize(header, e)}
-                                  />
-                                </TableHead>
-                              ))}
-                              <TableHead className="table-header-cell w-8" />
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {paginatedRows.map((row, rowIndex) => (
-                              <TableRow
-                                key={rowIndex}
-                                className="table-row relative"
-                                ref={el => { if (rowRefs.current) rowRefs.current[startIndex + rowIndex] = el; }}
-                                style={{ height: settings.rowHeights?.[startIndex + rowIndex] }}
-                              >
-                                {settings.showRowNumbers && (
-                                  <TableCell
-                                    className="table-cell w-16 text-center text-xs font-medium"
-                                    onContextMenu={e => {
-                                      e.preventDefault();
-                                      setRowContextMenu({ x: e.clientX, y: e.clientY, rowIdx: startIndex + rowIndex });
-                                      setContextMenu(null);
-                                    }}
-                                  >
-                                    {startIndex + rowIndex + 1}
-                                  </TableCell>
-                                )}
-                                {(data.headers || []).map((column, colIdx) => {
-                                  const cellValue = row[column];
-                                  const isEditing = editingCell?.row === rowIndex && editingCell?.col === column;
-                                  return (
-                                    <TableCell
-                                      key={colIdx}
-                                      data-col={column}
-                                      className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : selectedColumn === column ? 'border border-black' : ''}`}
-                                      style={settings.columnWidths?.[column] ? { width: settings.columnWidths[column], minWidth: settings.columnWidths[column] } : undefined}
-                                      onClick={() => handleCellClick(rowIndex, column)}
-                                      onDoubleClick={() => {
-                                        // Always allow cell editing regardless of enableEditing setting
-                                        setEditingCell({ row: rowIndex, col: column });
-                                        setEditingCellValue(safeToString(row[column]));
-                                      }}
-                                    >
-                                      {editingCell?.row === rowIndex && editingCell?.col === column ? (
-                                        <input
-                                          type="text"
-                                          className="h-7 text-xs outline-none border-none bg-white px-1"
-                                          style={{ width: '100%', boxSizing: 'border-box', background: 'inherit' }}
-                                          value={editingCellValue}
-                                          autoFocus
-                                          onChange={e => setEditingCellValue(e.target.value)}
-                                          onKeyDown={e => {
-                                            if (e.key === 'Enter') commitCellEdit(rowIndex, column);
-                                            if (e.key === 'Escape') setEditingCell(null);
-                                          }}
-                                          onBlur={() => commitCellEdit(rowIndex, column)}
-                                        />
-                                      ) : (
-                                        <div className="text-xs p-1 hover:bg-blue-50 rounded cursor-pointer min-h-[20px] flex items-center text-gray-800"
-                                          onDoubleClick={() => {
-                                            // Always allow cell editing regardless of enableEditing setting
-                                            setEditingCell({ row: rowIndex, col: column });
-                                            setEditingCellValue(safeToString(row[column]));
-                                          }}
-                                          title="Double-click to edit cell"
-                                        >
-                                          {safeToString(row[column]) !== '' ? highlightMatch(safeToString(row[column]), settings.searchTerm || '') : null}
-                                        </div>
-                                      )}
-                                    </TableCell>
-                                  );
-                                })}
-                                <TableCell className="table-cell w-8">
-                                  <div
-                                    className="absolute bottom-0 left-0 w-full h-1 cursor-row-resize"
-                                    onMouseDown={e => startRowResize(startIndex + rowIndex, e)}
-                                  />
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
+                <div className="table-wrapper">
+                  <div className="table-edge-left" />
+                  <div className="table-edge-right" />
+                  <div className="table-overflow relative">
+                    {operationLoading && (
+                      <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10 text-sm text-slate-700">
+                        Operation Loading...
                       </div>
-                    </div>
-                  </div>
+                    )}
+                    <Table className="table-base">
+              <TableHeader className="table-header">
+                <TableRow className="table-header-row">
+                  {settings.showRowNumbers && (
+                    <TableHead className="table-header-cell w-16 text-center">#</TableHead>
+                  )}
+                  {Array.isArray(data?.headers) && data.headers.map((header, colIdx) => (
+                    <TableHead
+                      key={header + '-' + colIdx}
+                      data-col={header}
+                      className={`table-header-cell text-center bg-white border-r border-gray-200 relative ${selectedColumn === header ? 'border-2 border-black' : ''}`}
+                      style={settings.columnWidths?.[header] ? { width: settings.columnWidths[header], minWidth: settings.columnWidths[header] } : undefined}
+                      draggable
+                      onDragStart={() => handleDragStart(header)}
+                      onDragOver={e => handleDragOver(e, header)}
+                      onDragEnd={handleDragEnd}
+                      onContextMenu={e => {
+                        e.preventDefault();
+                        let rect = undefined;
+                        if (headerRefs.current && headerRefs.current[header]) {
+                          rect = headerRefs.current[header].getBoundingClientRect?.();
+                        }
+                        setContextMenu({
+                          x: rect ? rect.right : e.clientX,
+                          y: rect ? rect.top : e.clientY,
+                          col: header,
+                          colIdx: colIdx
+                        });
+                        setRowContextMenu(null);
+                      }}
+                      onClick={() => handleHeaderClick(header)}
+                      onDoubleClick={() => {
+                        // Always allow header editing regardless of enableEditing setting
+                        setEditingHeader(colIdx);
+                        setEditingHeaderValue(header);
+                      }}
+                      ref={el => {
+                        if (headerRefs.current) {
+                          headerRefs.current[header] = el;
+                        }
+                      }}
+                    >
+                      {editingHeader === colIdx ? (
+                        <input
+                          type="text"
+                          className="h-7 text-xs outline-none border-none bg-white px-0 font-bold text-gray-800 truncate text-center w-full"
+                          style={{ width: '100%', boxSizing: 'border-box', background: 'inherit', textAlign: 'center', padding: 0, margin: 0 }}
+                          value={editingHeaderValue}
+                          autoFocus
+                          onChange={e => setEditingHeaderValue(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') commitHeaderEdit(colIdx, (e.target as HTMLInputElement).value);
+                            if (e.key === 'Escape') setEditingHeader(null);
+                          }}
+                          onBlur={e => commitHeaderEdit(colIdx, (e.target as HTMLInputElement).value)}
+                        />
+                      ) : (
+                        <div
+                          className="flex items-center justify-center cursor-pointer w-full h-full"
+                          onDoubleClick={() => {
+                            // Always allow header editing regardless of enableEditing setting
+                            setEditingHeader(colIdx);
+                            setEditingHeaderValue(header);
+                          }}
+                          title="Double-click to edit column name"
+                          style={{ width: '100%', height: '100%' }}
+                        >
+                          {headerDisplayNames[header] ?? header}
+                        </div>
+                      )}
+                      <div
+                        className="absolute top-0 right-0 h-full w-1 cursor-col-resize"
+                        onMouseDown={e => startColResize(header, e)}
+                      />
+                    </TableHead>
+                  ))}
+                  <TableHead className="table-header-cell w-8" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {paginatedRows.map((row, rowIndex) => (
+                  <TableRow
+                    key={rowIndex}
+                    className="table-row relative"
+                    ref={el => { if (rowRefs.current) rowRefs.current[startIndex + rowIndex] = el; }}
+                    style={{ height: settings.rowHeights?.[startIndex + rowIndex] }}
+                  >
+                    {settings.showRowNumbers && (
+                      <TableCell
+                        className="table-cell w-16 text-center text-xs font-medium"
+                        onContextMenu={e => {
+                          e.preventDefault();
+                          setRowContextMenu({ x: e.clientX, y: e.clientY, rowIdx: startIndex + rowIndex });
+                          setContextMenu(null);
+                        }}
+                      >
+                        {startIndex + rowIndex + 1}
+                      </TableCell>
+                    )}
+                    {(data.headers || []).map((column, colIdx) => {
+                      const cellValue = row[column];
+                      const isEditing = editingCell?.row === rowIndex && editingCell?.col === column;
+                        return (
+                          <TableCell
+                            key={colIdx}
+                            data-col={column}
+                            className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : selectedColumn === column ? 'border border-black' : ''}`}
+                            style={settings.columnWidths?.[column] ? { width: settings.columnWidths[column], minWidth: settings.columnWidths[column] } : undefined}
+                            onClick={() => handleCellClick(rowIndex, column)}
+                            onDoubleClick={() => {
+                            // Always allow cell editing regardless of enableEditing setting
+                            setEditingCell({ row: rowIndex, col: column });
+                            setEditingCellValue(safeToString(row[column]));
+                          }}
+                        >
+                          {editingCell?.row === rowIndex && editingCell?.col === column ? (
+                            <input
+                              type="text"
+                              className="h-7 text-xs outline-none border-none bg-white px-1"
+                              style={{ width: '100%', boxSizing: 'border-box', background: 'inherit' }}
+                              value={editingCellValue}
+                              autoFocus
+                              onChange={e => setEditingCellValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') commitCellEdit(rowIndex, column);
+                                if (e.key === 'Escape') setEditingCell(null);
+                              }}
+                              onBlur={() => commitCellEdit(rowIndex, column)}
+                            />
+                          ) : (
+                            <div className="text-xs p-1 hover:bg-blue-50 rounded cursor-pointer min-h-[20px] flex items-center text-gray-800"
+                              onDoubleClick={() => {
+                                // Always allow cell editing regardless of enableEditing setting
+                                setEditingCell({ row: rowIndex, col: column });
+                                setEditingCellValue(safeToString(row[column]));
+                              }}
+                              title="Double-click to edit cell"
+                            >
+                              {safeToString(row[column]) !== '' ? highlightMatch(safeToString(row[column]), settings.searchTerm || '') : null}
+                            </div>
+                          )}
+                        </TableCell>
+                      );
+                    })}
+                    <TableCell className="table-cell w-8">
+                    </TableCell>
+                    <div
+                      className="absolute bottom-0 left-0 w-full h-1 cursor-row-resize"
+                      onMouseDown={e => startRowResize(startIndex + rowIndex, e)}
+                    />
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
                 </div>
-              )}
+              </div>
+            )}
             </div>
             {totalPages > 1 && (
             <div className="flex flex-col items-center py-4">
@@ -1308,6 +1378,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               </Pagination>
             </div>
           )}
+        </div>
+        </div>
         </div>
         {contextMenu && data && typeof contextMenu.col === 'string' && (
         <div
