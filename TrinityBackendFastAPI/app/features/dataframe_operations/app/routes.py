@@ -361,6 +361,66 @@ SAFE_EVAL_GLOBALS: Dict[str, Any] = {
     "FILLNA": _fn_fillna,
 }
 
+SAFE_EVAL_FUNCTIONS = {
+    name for name in SAFE_EVAL_GLOBALS if name not in {"__builtins__", "True", "False", "None"}
+}
+
+
+def _normalize_formula_functions(expr: str) -> str:
+    """Normalize function names to match the casing expected by SAFE_EVAL_GLOBALS."""
+
+    result: List[str] = []
+    i = 0
+    in_quote: str | None = None
+    length = len(expr)
+
+    while i < length:
+        ch = expr[i]
+
+        if in_quote:
+            result.append(ch)
+            if ch == "\\" and i + 1 < length:
+                # Preserve escaped characters within strings
+                result.append(expr[i + 1])
+                i += 2
+                continue
+            if ch == in_quote:
+                in_quote = None
+            i += 1
+            continue
+
+        if ch in {'"', "'"}:
+            in_quote = ch
+            result.append(ch)
+            i += 1
+            continue
+
+        if ch.isalpha() or ch == "_":
+            start = i
+            while i < length and (expr[i].isalnum() or expr[i] == "_"):
+                i += 1
+            name = expr[start:i]
+            j = i
+            while j < length and expr[j].isspace():
+                j += 1
+            if j < length and expr[j] == "(":
+                canonical = name.upper()
+                if canonical in SAFE_EVAL_FUNCTIONS:
+                    result.append(canonical)
+                else:
+                    result.append(name)
+            else:
+                result.append(name)
+            if j > i:
+                result.append(expr[i:j])
+            i = j
+            continue
+
+        result.append(ch)
+        i += 1
+
+    return "".join(result)
+
 
 def _fetch_df_from_object(object_name: str) -> pl.DataFrame:
     """Fetch a DataFrame from the Flight server or MinIO given an object key."""
@@ -631,6 +691,7 @@ async def apply_formula(
                 return placeholder
 
             expr_body_processed = zscore_pattern.sub(_capture_zscore, expr_body)
+            expr_body_processed = _normalize_formula_functions(expr_body_processed)
 
             zscore_values: Dict[str, List[Any]] = {}
             if zscore_placeholders:
