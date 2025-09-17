@@ -636,68 +636,95 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartConfigs.length, safeData.dataframe]);
 
-  const openChartTypeTray = (e: React.MouseEvent, index: number) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setChatBubble({ visible: true, chartIndex: index, anchor: { x: e.clientX, y: e.clientY } });
-    setChatBubbleShouldRender(true);
-  };
+  // COMMENTED OUT: Chart configuration right-click functionality
+  // const openChartTypeTray = (e: React.MouseEvent, index: number) => {
+  //   e.preventDefault();
+  //   e.stopPropagation();
+  //   setChatBubble({ visible: true, chartIndex: index, anchor: { x: e.clientX, y: e.clientY } });
+  //   setChatBubbleShouldRender(true);
+  // };
 
-  const handleChartTypeSelect = (type: string) => {
-    if (chatBubble.chartIndex !== null) {
-      const newConfigs = [...chartConfigs];
-      const mappedType = `${type}_chart` as typeof newConfigs[number]['chartType'];
+  // const handleChartTypeSelect = (type: string) => {
+  //   if (chatBubble.chartIndex !== null) {
+  //     const newConfigs = [...chartConfigs];
+  //     const mappedType = `${type}_chart` as typeof newConfigs[number]['chartType'];
 
-      // Reset legendField and notify when pie charts don't support segregation
-      let legendField = newConfigs[chatBubble.chartIndex].legendField;
-      if (mappedType === 'pie_chart' && legendField && legendField !== 'aggregate') {
-        legendField = 'aggregate';
-        toast({ description: 'Segregation of Field Value is not allowed for pie chart' });
-      }
+  //     // Reset legendField and notify when pie charts don't support segregation
+  //     let legendField = newConfigs[chatBubble.chartIndex].legendField;
+  //     if (mappedType === 'pie_chart' && legendField && legendField !== 'aggregate') {
+  //       legendField = 'aggregate';
+  //       toast({ description: 'Segregation of Field Value is not allowed for pie chart' });
+  //     }
 
-      newConfigs[chatBubble.chartIndex] = {
-        ...newConfigs[chatBubble.chartIndex],
-        chartType: mappedType,
-        legendField
-      };
-      setChartConfigs(newConfigs);
-      const cfg = newConfigs[chatBubble.chartIndex];
-      if (cfg.xAxis && hasValidYAxes(cfg.yAxes)) {
-        safeTriggerChartGeneration(chatBubble.chartIndex, cfg, 100);
-      }
+  //     newConfigs[chatBubble.chartIndex] = {
+  //       ...newConfigs[chatBubble.chartIndex],
+  //       chartType: mappedType,
+  //       legendField
+  //     };
+  //     setChartConfigs(newConfigs);
+  //     const cfg = newConfigs[chatBubble.chartIndex];
+  //     if (cfg.xAxis && hasValidYAxes(cfg.yAxes)) {
+  //       safeTriggerChartGeneration(chatBubble.chartIndex, cfg, 100);
+  //     }
+  //   }
+  //   setChatBubble(prev => ({ ...prev, visible: false }));
+  // };
+
+  // const closeChatBubble = () => setChatBubble(prev => ({ ...prev, visible: false }));
+  // const handleBubbleExited = () => setChatBubbleShouldRender(false);
+
+  // Individual chart type change handlers (like evaluate atom)
+  const handleChartTypeChange = (index: number, newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
+    const newConfigs = [...chartConfigs];
+    const mappedType = newType;
+
+    // Reset legendField and notify when pie charts don't support segregation
+    let legendField = newConfigs[index].legendField;
+    if (mappedType === 'pie_chart' && legendField && legendField !== 'aggregate') {
+      legendField = 'aggregate';
+      toast({ description: 'Segregation of Field Value is not allowed for pie chart' });
     }
-    setChatBubble(prev => ({ ...prev, visible: false }));
-  };
 
-  const closeChatBubble = () => setChatBubble(prev => ({ ...prev, visible: false }));
-  const handleBubbleExited = () => setChatBubbleShouldRender(false);
+    newConfigs[index] = {
+      ...newConfigs[index],
+      chartType: mappedType,
+      legendField
+    };
+    setChartConfigs(newConfigs);
+    const cfg = newConfigs[index];
+    if (cfg.xAxis && hasValidYAxes(cfg.yAxes)) {
+      safeTriggerChartGeneration(index, cfg, 100);
+    }
+  };
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setOpenDropdowns({});
-    closeChatBubble();
-    setChatBubbleShouldRender(false);
+    // closeChatBubble(); // COMMENTED OUT: Chat bubble functionality
+    // setChatBubbleShouldRender(false); // COMMENTED OUT: Chat bubble functionality
   };
 
-  const overlayVisible =
-    chatBubble.visible ||
-    chatBubbleShouldRender;
+  // COMMENTED OUT: Chat bubble functionality
+  // const overlayVisible =
+  //   chatBubble.visible ||
+  //   chatBubbleShouldRender;
+  const overlayVisible = false; // Always false since chat bubble is disabled
 
   useEffect(() => {
     const handleClickOutside = () => {
       setOpenDropdowns({});
-      closeChatBubble();
-      setChatBubbleShouldRender(false);
+      // closeChatBubble(); // COMMENTED OUT: Chat bubble functionality
+      // setChatBubbleShouldRender(false); // COMMENTED OUT: Chat bubble functionality
     };
     if (
-      Object.values(openDropdowns).some(Boolean) ||
-      chatBubble.visible
+      Object.values(openDropdowns).some(Boolean)
+      // || chatBubble.visible // COMMENTED OUT: Chat bubble functionality
     ) {
       document.addEventListener('click', handleClickOutside);
     }
     return () => document.removeEventListener('click', handleClickOutside);
-  }, [openDropdowns, chatBubble.visible]);
+  }, [openDropdowns]); // COMMENTED OUT: chatBubble.visible dependency
 
   // Initialize data summary collapse state
   useEffect(() => {
@@ -2004,6 +2031,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       showLegend: chartOptions[index]?.legend,
       showAxisLabels: chartOptions[index]?.axisLabels,
       showDataLabels: chartOptions[index]?.dataLabels,
+      onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleChartTypeChange(index, newType),
       showGrid: chartOptions[index]?.grid
     } as const;
     
@@ -2012,13 +2040,13 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         <Card className="border-pink-200 h-full w-full explore-chart-card">
           <CardContent className="p-4 flex flex-col h-full w-full min-w-0 explore-chart-content">
                         {/* Chart Configuration Header with Toggle */}
-            <div className="flex items-center mb-4 p-3 bg-gray-50 rounded-lg" onContextMenu={(e) => openChartTypeTray(e, index)}>
+            <div className="flex items-center mb-4 p-3 bg-gray-50 rounded-lg">
               <div className="flex items-center space-x-2">
                 <div className="flex items-center justify-center w-6 h-6 bg-pink-100 rounded-md">
                   <BarChart3 className="w-3 h-3 text-pink-600" />
                 </div>
                 <span className="font-semibold text-sm text-gray-800">Chart Configuration</span>
-                <span className="ml-2 text-xs text-gray-500 whitespace-nowrap">Right-click to change chart type</span>
+                {/* <span className="ml-2 text-xs text-gray-500 whitespace-nowrap">Right-click to change chart type</span> */}
               </div>
               <div className="flex items-center space-x-2 ml-auto">
                 <Button
@@ -2057,7 +2085,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                     </Button>
                   </DialogTrigger>
                   <DialogContent className="max-w-4xl">
-                    <div className="h-[500px] w-full" onContextMenu={(e) => openChartTypeTray(e, index)}>
+                    <div className="h-[500px] w-full">
                       <RechartsChartRenderer {...rendererProps} />
                     </div>
                   </DialogContent>
@@ -2081,7 +2109,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
               {/* Axis Selectors */}
               <div
                 className="flex items-center mb-3 p-3 pr-2 bg-gray-50 rounded-lg min-w-0 w-full explore-axis-selectors"
-                onContextMenu={(e) => openChartTypeTray(e, index)}
                 style={{ position: 'relative', zIndex: 40 }}
               >
                 <div className="flex items-center space-x-2">
@@ -2782,7 +2809,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                             );
                           }
                           return (
-                            <div className="relative w-full h-full" onContextMenu={(e) => openChartTypeTray(e, index)}>
+                            <div className="relative w-full h-full">
                               <RechartsChartRenderer {...rendererProps} />
                             </div>
                           );
@@ -3382,8 +3409,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           ) : cardinalityError ? (
             <div className="p-4 text-red-600">{cardinalityError}</div>
           ) : cardinalityData && cardinalityData.length > 0 ? (
-            <div className="w-full mb-6">
-              <Table
+            <Table
                 headers={[
                   <ContextMenu key="Column">
                     <ContextMenuTrigger asChild>
@@ -3591,7 +3617,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                   </tr>
                 ))}
               </Table>
-            </div>
           ) : null}
 
           {/* Chart Configuration - Only show when settings are applied */}
@@ -3657,7 +3682,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           onMouseDown={handleOverlayClick}
         />
       )}
-      {chatBubbleShouldRender && (
+      {/* COMMENTED OUT: Chat bubble functionality */}
+      {/* {chatBubbleShouldRender && (
         <div
           style={{
             position: 'fixed',
@@ -3679,7 +3705,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             onExited={handleBubbleExited}
           />
         </div>
-      )}
+      )} */}
     </div>
   );
 };

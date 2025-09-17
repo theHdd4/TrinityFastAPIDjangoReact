@@ -31,10 +31,15 @@ pipeline {
                         if (fileExists(composeExample)) {
                             def composeContent = readFile(composeExample)
                             def updatedCompose = composeContent
-                                .replace('${HOST_IP:-localhost}', env.EXPECTED_HOST_IP)
+                                // Fix template default values in Docker Compose
+                                .replaceAll(/\$\{HOST_IP:-[^}]+\}/, "\${HOST_IP:-${env.EXPECTED_HOST_IP}}")
+                                .replaceAll(/\$\{OLLAMA_IP:-[^}]+\}/, "\${OLLAMA_IP:-${env.EXPECTED_HOST_IP}}")
+                                // Replace any remaining ${HOST_IP} and ${OLLAMA_IP} without defaults
                                 .replace('${HOST_IP}', env.EXPECTED_HOST_IP)
+                                .replace('${OLLAMA_IP}', env.EXPECTED_HOST_IP)
+                            
                             writeFile file: composeFinal, text: updatedCompose
-                            echo "✅ Created ${composeFinal} with HOST_IP=${env.EXPECTED_HOST_IP}"
+                            echo "✅ Created ${composeFinal} with corrected IP defaults"
                         } else {
                             error "❌ ${composeExample} not found!"
                         }
@@ -50,14 +55,26 @@ pipeline {
                             if (fileExists(envExample)) {
                                 def envContent = readFile(envExample)
                                 def updatedEnv = envContent
-                                    .replace('${HOST_IP:-localhost}', env.EXPECTED_HOST_IP)
+                                    // Replace template placeholders first
+                                    .replaceAll(/\$\{HOST_IP:-[^}]+\}/, env.EXPECTED_HOST_IP)
+                                    .replaceAll(/\$\{OLLAMA_IP:-[^}]+\}/, env.EXPECTED_HOST_IP)
                                     .replace('${HOST_IP}', env.EXPECTED_HOST_IP)
+                                    .replace('${OLLAMA_IP}', env.EXPECTED_HOST_IP)
+                                    // Fix specific variable assignments (selective replacement)
+                                    .replaceAll(/^HOST_IP\s*=\s*.*$/m, "HOST_IP=${env.EXPECTED_HOST_IP}")
+                                    .replaceAll(/^VITE_HOST_IP\s*=\s*.*$/m, "VITE_HOST_IP=${env.EXPECTED_HOST_IP}")
+                                    .replaceAll(/^OLLAMA_IP\s*=\s*.*$/m, "OLLAMA_IP=${env.EXPECTED_HOST_IP}")
+                                    // Update template references in CORS/CSRF (but leave other IPs alone)
+                                    .replaceAll(/\$\{HOST_IP\}/g, env.EXPECTED_HOST_IP)
+                                
                                 writeFile file: envFinal, text: updatedEnv
-                                echo "✅ Created ${envFinal}"
+                                echo "✅ Created ${envFinal} with corrected IPs"
                             } else {
                                 echo "⚠️ Warning: ${envExample} not found, skipping..."
                             }
                         }
+                        
+                        echo "🔍 Configuration files prepared with IP: ${env.EXPECTED_HOST_IP}"
                     }
                 }
             }
@@ -89,9 +106,9 @@ pipeline {
                             echo ✅ Docker Compose stack started
                         """
                         
-                        // Wait 1 minute for services to be ready
+                        // Wait 2 minutes for services to be ready
                         echo "⏳ Waiting 2 minutes for services to be ready..."
-                        sleep(60) // 60 seconds = 1 minute
+                        sleep(120) // 120 seconds = 2 minutes
                         echo "✅ Wait completed!"
                         
                         // Execute tenant creation script
@@ -131,12 +148,12 @@ pipeline {
                             echo ✅ Docker Compose stack started
                         """
                         
-                        // Wait 1 minutes for services to be ready
-                        echo "⏳ Waiting 2 minute for services to be ready..."
-                        sleep(60) // 60 seconds = 1 minute
+                        // Wait 2 minutes for services to be ready
+                        echo "⏳ Waiting 2 minutes for services to be ready..."
+                        sleep(120) // 120 seconds = 2 minutes
                         echo "✅ Wait completed!"
                         
-                        // Execute tenant creation script
+                        // Execute tenant creation script with error handling
                         def tenantResult = bat(
                             script: """
                                 echo 🔧 Running tenant creation script...
@@ -159,9 +176,11 @@ pipeline {
     post {
         always {
             echo "🔍 Pipeline completed for branch: ${env.BRANCH_NAME}"
+            echo "🎯 Target IP used: ${env.EXPECTED_HOST_IP}"
         }
         success { 
             echo "✅ Deployment successful for branch: ${env.BRANCH_NAME}" 
+            echo "🌐 Services should be accessible on IP: ${env.EXPECTED_HOST_IP}"
         }
         failure { 
             echo "❌ Deployment failed for branch: ${env.BRANCH_NAME}"

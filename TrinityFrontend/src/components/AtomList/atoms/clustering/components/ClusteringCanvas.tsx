@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -6,12 +6,25 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Filter, Target, BarChart3, Settings, Play, X } from 'lucide-react';
+import { Filter as FilterIcon, Target, BarChart3, Settings, Play, X, ArrowUp, ArrowDown, Plus } from 'lucide-react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { ClusteringSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
-import ClusteringDataView from './ClusteringDataView';
 import { FEATURE_OVERVIEW_API, CLUSTERING_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import ClusteringCardinalityView from './ClusteringCardinalityView';
+import Table from '@/templates/tables/table';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface ClusteringCanvasProps {
   atomId: string;
@@ -76,6 +89,11 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
   const [loadingValues, setLoadingValues] = useState<Record<string, boolean>>({});
   const [clusteringError, setClusteringError] = useState<string | null>(null);
   const { toast } = useToast();
+
+  // State for Full Output Data filtering and sorting
+  const [outputDataSortColumn, setOutputDataSortColumn] = useState<string>('');
+  const [outputDataSortDirection, setOutputDataSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [outputDataColumnFilters, setOutputDataColumnFilters] = useState<Record<string, string[]>>({});
 
   // Initialize filters when selectedIdentifiers change
   useEffect(() => {
@@ -210,8 +228,8 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
       // Prepare identifier filters
       const identifierFiltersList = Object.entries(identifierFilters).map(([column, values]) => ({
         column,
-        values: values || []
-      })).filter(filter => filter.values.length > 0);
+        values: Array.isArray(values) ? values : []
+      })).filter(filter => Array.isArray(filter.values) && filter.values.length > 0);
 
       // Prepare clustering request
       const clusteringRequest = {
@@ -392,6 +410,134 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
     return count > 1;
   });
 
+  // Functions for Full Output Data sorting and filtering
+  const handleOutputDataSort = (column: string, direction?: 'asc' | 'desc') => {
+    if (outputDataSortColumn === column) {
+      if (outputDataSortDirection === 'asc') {
+        setOutputDataSortDirection('desc');
+      } else if (outputDataSortDirection === 'desc') {
+        setOutputDataSortColumn('');
+        setOutputDataSortDirection('asc');
+      }
+    } else {
+      setOutputDataSortColumn(column);
+      setOutputDataSortDirection(direction || 'asc');
+    }
+  };
+
+  const handleOutputDataColumnFilter = (column: string, values: string[]) => {
+    setOutputDataColumnFilters(prev => ({
+      ...prev,
+      [column]: values
+    }));
+  };
+
+  const clearOutputDataColumnFilter = (column: string) => {
+    setOutputDataColumnFilters(prev => {
+      const newFilters = { ...prev };
+      delete newFilters[column];
+      return newFilters;
+    });
+  };
+
+  const getOutputDataUniqueColumnValues = (column: string, data: any[]): string[] => {
+    if (!Array.isArray(data)) return [];
+    
+    // Get the currently filtered data (before applying the current column's filter)
+    let filteredData = data;
+
+    // Apply all other column filters except the current one
+    Object.entries(outputDataColumnFilters).forEach(([col, filterValues]) => {
+      if (col !== column && filterValues && Array.isArray(filterValues) && filterValues.length > 0) {
+        filteredData = filteredData.filter(row => {
+          const cellValue = String(row[col] || '');
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+
+    // Get unique values from the filtered data
+    const values = filteredData.map(row => String(row[column] || '')).filter(Boolean);
+    return Array.from(new Set(values)).sort();
+  };
+
+  // FilterMenu component for output data filtering
+  const OutputDataFilterMenu = ({ column, data }: { column: string; data: any[] }) => {
+    const uniqueValues = getOutputDataUniqueColumnValues(column, data);
+    const current = outputDataColumnFilters[column] || [];
+    const [temp, setTemp] = useState<string[]>(current);
+
+    const toggleVal = (val: string) => {
+      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
+    };
+
+    const selectAll = () => {
+      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
+    };
+
+    const apply = () => handleOutputDataColumnFilter(column, temp);
+
+    return (
+      <div className="w-64 max-h-80 overflow-y-auto">
+        <div className="p-2 border-b">
+          <div className="flex items-center space-x-2 mb-2">
+            <Checkbox checked={temp.length === uniqueValues.length} onCheckedChange={selectAll} />
+            <span className="text-sm font-medium">Select All</span>
+          </div>
+        </div>
+        <div className="p-2 space-y-1">
+          {uniqueValues.map((v, i) => (
+            <div key={i} className="flex items-center space-x-2">
+              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
+              <span className="text-sm">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div className="p-2 border-t flex space-x-2">
+          <Button size="sm" onClick={apply}>Apply</Button>
+          <Button size="sm" variant="outline" onClick={() => setTemp(current)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  // Computed filtered and sorted output data
+  const displayedOutputData = useMemo(() => {
+    if (!clusterResults?.output_data || !Array.isArray(clusterResults.output_data)) return [];
+    
+    let filtered = [...clusterResults.output_data];
+
+    // Apply column filters
+    Object.entries(outputDataColumnFilters).forEach(([column, filterValues]) => {
+      if (filterValues && Array.isArray(filterValues) && filterValues.length > 0) {
+        filtered = filtered.filter(row => {
+          const cellValue = String(row[column] || '');
+          return filterValues.includes(cellValue);
+        });
+      }
+    });
+
+    // Apply sorting
+    if (outputDataSortColumn) {
+      filtered = [...filtered].sort((a, b) => {
+        const aVal = a[outputDataSortColumn];
+        const bVal = b[outputDataSortColumn];
+        if (aVal === bVal) return 0;
+        let comparison = 0;
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          comparison = aVal - bVal;
+        } else {
+          comparison = String(aVal).localeCompare(String(bVal));
+        }
+        return outputDataSortDirection === 'desc' ? -comparison : comparison;
+      });
+    }
+
+    return filtered;
+  }, [clusterResults?.output_data, outputDataColumnFilters, outputDataSortColumn, outputDataSortDirection]);
+
   // Export functions (assuming these are defined elsewhere or will be added)
 
 
@@ -491,11 +637,13 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Data Source Selection */}
-      <ClusteringDataView 
-        objectName={clusteringData.objectName || ''} 
-        apiBase={FEATURE_OVERVIEW_API}
-      />
+      {/* Cardinality View */}
+      {clusteringData.objectName && (
+        <ClusteringCardinalityView 
+          objectName={clusteringData.objectName} 
+          atomId={atomId} 
+        />
+      )}
 
              {/* Identifier Value Selectors - Only show identifiers with >1 unique value */}
               <Card className="p-2 border border-gray-200">
@@ -816,51 +964,82 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
                 {/* Full Output Data with Cluster IDs */}
                 {clusterResults.output_data && Array.isArray(clusterResults.output_data) && clusterResults.output_data.length > 0 && (
                   <div className="mt-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-lg font-semibold text-black">Full Output Data with Cluster IDs</h4>
-                      <div className="flex items-center gap-4 text-sm text-gray-600">
-                        <span>Total Rows: {clusterResults.output_data.length.toLocaleString()}</span>
-                        {clusterResults.output_data.length > 1000 && (
-                          <span className="text-orange-600 bg-orange-50 px-2 py-1 rounded text-xs">
-                            ⚡ Scroll to view all data
-                          </span>
-        )}
-      </div>
-      </div>
-                    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                      <div className="max-h-[300px] overflow-y-auto">
-                        <table className="min-w-full">
-                          <thead className="bg-gray-50 sticky top-0 z-10">
-                            <tr>
-                                                             {Object.keys(clusterResults.output_data[0]).map((column) => (
-                                 <th key={column} className="px-4 py-3 text-center text-sm font-medium text-black border-b bg-gray-50 shadow-sm">
-                                   {column === 'cluster_id' ? 'Cluster ID' : column}
-                     </th>
-                   ))}
-                </tr>
-              </thead>
-              <tbody>
-                            {clusterResults.output_data.map((row: any, index: number) => (
-                              <tr key={index} className="hover:bg-gray-50 border-b border-gray-100">
-                                {Object.entries(row).map(([column, value]) => (
-                                  <td key={column} className="px-4 py-2 text-sm text-gray-900 text-center">
-                                                                     {column === 'cluster_id' ? (
-                                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                     {String(value)}
-                                   </span>
-                                 ) : (
-                                   <span className={typeof value === 'number' ? 'font-mono' : ''}>
-                                     {typeof value === 'number' ? (value as number).toFixed(3) : String(value)}
-                                   </span>
-                                 )}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-                    </div>
+                    <Table
+                      headers={Object.keys(clusterResults.output_data[0]).map((column) => {
+                        const displayName = column === 'cluster_id' ? 'Cluster ID' : column;
+                        return (
+                          <ContextMenu key={column}>
+                            <ContextMenuTrigger asChild>
+                              <div className="flex items-center gap-1 cursor-pointer">
+                                {displayName}
+                                {outputDataSortColumn === column && (
+                                  outputDataSortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                                )}
+                              </div>
+                            </ContextMenuTrigger>
+                            <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                              <ContextMenuSub>
+                                <ContextMenuSubTrigger className="flex items-center">
+                                  <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                                </ContextMenuSubTrigger>
+                                <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                                  <ContextMenuItem onClick={() => handleOutputDataSort(column, 'asc')}>
+                                    <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                                  </ContextMenuItem>
+                                  <ContextMenuItem onClick={() => handleOutputDataSort(column, 'desc')}>
+                                    <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                                  </ContextMenuItem>
+                                </ContextMenuSubContent>
+                              </ContextMenuSub>
+                              <ContextMenuSeparator />
+                              <ContextMenuSub>
+                                <ContextMenuSubTrigger className="flex items-center">
+                                  <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                                </ContextMenuSubTrigger>
+                                <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                                  <OutputDataFilterMenu column={column} data={clusterResults.output_data} />
+                                </ContextMenuSubContent>
+                              </ContextMenuSub>
+                              {outputDataColumnFilters[column]?.length > 0 && (
+                                <>
+                                  <ContextMenuSeparator />
+                                  <ContextMenuItem onClick={() => clearOutputDataColumnFilter(column)}>
+                                    Clear Filter
+                                  </ContextMenuItem>
+                                </>
+                              )}
+                            </ContextMenuContent>
+                          </ContextMenu>
+                        );
+                      })}
+                      bodyClassName="max-h-[300px] overflow-y-auto"
+                      borderColor="border-orange-500"
+                      customHeader={{
+                        title: "Full Output Data with Cluster IDs",
+                        subtitle: `Total Rows: ${displayedOutputData.length.toLocaleString()}${displayedOutputData.length !== clusterResults.output_data.length ? ` (${clusterResults.output_data.length.toLocaleString()} total)` : ''}`,
+                        subtitlePosition: "right"
+                      }}
+                    >
+                      {displayedOutputData.map((row: any, index: number) => (
+                        <React.Fragment key={index}>
+                          <tr className="table-row">
+                            {Object.entries(row).map(([column, value]) => (
+                              <td key={column} className="table-cell">
+                                {column === 'cluster_id' ? (
+                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                    {String(value)}
+                                  </span>
+                                ) : (
+                                  <span className={typeof value === 'number' ? 'font-mono' : ''}>
+                                    {typeof value === 'number' ? (value as number).toFixed(3) : String(value)}
+                                  </span>
+                                )}
+                              </td>
+                            ))}
+                          </tr>
+                        </React.Fragment>
+                      ))}
+                    </Table>
                   </div>
                 )}
 

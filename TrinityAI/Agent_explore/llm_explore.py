@@ -27,8 +27,11 @@ class ExploreAgent:
         self.minio_bucket = minio_bucket
         self.object_prefix = object_prefix
         
+<<<<<<< HEAD
         # Dynamic path resolution - will be updated per request
         
+=======
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
         # Session management
         self.sessions = {}  # {session_id: [messages]}
         self.files_with_columns = {}  # {file_path: [columns]}
@@ -38,6 +41,7 @@ class ExploreAgent:
         
         logger.info(f"ExploreAgent initialized with model: {model_name}")
     
+<<<<<<< HEAD
     def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
         """
         Set environment context for dynamic path resolution.
@@ -56,6 +60,9 @@ class ExploreAgent:
     
     def process(self, user_prompt: str, session_id: Optional[str] = None, 
                 client_name: str = "", app_name: str = "", project_name: str = "") -> Dict[str, Any]:
+=======
+    def process(self, user_prompt: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
         """
         Process user prompt and generate exploration configuration.
         Main entry point for exploration requests.
@@ -67,9 +74,12 @@ class ExploreAgent:
             return {"success": False, "error": "Prompt cannot be empty.", "session_id": session_id}
 
         try:
+<<<<<<< HEAD
             # Set environment context for dynamic path resolution (like merge agent)
             self.set_context(client_name, app_name, project_name)
             
+=======
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
             # Get or create session
             if not session_id:
                 session_id = f"explore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -111,6 +121,7 @@ class ExploreAgent:
             llm_response = call_explore_llm(self.api_url, self.model_name, self.bearer_token, prompt)
             logger.info(f"🔍 Explore Process - LLM response length: {len(llm_response)}")
             
+<<<<<<< HEAD
             # 🔧 PRINT AI OUTPUT FOR DEBUGGING
             print("=" * 80)
             print("🤖 AI LLM RESPONSE:")
@@ -128,6 +139,11 @@ class ExploreAgent:
             print(json.dumps(result, indent=2) if result else "None")
             print("=" * 80)
             
+=======
+            result = extract_json(llm_response, self.files_with_columns)
+            logger.info(f"🔍 Explore Process - Extracted result: {json.dumps(result, indent=2) if result else 'None'}")
+            
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
             # Apply filters to exploration configs if needed
             if result and result.get("success") and result.get("exploration_config"):
                 configs = result["exploration_config"]
@@ -222,13 +238,21 @@ class ExploreAgent:
             
             return error_result
     
+<<<<<<< HEAD
     def process_conversation(self, query: str, session_id: Optional[str] = None,
                            client_name: str = "", app_name: str = "", project_name: str = "") -> Dict[str, Any]:
+=======
+    def process_conversation(self, query: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
         """
         Process conversational query with full memory context.
         Compatible with AIChatBot frontend integration.
         """
+<<<<<<< HEAD
         return self.process(query, session_id, client_name, app_name, project_name)
+=======
+        return self.process(query, session_id)
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
     
     def set_file_context(self, file_id: str, columns: List[str], file_name: Optional[str] = None):
         """Set the current file context for exploration"""
@@ -248,15 +272,23 @@ class ExploreAgent:
         return self.current_file_context
     
     def list_available_files(self) -> Dict[str, Any]:
+<<<<<<< HEAD
         """List all available files from MinIO for exploration using dynamic paths"""
+=======
+        """List all available files from MinIO for exploration"""
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
         try:
             self._load_available_files()
             return {
                 "success": True,
                 "files": self.files_with_columns,
                 "total_files": len(self.files_with_columns),
+<<<<<<< HEAD
                 "current_context": self.current_file_context,
                 "dynamic_prefix": self.object_prefix
+=======
+                "current_context": self.current_file_context
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
             }
         except Exception as e:
             logger.error(f"Error listing available files: {e}")
@@ -271,6 +303,7 @@ class ExploreAgent:
         """Get conversation history for a specific session"""
         return self.sessions.get(session_id, [])
     
+<<<<<<< HEAD
     def _maybe_update_prefix(self) -> None:
         """Dynamically updates the MinIO prefix using the data_upload_validate API endpoint.
         Uses the same dynamic path resolution as merge agent for consistency."""
@@ -344,17 +377,24 @@ class ExploreAgent:
 
     def _load_available_files(self):
         """Load available files from MinIO with their columns using dynamic paths"""
+=======
+    def _load_available_files(self):
+        """Load available files from MinIO with their columns"""
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
         try:
             from minio import Minio
             from minio.error import S3Error
             import pyarrow as pa
             import pyarrow.ipc as ipc
             
+<<<<<<< HEAD
             # Update prefix to current path before loading files
             self._maybe_update_prefix()
             
             logger.info(f"Loading files with prefix: {self.object_prefix}")
             
+=======
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
             # Initialize MinIO client
             minio_client = Minio(
                 self.minio_endpoint,
@@ -363,7 +403,11 @@ class ExploreAgent:
                 secure=False
             )
             
+<<<<<<< HEAD
             # List objects in bucket with current prefix
+=======
+            # List objects in bucket
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
             objects = minio_client.list_objects(self.minio_bucket, prefix=self.object_prefix, recursive=True)
             
             files_with_columns = {}
@@ -425,11 +469,14 @@ class ExploreAgent:
         context_parts.append("=== END CONVERSATION HISTORY ===")
         context_parts.append("")
         
+<<<<<<< HEAD
         # Debug: Log the context being built
         context_str = "\n".join(context_parts)
         logger.info(f"📚 Built conversation context: {len(context_str)} characters")
         logger.info(f"📚 Context preview: {context_str[:300]}...")
         
+=======
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
         # Add intelligent context analysis
         if len(messages) > 2:
             context_parts.append("🧠 CONVERSATION INTELLIGENCE:")

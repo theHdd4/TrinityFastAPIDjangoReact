@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useLaboratoryStore, EvaluateModelsFeatureSettings, DEFAULT_EVALUATE_MODELS_FEATURE_SETTINGS } from '@/components/LaboratoryMode/store/laboratoryStore';
 import EvaluateModelsFeatureCanvas from './components/EvaluateModelsFeatureCanvas';
 
 export interface IdentifierConfig {
@@ -25,13 +25,10 @@ export interface EvaluateModelsFeatureData {
   modelResults: any[];
   identifiersData?: {[key: string]: {column_name: string | null, unique_values: string[]}};
   selectedIdentifierValues?: {[key: string]: string[]};
+  comments?: Record<string, Array<{id: string, text: string, timestamp: string}>>;
+  newComments?: Record<string, string>;
 }
 
-export interface EvaluateModelsFeatureSettings {
-  showLegend: boolean;
-  chartHeight: number;
-  autoRefresh: boolean;
-}
 
 interface EvaluateModelsFeatureAtomProps {
   atomId: string;
@@ -70,7 +67,9 @@ const EvaluateModelsFeatureAtom: React.FC<EvaluateModelsFeatureAtomProps> = ({
     availableColumns: ['Column 1', 'Column 2', 'Column 3', 'Column 4'],
     modelResults: [],
     identifiersData: {},
-    selectedIdentifierValues: {}
+    selectedIdentifierValues: {},
+    comments: {},
+    newComments: {}
   };
 
   const defaultSettings = {
@@ -79,10 +78,7 @@ const EvaluateModelsFeatureAtom: React.FC<EvaluateModelsFeatureAtomProps> = ({
     autoRefresh: false
   };
 
-  const settings = (atom?.settings as any) || {
-    data: defaultData,
-    settings: defaultSettings
-  };
+  const settings: EvaluateModelsFeatureSettings = (atom?.settings as EvaluateModelsFeatureSettings) || DEFAULT_EVALUATE_MODELS_FEATURE_SETTINGS;
 
   // Ensure data structure is complete - get latest from store
   const data = {
@@ -127,15 +123,21 @@ const EvaluateModelsFeatureAtom: React.FC<EvaluateModelsFeatureAtomProps> = ({
     // Update the store with the new data
     const updatedData = { ...data, ...newData };
     console.log('🔧 Updated data after merge:', updatedData);
-    updateSettings(atomId, { data: updatedData });
+    updateSettings(atomId, { 
+      ...settings,
+      data: updatedData 
+    });
     console.log('🔧 Store update called for atomId:', atomId);
   };
 
-  const handleSettingsChange = (newSettings: Partial<EvaluateModelsFeatureSettings>) => {
+  const handleSettingsChange = (newSettings: Partial<EvaluateModelsFeatureSettings['settings']>) => {
     console.log('Settings change in atom:', newSettings);
     // Update the store with the new settings
     const updatedSettings = { ...completeSettings, ...newSettings };
-    updateSettings(atomId, { settings: updatedSettings });
+    updateSettings(atomId, { 
+      ...settings,
+      settings: updatedSettings 
+    });
   };
 
   const handleDataUpload = (file: File, fileId: string) => {

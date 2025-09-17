@@ -39,11 +39,15 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
     fetch(`${VALIDATE_API}/list_saved_dataframes${query}`)
       .then(r => r.json())
       .then(d => {
+        // Filter to only show Arrow files, exclude CSV and XLSX files
         let files = Array.isArray(d.files) ? d.files : [];
-        if (settings.dataSource && !files.some(f => f.object_name === settings.dataSource)) {
-          files = [...files, { object_name: settings.dataSource, csv_name: settings.dataSource }];
+        const arrowFiles = files.filter(f => 
+          f.object_name && f.object_name.endsWith('.arrow')
+        );
+        if (settings.dataSource && !arrowFiles.some(f => f.object_name === settings.dataSource)) {
+          arrowFiles.push({ object_name: settings.dataSource, csv_name: settings.dataSource });
         }
-        setFrames(files);
+        setFrames(arrowFiles);
       })
       .catch(() => {
         if (settings.dataSource) {

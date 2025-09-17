@@ -26,7 +26,10 @@ EXAMPLE_SINGLE_EXPLORATION_JSON = {
             "dimensions": ["actual_column_name_from_file"],  # Will become group_by in backend
             "measures": ["actual_column_name_from_file"],  # Will become measures_config keys
             "weight_column": None,  # Required if using weighted_avg aggregation
+<<<<<<< HEAD
             "segregated_field": None,  # Optional categorical column for secondary x-axis grouping (like filters, optional but useful when user requests multiple column comparison)
+=======
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
             "data_summary": False,  # Set to true if user wants data summary/statistics
             "add_note": "This analysis will reveal patterns and relationships in your data, helping you identify key insights and trends."  # AI-generated insights about the chart
         }
@@ -50,7 +53,11 @@ EXAMPLE_MULTIPLE_EXPLORATIONS_JSON = {
             "description": "based on the user's request",
             "aggregation": "sum",
             "filters": {},
+<<<<<<< HEAD
             "segregated_field": None,  # Optional categorical column for secondary x-axis grouping
+=======
+            
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
             "weight_column": None,
             "data_summary": False,
             "add_note": "Insight based on the users request and the data "
@@ -64,7 +71,10 @@ EXAMPLE_MULTIPLE_EXPLORATIONS_JSON = {
             "description": "Track performance trends over time",
             "aggregation": "sum",
             "filters": {},
+<<<<<<< HEAD
             "segregated_field": "category_column",  # Example: Use category column for secondary grouping
+=======
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
             "weight_column": None,
             "data_summary": True,
             "add_note": "This trend analysis will show how your metrics change over time, revealing growth patterns and seasonal variations."
@@ -98,10 +108,14 @@ def build_file_info_string(available_files_with_columns: dict) -> str:
             logger.warning(f"Unexpected file_data type for {file_name}: {type(file_data)}")
             columns = []
         
+<<<<<<< HEAD
         # Show just the filename for cleaner display
         display_name = file_name.split('/')[-1] if '/' in file_name else file_name
         
         file_info_parts.append(f"{display_name} (columns: {', '.join(columns)})")
+=======
+        file_info_parts.append(f"{file_name} (columns: {', '.join(columns)})")
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
     
     return ', '.join(file_info_parts)
 
@@ -111,8 +125,11 @@ def build_explore_prompt(user_prompt: str, available_files_with_columns: dict, c
     Enhanced with better error handling and smart responses.
     """
     logger.info(f"Building explore prompt for: {user_prompt[:100]}...")
+<<<<<<< HEAD
     logger.info(f"📚 Conversation context length: {len(context)} characters")
     logger.info(f"📚 Conversation context preview: {context[:200]}...")
+=======
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
     
     # Check if we have sufficient data
     has_files = available_files_with_columns and len(available_files_with_columns) > 0
@@ -131,7 +148,11 @@ USER INPUT: "{}"
 """ + json.dumps(available_files_with_columns, indent=2) + """
 
 📝 CONVERSATION CONTEXT:
+<<<<<<< HEAD
 {2}
+=======
+{}
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
 
 TASK: Analyze the user input along with the complete conversation history to provide the most appropriate data exploration configuration.
 
@@ -152,6 +173,7 @@ TASK: Analyze the user input along with the complete conversation history to pro
    - "use different columns" → Modify Previous Configuration with new columns
    - "change the title" → Update Previous Configuration title only
    - "add filters" → Add filters to Previous Configuration
+<<<<<<< HEAD
    - "filter on [column]" → Add filter for [column] to Previous Configuration
    - "apply filter" → Add the specified filter to Previous Configuration
    - "add more filters" → Ask which filters to add to Previous Configuration
@@ -159,6 +181,8 @@ TASK: Analyze the user input along with the complete conversation history to pro
    - "split by [column]" → Add [column] as segregated_field for data splitting
    - "decompose by [column]" → Add [column] as segregated_field for decomposition
    - "show by [dimension]" → Add [dimension] as segregated_field for detailed analysis
+=======
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
 
 🔍 DECISION PROCESS - SMART CONFIGURATION BUILDING:
 1. FIRST: Check if there's a Previous Configuration in conversation history
@@ -170,6 +194,7 @@ TASK: Analyze the user input along with the complete conversation history to pro
    - For "filter on [column]" → Add filter to Previous Configuration
    - For "x axis as [column]" → Update x_axis in Previous Configuration
    - For "y axis as [column]" → Update y_axis in Previous Configuration
+<<<<<<< HEAD
    - For "break down by [column]" → Add [column] as segregated_field
    - For "split by [column]" → Add [column] as segregated_field
    - For "decompose by [column]" → Add [column] as segregated_field
@@ -196,11 +221,24 @@ TASK: Analyze the user input along with the complete conversation history to pro
    - User explicitly mentions specific chart types, analysis requests, or columns, OR
    - User mentions a file name (even without specific chart details)
 5. For vague questions without file context → Return suggestions in smart_response
+=======
+   - For any modification → Update only requested parts of Previous Configuration
+   - ALWAYS return success: true when building upon Previous Configuration
+3. IF no Previous Configuration:
+   - Check if user mentioned a specific file name in their request
+   - IF user mentioned a file → Use that file (if it exists in available files)
+   - IF user didn't mention a file → Ask which file to use in smart_response
+4. ONLY generate exploration config if:
+   - Previous Configuration exists and user is modifying it, OR
+   - User explicitly mentions specific chart types, analysis requests, or columns
+5. For ANY vague or general questions → Return suggestions in smart_response
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
 6. PRIORITIZE building upon Previous Configuration over asking for new details
 7. NEVER ask for file selection again if Previous Configuration has a file
 8. NEVER ask for chart type again if Previous Configuration has a chart type
 9. Remember: smart_response is what user sees - be helpful and ask for clarification
 
+<<<<<<< HEAD
 🔧 FILE SELECTION LOGIC - SMART MEMORY:
 1. FIRST: Check if Previous Configuration has a file - if yes, use that file (NEVER ask again)
 2. SECOND: Look for file names mentioned in user prompt (case-insensitive)
@@ -210,11 +248,21 @@ TASK: Analyze the user input along with the complete conversation history to pro
 6. IF user doesn't mention any file BUT Previous Configuration exists → Use Previous Configuration file
 7. NEVER ask for file selection again once a file is established in Previous Configuration
 8. ALWAYS validate that the selected file exists in available files
+=======
+🔧 FILE SELECTION LOGIC - PRIORITIZE USER MENTION:
+1. FIRST: Look for file names mentioned in user prompt (case-insensitive)
+2. IF user mentions a file name → Use that file if it exists in available files
+3. IF user mentions multiple files → Ask which one to use
+4. IF user doesn't mention any file → Ask which file to use in smart_response
+5. NEVER automatically select the first file without user consent
+6. ALWAYS validate that the selected file exists in available files
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
 
 🔧 COLUMN SELECTION RULES:
 - ALWAYS use ONLY column names that exist in the selected file
 - NEVER use generic names like "Column1", "Column2" - use actual column names from the data
 - NEVER hardcode values like "sales", "brand", "date" unless they exist in the actual columns
+<<<<<<< HEAD
 - ALWAYS validate that selected columns exist in the chosen file
 
 🔧 DATA DISAGGREGATION & SEGREGATION RULES:
@@ -231,6 +279,9 @@ TASK: Analyze the user input along with the complete conversation history to pro
   - "Break down revenue by channel and month" → x_axis: month, y_axis: revenue, segregated_field: channel
   - "Compare performance across categories" → x_axis: category, y_axis: performance, segregated_field: null
   - "Show trends by product type and region" → x_axis: product_type, y_axis: trends, segregated_field: region 
+=======
+- ALWAYS validate that selected columns exist in the chosen file 
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
 
 🔧 CRITICAL INSTRUCTIONS:""".format(user_prompt, json.dumps(available_files_with_columns, indent=2), context) + """
 
@@ -242,6 +293,7 @@ TASK: Analyze the user input along with the complete conversation history to pro
 - If user asks for specific charts/analysis → Generate exploration_config with success: true
 - NEVER assume what the user wants - ask for clarification instead
 
+<<<<<<< HEAD
 🚨 **CRITICAL FILE MEMORY RULE**:
 - **IF Previous Configuration has a file** → ALWAYS use that file, NEVER ask for file selection again
 - **ONLY ask for file selection** if there's no Previous Configuration AND user doesn't mention a file
@@ -253,6 +305,8 @@ TASK: Analyze the user input along with the complete conversation history to pro
   - No Previous Configuration → User: "create chart" → Ask which file to use
   - No Previous Configuration → User: "help" → Ask which file to use
 
+=======
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
 🔧 SMART_RESPONSE REQUIREMENT:
 - MUST include smart_response field in ALL responses - this is the ONLY thing user sees
 - Write in a conversational, professional tone like ChatGPT
@@ -266,6 +320,7 @@ TASK: Analyze the user input along with the complete conversation history to pro
 
 ✅ INCREMENTAL CONFIGURATION BUILDING (success: true) when user says:
 - "Create a bar chart showing sales by region using sales_data.arrow" → Generate full config
+<<<<<<< HEAD
 - "yes" (after you suggested a chart) → Use Previous Configuration exactly (SAME FILE)
 - "ok, create it" (after you suggested a chart) → Use Previous Configuration exactly (SAME FILE)
 - "make it a bar chart" (after suggesting line chart) → Modify Previous Configuration chart type (SAME FILE)
@@ -280,6 +335,16 @@ TASK: Analyze the user input along with the complete conversation history to pro
 - "group by brand and region" → Add region as segregated_field (SAME FILE)
 - "show by category and channel" → Add channel as segregated_field (SAME FILE)
 - "compare by product type" → Add product_type as segregated_field (SAME FILE)
+=======
+- "yes" (after you suggested a chart) → Use Previous Configuration exactly
+- "ok, create it" (after you suggested a chart) → Use Previous Configuration exactly
+- "make it a bar chart" (after suggesting line chart) → Modify Previous Configuration chart type
+- "use sales column" (after you suggested a chart) → Update Previous Configuration with sales column
+- "show me trends" (after suggesting bar chart) → Convert Previous Configuration to line chart
+- "change the title to Sales Analysis" → Update Previous Configuration title only
+- "add a filter for 2023" → Add filter to Previous Configuration
+- "use different columns" (after specifying which) → Update Previous Configuration columns
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
 
 ✅ Example - INCREMENTAL UPDATES (success: true) when user says after Previous Configuration:
 - "use salesvalue" → Update Previous Configuration y_axis to SalesValue
@@ -293,6 +358,7 @@ TASK: Analyze the user input along with the complete conversation history to pro
 
 ✅ REAL-WORLD EXAMPLE - STEP BY STEP:
 1. User: "use uk mayo file and create the chart for sales" → AI: Creates bar chart with UK Mayo file
+<<<<<<< HEAD
 2. User: "apply filter on channel and use x axis as brand" → AI: Updates Previous Configuration with Channel filter and Brand x_axis (USES SAME FILE)
 3. User: "use salesvalue" → AI: Updates Previous Configuration y_axis to SalesValue (USES SAME FILE)
 4. User: "make it a line chart" → AI: Updates Previous Configuration chart_type to line_chart (USES SAME FILE)
@@ -320,6 +386,11 @@ TASK: Analyze the user input along with the complete conversation history to pro
 3. Previous: customer_data.arrow → User: "change to pie chart" → AI: Creates pie chart with customer_data.arrow (NO FILE QUESTION)
 4. Previous: revenue_file.arrow → User: "use different columns" → AI: Asks which columns, uses revenue_file.arrow (NO FILE QUESTION)
 5. Previous: any file → User: "yes" → AI: Uses Previous Configuration exactly (NO FILE QUESTION)
+=======
+2. User: "apply filter on channel and use x axis as brand" → AI: Updates Previous Configuration with Channel filter and Brand x_axis
+3. User: "use salesvalue" → AI: Updates Previous Configuration y_axis to SalesValue (success: true)
+4. Result: Complete configuration with UK Mayo file, bar chart, Channel filter, Brand x_axis, SalesValue y_axis
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
 
 ✅ NEW CONFIGURATION (success: true) when user says:
 - "Show me a line chart of revenue over time from revenue_file.arrow" 
@@ -376,13 +447,17 @@ TASK: Analyze the user input along with the complete conversation history to pro
 - **data_summary**: Set to true if user wants to see data summary/statistics (default: false)
 - **filter_unique**: Set to true if user wants to filter out columns with single unique value (default: false)
 - **add_note**: Provide AI-generated insights about the chart data and what it means (required for all charts)
+<<<<<<< HEAD
 - **segregated_field**: Optional categorical column name for data decomposition/disaggregation - used when user wants to split/break down data by additional dimensions (e.g., "show sales by region and product category")
+=======
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
 
 🔧 ADD_NOTE EXAMPLES:
 - Bar chart: "This analysis reveals key patterns and relationships in your categorical data, helping identify dominant categories and outliers"
 - Line chart: "The trend analysis shows how your metrics change over time, revealing growth patterns and seasonal variations"
 - Pie chart: "This visualization highlights the distribution of your data across different segments, showing relative proportions and key insights"
 
+<<<<<<< HEAD
 🔧 SEGREGATED_FIELD USAGE:
 - **Purpose**: Add a categorical column as secondary x-axis to show multiple columns in same graph
 - **When to use**: When user asks for "compare by category", "group by brand and region", "show both X and Y by category"
@@ -394,6 +469,8 @@ TASK: Analyze the user input along with the complete conversation history to pro
 - **Behavior**: Like filters - optional but useful when user requests multiple column comparison
 - **UI Element**: Maps to "Segregate Field Values" dropdown in the frontend
 
+=======
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
 
 🔧 MANDATORY FILE AND COLUMN USAGE:
 - You MUST use the EXACT file names from the "AVAILABLE FILES AND THEIR COLUMNS" section above
@@ -641,8 +718,13 @@ def call_explore_llm(api_url: str, model_name: str, bearer_token: str, prompt: s
 
 def extract_json(text: str, available_files_with_columns: dict) -> Optional[Dict[str, Any]]:
     """
+<<<<<<< HEAD
     Extract JSON from LLM response with simplified parsing.
     If LLM generates valid JSON with file_name, x_axis, y_axis, then pass it through.
+=======
+    Extract JSON from LLM response with multiple fallback patterns.
+    Enhanced to handle malformed responses better.
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
     """
     if not text or not text.strip():
         logger.warning("🔍 JSON Extraction - Empty or None text provided")
@@ -661,6 +743,7 @@ def extract_json(text: str, available_files_with_columns: dict) -> Optional[Dict
     
     logger.info(f"🔍 JSON Extraction - Input length: {len(text)}")
     
+<<<<<<< HEAD
     # Simple JSON extraction - look for JSON in markdown code blocks first
     json_patterns = [
         r'```json\s*(\{.*?\})\s*```',
@@ -679,6 +762,17 @@ def extract_json(text: str, available_files_with_columns: dict) -> Optional[Dict
                 continue
     
     # Fallback: Find JSON by counting braces
+=======
+    # Pattern 1: Look for JSON block markers
+    json_patterns = [
+        r'```json\s*(\{.*?\})\s*```',
+        r'```\s*(\{.*?\})\s*```',
+        r'</think>\s*(\{.*\})',  # JSON after </think> tag
+        r'(\{.*\})',  # Any JSON object
+    ]
+    
+    # Pattern 2: Find JSON by counting braces (more robust)
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
     def find_complete_json(text):
         start = text.find('{')
         if start == -1:
@@ -694,10 +788,27 @@ def extract_json(text: str, available_files_with_columns: dict) -> Optional[Dict
                     return text[start:i+1]
         return None
     
+<<<<<<< HEAD
+=======
+    for pattern in json_patterns:
+        matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
+        for match in matches:
+            try:
+                result = json.loads(match)
+                if _validate_explore_config(result, available_files_with_columns):
+                    logger.info("✅ Successfully extracted JSON using pattern matching")
+                    return result
+            except json.JSONDecodeError as e:
+                logger.debug(f"JSON decode error with pattern {pattern}: {e}")
+                continue
+    
+    # Try brace counting method
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
     complete_json = find_complete_json(text)
     if complete_json:
         try:
             result = json.loads(complete_json)
+<<<<<<< HEAD
             logger.info("✅ Successfully extracted JSON using brace counting")
             
             # Basic validation - check if it has the required structure
@@ -756,11 +867,23 @@ def extract_json(text: str, available_files_with_columns: dict) -> Optional[Dict
     
     # Final fallback: Try to find JSON-like structure
     try:
+=======
+            if _validate_explore_config(result, available_files_with_columns):
+                logger.info("✅ Successfully extracted JSON using brace counting")
+                return result
+        except json.JSONDecodeError as e:
+            logger.debug(f"JSON decode error with brace counting: {e}")
+    
+    # Pattern 2: Try to find JSON-like structure
+    try:
+        # Look for the first { and last }
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
         start = text.find('{')
         end = text.rfind('}')
         if start != -1 and end != -1 and end > start:
             json_str = text[start:end+1]
             result = json.loads(json_str)
+<<<<<<< HEAD
             logger.info("✅ Successfully extracted JSON using bracket matching")
             
             # Basic validation for fallback JSON
@@ -774,6 +897,54 @@ def extract_json(text: str, available_files_with_columns: dict) -> Optional[Dict
         logger.debug(f"JSON decode error with bracket matching: {e}")
     
     # If all parsing fails, return a helpful response
+=======
+            if _validate_explore_config(result, available_files_with_columns):
+                logger.info("✅ Successfully extracted JSON using bracket matching")
+                return result
+    except json.JSONDecodeError as e:
+        logger.debug(f"JSON decode error with bracket matching: {e}")
+    
+    # Pattern 3: Try to clean and fix common JSON issues
+    try:
+        # Remove any text before the first { and after the last }
+        cleaned_text = text
+        first_brace = cleaned_text.find('{')
+        last_brace = cleaned_text.rfind('}')
+        
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            cleaned_text = cleaned_text[first_brace:last_brace+1]
+            
+            # Try to fix common issues
+            cleaned_text = cleaned_text.replace('\n', ' ').replace('\r', ' ')
+            cleaned_text = re.sub(r'\s+', ' ', cleaned_text)  # Normalize whitespace
+            
+            result = json.loads(cleaned_text)
+            if _validate_explore_config(result, available_files_with_columns):
+                logger.info("✅ Successfully extracted JSON after cleaning")
+                return result
+    except json.JSONDecodeError as e:
+        logger.debug(f"JSON decode error after cleaning: {e}")
+    
+    # Pattern 4: Try to extract just the content part if it's wrapped
+    try:
+        if '"content":' in text:
+            # Extract content from OpenAI-style response
+            content_start = text.find('"content":"') + 11
+            content_end = text.find('"', content_start)
+            if content_start > 10 and content_end > content_start:
+                content = text[content_start:content_end]
+                # Unescape the content
+                content = content.replace('\\"', '"').replace('\\n', '\n').replace('\\t', '\t')
+                # Try to parse the extracted content
+                result = json.loads(content)
+                if _validate_explore_config(result, available_files_with_columns):
+                    logger.info("✅ Successfully extracted JSON from content field")
+                    return result
+    except json.JSONDecodeError as e:
+        logger.debug(f"JSON decode error from content extraction: {e}")
+    
+    # Pattern 5: If all else fails, try to extract smart_response from the text
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
     logger.warning("Could not extract valid JSON from LLM response")
     logger.warning(f"Response preview: {text[:200]}...")
     
@@ -781,10 +952,18 @@ def extract_json(text: str, available_files_with_columns: dict) -> Optional[Dict
     smart_response = text.strip()
     if '"smart_response":' in text:
         try:
+<<<<<<< HEAD
+=======
+            # Try to extract just the smart_response value
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
             start = text.find('"smart_response":"') + 18
             end = text.find('"', start)
             if start > 17 and end > start:
                 smart_response = text[start:end]
+<<<<<<< HEAD
+=======
+                # Unescape the content
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5
                 smart_response = smart_response.replace('\\"', '"').replace('\\n', '\n').replace('\\t', '\t')
         except:
             pass
@@ -803,6 +982,169 @@ def extract_json(text: str, available_files_with_columns: dict) -> Optional[Dict
         "raw_response": text
     }
 
+<<<<<<< HEAD
 # Removed _validate_explore_config function - simplified JSON parsing without strict validation
 
 # Removed _validate_single_exploration_config function - simplified JSON parsing without strict validation
+=======
+def _validate_explore_config(config: Dict[str, Any], available_files_with_columns: dict) -> bool:
+    """
+    Validate that the extracted configuration has the required structure and backend compatibility.
+    """
+    if not isinstance(config, dict):
+        logger.warning("Config is not a dictionary")
+        return False
+    
+    # Check for success field
+    if "success" not in config:
+        logger.warning("Config missing success field")
+        return False
+    
+    logger.info(f"Validating config with success: {config.get('success')}")
+    
+    # If success is True, only check essential fields
+    if config.get("success"):
+        # Check file_name exists and is valid
+        if "file_name" not in config:
+            logger.warning("File name is required for successful exploration config")
+            return False
+        
+        file_name = config["file_name"]
+        if file_name not in available_files_with_columns:
+            logger.warning(f"File {file_name} not found in available files: {list(available_files_with_columns.keys())}")
+            return False
+        
+        # Check smart_response exists
+        if "smart_response" not in config:
+            logger.warning("Smart response is required for successful exploration config")
+            return False
+        
+        # Check exploration_config exists and has x_axis, y_axis
+        if "exploration_config" in config:
+            exploration_configs = config["exploration_config"]
+            if isinstance(exploration_configs, list) and len(exploration_configs) > 0:
+                exp_config = exploration_configs[0]  # Check first config
+                if "x_axis" not in exp_config or "y_axis" not in exp_config:
+                    logger.warning("x_axis and y_axis are required in exploration config")
+                    return False
+        
+        logger.info("✅ Success config validation passed")
+        return True
+    
+    # If success is False, check for suggestions and smart_response
+    else:
+        if "suggestions" not in config:
+            logger.warning("Config with success=false missing suggestions field")
+            return False
+        
+        if "smart_response" not in config:
+            logger.warning("Smart response is required for suggestions")
+            return False
+        
+        logger.info("✅ Suggestions config validation passed")
+        return True
+
+def _validate_single_exploration_config(exp_config: Dict[str, Any], available_files_with_columns: dict = None) -> bool:
+    """
+    Validate a single exploration configuration against backend API requirements.
+    """
+    if not isinstance(exp_config, dict):
+        return False
+    
+    # Required fields
+    required_fields = ["chart_type", "dimensions", "measures", "aggregation"]
+    for field in required_fields:
+        if field not in exp_config:
+            logger.warning(f"Missing required field: {field}")
+            return False
+    
+    # Validate chart_type
+    valid_chart_types = ["bar_chart", "area_bar_chart", "line_chart", "pie_chart", "table"]
+    if exp_config["chart_type"] not in valid_chart_types:
+        logger.warning(f"Invalid chart_type: {exp_config['chart_type']}")
+        return False
+    
+    # Validate aggregation
+    valid_aggregations = ["sum", "avg", "count", "min", "max", "weighted_avg", "null", "no_aggregation"]
+    if exp_config["aggregation"] not in valid_aggregations:
+        logger.warning(f"Invalid aggregation: {exp_config['aggregation']}")
+        return False
+    
+    # Validate line_chart requirements
+    if exp_config["chart_type"] == "line_chart":
+        if "x_axis" not in exp_config or not exp_config["x_axis"]:
+            logger.warning("x_axis is required for line_chart")
+            return False
+        if exp_config["x_axis"] not in exp_config.get("dimensions", []):
+            logger.warning("x_axis must be in dimensions list for line_chart")
+            return False
+    
+    # Validate weighted_avg requirements
+    if exp_config["aggregation"] == "weighted_avg":
+        if "weight_column" not in exp_config or not exp_config["weight_column"]:
+            logger.warning("weight_column is required for weighted_avg aggregation")
+            return False
+    
+    # Validate filters format
+    filters = exp_config.get("filters", {})
+    if not isinstance(filters, dict):
+        logger.warning("filters must be a dictionary")
+        return False
+    
+    # Validate dimensions and measures are lists
+    if not isinstance(exp_config.get("dimensions", []), list):
+        logger.warning("dimensions must be a list")
+        return False
+    
+    if not isinstance(exp_config.get("measures", []), list):
+        logger.warning("measures must be a list")
+        return False
+    
+    # 🔧 VALIDATE NEW FIELDS: data_summary and add_note
+    # Validate data_summary (optional, must be boolean if present)
+    if "data_summary" in exp_config and not isinstance(exp_config["data_summary"], bool):
+        logger.warning("data_summary must be a boolean value")
+        return False
+    
+    # Validate add_note (required, must be string)
+    if "add_note" not in exp_config or not isinstance(exp_config["add_note"], str) or not exp_config["add_note"].strip():
+        logger.warning("add_note is required and must be a non-empty string")
+        return False
+    
+    # Validate columns exist in available files (if validation data provided)
+    if available_files_with_columns:
+        # Get the file name from the parent config (we need to pass this through)
+        # For now, validate against all available files
+        all_columns = set()
+        for file_data in available_files_with_columns.values():
+            if isinstance(file_data, dict) and 'columns' in file_data:
+                all_columns.update(file_data['columns'])
+        
+        # Check if dimensions exist in any available file
+        dimensions = exp_config.get("dimensions", [])
+        for dim in dimensions:
+            if dim not in all_columns:
+                logger.warning(f"Dimension column '{dim}' not found in any available file")
+                return False
+        
+        # Check if measures exist in any available file
+        measures = exp_config.get("measures", [])
+        for measure in measures:
+            if measure not in all_columns:
+                logger.warning(f"Measure column '{measure}' not found in any available file")
+                return False
+        
+        # Check if x_axis exists in any available file
+        x_axis = exp_config.get("x_axis")
+        if x_axis and x_axis not in all_columns:
+            logger.warning(f"x_axis column '{x_axis}' not found in any available file")
+            return False
+        
+        # Check if y_axis exists in any available file
+        y_axis = exp_config.get("y_axis")
+        if y_axis and y_axis not in all_columns:
+            logger.warning(f"y_axis column '{y_axis}' not found in any available file")
+            return False
+    
+    return True
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5

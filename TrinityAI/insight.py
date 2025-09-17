@@ -273,4 +273,8 @@ async def generate_insights(request: InsightRequest):
 @router.get("/health")
 async def health_check():
     """Health check endpoint for insight service."""
+<<<<<<< HEAD
     return {"status": "healthy", "service": "AI Insights"}
+=======
+    return {"status": "healthy", "service": "AI Insights"}
+>>>>>>> 150810c1b5794effe92101434eba656c97730ac5

@@ -269,9 +269,31 @@ async def save_concat_metadata_to_mongo(collection, metadata: dict):
     await collection.insert_one(metadata)
     print(f"📦 Stored in {collection.name}: {metadata}")
 
+def get_minio_df(bucket: str, file_key: str) -> pd.DataFrame:
+    try:
+        response = minio_client.get_object(bucket, file_key)
+        content = response.read()
+        if file_key.endswith(".csv"):
+            df = pd.read_csv(BytesIO(content))
+        elif file_key.endswith(".xlsx"):
+            df = pd.read_excel(BytesIO(content))
+        elif file_key.endswith(".arrow"):
+            import pyarrow as pa
+            import pyarrow.ipc as ipc
+            reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+            df = reader.read_all().to_pandas()
+        else:
+            raise ValueError("Unsupported file type")
+        return df
+    except S3Error as e:
+        raise RuntimeError(f"MinIO S3 error: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch file from MinIO: {e}")
+
 __all__ = [
     'minio_client',
     'load_dataframe',
+    'get_minio_df',
     'save_concat_result_to_minio',
     'get_concat_results_collection',
     'save_concat_metadata_to_mongo',

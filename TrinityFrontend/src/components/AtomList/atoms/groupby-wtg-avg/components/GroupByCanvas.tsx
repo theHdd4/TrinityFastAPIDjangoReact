@@ -64,8 +64,12 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const hasWeightedMean = selectedMeasures.some((m: any) => m.aggregator === 'Weighted Mean');
 
   // Total rows (before slicing) and Save DataFrame states
-  const [totalRows, setTotalRows] = useState(0);
-  const [allResults, setAllResults] = useState<Record<string, any>[]>([]);
+  const [totalRows, setTotalRows] = useState(() => {
+    return settings.groupbyResults?.unsaved_data?.length || 0;
+  });
+  const [allResults, setAllResults] = useState<Record<string, any>[]>(() => {
+    return settings.groupbyResults?.unsaved_data || [];
+  });
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -215,10 +219,29 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     ? settings.selectedMeasureNames 
     : fallbackMeasures;
 
-  const [results, setResults] = useState<any[]>([]);
-  const [resultsHeaders, setResultsHeaders] = useState<string[]>([]);
+  // Initialize results from global store
+  const [results, setResults] = useState<any[]>(() => {
+    return settings.groupbyResults?.unsaved_data || [];
+  });
+  const [resultsHeaders, setResultsHeaders] = useState<string[]>(() => {
+    return settings.groupbyResults?.unsaved_data?.length > 0 
+      ? Object.keys(settings.groupbyResults.unsaved_data[0] || {})
+      : [];
+  });
   const [resultsLoading, setResultsLoading] = useState(false);
   const [resultsError, setResultsError] = useState<string | null>(null);
+
+  // Sync with global store changes
+  React.useEffect(() => {
+    if (settings.groupbyResults?.unsaved_data) {
+      setResults(settings.groupbyResults.unsaved_data);
+      setAllResults(settings.groupbyResults.unsaved_data);
+      setTotalRows(settings.groupbyResults.unsaved_data.length);
+      if (settings.groupbyResults.unsaved_data.length > 0) {
+        setResultsHeaders(Object.keys(settings.groupbyResults.unsaved_data[0] || {}));
+      }
+    }
+  }, [settings.groupbyResults?.unsaved_data]);
 
   // Cardinality View state
   const [cardinalityData, setCardinalityData] = useState<any[]>([]);
@@ -495,13 +518,14 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           
           setResultsHeaders(headers);
           
-          // Persist result metadata
+          // Persist result metadata and data
           updateSettings(atomId, {
             groupbyResults: {
               result_file: data.result_file,
               result_shape: [allRows.length, headers.length],
               row_count: data.row_count,
-              columns: data.columns
+              columns: data.columns,
+              unsaved_data: allRows
             },
           });
           
@@ -543,7 +567,8 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                     result_file: data.result_file,
                     result_shape: [rows.length, headers.length],
                     row_count: data.row_count,
-                    columns: data.columns
+                    columns: data.columns,
+                    unsaved_data: rows
                   },
                 });
                 
@@ -761,8 +786,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
       ) : cardinalityError ? (
         <div className="p-4 text-red-600">{cardinalityError}</div>
       ) : cardinalityData && cardinalityData.length > 0 ? (
-        <div className="mx-auto max-w-screen-2xl">
-          <Table
+        <Table
             headers={[
               <ContextMenu key="Column">
                 <ContextMenuTrigger asChild>
@@ -951,7 +975,6 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
               </tr>
             ))}
           </Table>
-        </div>
       ) : null}
       
       {/* Group By Section */}

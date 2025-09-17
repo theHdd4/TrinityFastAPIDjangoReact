@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sparkles, Bot, User, X, MessageSquare, Send, Plus, RotateCcw } from 'lucide-react';
 import { TRINITY_AI_API, CONCAT_API, MERGE_API, CREATECOLUMN_API, GROUPBY_API, FEATURE_OVERVIEW_API, VALIDATE_API, CHART_MAKER_API, EXPLORE_API } from '@/lib/api';
+import { TRINITY_AI_API, CONCAT_API, MERGE_API, CREATECOLUMN_API, GROUPBY_API, FEATURE_OVERVIEW_API, VALIDATE_API, CHART_MAKER_API, EXPLORE_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Message {
@@ -30,6 +31,7 @@ const ENDPOINTS: Record<string, string> = {
   'create-column': `${TRINITY_AI_API}/create-transform`,
   'groupby-wtg-avg': `${TRINITY_AI_API}/groupby`,
   'explore': `${TRINITY_AI_API}/explore`,
+  'explore': `${TRINITY_AI_API}/explore`,
 };
 
 const PERFORM_ENDPOINTS: Record<string, string> = {
@@ -38,6 +40,7 @@ const PERFORM_ENDPOINTS: Record<string, string> = {
   'create-column': `${CREATECOLUMN_API}/perform`,
   'groupby-wtg-avg': `${GROUPBY_API}/run`,
   'chart-maker': `${CHART_MAKER_API}/charts`,
+  'explore': `${EXPLORE_API}/perform`,
   'explore': `${EXPLORE_API}/perform`,
 };
 
@@ -74,6 +77,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     return [{
       id: 'init',
       content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.`,
+      content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.`,
       sender: 'ai',
       timestamp: new Date(),
     }];
@@ -93,6 +97,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     const clearedMessages = [
       {
         id: 'init',
+        content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.\n\n💬 Chat history cleared`,
         content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.\n\n💬 Chat history cleared`,
         sender: 'ai',
         timestamp: new Date(),
@@ -114,6 +119,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     const newMessages = [
       {
         id: 'init',
+        content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.`,
         content: `Hi! I can help configure the "${atomTitle}" atom. Describe what you want to do.`,
         sender: 'ai',
         timestamp: new Date(),
@@ -181,11 +187,45 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
       if (res.ok) {
         data = await res.json();
         // Enhanced AI response handling with smart_response as priority
+        // Enhanced AI response handling with smart_response as priority
         let aiText = '';
         if (data.success) {
           // Success case - use smart_response if available, otherwise show completion message
           aiText = data.smart_response || `I've successfully completed the operation for you. ${data.message || 'The configuration is ready and you can now proceed with the current settings or make further adjustments as needed.'}`;
+          // Success case - use smart_response if available, otherwise show completion message
+          aiText = data.smart_response || `I've successfully completed the operation for you. ${data.message || 'The configuration is ready and you can now proceed with the current settings or make further adjustments as needed.'}`;
         } else if (Array.isArray(data.suggestions) && data.suggestions.length) {
+          // Suggestions case - ALWAYS use smart_response if available, don't add extra content
+          if (data.smart_response) {
+            aiText = data.smart_response;
+          } else {
+            // Only show suggestions if no smart_response
+            aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
+            
+            // Add file analysis if available
+            if (data.file_analysis) {
+              aiText += `\n\n📊 File Analysis:\n`;
+              if (data.file_analysis.total_files) {
+                aiText += `• Total files available: ${data.file_analysis.total_files}\n`;
+              }
+              if (data.file_analysis.recommended_pairs && data.file_analysis.recommended_pairs.length > 0) {
+                aiText += `• Recommended pairs: ${data.file_analysis.recommended_pairs.join(', ')}\n`;
+              }
+              if (data.file_analysis.common_columns && data.file_analysis.common_columns.length > 0) {
+                aiText += `• Common columns: ${data.file_analysis.common_columns.join(', ')}\n`;
+              }
+              if (data.file_analysis.concat_tips && data.file_analysis.concat_tips.length > 0) {
+                aiText += `• Tips: ${data.file_analysis.concat_tips.join(', ')}\n`;
+              }
+              if (data.file_analysis.merge_tips && data.file_analysis.merge_tips.length > 0) {
+                aiText += `• Tips: ${data.file_analysis.merge_tips.join(', ')}\n`;
+              }
+            }
+            
+            // Add next steps if available
+            if (data.next_steps && data.next_steps.length > 0) {
+              aiText += `\n\n🎯 Next Steps:\n${data.next_steps.map((step, idx) => `${idx + 1}. ${step}`).join('\n')}`;
+            }
           // Suggestions case - ALWAYS use smart_response if available, don't add extra content
           if (data.smart_response) {
             aiText = data.smart_response;
@@ -221,6 +261,21 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
         } else {
           // Fallback case - use smart_response if available
           aiText = data.smart_response || data.message || data.response || data.final_response || 'AI response received';
+          // Fallback case - use smart_response if available
+          aiText = data.smart_response || data.message || data.response || data.final_response || 'AI response received';
+        }
+        
+        // Only add general AI message if not handled by specific atom types
+        const hasSpecificHandler = (atomType === 'concat' && data.concat_json) ||
+                                 (atomType === 'merge' && data.merge_json) ||
+                                 (atomType === 'create-column' && data.json) ||
+                                 (atomType === 'groupby-wtg-avg' && data.groupby_json) ||
+                                 (atomType === 'chart-maker' && data.chart_json) ||
+                                 (atomType === 'explore' && data.exploration_config);
+        
+        if (!hasSpecificHandler) {
+          const aiMsg: Message = { id: (Date.now() + 1).toString(), content: aiText, sender: 'ai', timestamp: new Date() };
+          setMessages(prev => [...prev, aiMsg]);
         }
         
         // Only add general AI message if not handled by specific atom types
@@ -824,6 +879,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             cfg.file_name,
             cfg.file_key,
             cfg.file_name,
+            cfg.file_name,
             cfg.source_file
           ].filter(Boolean);
           
@@ -1217,6 +1273,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           let targetFile = '';
           
           // Priority 1: Use AI-provided file name (exact keys from LLM)
+          if (data.file_name) {
+            targetFile = data.file_name;
           if (data.file_name) {
             targetFile = data.file_name;
             console.log('🎯 Using AI-provided file name:', targetFile);

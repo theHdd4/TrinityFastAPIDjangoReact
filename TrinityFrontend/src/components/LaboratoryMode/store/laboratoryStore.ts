@@ -429,7 +429,73 @@ export interface SelectModelsFeatureSettings {
   isRunning: boolean;
   dataType: string;
   aggregationLevel: string;
+  combinationStatus?: any;
+  combinationStatusMinimized?: boolean;
 }
+
+export interface EvaluateModelsFeatureSettings {
+  data: {
+    selectedDataframe: string;
+    scope: string;
+    selectedCombinations: string[];
+    identifiers: Array<{
+      id: string;
+      name: string;
+      selected: boolean;
+    }>;
+    graphs: Array<{
+      id: string;
+      name: string;
+      type: 'waterfall' | 'contribution' | 'actual-vs-predicted' | 'elasticity' | 'beta' | 'averages';
+      selected: boolean;
+    }>;
+    availableColumns: string[];
+    modelResults: any[];
+    identifiersData?: {[key: string]: {column_name: string | null, unique_values: string[]}};
+    selectedIdentifierValues?: {[key: string]: string[]};
+    comments?: Record<string, Array<{id: string, text: string, timestamp: string}>>;
+    newComments?: Record<string, string>;
+    columnFilters?: {[key: string]: string[]};
+    sortColumn?: string;
+    sortDirection?: 'asc' | 'desc';
+  };
+  settings: {
+    showLegend: boolean;
+    chartHeight: number;
+    autoRefresh: boolean;
+  };
+}
+
+export const DEFAULT_EVALUATE_MODELS_FEATURE_SETTINGS: EvaluateModelsFeatureSettings = {
+  data: {
+    selectedDataframe: '',
+    scope: 'SCOPE 12',
+    selectedCombinations: [],
+    identifiers: [],
+    graphs: [
+      { id: '1', name: 'Waterfall Chart', type: 'waterfall', selected: true },
+      { id: '2', name: 'Contribution Chart', type: 'contribution', selected: true },
+      { id: '3', name: 'Actual vs Predicted', type: 'actual-vs-predicted', selected: true },
+      { id: '4', name: 'Elasticity', type: 'elasticity', selected: true },
+      { id: '5', name: 'Beta', type: 'beta', selected: true },
+      { id: '6', name: 'Averages', type: 'averages', selected: true },
+    ],
+    availableColumns: ['Column 1', 'Column 2', 'Column 3', 'Column 4'],
+    modelResults: [],
+    identifiersData: {},
+    selectedIdentifierValues: {},
+    comments: {},
+    newComments: {},
+    columnFilters: {},
+    sortColumn: '',
+    sortDirection: 'desc'
+  },
+  settings: {
+    showLegend: true,
+    chartHeight: 300,
+    autoRefresh: false
+  }
+};
 
 export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
   dataSource: '',
@@ -985,6 +1051,117 @@ export const DEFAULT_SELECT_MODELS_FEATURE_SETTINGS: SelectModelsFeatureSettings
   dataType: '',
   aggregationLevel: ''
 };
+
+export interface ScopeSelectorPreviewRow {
+  scopeId: string;
+  values: Record<string, string>;
+  count: number;
+  pctPass?: boolean;
+}
+
+export interface ScopeSelectorSettings {
+  scopes: Array<{
+    id: string;
+    name: string;
+    identifiers: { [key: string]: string };
+    timeframe: {
+      from: string;
+      to: string;
+    };
+  }>;
+  availableIdentifiers: string[];
+  selectedIdentifiers: string[];
+  measures?: string[];
+  allColumns?: Array<{
+    column_name: string;
+    dtype: string;
+  }>;
+  dataSource?: string;
+  previewRows?: ScopeSelectorPreviewRow[];
+}
+
+export const DEFAULT_SCOPE_SELECTOR_SETTINGS: ScopeSelectorSettings = {
+  scopes: [],
+  availableIdentifiers: [],
+  selectedIdentifiers: [],
+  measures: [],
+  allColumns: [],
+  dataSource: '',
+  previewRows: []
+};
+
+export interface BuildModelFeatureBasedSettings {
+  data: {
+    uploadedFile: File | null;
+    selectedDataset: string;
+    selectedScope: string;
+    selectedCombinations: string[];
+    selectedModels: string[];
+    modelConfigs: Array<{
+      id: string;
+      name: string;
+      parameters: Record<string, any>;
+    }>;
+    yVariable: string;
+    xVariables: (string | string[])[];
+    transformations: Array<{
+      id: string;
+      component1: string;
+      component2: string;
+      operation: string;
+    }>;
+    availableFiles?: string[];
+    availableColumns: string[];
+    scopes: string[];
+    outputFileName: string;
+    kFolds?: number;
+    testSize?: number;
+  };
+  settings: {
+    dataType: string;
+    aggregationLevel: string;
+    dateFrom: string;
+    dateTo: string;
+  };
+  modelResult?: any;
+  modelError?: string | null;
+}
+
+export const DEFAULT_BUILD_MODEL_FEATURE_BASED_SETTINGS: BuildModelFeatureBasedSettings = {
+  data: {
+    uploadedFile: null,
+    selectedDataset: '',
+    selectedScope: '',
+    selectedCombinations: [],
+    selectedModels: ['Linear Regression', 'Ridge Regression', 'Lasso Regression', 'ElasticNet Regression', 'Bayesian Ridge Regression', 'Custom Constrained Ridge', 'Constrained Linear Regression'],
+    modelConfigs: [
+      { id: 'Linear Regression', name: 'Linear Regression', parameters: {} },
+      { id: 'Ridge Regression', name: 'Ridge Regression', parameters: { 'Alpha': '1.0' } },
+      { id: 'Lasso Regression', name: 'Lasso Regression', parameters: { 'Alpha': '1.0' } },
+      { id: 'ElasticNet Regression', name: 'ElasticNet Regression', parameters: { 'Alpha': '1.0', 'L1 Ratio': '0.5' } },
+      { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', parameters: {} },
+      { id: 'Custom Constrained Ridge', name: 'Custom Constrained Ridge', parameters: { 'L2 Penalty': '0.1', 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' } },
+      { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', parameters: { 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' } }
+    ],
+    yVariable: '',
+    xVariables: [],
+    transformations: [],
+    availableFiles: [],
+    availableColumns: ['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6', 'Feature 7', 'Feature 8'],
+    scopes: ['Scope 1', 'Scope 2', 'Scope 3', 'Scope 4', 'Scope 5'],
+    outputFileName: '',
+    kFolds: 5,
+    testSize: 0.2
+  },
+  settings: {
+    dataType: '',
+    aggregationLevel: '',
+    dateFrom: '',
+    dateTo: ''
+  },
+  modelResult: null,
+  modelError: null
+};
 export interface DroppedAtom {
   id: string;
   atomId: string;
@@ -1026,6 +1203,10 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   },
 
   updateAtomSettings: (atomId: string, settings: any) => {
+    // console.log('=== Store: updateAtomSettings called ===');
+    // console.log('Store: atomId:', atomId);
+    // console.log('Store: settings to update:', settings);
+    
     set((state) => {
       const updatedCards = state.cards.map((card) => ({
         ...card,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -78,11 +78,14 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     settings.activeMetric || settings.yAxes?.[0] || "",
   );
   const [error, setError] = useState<string | null>(null);
+  const [dimensionError, setDimensionError] = useState<string | null>(null);
   
   // Sorting and filtering state for Cardinality View
   const [sortColumn, setSortColumn] = useState<string>('unique_count');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+
+  const lastFetchedSource = useRef<string | null>(null);
 
   // Get atom settings to access the input file name
   const atom = useLaboratoryStore(state => atomId ? state.getAtom(atomId) : undefined);
@@ -116,22 +119,55 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   }, [settings.dimensionMap]);
 
   useEffect(() => {
+    let active = true;
     const loadMapping = async () => {
-      const raw = await fetchDimensionMapping();
-      const mapping = filterUnattributed(raw);
+      if (!settings.dataSource) {
+        return;
+      }
+      if (settings.dimensionMap && Object.keys(settings.dimensionMap).length > 0) {
+        return;
+      }
+      const { mapping: rawMapping } = await fetchDimensionMapping({
+        objectName: settings.dataSource,
+      });
+      if (!active) return;
+      const mapping = filterUnattributed(rawMapping);
       setDimensionMap(mapping);
       onUpdateSettings({ dimensionMap: mapping });
     };
     loadMapping();
-  }, []);
+    return () => {
+      active = false;
+    };
+  }, [settings.dataSource]);
 
   useEffect(() => {
-    if (hasMappedIdentifiers && skuRows.length === 0 && settings.dataSource) {
-      // prefill SKUs only when a data source is configured
-      displaySkus();
+    if (!settings.dataSource) {
+      setDimensionError(null);
+      lastFetchedSource.current = null;
+      return;
     }
+
+    if (hasMappedIdentifiers) {
+      setDimensionError(null);
+    } else {
+      const message =
+        "Column Classifier is not configured for the selected dataframe. Configure it to view hierarchical dimensions.";
+      setDimensionError(message);
+      lastFetchedSource.current = null;
+      return;
+    }
+
+    if (
+      lastFetchedSource.current === settings.dataSource &&
+      skuRows.length > 0
+    ) {
+      return;
+    }
+    lastFetchedSource.current = settings.dataSource;
+    displaySkus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dimensionMap, settings.dataSource]);
+  }, [settings.dataSource, hasMappedIdentifiers, skuRows.length, dimensionMap]);
 
   useEffect(() => {
     setSkuRows(Array.isArray(settings.skuTable) ? settings.skuTable : []);
@@ -782,6 +818,15 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         </div>
       )}
 
+      {settings.hierarchicalView && dimensionError && (
+        <div
+          className="mb-4 text-sm font-medium text-red-600"
+          data-testid="fo-dimension-warning"
+        >
+          {dimensionError}
+        </div>
+      )}
+
       {settings.hierarchicalView && settings.selectedColumns?.length > 0 && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -812,9 +857,11 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                 </Card>
               ))
             ) : (
-              <div className="col-span-1 text-sm text-gray-500">
-                Please configure dimensions using Column Classifier
-              </div>
+              !dimensionError && (
+                <div className="col-span-1 text-sm font-medium text-red-600">
+                  Please configure dimensions using Column Classifier
+                </div>
+              )
             )}
           </div>
 

@@ -1,6 +1,119 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import * as d3 from 'd3';
+
+// Separate component for axis label editing to prevent re-renders
+const AxisLabelEditor = React.memo(({ 
+  xAxisLabel, 
+  yAxisLabel, 
+  customXAxisLabel, 
+  customYAxisLabel, 
+  title,
+  customTitle,
+  position, 
+  onSave, 
+  onCancel 
+}: {
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  customXAxisLabel: string;
+  customYAxisLabel: string;
+  title?: string;
+  customTitle: string;
+  position: { x: number; y: number };
+  onSave: (x: string, y: string, t: string) => void;
+  onCancel: () => void;
+}) => {
+  const [tempX, setTempX] = useState(customXAxisLabel || xAxisLabel || '');
+  const [tempY, setTempY] = useState(customYAxisLabel || yAxisLabel || '');
+  const [tempTitle, setTempTitle] = useState(customTitle || title || '');
+
+  useEffect(() => {
+    setTempX(customXAxisLabel || xAxisLabel || '');
+    setTempY(customYAxisLabel || yAxisLabel || '');
+    setTempTitle(customTitle || title || '');
+  }, [customXAxisLabel, customYAxisLabel, customTitle, xAxisLabel, yAxisLabel, title]);
+
+  return (
+    <div
+      className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-4 axis-label-submenu"
+      style={{
+        left: position.x,
+        top: position.y,
+        minWidth: '280px',
+        maxHeight: '400px'
+      }}
+    >
+      <div className="px-2 py-2 text-sm font-semibold text-gray-700 border-b border-gray-200 mb-3">
+        Edit Chart Labels
+      </div>
+      
+      <div className="space-y-4">
+        {/* Chart Title */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Chart Title
+          </label>
+          <input
+            type="text"
+            value={tempTitle}
+            onChange={(e) => setTempTitle(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            placeholder={title || 'Enter chart title'}
+          />
+        </div>
+        
+        {/* X-Axis Label */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            X-Axis Label
+          </label>
+          <input
+            type="text"
+            value={tempX}
+            onChange={(e) => setTempX(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            placeholder={xAxisLabel || 'Enter X-axis label'}
+          />
+        </div>
+        
+        {/* Y-Axis Label */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Y-Axis Label
+          </label>
+          <input
+            type="text"
+            value={tempY}
+            onChange={(e) => setTempY(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            placeholder={yAxisLabel || 'Enter Y-axis label'}
+          />
+        </div>
+        
+        {/* Action Buttons */}
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            onClick={() => {
+              setTempX(customXAxisLabel || xAxisLabel || '');
+              setTempY(customYAxisLabel || yAxisLabel || '');
+              setTempTitle(customTitle || title || '');
+              onCancel();
+            }}
+            className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onSave(tempX, tempY, tempTitle)}
+            className="px-3 py-1.5 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded transition-colors"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
 import "./chart.css";
 import {
   BarChart,
@@ -22,6 +135,7 @@ import {
   ResponsiveContainer,
   LabelList
 } from 'recharts';
+import * as d3 from 'd3';
 
 interface Props {
   type: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart';
@@ -40,6 +154,7 @@ interface Props {
   enableScroll?: boolean; // New prop for enabling horizontal scroll
   theme?: string; // Theme prop to receive from parent
   onThemeChange?: (theme: string) => void; // Callback for theme changes
+  onChartTypeChange?: (type: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => void; // Callback for chart type changes
   onGridToggle?: (enabled: boolean) => void; // Callback for grid toggle
   onLegendToggle?: (enabled: boolean) => void; // Callback for legend toggle
   onAxisLabelsToggle?: (enabled: boolean) => void; // Callback for axis labels toggle
@@ -259,8 +374,21 @@ const DEFAULT_COLORS = [
 const FONT_FAMILY = `'Inter', 'Segoe UI', sans-serif`;
 
 // Number formatting function for large numbers with proper precision
-const formatLargeNumber = (value: number): string => {
-  const absValue = Math.abs(value);
+const formatLargeNumber = (value: any): string => {
+  // Handle non-numeric values like ChartMaker does
+  if (value === undefined || value === null || isNaN(value)) {
+    return "";
+  }
+  
+  // Convert to number if it's a string
+  const numValue = typeof value === 'string' ? parseFloat(value) : value;
+  
+  // Check if conversion was successful
+  if (isNaN(numValue)) {
+    return "";
+  }
+  
+  const absValue = Math.abs(numValue);
 
   const formatScaled = (scaled: number): string => {
     // Keep at most two decimals and trim trailing zeros (e.g. 2.34M, 2M)
@@ -268,22 +396,35 @@ const formatLargeNumber = (value: number): string => {
   };
 
   if (absValue >= 1_000_000_000) { // Billions (10^9)
-    return `${formatScaled(value / 1_000_000_000)}B`;
+    return `${formatScaled(numValue / 1_000_000_000)}B`;
   } else if (absValue >= 1_000_000) { // Millions (10^6)
-    return `${formatScaled(value / 1_000_000)}M`;
+    return `${formatScaled(numValue / 1_000_000)}M`;
   } else if (absValue >= 1_000) { // Thousands (10^3)
-    return `${formatScaled(value / 1_000)}K`;
+    return `${formatScaled(numValue / 1_000)}K`;
   }
-  return value.toLocaleString(); // Numbers less than 1000
+  return parseFloat(numValue.toFixed(2)).toString(); // Numbers less than 1000, max 2 decimals
 };
 
 // Format numbers for tooltips - show exact values without suffixes
-const formatTooltipNumber = (value: number): string => {
+const formatTooltipNumber = (value: any): string => {
+  // Handle non-numeric values like ChartMaker does
+  if (value === undefined || value === null || isNaN(value)) {
+    return "";
+  }
+  
+  // Convert to number if it's a string
+  const numValue = typeof value === 'string' ? parseFloat(value) : value;
+  
+  // Check if conversion was successful
+  if (isNaN(numValue)) {
+    return "";
+  }
+  
   // For tooltips, show the exact number with proper formatting
-  if (Number.isInteger(value)) {
-    return value.toLocaleString(); // Add commas for thousands separators
+  if (Number.isInteger(numValue)) {
+    return numValue.toLocaleString(); // Add commas for thousands separators
   } else {
-    return value.toLocaleString(undefined, { 
+    return numValue.toLocaleString(undefined, { 
       minimumFractionDigits: 0, 
       maximumFractionDigits: 6 
     }); // Show up to 6 decimal places if needed
@@ -337,6 +478,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   enableScroll = false,
   theme: propTheme, // Use propTheme from parent
   onThemeChange,
+  onChartTypeChange,
   onGridToggle,
   onLegendToggle,
   onAxisLabelsToggle,
@@ -367,10 +509,84 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [showColorSubmenu, setShowColorSubmenu] = useState(false);
   const [showSortSubmenu, setShowSortSubmenu] = useState(false);
+  const [showChartTypeSubmenu, setShowChartTypeSubmenu] = useState(false);
+  const [showAxisLabelSubmenu, setShowAxisLabelSubmenu] = useState(false);
   const [colorSubmenuPos, setColorSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [sortSubmenuPos, setSortSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [chartTypeSubmenuPos, setChartTypeSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [axisLabelSubmenuPos, setAxisLabelSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
   const chartRef = useRef<HTMLDivElement>(null);
+
+  // State for custom axis labels - use localStorage to persist across component recreations
+  // Create a unique key based on chart props to make it chart-specific (excluding type for persistence across chart types)
+  const getStorageKey = () => {
+    const chartId = `${xAxisLabel}_${yAxisLabel}_${width}_${height}_${title || 'no_title'}`;
+    return `chart_labels_${chartId}`;
+  };
+  
+  const [customXAxisLabel, setCustomXAxisLabel] = useState<string>(() => {
+    try {
+      return localStorage.getItem(`${getStorageKey()}_x`) || '';
+    } catch {
+      return '';
+    }
+  });
+  const [customYAxisLabel, setCustomYAxisLabel] = useState<string>(() => {
+    try {
+      return localStorage.getItem(`${getStorageKey()}_y`) || '';
+    } catch {
+      return '';
+    }
+  });
+  const [showXAxisLabelDialog, setShowXAxisLabelDialog] = useState(false);
+  const [showYAxisLabelDialog, setShowYAxisLabelDialog] = useState(false);
+  const [tempXAxisLabel, setTempXAxisLabel] = useState<string>('');
+  const [tempYAxisLabel, setTempYAxisLabel] = useState<string>('');
+  const [customTitle, setCustomTitle] = useState<string>(() => {
+    try {
+      return localStorage.getItem(`${getStorageKey()}_title`) || '';
+    } catch {
+      return '';
+    }
+  });
+
+  // Save custom labels to localStorage whenever they change
+  useEffect(() => {
+    try {
+      if (customXAxisLabel) {
+        localStorage.setItem(`${getStorageKey()}_x`, customXAxisLabel);
+      } else {
+        localStorage.removeItem(`${getStorageKey()}_x`);
+      }
+    } catch (e) {
+      // Ignore localStorage errors
+    }
+  }, [customXAxisLabel, xAxisLabel, yAxisLabel, type]);
+
+  useEffect(() => {
+    try {
+      if (customYAxisLabel) {
+        localStorage.setItem(`${getStorageKey()}_y`, customYAxisLabel);
+      } else {
+        localStorage.removeItem(`${getStorageKey()}_y`);
+      }
+    } catch (e) {
+      // Ignore localStorage errors
+    }
+  }, [customYAxisLabel, xAxisLabel, yAxisLabel, type]);
+
+  useEffect(() => {
+    try {
+      if (customTitle) {
+        localStorage.setItem(`${getStorageKey()}_title`, customTitle);
+      } else {
+        localStorage.removeItem(`${getStorageKey()}_title`);
+      }
+    } catch (e) {
+      // Ignore localStorage errors
+    }
+  }, [customTitle, xAxisLabel, yAxisLabel, type]);
 
   const handleOverlayClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -378,9 +594,47 @@ const RechartsChartRenderer: React.FC<Props> = ({
     setShowContextMenu(false);
     setShowColorSubmenu(false);
     setShowSortSubmenu(false);
+    setShowChartTypeSubmenu(false);
+    setShowAxisLabelSubmenu(false);
   };
 
-  const overlayVisible = showContextMenu || showColorSubmenu || showSortSubmenu;
+  // Handler for axis label editing submenu
+  const handleAxisLabelClick = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setAxisLabelSubmenuPos({ x: rect.right + 4, y: rect.top });
+    
+    // Initialize temp values with current values
+    setTempXAxisLabel(customXAxisLabel || xAxisLabel || '');
+    setTempYAxisLabel(customYAxisLabel || yAxisLabel || '');
+    
+    setShowAxisLabelSubmenu(prev => !prev);
+    setShowColorSubmenu(false);
+    setShowSortSubmenu(false);
+    setShowChartTypeSubmenu(false);
+  }, [customXAxisLabel, xAxisLabel, customYAxisLabel, yAxisLabel]);
+
+  // Handler for saving X-axis label
+  const handleSaveXAxisLabel = () => {
+    setCustomXAxisLabel(tempXAxisLabel);
+    setShowXAxisLabelDialog(false);
+  };
+
+  // Handler for saving Y-axis label
+  const handleSaveYAxisLabel = () => {
+    setCustomYAxisLabel(tempYAxisLabel);
+    setShowYAxisLabelDialog(false);
+  };
+
+  // Handler for canceling axis label editing
+  const handleCancelAxisLabelEdit = () => {
+    setShowXAxisLabelDialog(false);
+    setShowYAxisLabelDialog(false);
+  };
+
+
+  const overlayVisible = showContextMenu || showColorSubmenu || showSortSubmenu || showChartTypeSubmenu || showAxisLabelSubmenu;
 
   // State for chart options
   const [showGrid, setShowGrid] = useState(true);
@@ -412,12 +666,35 @@ const RechartsChartRenderer: React.FC<Props> = ({
   // CRITICAL FIX: Store the detected legend field to ensure consistency
   const [detectedLegendField, setDetectedLegendField] = useState<string | null>(null);
 
+  // Helper function to sort data based on sortOrder
+  const sortData = (data: any[], sortOrder: 'asc' | 'desc' | null, yKey: string): any[] => {
+    if (!sortOrder || !data || data.length === 0) {
+      return data;
+    }
+
+    return [...data].sort((a, b) => {
+      const aValue = a[yKey];
+      const bValue = b[yKey];
+      
+      if (aValue === null || aValue === undefined) return 1;
+      if (bValue === null || bValue === undefined) return -1;
+      
+      if (sortOrder === 'asc') {
+        return aValue < bValue ? -1 : aValue > bValue ? 1 : 0;
+      } else {
+        return aValue > bValue ? -1 : aValue < bValue ? 1 : 0;
+      }
+    });
+  };
+
   // Use data directly for rendering.
   // When pie charts return an object keyed by legend values, flatten the slices
   // so that downstream logic expecting an array (e.g. key detection) continues
   // to work.
   const chartDataForRendering = useMemo(() => {
     if (!data || !Array.isArray(data)) return [];
+
+    let processedData: any[] = [];
 
     // When data is already an array, handle special cases for pie charts
     if (Array.isArray(data)) {
@@ -432,7 +709,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         const xKeyName = xField || 'name';
         const yKeyName = yField || 'value';
 
-        return (data as any[]).map((item) => {
+        processedData = (data as any[]).map((item) => {
           const [name, rawValue] = item as [any, any];
           let numericValue = rawValue;
           if (typeof rawValue === 'object' && rawValue !== null) {
@@ -443,44 +720,49 @@ const RechartsChartRenderer: React.FC<Props> = ({
           }
           return { [xKeyName]: name, [yKeyName]: numericValue };
         });
+      } else {
+        processedData = data;
       }
-      return data;
-    }
-
-    if (type === 'pie_chart' && typeof data === 'object') {
+    } else if (type === 'pie_chart' && typeof data === 'object') {
       // If a legend field is provided, the backend may return an object keyed by legend value
       if (legendField) {
         try {
-          return Object.values(data as Record<string, any[]>).flat();
+          processedData = Object.values(data as Record<string, any[]>).flat();
         } catch {
-          return [];
+          processedData = [];
         }
-      }
+      } else {
+        // When no legend field is provided, convert simple key-value pairs to an
+        // array of objects. Some APIs return values as nested objects (e.g.
+        // { category: { metric: 10 } }), which would otherwise break the pie
+        // chart because Recharts expects numeric values. Extract the first
+        // numeric field from such objects.
+        try {
+          const xKeyName = xField || 'name';
+          const yKeyName = yField || 'value';
 
-      // When no legend field is provided, convert simple key-value pairs to an
-      // array of objects. Some APIs return values as nested objects (e.g.
-      // { category: { metric: 10 } }), which would otherwise break the pie
-      // chart because Recharts expects numeric values. Extract the first
-      // numeric field from such objects.
-      try {
-        const xKeyName = xField || 'name';
-        const yKeyName = yField || 'value';
-
-        return Object.entries(data as Record<string, any>).map(([name, value]) => {
-          let numericValue: any = value;
-          if (typeof value === 'object' && value !== null) {
-            const firstNumber = Object.values(value).find(v => typeof v === 'number');
-            numericValue = firstNumber !== undefined ? firstNumber : value;
-          }
-          return { [xKeyName]: name, [yKeyName]: numericValue };
-        });
-      } catch {
-        return [];
+          processedData = Object.entries(data as Record<string, any>).map(([name, value]) => {
+            let numericValue: any = value;
+            if (typeof value === 'object' && value !== null) {
+              const firstNumber = Object.values(value).find(v => typeof v === 'number');
+              numericValue = firstNumber !== undefined ? firstNumber : value;
+            }
+            return { [xKeyName]: name, [yKeyName]: numericValue };
+          });
+        } catch {
+          processedData = [];
+        }
       }
     }
 
-    return [];
-  }, [data, type, legendField]);
+    // Apply sorting if sortOrder is specified and we have data
+    if (sortOrder && processedData.length > 0) {
+      const yKeyForSorting = yField || 'value';
+      processedData = sortData(processedData, sortOrder, yKeyForSorting);
+    }
+
+    return processedData;
+  }, [data, type, legendField, sortOrder, yField]);
 
   // Simple chart render key
   const chartRenderKey = useMemo(() => {
@@ -493,6 +775,28 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const currentShowLegend = propShowLegend !== undefined ? propShowLegend : showLegend;
   const currentShowAxisLabels = propShowAxisLabels !== undefined ? propShowAxisLabels : showAxisLabels;
   const currentShowDataLabels = propShowDataLabels !== undefined ? propShowDataLabels : showDataLabels;
+
+  // Use custom axis labels if provided, otherwise fall back to props
+  const effectiveXAxisLabel = customXAxisLabel || xAxisLabel;
+  const effectiveYAxisLabel = customYAxisLabel || yAxisLabel;
+  const effectiveYAxisLabels = yAxisLabels; // For dual Y-axes, we don't have custom editing yet
+
+  // Calculate dynamic margins based on axis labels visibility
+  const getChartMargins = () => {
+    if (!currentShowAxisLabels) {
+      // When axis labels are hidden, reduce margins to expand chart in all directions
+      return { top: 20, right: 20, left: 20, bottom: 20 };
+    }
+    
+    // When axis labels are shown, add space for both X and Y axis labels
+    // Increased bottom margin to accommodate tilted X-axis labels
+    return { top: 20, right: 20, left: 45, bottom: 60 };
+  };
+
+  // Calculate dynamic margins for pie charts (no axis labels, but may have legend)
+  const getPieChartMargins = () => {
+    return { top: 20, right: 20, left: 20, bottom: 20 };
+  };
 
   // Get current theme colors - recalculate whenever currentTheme changes
   const theme = useMemo(() => {
@@ -658,12 +962,37 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   // Styling for axis ticks & labels
   const axisTickStyle = { fontFamily: FONT_FAMILY, fontSize: 12, fill: '#475569' } as const;
+  const xAxisTickStyle = { fontFamily: FONT_FAMILY, fontSize: 12, fill: '#475569', angle: -45, textAnchor: 'end' } as const;
+  
+  // Custom tick formatter for X-axis to show only first 3 characters with ".."
+  const xAxisTickFormatter = (value: any) => {
+    const str = String(value);
+    return str.length > 3 ? str.substring(0, 3) + '..' : str;
+  };
   const axisLabelStyle = {
     fontFamily: FONT_FAMILY,
     fontSize: 14,
     fontWeight: 'bold',
     fill: '#334155',
     textAnchor: 'middle'
+  } as const;
+  
+  // Y-axis label style with reduced spacing from axis
+  const effectiveYAxisLabelStyle = {
+    fontFamily: FONT_FAMILY,
+    fontSize: 14,
+    fontWeight: 'bold',
+    fill: '#334155',
+    textAnchor: 'middle',
+  } as const;
+  
+  // X-axis label style with increased spacing from axis
+  const effectiveXAxisLabelStyle = {
+    fontFamily: FONT_FAMILY,
+    fontSize: 14,
+    fontWeight: 'bold',
+    fill: '#334155',
+    textAnchor: 'middle',
   } as const;
 
   // Handle right-click context menu
@@ -676,6 +1005,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
     setShowContextMenu(true);
     setShowColorSubmenu(false); // Always close submenu when opening main menu
     setShowSortSubmenu(false);
+    setShowAxisLabelSubmenu(false);
   };
 
   // Handle theme change
@@ -702,6 +1032,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
     setColorSubmenuPos({ x: rect.right + 4, y: rect.top });
     setShowColorSubmenu(prevState => !prevState);
     setShowSortSubmenu(false);
+    setShowAxisLabelSubmenu(false);
   };
 
   // Handle sort submenu toggle
@@ -712,6 +1043,20 @@ const RechartsChartRenderer: React.FC<Props> = ({
     setSortSubmenuPos({ x: rect.right + 4, y: rect.top });
     setShowSortSubmenu(prev => !prev);
     setShowColorSubmenu(false);
+    setShowChartTypeSubmenu(false);
+    setShowAxisLabelSubmenu(false);
+  };
+
+  // Handle chart type submenu toggle
+  const handleChartTypeClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setChartTypeSubmenuPos({ x: rect.right + 4, y: rect.top });
+    setShowChartTypeSubmenu(prev => !prev);
+    setShowColorSubmenu(false);
+    setShowSortSubmenu(false);
+    setShowAxisLabelSubmenu(false);
   };
 
   // Apply selected sort order
@@ -721,6 +1066,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
     }
     setShowContextMenu(false);
     setShowSortSubmenu(false);
+  };
+
+  // Handle chart type change
+  const handleChartTypeChange = (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
+    if (onChartTypeChange) {
+      onChartTypeChange(newType);
+    }
+    setShowContextMenu(false);
+    setShowChartTypeSubmenu(false);
   };
 
   // Handle grid toggle
@@ -758,7 +1112,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   // Handle data labels toggle
   const handleDataLabelsToggle = () => {
-    const newDataLabelsState = !showDataLabels;
+    const newDataLabelsState = !currentShowDataLabels;
     setShowDataLabels(newDataLabelsState);
     setShowContextMenu(false);
     setShowColorSubmenu(false);
@@ -795,19 +1149,23 @@ const RechartsChartRenderer: React.FC<Props> = ({
       const isOutsideMainMenu = !target.closest('.context-menu');
       const isOutsideColorSubmenu = !target.closest('.color-submenu');
       const isOutsideSortSubmenu = !target.closest('.sort-submenu');
+      const isOutsideChartTypeSubmenu = !target.closest('.chart-type-submenu');
+      const isOutsideAxisLabelSubmenu = !target.closest('.axis-label-submenu');
 
       // Only close menus if click is outside ALL active menus
-      if (isOutsideMainMenu && isOutsideColorSubmenu && isOutsideSortSubmenu) {
+      if (isOutsideMainMenu && isOutsideColorSubmenu && isOutsideSortSubmenu && isOutsideChartTypeSubmenu && isOutsideAxisLabelSubmenu) {
         // Add a small delay to ensure button clicks are processed first
         setTimeout(() => {
           setShowContextMenu(false);
           setShowColorSubmenu(false);
           setShowSortSubmenu(false);
+          setShowChartTypeSubmenu(false);
+          setShowAxisLabelSubmenu(false);
         }, 50);
       }
     };
 
-    if (showContextMenu || showColorSubmenu || showSortSubmenu) {
+    if (showContextMenu || showColorSubmenu || showSortSubmenu || showChartTypeSubmenu || showAxisLabelSubmenu) {
       // Use a longer delay to allow submenu to open properly
       const timeoutId = setTimeout(() => {
         document.addEventListener('click', handleClickOutside, false);
@@ -818,7 +1176,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         document.removeEventListener('click', handleClickOutside, false);
       };
     }
-  }, [showContextMenu, showColorSubmenu, showSortSubmenu]);
+  }, [showContextMenu, showColorSubmenu, showSortSubmenu, showChartTypeSubmenu, showAxisLabelSubmenu]);
 
   // Context menu component
   const ContextMenu = () => {
@@ -848,6 +1206,20 @@ const RechartsChartRenderer: React.FC<Props> = ({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zM21 5a2 2 0 00-2-2h-4a2 2 0 00-2 2v12a4 4 0 004 4h4a2 2 0 002-2V5z" />
           </svg>
           <span>Color Theme</span>
+          <svg className="w-4 h-4 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+
+        {/* Chart Type Option */}
+        <button
+          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700 relative"
+          onClick={handleChartTypeClick}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+          <span>Chart Type</span>
           <svg className="w-4 h-4 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
@@ -907,6 +1279,23 @@ const RechartsChartRenderer: React.FC<Props> = ({
           </div>
         </button>
 
+        {/* Separator */}
+        <div className="border-t border-gray-200 my-1"></div>
+
+        {/* Edit Labels */}
+        <button
+          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+          onClick={handleAxisLabelClick}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+          </svg>
+          <span>Edit Labels</span>
+          <svg className="w-3 h-3 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+
         {/* Data Labels Toggle */}
         <button
           className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
@@ -917,8 +1306,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
           </svg>
           <span>Data Labels</span>
           <div className="ml-auto">
-            <div className={`w-4 h-3 rounded border ${showDataLabels ? 'bg-blue-500 border-blue-500' : 'bg-gray-200 border-gray-300'}`}>
-              {showDataLabels && (
+            <div className={`w-4 h-3 rounded border ${currentShowDataLabels ? 'bg-blue-500 border-blue-500' : 'bg-gray-200 border-gray-300'}`}>
+              {currentShowDataLabels && (
                 <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                 </svg>
@@ -948,7 +1337,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         </button>
 
         {/* Save Action */}
-        <button
+        {/* <button
           className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
           onClick={handleSave}
         >
@@ -956,7 +1345,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
           </svg>
           <span>Save</span>
-        </button>
+        </button> */}
       </div>
     );
 
@@ -1092,6 +1481,83 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
 
 
+
+  // Chart type submenu component
+  const ChartTypeSubmenu = () => {
+    if (!showChartTypeSubmenu) return null;
+
+    const chartTypes = [
+      { key: 'pie_chart', label: 'Pie Chart', icon: '🥧' },
+      { key: 'bar_chart', label: 'Bar Chart', icon: '📊' },
+      { key: 'line_chart', label: 'Line Chart', icon: '📈' },
+      { key: 'area_chart', label: 'Area Chart', icon: '📉' },
+      { key: 'scatter_chart', label: 'Scatter Chart', icon: '⚪' }
+    ];
+
+    const submenu = (
+      <div
+        className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 chart-type-submenu"
+        style={{
+          left: chartTypeSubmenuPos.x,
+          top: chartTypeSubmenuPos.y,
+          minWidth: '180px'
+        }}
+      >
+        <div className="px-2 py-2 text-sm font-semibold text-gray-700 border-b border-gray-200 mb-2">
+          Chart Type
+        </div>
+        <div className="flex flex-col">
+          {chartTypes.map((chartType) => (
+            <button
+              key={chartType.key}
+              className="px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                handleChartTypeChange(chartType.key as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart');
+              }}
+            >
+              {type === chartType.key && (
+                <svg className="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              )}
+              <span className="text-lg mr-2">{chartType.icon}</span>
+              <span>{chartType.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+
+    return createPortal(submenu, document.body);
+  };
+
+  // Axis Label Submenu component - completely isolated
+  const AxisLabelSubmenu = () => {
+    if (!showAxisLabelSubmenu) return null;
+
+    return createPortal(
+      <AxisLabelEditor
+        xAxisLabel={xAxisLabel}
+        yAxisLabel={yAxisLabel}
+        customXAxisLabel={customXAxisLabel}
+        customYAxisLabel={customYAxisLabel}
+        title={title}
+        customTitle={customTitle}
+        position={axisLabelSubmenuPos}
+        onSave={(x, y, t) => {
+          setCustomXAxisLabel(x);
+          setCustomYAxisLabel(y);
+          setCustomTitle(t);
+          setShowAxisLabelSubmenu(false);
+        }}
+        onCancel={() => {
+          setShowAxisLabelSubmenu(false);
+        }}
+      />,
+      document.body
+    );
+  };
 
   const renderChart = () => {
     // Check if data is empty or invalid (skip check for multi-pie structure)
@@ -1334,10 +1800,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
     // Final validation for dual Y-axes
     const hasDualYAxes = yKeys.length > 1 || (yFields && yFields.length > 1);
 
-    // CRITICAL FIX: Transform data for bar charts when data has generic keys
+    // CRITICAL FIX: Transform data for bar charts and line charts when data has generic keys
     // Now also supports dual Y-axes by mapping both Y fields when available
     let transformedChartData = chartDataForRendering;
-    if (type === 'bar_chart' && xField && yField && chartDataForRendering.length > 0) {
+    if ((type === 'bar_chart' || type === 'line_chart') && xField && yField && chartDataForRendering.length > 0) {
       const firstItem = chartDataForRendering[0];
       const availableKeys = Object.keys(firstItem);
 
@@ -1426,20 +1892,20 @@ const RechartsChartRenderer: React.FC<Props> = ({
             Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
             Object.keys(pivotedLineData[0] || {})[0];
           return (
-            <BarChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
+            <BarChart data={pivotedLineData} margin={getChartMargins()}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForBar}
                 type="category"
-                label={currentShowAxisLabels && xAxisLabel ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
-                tick={axisTickStyle}
+                label={currentShowAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 15 } : undefined}
+                tick={xAxisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
-                tickFormatter={(v) => (typeof v === 'number' ? v : String(v))}
+                tickFormatter={xAxisTickFormatter}
               />
               <YAxis
                 tickFormatter={formatLargeNumber}
-                label={currentShowAxisLabels && yAxisLabel ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
+                label={currentShowAxisLabels && effectiveYAxisLabel ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
               />
@@ -1448,7 +1914,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   if (active && payload && payload.length) {
                     return (
                       <div className="explore-chart-tooltip">
-                        <p className="font-semibold text-gray-900 mb-2 text-sm">{isDateAxis ? formatDateTick(new Date(label)) : label}</p>
+                        <p className="font-semibold text-gray-900 mb-2 text-sm">{label}</p>
                         {payload.map((entry: any, index: number) => (
                           <div key={index} className="flex items-center gap-2 mb-1">
                             <div
@@ -1502,18 +1968,19 @@ const RechartsChartRenderer: React.FC<Props> = ({
         } else {
           // ---- Fallback to original single-bar rendering ----
           return (
-            <BarChart data={transformedChartData} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
+            <BarChart data={transformedChartData} margin={getChartMargins()}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis 
               dataKey={xKey} 
-                label={currentShowAxisLabels && xAxisLabel && xAxisLabel.trim() ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
-              tick={axisTickStyle}
+                label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 15 } : undefined}
+              tick={xAxisTickStyle}
               tickLine={false}
+              tickFormatter={xAxisTickFormatter}
             />
             {/* Primary Y-Axis (Left) */}
             <YAxis 
               yAxisId={0}
-                label={currentShowAxisLabels && yAxisLabel && yAxisLabel.trim() ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
+                label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
               tick={axisTickStyle}
               tickLine={false}
               tickFormatter={formatLargeNumber}
@@ -1523,7 +1990,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               <YAxis 
                 yAxisId={1}
                 orientation="right"
-                  label={currentShowAxisLabels && yAxisLabels && yAxisLabels[1] ? { value: capitalizeWords(yAxisLabels[1]), angle: 90, position: 'right', style: axisLabelStyle } : undefined}
+                  label={currentShowAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
@@ -1539,9 +2006,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
                         // Use the actual Y-axis label instead of the dataKey
                         let displayName = entry.dataKey;
                         if (entry.dataKey === yKey) {
-                          displayName = yAxisLabel || yAxisLabels?.[0] || 'Value';
+                          displayName = effectiveYAxisLabel || effectiveYAxisLabels?.[0] || 'Value';
                         } else if (entry.dataKey === yKeys[1] || entry.dataKey === yFields?.[1]) {
-                          displayName = yAxisLabels?.[1] || yFields?.[1] || 'Value';
+                          displayName = effectiveYAxisLabels?.[1] || yFields?.[1] || 'Value';
                         }
                         
                         return (
@@ -1577,12 +2044,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   if (yFields && yFields.length > 1) {
                     const fieldIndex = entry.dataKey === yKey ? 0 : 1;
                     const fieldName = yFields[fieldIndex];
-                    const label = yAxisLabels && yAxisLabels[fieldIndex] ? yAxisLabels[fieldIndex] : fieldName;
+                    const label = effectiveYAxisLabels && effectiveYAxisLabels[fieldIndex] ? effectiveYAxisLabels[fieldIndex] : fieldName;
                     return capitalizeWords(label);
                   }
                   // For single Y-axis, use the actual Y-axis label instead of generic "Value"
                   if (entry.dataKey === yKey) {
-                    return capitalizeWords(yAxisLabel || yAxisLabels?.[0] || 'Value');
+                    return capitalizeWords(effectiveYAxisLabel || effectiveYAxisLabels?.[0] || 'Value');
                   }
                   return capitalizeWords(value);
                 }}
@@ -1639,24 +2106,61 @@ const RechartsChartRenderer: React.FC<Props> = ({
             xField ||
             Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
             Object.keys(pivotedLineData[0] || {})[0];
+          
+          // Check if this is a date axis
+          const isDateAxisMultiLine =
+            xKeyForLine &&
+            xKeyForLine.toLowerCase().includes('date') &&
+            pivotedLineData.length > 0 &&
+            typeof pivotedLineData[0][xKeyForLine] === 'number';
+          const formatDateTickMultiLine = d3.timeFormat('%d-%B-%y');
+          
           return (
-            <LineChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
+            <LineChart data={pivotedLineData} margin={getChartMargins()}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForLine}
-                label={currentShowAxisLabels && xAxisLabel ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
-                tick={axisTickStyle}
+                label={currentShowAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 15 } : undefined}
+                tick={xAxisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
-                tickFormatter={(v) => String(v)}
+                tickFormatter={isDateAxisMultiLine ? (value) => formatDateTickMultiLine(new Date(value)) : xAxisTickFormatter}
               />
               <YAxis
                 tickFormatter={formatLargeNumber}
-                label={currentShowAxisLabels && yAxisLabel ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
+                label={currentShowAxisLabels && effectiveYAxisLabel ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
               />
-              <Tooltip formatter={(v: number) => formatTooltipNumber(v as number)} />
+              <Tooltip 
+                content={({ active, payload, label }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="explore-chart-tooltip">
+                        <p className="font-semibold text-gray-900 mb-2 text-sm">
+                          {isDateAxisMultiLine ? formatDateTickMultiLine(new Date(label)) : label}
+                        </p>
+                        {payload.map((entry: any, index: number) => (
+                          <div key={index} className="flex items-center gap-2 mb-1">
+                            <div 
+                              className="w-3 h-3 rounded-full" 
+                              style={{ backgroundColor: entry.color }}
+                            />
+                            <span className="text-sm font-medium text-gray-700">
+                              {entry.dataKey}: 
+                            </span>
+                            <span className="text-sm font-semibold text-gray-700">
+                              {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+                cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+              />
               {currentShowLegend && (
                 <Legend
                   layout="horizontal"
@@ -1698,22 +2202,19 @@ const RechartsChartRenderer: React.FC<Props> = ({
             typeof chartDataForRendering[0][xKey] === 'number';
           const formatDateTick = d3.timeFormat('%d-%B-%y');
           return (
-            <LineChart data={chartDataForRendering} margin={{ top: 20, right: 20, left: 20, bottom: 40 }} className="explore-chart-line">
+            <LineChart data={transformedChartData} margin={getChartMargins()} className="explore-chart-line">
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKey}
-                type={isDateAxis ? 'number' : 'category'}
-                domain={isDateAxis ? ['dataMin', 'dataMax'] : undefined}
-                scale={isDateAxis ? 'time' : undefined}
-                tickFormatter={isDateAxis ? (v) => formatDateTick(new Date(v)) : undefined}
-                label={currentShowAxisLabels && xAxisLabel && xAxisLabel.trim() ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
-                tick={axisTickStyle}
+                label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 15 } : undefined}
+                tick={xAxisTickStyle}
                 tickLine={false}
+                tickFormatter={isDateAxis ? (value) => formatDateTick(new Date(value)) : xAxisTickFormatter}
               />
               {/* Primary Y-Axis (Left) */}
               <YAxis
                 yAxisId={0}
-                label={currentShowAxisLabels && yAxisLabel && yAxisLabel.trim() ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
+                label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
@@ -1724,7 +2225,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 <YAxis
                   yAxisId={1}
                   orientation="right"
-                  label={currentShowAxisLabels && yAxisLabels && yAxisLabels[1] ? { value: capitalizeWords(yAxisLabels[1]), angle: 90, position: 'right', style: axisLabelStyle } : undefined}
+                  label={currentShowAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                   tick={axisTickStyle}
                   tickLine={false}
                   tickFormatter={formatLargeNumber}
@@ -1741,9 +2242,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
                           // Use the actual Y-axis label instead of the dataKey
                           let displayName = entry.dataKey;
                           if (entry.dataKey === yKey) {
-                            displayName = yAxisLabel || yAxisLabels?.[0] || 'Value';
+                            displayName = effectiveYAxisLabel || effectiveYAxisLabels?.[0] || 'Value';
                           } else if (entry.dataKey === yKeys[1] || entry.dataKey === yFields?.[1]) {
-                            displayName = yAxisLabels?.[1] || yFields?.[1] || 'Value';
+                            displayName = effectiveYAxisLabels?.[1] || yFields?.[1] || 'Value';
                           }
                           
                           return (
@@ -1779,12 +2280,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
                     if (yFields && yFields.length > 1) {
                       const fieldIndex = entry.dataKey === yKey ? 0 : 1;
                       const fieldName = yFields[fieldIndex];
-                      const label = yAxisLabels && yAxisLabels[fieldIndex] ? yAxisLabels[fieldIndex] : fieldName;
+                      const label = effectiveYAxisLabels && effectiveYAxisLabels[fieldIndex] ? effectiveYAxisLabels[fieldIndex] : fieldName;
                       return capitalizeWords(label);
                     }
                     // For single Y-axis, use the actual Y-axis label instead of generic "Y"
                     if (entry.dataKey === yKey) {
-                      return capitalizeWords(yAxisLabel || yAxisLabels?.[0] || 'Value');
+                      return capitalizeWords(effectiveYAxisLabel || effectiveYAxisLabels?.[0] || 'Value');
                     }
                     return capitalizeWords(value);
                   }}
@@ -1806,7 +2307,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 }}
                 yAxisId={0}
               >
-                {showDataLabels && (
+                {currentShowDataLabels && (
                   <LabelList 
                     dataKey={yKey} 
                     position="top" 
@@ -1833,7 +2334,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   }}
                   yAxisId={1}
                 >
-                  {showDataLabels && (
+                  {currentShowDataLabels && (
                     <LabelList 
                       dataKey={yKeys[1] || yFields[1]} 
                       position="top" 
@@ -1856,24 +2357,61 @@ const RechartsChartRenderer: React.FC<Props> = ({
             xField ||
             Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
             Object.keys(pivotedLineData[0] || {})[0];
+          
+          // Check if this is a date axis
+          const isDateAxisArea =
+            xKeyForArea &&
+            xKeyForArea.toLowerCase().includes('date') &&
+            pivotedLineData.length > 0 &&
+            typeof pivotedLineData[0][xKeyForArea] === 'number';
+          const formatDateTickArea = d3.timeFormat('%d-%B-%y');
+          
           return (
-            <AreaChart data={pivotedLineData} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
+            <AreaChart data={pivotedLineData} margin={getChartMargins()}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForArea}
-                label={currentShowAxisLabels && xAxisLabel && xAxisLabel.trim() ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
-                tick={axisTickStyle}
+                label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 15 } : undefined}
+                tick={xAxisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
-                tickFormatter={(v) => String(v)}
+                tickFormatter={isDateAxisArea ? (value) => formatDateTickArea(new Date(value)) : xAxisTickFormatter}
               />
               <YAxis
-                label={currentShowAxisLabels && yAxisLabel && yAxisLabel.trim() ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
+                label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
               />
-              <Tooltip formatter={(v: number) => formatTooltipNumber(v)} />
+              <Tooltip 
+                content={({ active, payload, label }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="explore-chart-tooltip">
+                        <p className="font-semibold text-gray-900 mb-2 text-sm">
+                          {isDateAxisArea ? formatDateTickArea(new Date(label)) : label}
+                        </p>
+                        {payload.map((entry: any, index: number) => (
+                          <div key={index} className="flex items-center gap-2 mb-1">
+                            <div 
+                              className="w-3 h-3 rounded-full" 
+                              style={{ backgroundColor: entry.color }}
+                            />
+                            <span className="text-sm font-medium text-gray-700">
+                              {entry.dataKey}: 
+                            </span>
+                            <span className="text-sm font-semibold text-gray-700">
+                              {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+                cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+              />
               {currentShowLegend && (
                 <Legend
                   layout="horizontal"
@@ -1896,17 +2434,18 @@ const RechartsChartRenderer: React.FC<Props> = ({
           );
         }
         return (
-          <AreaChart data={chartDataForRendering} margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
+          <AreaChart data={chartDataForRendering} margin={getChartMargins()}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKey}
-              label={currentShowAxisLabels && xAxisLabel && xAxisLabel.trim() ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
-              tick={axisTickStyle}
+              label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
+              tick={xAxisTickStyle}
               tickLine={false}
+              tickFormatter={xAxisTickFormatter}
             />
             <YAxis
               yAxisId={0}
-              label={currentShowAxisLabels && yAxisLabel && yAxisLabel.trim() ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
+              label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
               tick={axisTickStyle}
               tickLine={false}
               tickFormatter={formatLargeNumber}
@@ -1915,7 +2454,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               <YAxis
                 yAxisId={1}
                 orientation="right"
-                label={currentShowAxisLabels && yAxisLabels && yAxisLabels[1] ? { value: capitalizeWords(yAxisLabels[1]), angle: 90, position: 'right', style: axisLabelStyle } : undefined}
+                label={currentShowAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
@@ -1930,9 +2469,27 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 wrapperStyle={{ bottom: 20, fontSize: '11px' }}
               />
             )}
-            <Area type="monotone" dataKey={yKey} stroke={palette[0]} fill={palette[1]} yAxisId={0} />
+            <Area type="monotone" dataKey={yKey} stroke={palette[0]} fill={palette[1]} yAxisId={0}>
+              {currentShowDataLabels && (
+                <LabelList 
+                  dataKey={yKey} 
+                  position="top" 
+                  formatter={(value) => formatLargeNumber(value)}
+                  style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                />
+              )}
+            </Area>
             {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
-              <Area type="monotone" dataKey={yKeys[1] || yFields[1]} stroke={palette[1]} fill={palette[2]} yAxisId={1} />
+              <Area type="monotone" dataKey={yKeys[1] || yFields[1]} stroke={palette[1]} fill={palette[2]} yAxisId={1}>
+                {currentShowDataLabels && (
+                  <LabelList 
+                    dataKey={yKeys[1] || yFields[1]} 
+                    position="top" 
+                    formatter={(value) => formatLargeNumber(value)}
+                    style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                  />
+                )}
+              </Area>
             )}
           </AreaChart>
         );
@@ -1946,20 +2503,30 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
                 Object.keys(pivotedLineData[0] || {})[0]
             : xKey;
+        
+        // Check if this is a date axis
+        const isDateAxisScatter =
+          xKeyForScatter &&
+          xKeyForScatter.toLowerCase().includes('date') &&
+          ((legendField && legendValues.length > 0 && pivotedLineData.length > 0) ? 
+            (pivotedLineData.length > 0 && typeof pivotedLineData[0][xKeyForScatter] === 'number') :
+            (chartDataForRendering.length > 0 && typeof chartDataForRendering[0][xKeyForScatter] === 'number'));
+        const formatDateTickScatter = d3.timeFormat('%d-%B-%y');
+        
         return (
-          <ScatterChart margin={{ top: 20, right: 20, left: 20, bottom: 40 }}>
+          <ScatterChart margin={getChartMargins()}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKeyForScatter}
-              label={currentShowAxisLabels && xAxisLabel && xAxisLabel.trim() ? { value: capitalizeWords(xAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
-              tick={axisTickStyle}
+              label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
+              tick={xAxisTickStyle}
               tickLine={false}
               allowDuplicatedCategory={false}
-              tickFormatter={(v) => String(v)}
+              tickFormatter={isDateAxisScatter ? (value) => formatDateTickScatter(new Date(value)) : xAxisTickFormatter}
             />
             <YAxis
               yAxisId={0}
-              label={currentShowAxisLabels && yAxisLabel && yAxisLabel.trim() ? { value: capitalizeWords(yAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
+              label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
               tick={axisTickStyle}
               tickLine={false}
               tickFormatter={formatLargeNumber}
@@ -1968,13 +2535,41 @@ const RechartsChartRenderer: React.FC<Props> = ({
               <YAxis
                 yAxisId={1}
                 orientation="right"
-                label={currentShowAxisLabels && yAxisLabels && yAxisLabels[1] ? { value: capitalizeWords(yAxisLabels[1]), angle: 90, position: 'right', style: axisLabelStyle } : undefined}
+                label={currentShowAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
               />
             )}
-            <Tooltip formatter={(v: number) => formatTooltipNumber(v)} />
+            <Tooltip 
+              content={({ active, payload, label }) => {
+                if (active && payload && payload.length) {
+                  return (
+                    <div className="explore-chart-tooltip">
+                      <p className="font-semibold text-gray-900 mb-2 text-sm">
+                        {isDateAxisScatter ? formatDateTickScatter(new Date(label)) : label}
+                      </p>
+                      {payload.map((entry: any, index: number) => (
+                        <div key={index} className="flex items-center gap-2 mb-1">
+                          <div 
+                            className="w-3 h-3 rounded-full" 
+                            style={{ backgroundColor: entry.color }}
+                          />
+                          <span className="text-sm font-medium text-gray-700">
+                            {entry.dataKey}: 
+                          </span>
+                          <span className="text-sm font-semibold text-gray-700">
+                            {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+                return null;
+              }}
+              cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+            />
             {legendField && currentShowLegend && (
               <Legend
                 layout="horizontal"
@@ -1987,14 +2582,41 @@ const RechartsChartRenderer: React.FC<Props> = ({
               legendValues.map((seriesKey, idx) => {
                 const seriesData = pivotedLineData.filter(d => d[seriesKey] !== undefined && d[seriesKey] !== null);
                 return (
-                  <Scatter key={seriesKey} data={seriesData} dataKey={seriesKey} name={seriesKey} fill={palette[idx % palette.length]} />
+                  <Scatter key={seriesKey} data={seriesData} dataKey={seriesKey} name={seriesKey} fill={palette[idx % palette.length]}>
+                    {currentShowDataLabels && (
+                      <LabelList 
+                        dataKey={seriesKey} 
+                        position="top" 
+                        formatter={(value) => formatLargeNumber(value)}
+                        style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                      />
+                    )}
+                  </Scatter>
                 );
               })
             ) : (
               <>
-                <Scatter data={chartDataForRendering} dataKey={yKey} fill={palette[0]} yAxisId={0} />
+                <Scatter data={chartDataForRendering} dataKey={yKey} fill={palette[0]} yAxisId={0}>
+                  {currentShowDataLabels && (
+                    <LabelList 
+                      dataKey={yKey} 
+                      position="top" 
+                      formatter={(value) => formatLargeNumber(value)}
+                      style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                    />
+                  )}
+                </Scatter>
                 {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
-                  <Scatter data={chartDataForRendering} dataKey={yKeys[1] || yFields[1]} fill={palette[1]} yAxisId={1} />
+                  <Scatter data={chartDataForRendering} dataKey={yKeys[1] || yFields[1]} fill={palette[1]} yAxisId={1}>
+                    {currentShowDataLabels && (
+                      <LabelList 
+                        dataKey={yKeys[1] || yFields[1]} 
+                        position="top" 
+                        formatter={(value) => formatLargeNumber(value)}
+                        style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                      />
+                    )}
+                  </Scatter>
                 )}
               </>
             )}
@@ -2050,7 +2672,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                       stroke="white"
                       strokeWidth={3}
                       filter="url(#pieShadow)"
-                      label={showDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
+                      label={currentShowDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
                       labelLine={false}
                       style={{ fontSize: '11px', fontWeight: 500 }}
                     >
@@ -2082,7 +2704,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           const primaryYKey = yKeys[0] || yFields[0];
 
           return (
-            <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+            <PieChart margin={getPieChartMargins()}>
               <defs>
                 {MODERN_PIE_COLORS.map((color, i) => (
                   <linearGradient key={i} id={`pieGradient-${i}`} x1="0" y1="0" x2="1" y2="1">
@@ -2103,7 +2725,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 stroke="white"
                 strokeWidth={3}
                 filter="url(#pieShadow)"
-                label={showDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
+                label={currentShowDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
                 labelLine={false}
                 dataKey={primaryYKey}
                 nameKey={xKey}
@@ -2129,9 +2751,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
                           // Use the actual Y-axis label instead of the dataKey
                           let displayName = entry.dataKey;
                           if (entry.dataKey === primaryYKey) {
-                            displayName = yAxisLabel || yAxisLabels?.[0] || 'Value';
+                            displayName = effectiveYAxisLabel || effectiveYAxisLabels?.[0] || 'Value';
                           } else if (entry.dataKey === yKeys[1] || entry.dataKey === yFields?.[1]) {
-                            displayName = yAxisLabels?.[1] || yFields?.[1] || 'Value';
+                            displayName = effectiveYAxisLabels?.[1] || yFields?.[1] || 'Value';
                           }
 
                           return (
@@ -2185,7 +2807,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         } else {
           // Single Y-axis pie chart (existing logic)
           return (
-            <PieChart margin={{ top: 20, right: 20, left: 20, bottom: 20 }}>
+            <PieChart margin={getPieChartMargins()}>
               <defs>
                 {MODERN_PIE_COLORS.map((color, i) => (
                   <linearGradient key={i} id={`pieGradient-${i}`} x1="0" y1="0" x2="1" y2="1">
@@ -2206,7 +2828,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 stroke="white"
                 strokeWidth={3}
                 filter="url(#pieShadow)"
-                label={showDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
+                label={currentShowDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
                 labelLine={false}
                 dataKey={yKey}
                 nameKey={xKey}
@@ -2233,9 +2855,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
                           // Use the actual Y-axis label instead of the dataKey
                           let displayName = entry.dataKey;
                           if (entry.dataKey === yKey) {
-                            displayName = yAxisLabel || yAxisLabels?.[0] || 'Value';
+                            displayName = effectiveYAxisLabel || effectiveYAxisLabels?.[0] || 'Value';
                           } else if (entry.dataKey === yKeys[1] || entry.dataKey === yFields?.[1]) {
-                            displayName = yAxisLabels?.[1] || yFields?.[1] || 'Value';
+                            displayName = effectiveYAxisLabels?.[1] || yFields?.[1] || 'Value';
                           }
 
                           return (
@@ -2305,9 +2927,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   return (
     <div className="w-full h-full flex flex-col">
-      {title && (
+      {(customTitle || title) && (
         <div className="text-center mb-3">
-          <h3 className="text-lg font-bold text-gray-900">{title}</h3>
+          <h3 className="text-lg font-bold text-gray-900">{customTitle || title}</h3>
         </div>
       )}
 
@@ -2404,6 +3026,82 @@ const RechartsChartRenderer: React.FC<Props> = ({
         <ContextMenu />
         <ColorThemeSubmenu />
         <SortSubmenu />
+        <ChartTypeSubmenu />
+        <AxisLabelSubmenu />
+        
+        {/* X-Axis Label Edit Dialog */}
+        {showXAxisLabelDialog && (
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000]"
+            onClick={handleCancelAxisLabelEdit}
+          >
+            <div
+              className="bg-white rounded-lg p-6 w-96 max-w-md mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold mb-4">Edit X-Axis Label</h3>
+              <input
+                type="text"
+                value={tempXAxisLabel}
+                onChange={(e) => setTempXAxisLabel(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter X-axis label"
+                autoFocus
+              />
+              <div className="flex justify-end gap-2 mt-4">
+                <button
+                  onClick={handleCancelAxisLabelEdit}
+                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveXAxisLabel}
+                  className="px-4 py-2 text-sm bg-blue-500 text-white rounded-md hover:bg-blue-600"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Y-Axis Label Edit Dialog */}
+        {showYAxisLabelDialog && (
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000]"
+            onClick={handleCancelAxisLabelEdit}
+          >
+            <div
+              className="bg-white rounded-lg p-6 w-96 max-w-md mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold mb-4">Edit Y-Axis Label</h3>
+              <input
+                type="text"
+                value={tempYAxisLabel}
+                onChange={(e) => setTempYAxisLabel(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Enter Y-axis label"
+                autoFocus
+              />
+              <div className="flex justify-end gap-2 mt-4">
+                <button
+                  onClick={handleCancelAxisLabelEdit}
+                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveYAxisLabel}
+                  className="px-4 py-2 text-sm bg-blue-500 text-white rounded-md hover:bg-blue-600"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -14,7 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { CREATECOLUMN_API, FEATURE_OVERVIEW_API } from '@/lib/api';
+import { CREATECOLUMN_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import {
   Pagination,
   PaginationContent,
@@ -64,9 +64,10 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   // Get columns from atom settings (from selected data source)
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const settings = atom?.settings || {};
   
   // Get input file name for clickable subtitle
-  const inputFileName = atom?.settings?.dataSource || '';
+  const inputFileName = settings.dataSource || '';
 
   // Handle opening the input file in a new tab
   const handleViewDataClick = () => {
@@ -155,7 +156,10 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   };
 
   const [loading, setLoading] = useState(false);
-  const [preview, setPreview] = useState<any[]>([]);
+  // Initialize preview from global store
+  const [preview, setPreview] = useState<any[]>(() => {
+    return settings.createResults?.results || [];
+  });
   const [error, setError] = useState<string | null>(null);
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -190,6 +194,13 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize] = useState(20);
   
+  // Sync with global store changes
+  React.useEffect(() => {
+    if (settings.createResults?.results) {
+      setPreview(settings.createResults.results);
+    }
+  }, [settings.createResults?.results]);
+
   // Sorting and filtering state for results
   const [resultsSortColumn, setResultsSortColumn] = useState<string>('');
   const [resultsSortDirection, setResultsSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -417,7 +428,10 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         const currentSettings = atom?.settings || {};
         updateSettings(atomId, {
           ...currentSettings,
-          createResults: data.createResults
+          createResults: {
+            ...data.createResults,
+            results: data.results || []
+          }
         });
       }
       
@@ -618,27 +632,20 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
     setCardinalityError(null);
     
     try {
-      const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(atom.settings.dataSource)}`
-      );
+      const formData = new FormData();
+      formData.append('validator_atom_id', atom.settings.validator_atom_id || '');
+      formData.append('file_key', atom.settings.dataSource || '');
+      formData.append('bucket_name', 'trinity');
+      formData.append('object_names', atom.settings.dataSource || '');
       
-      if (!res.ok) {
-        setCardinalityError('Failed to fetch cardinality data');
-        return;
-      }
-      
+      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
       const data = await res.json();
-      const summary = Array.isArray(data.summary) ? data.summary.filter(Boolean) : [];
       
-      // Transform the data to match the expected format
-      const cardinalityData = summary.map((col: any) => ({
-        column: col.column,
-        data_type: col.data_type,
-        unique_count: col.unique_count,
-        unique_values: col.unique_values || []
-      }));
-      
-      setCardinalityData(cardinalityData);
+      if (data.status === 'SUCCESS' && data.cardinality) {
+        setCardinalityData(data.cardinality);
+      } else {
+        setCardinalityError(data.error || 'Failed to fetch cardinality data');
+      }
     } catch (e: any) {
       setCardinalityError(e.message || 'Error fetching cardinality data');
     } finally {

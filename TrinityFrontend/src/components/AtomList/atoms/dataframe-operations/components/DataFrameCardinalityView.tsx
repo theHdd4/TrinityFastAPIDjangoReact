@@ -1,10 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Plus, ArrowUp, ArrowDown, Filter as FilterIcon } from 'lucide-react';
-import { Checkbox } from '@/components/ui/checkbox';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -16,9 +15,9 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import Table from '@/templates/tables/table';
-import { FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
+import { DataFrameData } from '../DataFrameOperationsAtom';
+import dataframeOperations from '../index';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
-import columnClassifier from '../index';
 
 interface ColumnInfo {
   column: string;
@@ -27,98 +26,87 @@ interface ColumnInfo {
   unique_values: string[];
 }
 
-interface ColumnInfoWithCategory extends ColumnInfo {
-  category: 'unclassified' | 'identifiers' | 'measures';
-}
-
-interface ColClassifierColumnViewProps {
-  objectName: string;
-  columns: {
-    unclassified: string[];
-    identifiers: string[];
-    measures: string[];
-  };
-  filterUnique: boolean;
-  onFilterToggle: (val: boolean) => void;
+interface DataFrameCardinalityViewProps {
+  data: DataFrameData | null;
   atomId?: string;
 }
 
-const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
-  objectName,
-  columns,
-  filterUnique,
-  onFilterToggle,
+const DataFrameCardinalityView: React.FC<DataFrameCardinalityViewProps> = ({
+  data,
   atomId,
 }) => {
-  const [summary, setSummary] = useState<ColumnInfo[]>([]);
   const [sortColumn, setSortColumn] = useState<string>('unique_count');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
 
-  // Get atom settings to access the input file name
+  // Get atom settings to access the selected file name
   const atom = useLaboratoryStore(state => atomId ? state.getAtom(atomId) : undefined);
   const settings = (atom?.settings as any) || {};
-  const inputFileName = settings.validatorId || '';
+  const inputFileName = settings.selectedFile || '';
 
-  // Handle opening the input file in a new tab
+  // Handle opening the dataframe in a new tab
   const handleViewDataClick = () => {
     if (inputFileName && atomId) {
       window.open(`/dataframe?name=${encodeURIComponent(inputFileName)}`, '_blank');
     }
   };
 
-  useEffect(() => {
-    if (!objectName) return;
-    const fetchSummary = async () => {
-      try {
-        const formData = new FormData();
-        formData.append('validator_atom_id', '');
-        formData.append('file_key', objectName);
-        formData.append('bucket_name', 'trinity');
-        formData.append('object_names', objectName);
+  const columnSummary = useMemo(() => {
+    if (!data || !data.headers || !data.rows) {
+      return [];
+    }
+
+    return data.headers.map(header => {
+      const values = data.rows.map(row => row[header]).filter(val => val !== null && val !== undefined && val !== '');
+      const uniqueValues = Array.from(new Set(values.map(val => String(val))));
+      
+      // Analyze actual data to determine pandas-style data types like column-classifier
+      let pandasDataType = 'object'; // default
+      
+      if (values.length > 0) {
+        // Check if all values are numeric
+        const numericValues = values.filter(val => {
+          const num = Number(val);
+          return !isNaN(num) && isFinite(num);
+        });
         
-        const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
-        const data = await res.json();
-        
-        if (data.status === 'SUCCESS' && data.cardinality) {
-          setSummary(data.cardinality);
+        if (numericValues.length === values.length) {
+          // All values are numeric
+          if (numericValues.every(val => Number.isInteger(Number(val)))) {
+            pandasDataType = 'int64';
+          } else {
+            pandasDataType = 'float64';
+          }
         } else {
-          setSummary([]);
+          // Check if all values are dates
+          const dateValues = values.filter(val => {
+            const date = new Date(val);
+            return !isNaN(date.getTime());
+          });
+          
+          if (dateValues.length === values.length) {
+            pandasDataType = 'datetime64[ns]';
+          } else {
+            pandasDataType = 'object';
+          }
         }
-      } catch {
-        setSummary([]);
       }
-    };
-    fetchSummary();
-  }, [objectName]);
 
-  const allColumns = useMemo(() => {
-    const mapWithCategory = (
-      names: string[],
-      category: ColumnInfoWithCategory['category']
-    ) =>
-      names
-        .map(name => {
-          const info = summary.find(s => s.column === name);
-          return info ? { ...info, category } : null;
-        })
-        .filter(Boolean) as ColumnInfoWithCategory[];
-
-    return [
-      ...mapWithCategory(columns.unclassified, 'unclassified'),
-      ...mapWithCategory(columns.identifiers, 'identifiers'),
-      ...mapWithCategory(columns.measures, 'measures'),
-    ];
-  }, [columns, summary]);
+      return {
+        column: header,
+        data_type: pandasDataType,
+        unique_count: uniqueValues.length,
+        unique_values: uniqueValues, // No truncation - show all values
+      } as ColumnInfo;
+    });
+  }, [data]);
 
   const displayed = useMemo(() => {
-    let filtered = filterUnique
-      ? allColumns.filter(c => c.unique_count > 0)
-      : allColumns;
+    let filtered = columnSummary;
 
     // Apply column filters
     Object.entries(columnFilters).forEach(([column, filterValues]) => {
-      if (filterValues && filterValues.length > 0) {
+      if (filterValues && Array.isArray(filterValues) && filterValues.length > 0) {
         filtered = filtered.filter(row => {
           const cellValue = String(row[column as keyof ColumnInfo] || '');
           return filterValues.includes(cellValue);
@@ -143,19 +131,17 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
     }
 
     return filtered;
-  }, [allColumns, filterUnique, columnFilters, sortColumn, sortDirection]);
+  }, [columnSummary, columnFilters, sortColumn, sortDirection]);
 
   const getUniqueColumnValues = (column: string): string[] => {
-    if (!allColumns.length) return [];
+    if (!columnSummary.length) return [];
     
     // Get the currently filtered data (before applying the current column's filter)
-    let filteredData = filterUnique
-      ? allColumns.filter(c => c.unique_count > 0)
-      : allColumns;
+    let filteredData = columnSummary;
 
     // Apply all other column filters except the current one
     Object.entries(columnFilters).forEach(([col, filterValues]) => {
-      if (col !== column && filterValues && filterValues.length > 0) {
+      if (col !== column && filterValues && Array.isArray(filterValues) && filterValues.length > 0) {
         filteredData = filteredData.filter(row => {
           const cellValue = String(row[col as keyof ColumnInfo] || '');
           return filterValues.includes(cellValue);
@@ -238,10 +224,10 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
     );
   };
 
-  if (!displayed.length) return null;
+  if (!data || !displayed.length) return null;
 
   return (
-    <div className="w-full">
+    <div className="w-full mb-4">
       <Table
           headers={[
             <ContextMenu key="Column">
@@ -373,9 +359,9 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
             "Sample values"
           ]}
           colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
-          bodyClassName="max-h-[484px] overflow-y-auto"
+          bodyClassName="max-h-[300px] overflow-y-auto"
           defaultMinimized={true}
-          borderColor={`border-${columnClassifier.color.replace('bg-', '')}`}
+          borderColor={`border-${dataframeOperations.color.replace('bg-', '')}`}
           customHeader={{
             title: "Cardinality View",
             subtitle: "Click Here to View Data",
@@ -423,5 +409,4 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
   );
 };
 
-export default ColClassifierColumnView;
-
+export default DataFrameCardinalityView;

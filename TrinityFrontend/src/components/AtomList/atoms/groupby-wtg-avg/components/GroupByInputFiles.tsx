@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VALIDATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
-import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Props {
@@ -33,7 +32,14 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
   useEffect(() => {
     fetch(`${VALIDATE_API}/list_saved_dataframes`)
       .then(r => r.json())
-      .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
+      .then(d => {
+        // Filter to only show Arrow files, exclude CSV and XLSX files
+        const allFiles = Array.isArray(d.files) ? d.files : [];
+        const arrowFiles = allFiles.filter(f => 
+          f.object_name && f.object_name.endsWith('.arrow')
+        );
+        setFrames(arrowFiles);
+      })
       .catch(() => setFrames([]));
   }, []);
 

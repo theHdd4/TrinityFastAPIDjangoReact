@@ -39,8 +39,8 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
 
     // Fetch common columns when both files are selected
     React.useEffect(() => {
-      // Fetch only if both files selected and we haven't already fetched columns
-      if (settings.file1 && settings.file2 && settings.availableColumns.length === 0) {
+      // Fetch whenever both files are selected (including when files change)
+      if (settings.file1 && settings.file2) {
         fetch(`${MERGE_API}/init`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

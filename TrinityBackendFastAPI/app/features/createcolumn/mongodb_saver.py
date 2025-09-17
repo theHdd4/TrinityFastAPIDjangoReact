@@ -4,7 +4,7 @@ import os
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin")
-MONGO_DB = os.getenv("MONGO_DB", "trinity_prod")
+MONGO_DB = os.getenv("MONGO_DB", "trinity_db")
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[MONGO_DB]
 # print("Mongo DB in use:", MONGO_DB)
@@ -35,7 +35,7 @@ async def save_createandtransform_configs(
         document_id = f"{client_name}/{app_name}/{project_name}"
         
         # Check if document already exists
-        existing_doc = await client["trinity_prod"]["createandtransform_configs"].find_one({"_id": document_id})
+        existing_doc = await client["trinity_db"]["createandtransform_configs"].find_one({"_id": document_id})
         
         if existing_doc:
             # Merge new data with existing data instead of replacing
@@ -90,7 +90,7 @@ async def save_createandtransform_configs(
                 print(f"✅ Added new file {input_file} to document")
             
             # Update the existing document
-            result = await client["trinity_prod"]["createandtransform_configs"].replace_one(
+            result = await client["trinity_db"]["createandtransform_configs"].replace_one(
                 {"_id": document_id},
                 merged_document
             )
@@ -119,7 +119,7 @@ async def save_createandtransform_configs(
             }
             
             # Insert new document
-            result = await client["trinity_prod"]["createandtransform_configs"].insert_one(document)
+            result = await client["trinity_db"]["createandtransform_configs"].insert_one(document)
             operation = "inserted"
         
         print(f"📦 Stored in createandtransform_configs: {document_id}")

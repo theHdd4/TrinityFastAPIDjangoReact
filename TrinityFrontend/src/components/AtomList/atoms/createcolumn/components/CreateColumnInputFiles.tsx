@@ -32,7 +32,7 @@ const CreateColumnInputFiles: React.FC<Props> = ({ atomId, selectedIdentifiers, 
   useEffect(() => {
     const loadMapping = async () => {
       try {
-        const mapping = await fetchDimensionMapping();
+        const { mapping } = await fetchDimensionMapping();
         let ids: string[] = [];
         // Prefer explicit identifiers list saved by classifier
         try {
@@ -74,7 +74,14 @@ const CreateColumnInputFiles: React.FC<Props> = ({ atomId, selectedIdentifiers, 
   useEffect(() => {
     fetch(`${VALIDATE_API}/list_saved_dataframes`)
       .then(r => r.json())
-      .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
+      .then(d => {
+        // Filter to only show Arrow files, exclude CSV and XLSX files
+        const allFiles = Array.isArray(d.files) ? d.files : [];
+        const arrowFiles = allFiles.filter(f => 
+          f.object_name && f.object_name.endsWith('.arrow')
+        );
+        setFrames(arrowFiles);
+      })
       .catch(() => setFrames([]));
   }, []);
 

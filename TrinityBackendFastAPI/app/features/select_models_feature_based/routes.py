@@ -1645,7 +1645,7 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
             try:
                 # Use the same MongoDB client that's already connected
                 from .database import client as mongo_client
-                scopeselector_collection = mongo_client["trinity_prod"]["scopeselector_configs"]
+                scopeselector_collection = mongo_client["trinity_db"]["scopeselector_configs"]
                 
                 # Query by the same document_id (client/app/project) to get the scope selector document
                 scopeselector_doc = await scopeselector_collection.find_one({"_id": document_id})
@@ -2197,7 +2197,7 @@ async def get_source_files_from_build_config(
         # Use shared authenticated MongoDB client from database.py
         # Get the build configuration from MongoDB
         document_id = f"{client_name}/{app_name}/{project_name}"
-        build_config = await client["trinity_prod"]["build-model_featurebased_configs"].find_one({"_id": document_id})
+        build_config = await client["trinity_db"]["build-model_featurebased_configs"].find_one({"_id": document_id})
         
         if not build_config:
             raise HTTPException(
@@ -2340,7 +2340,7 @@ async def calculate_ensemble_actual_vs_predicted(
         # Use shared authenticated MongoDB client from database.py
         # Get the build configuration from MongoDB
         document_id = f"{client_name}/{app_name}/{project_name}"
-        build_config = await client["trinity_prod"]["build-model_featurebased_configs"].find_one({"_id": document_id})
+        build_config = await client["trinity_db"]["build-model_featurebased_configs"].find_one({"_id": document_id})
         
         if not build_config:
             raise HTTPException(
@@ -2516,7 +2516,7 @@ async def calculate_ensemble_yoy(
         # Use shared authenticated MongoDB client from database.py
         # Get the build configuration from MongoDB
         document_id = f"{client_name}/{app_name}/{project_name}"
-        build_config = await client["trinity_prod"]["build-model_featurebased_configs"].find_one({"_id": document_id})
+        build_config = await client["trinity_db"]["build-model_featurebased_configs"].find_one({"_id": document_id})
         
         if not build_config:
             raise HTTPException(
@@ -2852,7 +2852,7 @@ async def calculate_actual_vs_predicted(
         # Use shared authenticated MongoDB client from database.py
         # Get the build configuration from MongoDB
         document_id = f"{client_name}/{app_name}/{project_name}"
-        build_config = await client["trinity_prod"]["build-model_featurebased_configs"].find_one({"_id": document_id})
+        build_config = await client["trinity_db"]["build-model_featurebased_configs"].find_one({"_id": document_id})
         
         if not build_config:
             raise HTTPException(
@@ -3016,7 +3016,7 @@ async def calculate_yoy(
         # Use shared authenticated MongoDB client from database.py
         # Get the build configuration from MongoDB
         document_id = f"{client_name}/{app_name}/{project_name}"
-        build_config = await client["trinity_prod"]["build-model_featurebased_configs"].find_one({"_id": document_id})
+        build_config = await client["trinity_db"]["build-model_featurebased_configs"].find_one({"_id": document_id})
         
         if not build_config:
             raise HTTPException(
