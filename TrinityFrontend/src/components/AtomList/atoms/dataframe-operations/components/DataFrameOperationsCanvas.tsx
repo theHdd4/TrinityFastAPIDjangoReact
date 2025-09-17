@@ -576,11 +576,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     if (!file) return;
     try {
       const resp = await loadDataframe(file);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       const newData: DataFrameData = {
         headers: resp.headers,
         rows: resp.rows,
@@ -596,7 +592,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     } catch {/* empty */
       setUploadError('Error parsing file');
     }
-  }, [onDataUpload]);
+  }, [onDataUpload, normalizeBackendColumnTypes]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -627,11 +623,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     try {
       console.log('[DataFrameOperations] sort', column, direction);
       const resp = await apiSort(fileId, column, direction);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -715,11 +707,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   if (newHeader === oldHeader) { setEditingHeader(null); return; }
   try {
     const resp = await apiRenameColumn(fileId, oldHeader, newHeader);
-    const columnTypes: any = {};
-    resp.headers.forEach(h => {
-      const t = resp.types[h];
-      columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-    });
+    const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
     onDataChange({
       headers: resp.headers,
       rows: resp.rows,
@@ -752,11 +740,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const globalRowIndex = startIndex + rowIndex;
     try {
       const resp = await apiEditCell(fileId, globalRowIndex, column, newValue);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -778,11 +762,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const dir: 'above' | 'below' = data.rows.length > 0 ? 'below' : 'above';
     try {
       const resp = await apiInsertRow(fileId, idx, dir);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -803,11 +783,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const newColumnName = `Column_${data.headers.length + 1}`;
     try {
       const resp = await apiInsertColumn(fileId, data.headers.length, newColumnName, '');
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -858,11 +834,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       const toIndex = data.headers.indexOf(draggedCol);
       try {
         const resp = await apiMoveColumn(fileId, draggedCol, toIndex);
-        const columnTypes: any = {};
-        resp.headers.forEach(h => {
-          const t = resp.types[h];
-          columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-        });
+        const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
         onDataChange({
           headers: resp.headers,
           rows: resp.rows,
@@ -960,11 +932,7 @@ const handleFormulaSubmit = async () => {
   if (!trimmedFormula) return;
   try {
     const resp = await apiApplyFormula(fileId, selectedColumn, trimmedFormula);
-    const columnTypes: any = {};
-    resp.headers.forEach(h => {
-      const t = resp.types[h];
-      columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-    });
+    const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
     onDataChange({
       headers: resp.headers,
       rows: resp.rows,
@@ -997,11 +965,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     const newColKey = getNextColKey(data.headers);
     try {
       const resp = await apiInsertColumn(fileId, colIdx, newColKey, '');
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -1023,11 +987,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     const col = data.headers[colIdx];
     try {
       const resp = await apiDeleteColumn(fileId, col);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -1052,11 +1012,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     }
     try {
       const resp = await apiDuplicateColumn(fileId, col, newName);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -1078,11 +1034,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     try {
       const resp = await apiInsertRow(fileId, rowIdx, position);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -1101,11 +1053,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     try {
       const resp = await apiDuplicateRow(fileId, rowIdx);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -1124,11 +1072,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     try {
       const resp = await apiRetypeColumn(fileId, col, newType === 'text' ? 'string' : newType);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -1147,11 +1091,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     try {
       const resp = await apiDeleteRow(fileId, rowIdx);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,

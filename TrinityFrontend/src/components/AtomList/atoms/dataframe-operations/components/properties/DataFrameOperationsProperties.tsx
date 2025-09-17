@@ -70,10 +70,17 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
       setSelectedFrame(foundFrame || null);
       const resp = await loadDataframeByKey(fileId);
 
-      const columnTypes: Record<string, string> = {};
+      const columnTypes: Record<string, 'text' | 'number' | 'date'> = {};
       resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+        const rawType = resp.types[h];
+        const normalized = (typeof rawType === 'string' ? rawType : String(rawType || '')).toLowerCase();
+        if (['float', 'double', 'int', 'decimal', 'numeric', 'number'].some(token => normalized.includes(token))) {
+          columnTypes[h] = 'number';
+        } else if (['datetime', 'date', 'time', 'timestamp'].some(token => normalized.includes(token))) {
+          columnTypes[h] = 'date';
+        } else {
+          columnTypes[h] = 'text';
+        }
       });
       const newData: DataFrameData = {
         headers: resp.headers,
