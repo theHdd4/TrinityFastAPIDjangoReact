@@ -54,10 +54,8 @@ class StackModelTrainer:
             Dictionary with training results, saved model counts, and MinIO file path
         """
         try:
-            logger.info("Starting complete stack model training workflow")
+
             
-            # Step 1: Prepare the stacked data
-            logger.info("Step 1: Preparing stacked data...")
             prepare_result = await self.processor.prepare_stack_model_data(
                 scope_number=scope_number,
                 combinations=combinations,
@@ -79,7 +77,6 @@ class StackModelTrainer:
             clustering_result = {}
             
             if apply_clustering and pooled_data:
-                logger.info("Step 2: Applying clustering...")
                 
                 # Convert numerical columns to lowercase for consistent matching
                 numerical_columns_for_clustering = [col.lower() for col in numerical_columns_for_clustering]
@@ -102,7 +99,7 @@ class StackModelTrainer:
                 
                 if clustering_result.get('status') == 'success':
                     # Reconstruct split clustered data for model training
-                    logger.info("Step 3: Reconstructing split clustered data for model training...")
+                   
                     
                     from .stack_model_data import DataPooler
                     data_pooler = DataPooler(minio_client, bucket_name)
@@ -114,8 +111,12 @@ class StackModelTrainer:
                         n_clusters=n_clusters
                     )
                     
-                    # Split clustered data by individual clusters
-                    split_clustered_data = data_pooler.split_clustered_data_by_clusters(clustered_pools)
+                    # Split clustered data by individual clusters and save to MinIO
+                    split_clustered_data = data_pooler.split_clustered_data_by_clusters(
+                        clustered_pools, 
+                        minio_client=minio_client, 
+                        bucket_name=bucket_name
+                    )
                     
                     # Apply interaction terms if requested
                     if apply_interaction_terms and numerical_columns_for_interaction:
@@ -132,12 +133,9 @@ class StackModelTrainer:
                 else:
                     raise Exception(f"Clustering failed: {clustering_result.get('error', 'Unknown error')}")
             else:
-                # No clustering - use original pooled data
-                logger.info("Step 2: No clustering requested, using original pooled data...")
                 split_clustered_data = pooled_data
             
-            # Step 3: Train models on the data
-            logger.info("Step 3: Training models on stacked data...")
+
             
             # Convert parameters to lowercase for consistent matching
             x_variables_lower = [col.lower() for col in x_variables]
@@ -158,119 +156,428 @@ class StackModelTrainer:
                 price_column=price_column.lower() if price_column else None
             )
             
-            # Step 4: Calculate elasticities and contributions
-            logger.info("Step 4: Calculating elasticities and contributions...")
-            self._calculate_elasticities_and_contributions(training_results, x_variables_lower, y_variable_lower)
+
             
-            # Step 5: Save results to MongoDB
-            logger.info("Step 5: Saving results to MongoDB...")
-            total_saved = await self._save_results_to_mongodb(
-                training_results=training_results,
-                scope_number=scope_number,
-                y_variable_lower=y_variable_lower,
-                price_column=price_column,
+            
+            # Convert training results to match individual model format
+            from .schemas import StackModelResults, StackModelResult
+            split_cluster_results = []
+            for split_key, result in training_results.items():
+                if 'error' not in result:
+                    # Convert model results to simplified format (beta coefficients only)
+                    simplified_model_results = []
+                    for model_result in result.get('model_results', []):
+                        simplified_model = StackModelResult(
+                            model_name=model_result.get('model_name', 'Unknown'),
+                            mape_train=model_result.get('mape_train', 0),
+                            mape_test=model_result.get('mape_test', 0),
+                            r2_train=model_result.get('r2_train', 0),
+                            r2_test=model_result.get('r2_test', 0),
+                            coefficients=model_result.get('coefficients', {}),
+                            intercept=model_result.get('intercept', 0),
+                            aic=model_result.get('aic', 0),
+                            bic=model_result.get('bic', 0),
+                            n_parameters=model_result.get('n_parameters', 0)
+                        )
+                        simplified_model_results.append(simplified_model)
+                    
+                    # Convert to StackModelResults format
+                    split_cluster_result = StackModelResults(
+                        split_clustered_data_id=split_key,
+                        file_key=f"stack_model_{split_key}",  # Virtual file key for stack models
+                        total_records=result.get('total_records', 0),
+                        model_results=simplified_model_results
+                    )
+                    split_cluster_results.append(split_cluster_result)
+            
+            # Prepare final response using the stack model schema
+            from .schemas import StackModelTrainingResponse
+            response = StackModelTrainingResponse(
+                scope_id=f"scope_{scope_number}",
+                set_name=f"Scope_{scope_number}",
+                x_variables=x_variables,
+                y_variable=y_variable,
                 standardization=standardization,
                 k_folds=k_folds,
-                run_id=run_id
+                total_split_clusters=len(split_clustered_data),
+                stack_model_results=split_cluster_results,
+                summary={
+                    "run_id": run_id,
+                    "total_split_clusters_processed": len(split_cluster_results),
+                    "total_models_trained": sum(len(result.get('model_results', [])) for result in training_results.values() if 'error' not in result),
+                    "total_models_saved": 0,  # Models are not saved to MinIO in this endpoint
+                    "clustering_applied": apply_clustering,
+                    "interaction_terms_applied": apply_interaction_terms and apply_clustering,
+                    "minio_results_file": None,  # No MinIO file saved in this endpoint
+                    "clustering_result": clustering_result if apply_clustering else None
+                }
             )
             
-            # Step 6: Save results to MinIO
-            logger.info("Step 6: Saving results to MinIO...")
-            minio_file_path = await self._save_results_to_minio(
-                training_results=training_results,
-                scope_number=scope_number,
-                y_variable_lower=y_variable_lower,
-                run_id=run_id,
-                minio_client=minio_client,
-                bucket_name=bucket_name
-            )
-            
-            # Prepare final response
-            response = {
-                "status": "success",
-                "run_id": run_id,
-                "scope_number": scope_number,
-                "total_split_clusters": len(split_clustered_data),
-                "total_models_trained": sum(len(result.get('model_results', [])) for result in training_results.values() if 'error' not in result),
-                "total_models_saved": total_saved,
-                "clustering_applied": apply_clustering,
-                "interaction_terms_applied": apply_interaction_terms and apply_clustering,
-                "minio_results_file": minio_file_path,
-                "training_results": {
-                    split_key: {
-                        "feature_breakdown": result.get('feature_breakdown', {}),
-                        "data_shape": result.get('data_shape', (0, 0)),
-                        "total_records": result.get('total_records', 0),
-                        "models_trained": len(result.get('model_results', [])),
-                        "model_results": result.get('model_results', []),  # Include detailed model results
-                        "variable_data": result.get('variable_data', {}),  # Include variable statistics
-                        "error": result.get('error', None)
-                    }
-                    for split_key, result in training_results.items()
-                },
-                "clustering_result": clustering_result if apply_clustering else None
-            }
-            
-            logger.info("Stack model training completed successfully")
             return response
             
         except Exception as e:
             logger.error(f"Error in stack model training: {str(e)}")
+            # Return error response in the same format as success
+            from .schemas import StackModelTrainingResponse
+            return StackModelTrainingResponse(
+                scope_id=f"scope_{scope_number}",
+                set_name=f"Scope_{scope_number}",
+                x_variables=x_variables,
+                y_variable=y_variable,
+                standardization=standardization,
+                k_folds=k_folds,
+                total_split_clusters=0,
+                stack_model_results=[],
+                summary={
+                    "status": "error",
+                    "error": str(e),
+                    "run_id": run_id,
+                    "scope_number": scope_number
+                }
+            )
+    
+    
+    def calculate_combination_betas(self, model_results: List[Dict[str, Any]], combinations: List[str], x_variables: List[str], numerical_columns_for_interaction: List[str], split_cluster_id: str = None) -> Dict[str, Dict[str, float]]:
+
+        combination_betas = {}
+        
+        for model_result in model_results:
+            model_name = model_result['model_name']
+            coefficients = model_result['coefficients']
+            intercept = model_result['intercept']
+            
+            # Extract combinations that are actually present in this model's coefficients
+            available_combinations = []
+            for key in coefficients.keys():
+                if key.startswith('encoded_combination_') and not key.endswith('_x_'):
+                    # Extract combination name from encoded_combination_{combination}
+                    combination_name = key.replace('encoded_combination_', '')
+                    if combination_name in combinations:
+                        available_combinations.append(combination_name)
+            
+            logger.info(f"Model {model_name} has coefficients for {len(available_combinations)} combinations: {available_combinations}")
+            logger.info(f"Intercept: {intercept}")
+            
+            # Calculate final betas only for combinations that are available in this model
+            for combination in available_combinations:
+                combination_key = f"{model_name}_{combination}"
+                final_betas = {}
+                # Calculate final intercept
+                combination_intercept_key = f"encoded_combination_{combination}"
+                combination_intercept_beta = coefficients.get(combination_intercept_key, 0.0)
+                logger.info(f"Combination intercept beta: {combination_intercept_beta}")
+                final_betas['intercept'] = intercept + combination_intercept_beta
+
+                logger.info(f"Final betas: {final_betas}")
+                
+                # Calculate final betas for x_variables (main model variables)
+                for x_var in x_variables:
+                    # Common beta for this x_variable
+                    common_beta = coefficients.get(x_var, 0.0)
+                    
+                    # Individual beta for this combination and x_variable (if interaction exists)
+                    interaction_key = f"encoded_combination_{combination}_x_{x_var}"
+                    individual_beta = coefficients.get(interaction_key, 0.0)
+                    
+                    # Final beta = common + individual
+                    final_betas[x_var] = common_beta + individual_beta
+                
+                # Calculate final betas for numerical_columns_for_interaction (interaction variables)
+                for interaction_var in numerical_columns_for_interaction:
+                    # Only add if it's not already in x_variables to avoid duplication
+                    if interaction_var not in x_variables:
+                        # Common beta for this interaction variable
+                        common_beta = coefficients.get(interaction_var, 0.0)
+                        
+                        # Individual beta for this combination and interaction variable
+                        interaction_key = f"encoded_combination_{combination}_x_{interaction_var}"
+                        individual_beta = coefficients.get(interaction_key, 0.0)
+                        
+                        # Final beta = common + individual
+                        final_betas[interaction_var] = common_beta + individual_beta
+                
+                combination_betas[combination_key] = final_betas
+                logger.info(f"Calculated final betas for {combination}: {final_betas}")
+        
+        return combination_betas
+    
+    async def calculate_individual_combination_metrics(
+        self,
+        scope_number: str,
+        combinations: List[str],
+        pool_by_identifiers: List[str],
+        x_variables: List[str],
+        y_variable: str,
+        minio_client,
+        bucket_name: str,
+        # Clustering parameters
+        apply_clustering: bool = False,
+        numerical_columns_for_clustering: List[str] = None,
+        n_clusters: Optional[int] = None,
+        # Interaction terms parameters
+        apply_interaction_terms: bool = True,
+        numerical_columns_for_interaction: List[str] = None,
+        # Model training parameters
+        standardization: str = 'none',
+        k_folds: int = 5,
+        models_to_run: Optional[List[str]] = None,
+        custom_configs: Optional[Dict[str, Any]] = None,
+        price_column: Optional[str] = None,
+        run_id: str = None
+    ) -> Dict[str, Any]:
+        """
+        Calculate MAPE, AIC, and BIC for individual combinations using betas from stack modeling.
+        
+        Process:
+        1. Train stack models to get betas
+        2. For each combination, fetch individual data
+        3. Apply stack modeling betas to individual combination data
+        4. Calculate predictions and metrics (MAPE, AIC, BIC)
+        5. Use stack modeling MAPE as train MAPE, individual combination MAPE as test MAPE
+        """
+        try:
+            logger.info("Starting individual combination metrics calculation")
+            
+            # Step 1: Train stack models to get betas
+            logger.info("Step 1: Training stack models to get betas...")
+            try:
+                training_result = await self.train_models_for_stacked_data(
+                scope_number=scope_number,
+                combinations=combinations,
+                pool_by_identifiers=pool_by_identifiers,
+                x_variables=x_variables,
+                y_variable=y_variable,
+                minio_client=minio_client,
+                bucket_name=bucket_name,
+                apply_clustering=apply_clustering,
+                numerical_columns_for_clustering=numerical_columns_for_clustering,
+                n_clusters=n_clusters,
+                apply_interaction_terms=apply_interaction_terms,
+                numerical_columns_for_interaction=numerical_columns_for_interaction,
+                standardization=standardization,
+                k_folds=k_folds,
+                models_to_run=models_to_run,
+                custom_configs=custom_configs,
+                price_column=price_column,
+                run_id=run_id
+                )
+                logger.info("Stack model training completed successfully")
+            except Exception as e:
+                logger.error(f"Error in stack model training: {e}")
+                raise
+            
+            # Step 2: Calculate combination betas from stack model results
+            logger.info("Step 2: Calculating combination betas from stack model results...")
+            logger.info(f"Number of stack results: {len(training_result.stack_model_results)}")
+            combination_betas_list = []
+            all_combinations = set()
+            
+            for stack_result in training_result.stack_model_results:
+
+                for model_result in stack_result.model_results:
+                    # Convert StackModelResult to dict format expected by calculate_combination_betas
+                    model_result_dict = {
+                        'model_name': model_result.model_name,
+                        'coefficients': model_result.coefficients,
+                        'intercept': model_result.intercept
+                    }
+                    
+                    model_betas = self.calculate_combination_betas(
+                        model_results=[model_result_dict],
+                        combinations=combinations,
+                        x_variables=x_variables,
+                        numerical_columns_for_interaction=numerical_columns_for_interaction or [],
+                        split_cluster_id=stack_result.split_clustered_data_id
+                    )
+                    
+                    for combination_key, betas in model_betas.items():
+                        model_name = combination_key.split('_', 1)[0]  
+                        combination = combination_key.split('_', 1)[1] if '_' in combination_key else combination_key
+                        
+                        # Remove intercept from coefficients
+                        coefficients = {k: v for k, v in betas.items() if k != 'intercept'}
+                        
+                        combination_beta = {
+                            'combination': combination,
+                            'model_name': model_name,
+                            'split_cluster_id': stack_result.split_clustered_data_id,
+                            'intercept': betas.get('intercept', 0.0),
+                            'coefficients': coefficients
+                        }
+                        
+                        combination_betas_list.append(combination_beta)
+                        all_combinations.add(combination)
+            
+            try:
+                individual_metrics = await self._calculate_individual_metrics(
+                scope_number=scope_number,
+                combinations=list(all_combinations),
+                combination_betas_list=combination_betas_list,
+                x_variables=x_variables,
+                y_variable=y_variable,
+                minio_client=minio_client,
+                bucket_name=bucket_name,
+                stack_model_results=training_result.stack_model_results
+                )
+            except Exception as e:
+                logger.error(f"Error in individual metrics calculation: {e}")
+                raise
+            
+            # Step 4: Save individual combination metrics to MinIO
+            try:
+                await self._save_individual_combination_metrics_to_minio(
+                    individual_metrics=individual_metrics,
+                    scope_number=scope_number,
+                    run_id=run_id,
+                    x_variables=x_variables,
+                    y_variable=y_variable,
+                    minio_client=minio_client,
+                    bucket_name=bucket_name
+                )
+                logger.info(f"Successfully saved individual combination metrics to MinIO for run_id: {run_id}")
+            except Exception as e:
+                logger.error(f"Failed to save individual combination metrics to MinIO: {e}")
+                # Don't fail the entire request if MinIO save fails
+            
+            # Step 5: Prepare response
+            result = {
+                'status': 'success',
+                'scope_number': scope_number,
+                'total_combinations': len(all_combinations),
+                'individual_combination_metrics': individual_metrics,
+                'stack_model_summary': training_result.summary,
+                'run_id': run_id
+            }
+            return result
+            
+        except Exception as e:
             return {
-                "status": "error",
-                "error": str(e),
-                "run_id": run_id,
-                "scope_number": scope_number
+                'status': 'error',
+                'error': str(e),
+                'scope_number': scope_number,
+                'run_id': run_id
             }
     
-    def _calculate_elasticities_and_contributions(
-        self, 
-        training_results: Dict[str, Any], 
-        x_variables_lower: List[str], 
-        y_variable_lower: str
-    ):
+    async def _calculate_individual_metrics(
+        self,
+        scope_number: str,
+        combinations: List[str],
+        combination_betas_list: List[Dict[str, Any]],
+        x_variables: List[str],
+        y_variable: str,
+        minio_client,
+        bucket_name: str,
+        stack_model_results: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """
-        Calculate elasticities and contributions for all models (same logic as individual models).
+        Calculate metrics for individual combinations using stack modeling betas.
         """
-        for split_key, result in training_results.items():
-            if 'error' in result or 'model_results' not in result:
-                continue
-                
-            model_results = result['model_results']
-            variable_data = result['variable_data']
+        from .stack_model_data import DataPooler
+        from sklearn.metrics import mean_absolute_percentage_error
+        import numpy as np
+        
+        data_pooler = DataPooler(minio_client, bucket_name)
+        individual_metrics = {}
+        
+        # Create a mapping of combination -> model_name -> betas (with split cluster info)
+        betas_by_combination = {}
+        for beta_info in combination_betas_list:
+            combination = beta_info['combination']
+            model_name = beta_info['model_name']
+            split_cluster_id = beta_info['split_cluster_id']
             
-            # Calculate elasticities and contributions for each model
-            for model_result in model_results:
-                try:
-                    # Get coefficients and means that are already available
-                    coefficients = model_result.get('coefficients', {})
-                    variable_averages = variable_data.get('variable_averages', {})
+            if combination not in betas_by_combination:
+                betas_by_combination[combination] = {}
+            
+            betas_by_combination[combination][model_name] = {
+                'split_cluster_id': split_cluster_id,
+                'intercept': beta_info['intercept'],
+                'coefficients': beta_info['coefficients']
+            }
+        
+        # Get stack model MAPE for train metrics (keyed by split_cluster_id + model_name)
+        stack_mape_by_cluster_model = {}
+        for stack_result in stack_model_results:
+            split_cluster_id = stack_result.split_clustered_data_id
+            for model_result in stack_result.model_results:
+                model_name = model_result.model_name
+                key = f"{split_cluster_id}_{model_name}"
+                stack_mape_by_cluster_model[key] = {
+                    'mape_train': model_result.mape_train,
+                    'mape_test': model_result.mape_test,
+                    'r2_train': model_result.r2_train,
+                    'r2_test': model_result.r2_test,
+                    'aic': model_result.aic,
+                    'bic': model_result.bic
+                }
+
+        for combination in combinations:
+            logger.info(f"Processing individual metrics for combination: {combination}")
+            
+            try:
+
+                df = data_pooler._fetch_combination_file_direct(scope_number, combination)
+                if df is None:
+                    logger.warning(f"Could not fetch data for combination: {combination}")
+                    continue
+        
+                
+                # Convert column names to lowercase for consistency
+                df.columns = df.columns.str.lower()
+                
+                # Filter to only include required columns
+                required_columns = x_variables + [y_variable]
+                available_columns = [col for col in required_columns if col in df.columns]
+                missing_columns = [col for col in required_columns if col not in df.columns]
+                
+                if missing_columns:
+                    logger.warning(f"Missing columns for {combination}: {missing_columns}")
+                    continue
+                
+                # Prepare data
+                X = df[x_variables].values
+                y_actual = df[y_variable].values
+                
+                combination_metrics = {}
+                
+                # Calculate metrics for each model
+                for model_name in betas_by_combination.get(combination, {}):
+                    if model_name not in betas_by_combination[combination]:
+                        continue
                     
-                    # Calculate elasticities using the CORRECT formula since Y is NOT standardized
+                    betas = betas_by_combination[combination][model_name]
+                    
+                    # Make predictions using the betas
+                    y_pred = self._predict_with_betas(X, betas, x_variables)
+                    
+                    # Calculate individual combination metrics
+                    individual_mape = mean_absolute_percentage_error(y_actual, y_pred)
+                    individual_r2 = self._calculate_r2(y_actual, y_pred)
+                    
+                    # Calculate AIC and BIC for individual combination
+                    n = len(y_actual)
+                    k = len(x_variables) + 1  # +1 for intercept
+                    mse = np.mean((y_actual - y_pred) ** 2)
+                    log_likelihood = -n/2 * np.log(2 * np.pi * mse) - n/2
+                    individual_aic = 2 * k - 2 * log_likelihood
+                    individual_bic = k * np.log(n) - 2 * log_likelihood
+                    
+                    # Calculate elasticity and contribution for individual combination
                     elasticities = {}
                     contributions = {}
                     
-                    # Get unstandardized coefficients (these are the correct ones since Y is not standardized)
-                    unstandardized_coeffs = model_result.get('unstandardized_coefficients', {})
+                    # Get variable means from the individual combination data
+                    variable_means = {}
+                    for x_var in x_variables:
+                        variable_means[x_var] = df[x_var].mean()
+                    y_mean = df[y_variable].mean()
                     
-                    # For each X variable, calculate elasticity and contribution
-                    for x_var in result['feature_columns']:
-                        # Skip interaction terms and encoded variables for elasticity calculation
-                        if '_x_' in x_var or x_var not in x_variables_lower:
-                            continue
-                            
-                        beta_key = f"Beta_{x_var}"
-                        x_mean = variable_averages.get(x_var, 0)
-                        y_mean = variable_averages.get(y_variable_lower, 0)
+                    # Calculate elasticity and contribution for each x_variable
+                    for x_var in x_variables:
+                        beta_val = betas['coefficients'].get(x_var, 0.0)
+                        x_mean = variable_means.get(x_var, 0)
                         
-                        # Use unstandardized coefficients for elasticity calculation
-                        if unstandardized_coeffs and beta_key in unstandardized_coeffs:
-                            beta_val = unstandardized_coeffs[beta_key]
-                        else:
-                            # Fallback to raw coefficients if unstandardized not available
-                            beta_val = coefficients.get(beta_key, 0)
-                        
-                        # Calculate elasticity using the CORRECT formula: (β × X_mean) / Y_mean
+                        # Calculate elasticity: (β × X_mean) / Y_mean
                         if y_mean != 0 and x_mean != 0:
                             elasticity = (beta_val * x_mean) / y_mean
                         else:
@@ -287,235 +594,294 @@ class StackModelTrainer:
                         for x_var in contributions:
                             contributions[x_var] = contributions[x_var] / total_contribution
                     
-                    # Store results in model_result
-                    model_result['elasticities'] = elasticities
-                    model_result['contributions'] = contributions
+                    # Get stack model metrics for train metrics using split cluster + model name
+                    split_cluster_id = betas['split_cluster_id']
+                    stack_key = f"{split_cluster_id}_{model_name}"
+                    stack_metrics = stack_mape_by_cluster_model.get(stack_key, {})
                     
-                    model_result['elasticity_details'] = {
-                        'calculation_method': 'direct_from_model_results',
-                        'variables_processed': list(elasticities.keys()),
-                        'transform_data_used': False
-                    }
-                    model_result['contribution_details'] = {
-                        'calculation_method': 'direct_from_model_results',
-                        'variables_processed': list(contributions.keys()),
-                        'total_contribution': total_contribution,
-                        'transform_data_used': False
+                    logger.info(f"  Using stack metrics from split cluster: {split_cluster_id}, model: {model_name}")
+                    
+                    combination_metrics[model_name] = {
+                        'combination': combination,
+                        'model_name': model_name,
+                        'individual_samples': n,
+                        'mape_train': stack_metrics.get('mape_train', 0.0),  # From stack modeling
+                        'mape_test': individual_mape,  # From individual combination
+                        'r2_train': stack_metrics.get('r2_train', 0.0),  # From stack modeling
+                        'r2_test': individual_r2,  # From individual combination
+                        'aic': individual_aic,  # Individual combination AIC
+                        'bic': individual_bic,  # Individual combination BIC
+                        'stack_aic': stack_metrics.get('aic', 0.0),  # Stack modeling AIC for reference
+                        'stack_bic': stack_metrics.get('bic', 0.0),  # Stack modeling BIC for reference
+                        'elasticities': elasticities,  # Individual combination elasticities
+                        'contributions': contributions,  # Individual combination contributions
+                        'actual_values': y_actual.tolist(),  # Actual target values
+                        'predicted_values': y_pred.tolist(),  # Predicted values using stack model betas
+                        'variable_means': variable_means,  # Variable means from individual combination data
+                        'y_mean': y_mean,  # Y variable mean from individual combination data
+                        'betas': betas
                     }
                     
-                except Exception as e:
-                    logger.warning(f"Failed to calculate elasticities/contributions for {split_key} {model_result.get('model_name', 'unknown')}: {e}")
-                    model_result['elasticities'] = {}
-                    model_result['contributions'] = {}
-                    model_result['elasticity_details'] = {}
-                    model_result['contribution_details'] = {}
-    
-    async def _save_results_to_mongodb(
-        self,
-        training_results: Dict[str, Any],
-        scope_number: str,
-        y_variable_lower: str,
-        price_column: Optional[str],
-        standardization: str,
-        k_folds: int,
-        run_id: str
-    ) -> int:
-        """
-        Save model results to MongoDB (same format as individual models).
-        """
-        total_saved = 0
-        
-        for split_key, result in training_results.items():
-            if 'error' in result:
-                logger.warning(f"Skipping {split_key} due to error: {result['error']}")
-                continue
-            
-            try:
-                # Create combination info for saving
-                combination_info = {
-                    "combination_id": split_key,
-                    "channel": "Stacked",  # Indicate this is stacked data
-                    "brand": "Stacked",
-                    "ppg": "Stacked",
-                    "file_key": f"stacked_data_{split_key}",
-                    "filename": f"stacked_data_{split_key}.csv",
-                    "set_name": f"Scope_{scope_number}_Stacked",
-                    "record_count": result.get('total_records', 0)
-                }
-                
-                # Save results using the same function as individual models
-                saved_ids = await save_model_results_enhanced(
-                    scope_id=f"scope_{scope_number}_stacked",
-                    scope_name=f"Scope_{scope_number}_Stacked",
-                    set_name=f"Scope_{scope_number}_Stacked",
-                    combination=combination_info,
-                    model_results=result['model_results'],
-                    x_variables=result['feature_columns'],
-                    y_variable=y_variable_lower,
-                    price_column=price_column.lower() if price_column else None,
-                    standardization=standardization,
-                    k_folds=k_folds,
-                    run_id=run_id,
-                    variable_data=result['variable_data']
-                )
-                
-                total_saved += len(saved_ids)
-                logger.info(f"Saved {len(saved_ids)} models for {split_key}")
+                individual_metrics[combination] = combination_metrics
                 
             except Exception as e:
-                logger.error(f"Failed to save results for {split_key}: {e}")
+                logger.error(f"Error processing combination {combination}: {e}")
+                individual_metrics[combination] = {'error': str(e)}
         
-        return total_saved
+        return individual_metrics
     
-    async def _save_results_to_minio(
+    def _predict_with_betas(self, X: np.ndarray, betas: Dict[str, Any], x_variables: List[str]) -> np.ndarray:
+        """
+        Make predictions using calculated betas.
+        """
+        import numpy as np
+        
+        intercept = betas['intercept']
+        coefficients = betas['coefficients']
+        
+        # Initialize predictions with intercept
+        y_pred = np.full(X.shape[0], intercept)
+        
+        # Add contributions from each variable
+        for i, var in enumerate(x_variables):
+            if var in coefficients:
+                y_pred += X[:, i] * coefficients[var]
+        
+        return y_pred
+    
+    def _calculate_r2(self, y_actual: np.ndarray, y_pred: np.ndarray) -> float:
+        """
+        Calculate R-squared score.
+        """
+        import numpy as np
+        
+        ss_res = np.sum((y_actual - y_pred) ** 2)
+        ss_tot = np.sum((y_actual - np.mean(y_actual)) ** 2)
+        
+        if ss_tot == 0:
+            return 0.0
+        
+        return 1 - (ss_res / ss_tot)
+    
+    async def _save_individual_combination_metrics_to_minio(
         self,
-        training_results: Dict[str, Any],
+        individual_metrics: Dict[str, Any],
         scope_number: str,
-        y_variable_lower: str,
         run_id: str,
+        x_variables: List[str],
+        y_variable: str,
         minio_client,
         bucket_name: str
-    ) -> Optional[str]:
+    ) -> None:
         """
-        Save model results to MinIO as Arrow file (same format as individual models).
+        Save individual combination metrics to MinIO in the same flattened format as individual combination models.
         """
+        import pandas as pd
+        import pyarrow as pa
+        import pyarrow.feather as feather
+        from io import BytesIO
+        from datetime import datetime
+        
         try:
-            # Get the standard prefix using get_object_prefix
-            prefix = await get_object_prefix()
-            
-            # Create timestamp for file naming
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            # Generate filename for model results
-            model_results_filename = f"stacked_model_results_scope_{scope_number}_{timestamp}.arrow"
-            
-            # Construct the full path with the standard structure
-            model_results_file_key = f"{prefix}model-results/{model_results_filename}"
-            
-            # Get identifiers from scope configuration
-            identifiers = []
-            try:
-                # Extract client, app, project from prefix
-                prefix_parts = prefix.strip('/').split('/')
-                
-                if len(prefix_parts) >= 2:
-                    client_name = prefix_parts[0]
-                    app_name = prefix_parts[1]
-                    project_name = prefix_parts[2] if len(prefix_parts) > 2 else "default_project"
-                    
-                    # Get scope configuration from MongoDB
-                    scope_config = await get_scope_config_from_mongo(client_name, app_name, project_name)
-                    
-                    if scope_config and 'identifiers' in scope_config:
-                        identifiers = scope_config['identifiers']
-                        logger.info(f"✅ Retrieved identifiers: {identifiers}")
-                    else:
-                        logger.warning("⚠️ No identifiers found in scope config")
-                else:
-                    logger.warning(f"⚠️ Could not extract client/app/project from prefix: {prefix}")
-            except Exception as e:
-                logger.warning(f"❌ Failed to get identifiers from scope config: {e}")
-                identifiers = []
-            
-            # Prepare data for MinIO storage
+            # Prepare data for saving in flattened format
             summary_data = []
-            for split_key, result in training_results.items():
-                if 'error' in result or 'model_results' not in result:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            
+            for combination, combination_metrics in individual_metrics.items():
+                if 'error' in combination_metrics:
                     continue
                     
-                variable_averages = result.get('variable_data', {}).get('variable_averages', {})
-                
-                for model_result in result.get('model_results', []):
-                    # Create base summary row
+                for model_name, metrics in combination_metrics.items():
+                    # Create base summary row (flattened format like individual combination models)
                     summary_row = {
-                        'Scope': f'Scope_{scope_number}_Stacked',
-                        'combination_id': split_key,
-                        'y_variable': y_variable_lower,
-                        'x_variables': result['feature_columns'],  # Keep as list instead of joining
-                        'model_name': model_result.get('model_name', 'Unknown'),
-                        'mape_train': model_result.get('mape_train', 0),
-                        'mape_test': model_result.get('mape_test', 0),
-                        'r2_train': model_result.get('r2_train', 0),
-                        'r2_test': model_result.get('r2_test', 0),
-                        'aic': model_result.get('aic', 0),
-                        'bic': model_result.get('bic', 0),
-                        'intercept': model_result.get('intercept', 0),
-                        'n_parameters': model_result.get('n_parameters', 0),
-                        'price_elasticity': model_result.get('price_elasticity', None),
+                        'Scope': f'Scope_{scope_number}',
+                        'combination_id': combination,
+                        'y_variable': y_variable,
+                        'x_variables': x_variables,  # Keep as list
+                        'model_name': model_name,
+                        'model_type': 'stack_individual_combination',
+                        'mape_train': metrics.get('mape_train', 0.0),
+                        'mape_test': metrics.get('mape_test', 0.0),
+                        'r2_train': metrics.get('r2_train', 0.0),
+                        'r2_test': metrics.get('r2_test', 0.0),
+                        'aic': metrics.get('aic', 0.0),
+                        'bic': metrics.get('bic', 0.0),
+                        'intercept': metrics.get('betas', {}).get('intercept', 0.0),
+                        'n_parameters': len(x_variables) + 1,
+                        'individual_samples': metrics.get('individual_samples', 0),
                         'run_id': run_id,
                         'timestamp': timestamp
                     }
                     
-                    # Add identifier column values (for stacked data, use split_key info)
-                    for identifier in identifiers:
-                        # Extract identifier values from split_key if possible
-                        if '_' in split_key:
-                            parts = split_key.split('_')
-                            if len(parts) >= 2:
-                                summary_row[f"{identifier}"] = f"{parts[0]}_{parts[1]}"  # e.g., "channel_convenience"
-                            else:
-                                summary_row[f"{identifier}"] = split_key
-                        else:
-                            summary_row[f"{identifier}"] = "Stacked"
+                    # Stack model reference metrics are not needed in saved data
                     
-                    # Add average values for each variable (before any transformation)
-                    for x_var in result['feature_columns']:
+                    # Add average values for each variable (from individual combination data)
+                    variable_means = metrics.get('variable_means', {})
+                    for x_var in x_variables:
                         avg_key = f"{x_var}_avg"
-                        summary_row[avg_key] = variable_averages.get(x_var, 0)
+                        summary_row[avg_key] = variable_means.get(x_var, 0)
                     
                     # Add Y variable average
-                    y_avg_key = f"{y_variable_lower}_avg"
-                    summary_row[y_avg_key] = variable_averages.get(y_variable_lower, 0)
+                    y_avg_key = f"{y_variable}_avg"
+                    summary_row[y_avg_key] = metrics.get('y_mean', 0)
                     
-                    # Add beta coefficients for each X-variable
-                    coefficients = model_result.get('coefficients', {})
-                    for x_var in result['feature_columns']:
+                    # Add beta coefficients for each X-variable (flattened)
+                    coefficients = metrics.get('betas', {}).get('coefficients', {})
+                    for x_var in x_variables:
                         beta_key = f"{x_var}_beta"
-                        summary_row[beta_key] = coefficients.get(f"Beta_{x_var}", 0)
+                        summary_row[beta_key] = coefficients.get(x_var, 0)
                     
-                    # Add elasticity values for each X-variable
-                    elasticities = model_result.get('elasticities', {})
-                    for x_var in result['feature_columns']:
+                    # Add elasticity values for each X-variable (flattened)
+                    elasticities = metrics.get('elasticities', {})
+                    for x_var in x_variables:
                         elasticity_key = f"{x_var}_elasticity"
                         summary_row[elasticity_key] = elasticities.get(x_var, 0)
                     
-                    # Add contribution values for each X-variable
-                    contributions = model_result.get('contributions', {})
-                    for x_var in result['feature_columns']:
+                    # Add contribution values for each X-variable (flattened)
+                    contributions = metrics.get('contributions', {})
+                    for x_var in x_variables:
                         contribution_key = f"{x_var}_contribution"
                         summary_row[contribution_key] = contributions.get(x_var, 0)
-                    
+                          
                     summary_data.append(summary_row)
             
-            if summary_data:
-                # Convert to DataFrame and save as Arrow file
-                summary_df = pd.DataFrame(summary_data)
-                
-                arrow_buffer = BytesIO()
-                table = pa.Table.from_pandas(summary_df)
-                feather.write_feather(table, arrow_buffer)
-                arrow_buffer.seek(0)
-                
-                # Save to MinIO
-                try:
-                    minio_client.put_object(
-                        bucket_name,
-                        model_results_file_key,
-                        arrow_buffer,
-                        length=arrow_buffer.getbuffer().nbytes,
-                        content_type='application/vnd.apache.arrow.file'
+            if not summary_data:
+                logger.warning("No valid individual combination metrics to save")
+                return
+            
+            # Create DataFrame
+            summary_df = pd.DataFrame(summary_data)
+            
+            # Create file key for MinIO
+            file_key = f"stack-modeling/individual-combination-metrics/{run_id}/individual_combination_metrics_{timestamp}.arrow"
+            
+            # Convert to Arrow format
+            arrow_buffer = BytesIO()
+            table = pa.Table.from_pandas(summary_df)
+            feather.write_feather(table, arrow_buffer)
+            arrow_buffer.seek(0)
+            
+            # Save to MinIO
+            minio_client.put_object(
+                bucket_name,
+                file_key,
+                arrow_buffer,
+                length=arrow_buffer.getbuffer().nbytes,
+                content_type='application/vnd.apache.arrow.file'
+            )
+            
+            logger.info(f"Individual combination metrics saved to MinIO: {file_key}")
+            logger.info(f"Saved {len(summary_data)} individual combination metric records")
+            
+        except Exception as e:
+            logger.error(f"Error saving individual combination metrics to MinIO: {e}")
+            raise
+    
+    async def get_combination_betas(
+        self,
+        scope_number: str,
+        combinations: List[str],
+        pool_by_identifiers: List[str],
+        x_variables: List[str],
+        y_variable: str,
+        minio_client,
+        bucket_name: str,
+        # Clustering parameters
+        apply_clustering: bool = False,
+        numerical_columns_for_clustering: List[str] = None,
+        n_clusters: Optional[int] = None,
+        # Interaction terms parameters
+        apply_interaction_terms: bool = True,
+        numerical_columns_for_interaction: List[str] = None,
+        # Model training parameters
+        standardization: str = 'none',
+        k_folds: int = 5,
+        models_to_run: Optional[List[str]] = None,
+        custom_configs: Optional[Dict[str, Any]] = None,
+        price_column: Optional[str] = None,
+        run_id: str = None
+    ) -> Dict[str, Any]:
+        """
+        Get combination betas using pooled regression approach.
+        This method trains models and returns only the final betas for each combination.
+        """
+        try:
+            
+            # First, train the models using the existing method
+            training_result = await self.train_models_for_stacked_data(
+                scope_number=scope_number,
+                combinations=combinations,
+                pool_by_identifiers=pool_by_identifiers,
+                x_variables=x_variables,
+                y_variable=y_variable,
+                minio_client=minio_client,
+                bucket_name=bucket_name,
+                apply_clustering=apply_clustering,
+                numerical_columns_for_clustering=numerical_columns_for_clustering,
+                n_clusters=n_clusters,
+                apply_interaction_terms=apply_interaction_terms,
+                numerical_columns_for_interaction=numerical_columns_for_interaction,
+                standardization=standardization,
+                k_folds=k_folds,
+                models_to_run=models_to_run,
+                custom_configs=custom_configs,
+                price_column=price_column,
+                run_id=run_id
+            )
+            
+            # Extract model results from training
+            combination_betas_list = []
+            all_combinations = set()
+            
+            for stack_result in training_result.stack_model_results:
+                for model_result in stack_result.model_results:
+                    model_betas = self.calculate_combination_betas(
+                        model_results=[model_result.dict()],
+                        combinations=combinations,
+                        x_variables=x_variables,
+                        numerical_columns_for_interaction=numerical_columns_for_interaction
                     )
                     
-                    logger.info(f"Stacked model results saved to MinIO: {model_results_file_key}")
-                    return model_results_file_key
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to save stacked model results to MinIO: {e}")
-                    return None
-            else:
-                logger.warning("No summary data to save to MinIO")
-                return None
-                    
+                    for combination_key, betas in model_betas.items():
+                        model_name = combination_key.split('_', 1)[0]  
+                        combination = combination_key.split('_', 1)[1] if '_' in combination_key else combination_key
+                        
+                        # Remove intercept from coefficients
+                        coefficients = {k: v for k, v in betas.items() if k != 'intercept'}
+                        
+                        combination_beta = {
+                            'combination': combination,
+                            'model_name': model_name,
+                            'intercept': betas.get('intercept', 0.0),
+                            'coefficients': coefficients
+                        }
+                        
+                        combination_betas_list.append(combination_beta)
+                        all_combinations.add(combination)
+            
+            # Prepare response
+            from .schemas import CombinationBetasResponse
+            response = CombinationBetasResponse(
+                scope_id=f"scope_{scope_number}",
+                set_name=f"Scope_{scope_number}",
+                x_variables=x_variables,
+                y_variable=y_variable,
+                standardization=standardization,
+                k_folds=k_folds,
+                total_combinations=len(all_combinations),
+                combination_betas=combination_betas_list,
+                summary={
+                    "run_id": run_id,
+                    "total_combinations": len(all_combinations),
+                    "total_combination_betas": len(combination_betas_list),
+                    "clustering_applied": apply_clustering,
+                    "interaction_terms_applied": apply_interaction_terms and apply_clustering,
+                    "models_used": models_to_run or ["All available models"]
+                }
+            )
+            
+            return response
+            
         except Exception as e:
-            logger.warning(f"Failed to prepare stacked model results for MinIO: {e}")
-            return None
+            logger.error(f"Error in combination betas calculation: {str(e)}")
+            raise

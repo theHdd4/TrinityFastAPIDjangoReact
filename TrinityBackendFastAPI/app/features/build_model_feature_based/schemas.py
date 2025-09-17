@@ -135,6 +135,20 @@ class ModelResult(BaseModel):
     contribution_details: Optional[Dict[str, Any]] = Field(None, description="Details about contribution calculation")
 
 
+class StackModelResult(BaseModel):
+    """Simplified result for a single model in stack modeling (beta coefficients only)."""
+    model_name: str
+    mape_train: float
+    mape_test: float
+    r2_train: float
+    r2_test: float
+    coefficients: Dict[str, float] = Field(..., description="Beta coefficients")
+    intercept: float = Field(..., description="Model intercept")
+    aic: float = Field(..., description="Akaike Information Criterion")
+    bic: float = Field(..., description="Bayesian Information Criterion")
+    n_parameters: int = Field(..., description="Number of model parameters including intercept")
+
+
 class CombinationModelResults(BaseModel):
     """Results for all models on a single combination."""
     combination_id: str
@@ -144,6 +158,13 @@ class CombinationModelResults(BaseModel):
     file_key: str
     total_records: int
     model_results: List[ModelResult]
+
+class StackModelResults(BaseModel):
+    """Results for all models on a single split cluster."""
+    split_clustered_data_id: str
+    file_key: str
+    total_records: int
+    model_results: List[StackModelResult]
 
 class ModelTrainingResponse(BaseModel):
     """Response from model training endpoint."""
@@ -155,6 +176,39 @@ class ModelTrainingResponse(BaseModel):
     k_folds: int
     total_combinations: int
     combination_results: List[CombinationModelResults]
+    summary: Dict[str, Any]
+
+class StackModelTrainingResponse(BaseModel):
+    """Response from stack model training endpoint."""
+    scope_id: str
+    set_name: str
+    x_variables: List[str]
+    y_variable: str
+    standardization: str
+    k_folds: int
+    total_split_clusters: int
+    stack_model_results: List[StackModelResults]
+    summary: Dict[str, Any]
+
+
+class CombinationBetaResult(BaseModel):
+    """Beta coefficients for a single combination."""
+    combination: str
+    model_name: str
+    intercept: float
+    coefficients: Dict[str, float] = Field(..., description="Final beta coefficients for each variable")
+
+
+class CombinationBetasResponse(BaseModel):
+    """Response from combination betas endpoint."""
+    scope_id: str
+    set_name: str
+    x_variables: List[str]
+    y_variable: str
+    standardization: str
+    k_folds: int
+    total_combinations: int
+    combination_betas: List[CombinationBetaResult]
     summary: Dict[str, Any]
 
 

@@ -49,7 +49,9 @@ from .schemas import (
     ModelTrainingResponse,
     ModelTrainingRequest,
     CombinationModelResults,
-    ModelResult
+    ModelResult,
+    StackModelTrainingResponse,
+    CombinationBetasResponse
 )
 
 
@@ -2410,9 +2412,7 @@ async def prepare_stack_model_data(request: dict):
     based on user-specified identifiers.
     """
     try:
-        logger.info("Starting stack model data preparation")
-        logger.info(f"Request: {request}")
-        
+
         # Extract parameters from request
         scope_number = request.get('scope_number')
         combinations = request.get('combinations', [])
@@ -2539,7 +2539,7 @@ async def prepare_stack_model_data(request: dict):
         logger.error(f"Error in stack model data preparation: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@router.post("/stack-model/train-models", tags=["Stack Modeling"])
+@router.post("/stack-model/train-models", response_model=StackModelTrainingResponse, tags=["Stack Modeling"])
 async def train_models_for_stacked_data(request: dict):
     """
     Train models on stacked/clustered data using the same models as individual combinations.
@@ -2643,8 +2643,8 @@ async def train_models_for_stacked_data(request: dict):
         )
         
         # Check if training was successful
-        if result.get('status') == 'error':
-            raise HTTPException(status_code=500, detail=result.get('error', 'Unknown error'))
+        if hasattr(result, 'summary') and result.summary.get('status') == 'error':
+            raise HTTPException(status_code=500, detail=result.summary.get('error', 'Unknown error'))
         
         logger.info("Stack model training completed successfully")
         return result
@@ -2653,5 +2653,215 @@ async def train_models_for_stacked_data(request: dict):
         raise
     except Exception as e:
         logger.error(f"Error in stack model training: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.post("/stack-model/combination-betas", response_model=CombinationBetasResponse, tags=["Stack Modeling"])
+async def get_combination_betas(request: dict):
+    """
+    Get final beta coefficients for each combination using pooled regression approach.
+    This endpoint trains models and returns only the final betas (common + individual) for each combination.
+    """
+    try:
+        logger.info("Starting combination betas calculation")
+        logger.info(f"Request: {request}")
+        
+        # Extract parameters from request
+        scope_number = request.get('scope_number')
+        combinations = request.get('combinations', [])
+        pool_by_identifiers = request.get('pool_by_identifiers', [])
+        x_variables = request.get('x_variables', [])
+        y_variable = request.get('y_variable')
+        
+        # Clustering parameters (optional)
+        apply_clustering = request.get('apply_clustering', False)
+        numerical_columns_for_clustering = request.get('numerical_columns_for_clustering', [])
+        n_clusters = request.get('n_clusters', None)
+        
+        # Interaction terms parameters (optional)
+        apply_interaction_terms = request.get('apply_interaction_terms', True)
+        numerical_columns_for_interaction = request.get('numerical_columns_for_interaction', [])
+        
+        # Model training parameters
+        standardization = request.get('standardization', 'none')
+        k_folds = request.get('k_folds', 5)
+        models_to_run = request.get('models_to_run', None)
+        custom_configs = request.get('custom_model_configs', None)
+        price_column = request.get('price_column', None)
+        
+        # Generate unique run ID
+        run_id = request.get('run_id') or str(uuid.uuid4())
+        
+        # Validate required parameters
+        if not scope_number:
+            raise HTTPException(status_code=400, detail="scope_number is required")
+        if not combinations:
+            raise HTTPException(status_code=400, detail="combinations list is required")
+        if not pool_by_identifiers:
+            raise HTTPException(status_code=400, detail="pool_by_identifiers list is required")
+        if not x_variables:
+            raise HTTPException(status_code=400, detail="x_variables list is required")
+        if not y_variable:
+            raise HTTPException(status_code=400, detail="y_variable is required")
+        
+        # Validate clustering parameters if clustering is requested
+        if apply_clustering and not numerical_columns_for_clustering:
+            raise HTTPException(
+                status_code=400, 
+                detail="numerical_columns_for_clustering is required when apply_clustering is True"
+            )
+        
+        # Validate interaction terms parameters if interaction terms are requested
+        if apply_interaction_terms and not numerical_columns_for_interaction:
+            raise HTTPException(
+                status_code=400, 
+                detail="numerical_columns_for_interaction is required when apply_interaction_terms is True"
+            )
+        
+        # Get MinIO client
+        minio_client = get_minio_client()
+        
+        # Dynamically get the bucket and prefix structure
+        try:
+            from ..scope_selector.config import get_settings
+            scope_settings = get_settings()
+            bucket_name = scope_settings.minio_bucket
+            object_prefix = await get_object_prefix()
+        except Exception as e:
+            bucket_name = "Quant_Matrix_AI_Schema"
+            object_prefix = "blank/blank project/"
+        
+        # Initialize trainer
+        trainer = StackModelTrainer()
+        
+        # Get combination betas using the dedicated trainer class
+        result = await trainer.get_combination_betas(
+            scope_number=scope_number,
+            combinations=combinations,
+            pool_by_identifiers=pool_by_identifiers,
+            x_variables=x_variables,
+            y_variable=y_variable,
+            minio_client=minio_client,
+            bucket_name=bucket_name,
+            apply_clustering=apply_clustering,
+            numerical_columns_for_clustering=numerical_columns_for_clustering,
+            n_clusters=n_clusters,
+            apply_interaction_terms=apply_interaction_terms,
+            numerical_columns_for_interaction=numerical_columns_for_interaction,
+            standardization=standardization,
+            k_folds=k_folds,
+            models_to_run=models_to_run,
+            custom_configs=custom_configs,
+            price_column=price_column,
+            run_id=run_id
+        )
+        
+        # Check if calculation was successful
+        if hasattr(result, 'summary') and result.summary.get('status') == 'error':
+            raise HTTPException(status_code=500, detail=result.summary.get('error', 'Unknown error'))
+        
+        logger.info("Combination betas calculation completed successfully")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in combination betas calculation: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.post("/stack-model/individual-combination-metrics", tags=["Stack Modeling"])
+async def calculate_individual_combination_metrics(request: dict):
+    """
+    Calculate MAPE, AIC, and BIC for individual combinations using betas from stack modeling.
+    
+    This endpoint:
+    1. Trains stack models to get betas
+    2. Applies those betas to individual combination data
+    3. Calculates predictions and metrics for each combination
+    4. Uses stack modeling MAPE as train MAPE, individual combination MAPE as test MAPE
+    """
+    try:  
+        # Extract parameters from request
+        scope_number = request.get('scope_number')
+        combinations = request.get('combinations', [])
+        pool_by_identifiers = request.get('pool_by_identifiers', [])
+        x_variables = request.get('x_variables', [])
+        y_variable = request.get('y_variable')
+        
+        # Clustering parameters (optional)
+        apply_clustering = request.get('apply_clustering', False)
+        numerical_columns_for_clustering = request.get('numerical_columns_for_clustering', [])
+        n_clusters = request.get('n_clusters', None)
+        
+        # Interaction terms parameters (optional)
+        apply_interaction_terms = request.get('apply_interaction_terms', True)
+        numerical_columns_for_interaction = request.get('numerical_columns_for_interaction', [])
+        
+        # Model training parameters
+        standardization = request.get('standardization', 'none')
+        k_folds = request.get('k_folds', 5)
+        models_to_run = request.get('models_to_run', None)
+        custom_configs = request.get('custom_model_configs', None)
+        price_column = request.get('price_column', None)
+        
+        # Generate unique run ID
+        run_id = request.get('run_id') or str(uuid.uuid4())
+        
+        # Validate required parameters
+        if not scope_number:
+            raise HTTPException(status_code=400, detail="scope_number is required")
+        if not combinations:
+            raise HTTPException(status_code=400, detail="combinations list is required")
+        if not pool_by_identifiers:
+            raise HTTPException(status_code=400, detail="pool_by_identifiers list is required")
+        if not x_variables:
+            raise HTTPException(status_code=400, detail="x_variables list is required")
+        if not y_variable:
+            raise HTTPException(status_code=400, detail="y_variable is required")
+        
+        # Get MinIO client and bucket name
+        from ..scope_selector.deps import get_minio_client
+        from ..scope_selector.config import get_settings
+        minio_client = get_minio_client()
+        scope_settings = get_settings()
+        bucket_name = scope_settings.minio_bucket
+        
+        # Initialize trainer
+        trainer = StackModelTrainer()
+        
+        # Calculate individual combination metrics
+        result = await trainer.calculate_individual_combination_metrics(
+            scope_number=scope_number,
+            combinations=combinations,
+            pool_by_identifiers=pool_by_identifiers,
+            x_variables=x_variables,
+            y_variable=y_variable,
+            minio_client=minio_client,
+            bucket_name=bucket_name,
+            apply_clustering=apply_clustering,
+            numerical_columns_for_clustering=numerical_columns_for_clustering,
+            n_clusters=n_clusters,
+            apply_interaction_terms=apply_interaction_terms,
+            numerical_columns_for_interaction=numerical_columns_for_interaction,
+            standardization=standardization,
+            k_folds=k_folds,
+            models_to_run=models_to_run,
+            custom_configs=custom_configs,
+            price_column=price_column,
+            run_id=run_id
+        )
+        
+        # Check if calculation was successful
+        if result.get('status') == 'error':
+            raise HTTPException(status_code=500, detail=result.get('error', 'Unknown error'))
+        
+        logger.info("Individual combination metrics calculation completed successfully")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in individual combination metrics calculation: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 

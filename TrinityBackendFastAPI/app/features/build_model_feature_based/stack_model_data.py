@@ -42,17 +42,7 @@ class CombinationParser:
     
     @staticmethod
     def get_identifier_values(combinations: List[str], identifier: str, identifier_names: List[str]) -> List[str]:
-        """
-        Get all unique values for a specific identifier across combinations.
-        
-        Args:
-            combinations: List of combination strings
-            identifier: Identifier name (e.g., 'Channel', 'Brand')
-            identifier_names: List of all identifier names in order
-            
-        Returns:
-            List of unique values for the identifier
-        """
+
         values = set()
         
         for combination in combinations:
@@ -61,6 +51,22 @@ class CombinationParser:
                 values.add(parsed[identifier])
         
         return sorted(list(values))
+    
+    @staticmethod
+    def get_available_identifiers(combinations: List[str]) -> List[str]:
+
+        if not combinations:
+            return []
+        
+        # Use the first combination to determine identifier names
+        # This assumes all combinations have the same structure
+        first_combination = combinations[0]
+        identifier_count = len(first_combination.split('_'))
+        
+        # Generate generic identifier names
+        identifier_names = [f"identifier_{i+1}" for i in range(identifier_count)]
+        
+        return identifier_names
 
 
 class DataPooler:
@@ -71,15 +77,7 @@ class DataPooler:
         self.bucket_name = bucket_name
     
     def read_combination_file(self, file_key: str) -> Optional[pd.DataFrame]:
-        """
-        Read a single combination file from MinIO.
-        
-        Args:
-            file_key: MinIO file key
-            
-        Returns:
-            DataFrame or None if error
-        """
+
         try:
             response = self.minio_client.get_object(self.bucket_name, file_key)
             file_data = response.read()
@@ -109,16 +107,6 @@ class DataPooler:
             return None
     
     def find_combination_files(self, scope_number: str, combinations: List[str]) -> Dict[str, str]:
-        """
-        Find MinIO file keys for given combinations.
-        
-        Args:
-            scope_number: Scope number (e.g., "3")
-            combinations: List of combination strings
-            
-        Returns:
-            Dictionary mapping combination strings to file keys
-        """
         combination_files = {}
         
         try:
@@ -160,8 +148,9 @@ class DataPooler:
         
         Process:
         1. First fetch all the files (using the same method as train-models-direct)
-        2. Merge all the data from those files
-        3. Filter the merged data using pool-identifiers selection
+        2. Add combination column to each DataFrame before merging
+        3. Merge all the data from those files
+        4. Filter the merged data using pool-identifiers selection
         
         Args:
             scope_number: Scope number
@@ -171,7 +160,7 @@ class DataPooler:
             y_variable: Target variable
             
         Returns:
-            Dictionary mapping pool keys to pooled DataFrames
+            Dictionary mapping pool keys to pooled DataFrames (with combination column)
         """
         try:
             
@@ -206,10 +195,25 @@ class DataPooler:
             if not all_dataframes:
                 raise ValueError("No valid data found for any combination")
             
-            # Step 2: Merge all the data from those files
+            # Step 2: Add combination column to each DataFrame before merging
+            for i, (df, combo_info) in enumerate(zip(all_dataframes, combination_info)):
+                df['combination'] = combo_info['combination']
+            
+            # Step 3: Merge all the data from those files
             merged_df = pd.concat(all_dataframes, ignore_index=True)
             
-            # Step 3: Filter the merged data using pool-identifiers selection
+            # Print unique values for pool_by_identifiers after merging
+            print(f"\n🔍 MERGED DATA - Unique values for pool_by_identifiers:")
+            for identifier in pool_by_identifiers:
+                if identifier in merged_df.columns:
+                    unique_values = merged_df[identifier].unique()
+                    print(f"  {identifier}: {unique_values.tolist()}")
+                else:
+                    print(f"  {identifier}: Column not found in merged data")
+            print(f"Total merged records: {len(merged_df)}")
+            print(f"Available columns: {list(merged_df.columns)}")
+            
+            # Step 4: Filter the merged data using pool-identifiers selection
             pooled_data = self._filter_by_pool_identifiers(
                 merged_df, combinations, pool_by_identifiers
             )
@@ -265,15 +269,10 @@ class DataPooler:
         merged_df: pd.DataFrame, 
         combinations: List[str], 
         pool_by_identifiers: List[str]
+   
     ) -> Dict[str, pd.DataFrame]:
-        """
-        Filter the merged data using pool-identifiers selection.
-        
-        Since combination names are just values (e.g., "Convenience_Small_Multi_HEINZ_Standard"),
-        we use the user-provided pool_by_identifiers to find unique values and filter accordingly.
-        """
+ 
         try:
-            
             # Step 1: Get unique values for each identifier from the merged data
             identifier_values = {}
             for identifier in pool_by_identifiers:
@@ -283,20 +282,12 @@ class DataPooler:
                 else:
                     logger.warning(f"Identifier column '{identifier}' not found in merged data")
                     identifier_values[identifier] = []
-            
-            # Step 2: Create pool groups based on unique combinations of identifier values
+
             pool_groups = {}
-            
-            # Generate all possible combinations of identifier values
             import itertools
-            
-            # Get all value combinations for the pool identifiers
             value_combinations = list(itertools.product(*[identifier_values[identifier] for identifier in pool_by_identifiers]))
-            
-            
-            # Create pool groups
+
             for value_combo in value_combinations:
-                # Create pool key from the value combination
                 pool_key_parts = []
                 for i, identifier in enumerate(pool_by_identifiers):
                     value = value_combo[i]
@@ -304,8 +295,6 @@ class DataPooler:
                     pool_key_parts.append(f"{identifier}_{clean_value}")
                 
                 pool_key = "_".join(pool_key_parts)
-                
-                # Find which combinations from the input list match this pool
                 matching_combinations = []
                 for combination in combinations:
                     # Check if this combination's values match the pool values
@@ -317,12 +306,9 @@ class DataPooler:
                         'values': value_combo,
                         'combinations': matching_combinations
                     }
-            
-            
-            # Step 3: Filter the merged data for each pool
+
             pooled_data = {}
             for pool_key, pool_info in pool_groups.items():
-                # Create filter conditions for this pool
                 filter_conditions = []
                 
                 for i, identifier in enumerate(pool_by_identifiers):
@@ -342,9 +328,6 @@ class DataPooler:
                     filtered_df = merged_df[final_condition].copy()
                     
                     if len(filtered_df) > 0:
-                        # Add pool metadata
-                        filtered_df['pool_key'] = pool_key
-                        filtered_df['pool_combinations'] = ', '.join(pool_info['combinations'])
                         pooled_data[pool_key] = filtered_df
                     else:
                         logger.warning(f"⚠️ Pool {pool_key}: No records found after filtering")
@@ -358,22 +341,25 @@ class DataPooler:
             raise
     
     def _combination_matches_pool_values(self, combination: str, pool_by_identifiers: List[str], pool_values: tuple) -> bool:
-        """
-        Check if a combination string matches the pool values.
-        
-        Since combination names are just values (e.g., "Convenience_Small_Multi_HEINZ_Standard"),
-        we need to check if the combination contains the pool values in the right order.
-        """
+
         try:
-            # Split the combination by underscores to get individual values
-            combination_parts = combination.split('_')           
             pool_value_strings = [str(value) for value in pool_values]
             
-            # Check if all pool values are present in the combination
+            # Debug logging
+            print(f"🔍 MATCHING DEBUG:")
+            print(f"  Combination: '{combination}'")
+            print(f"  Pool values: {pool_value_strings}")
+            print(f"  Pool identifiers: {pool_by_identifiers}")
+ 
             for pool_value in pool_value_strings:
-                if pool_value not in combination_parts:
+                pool_value_with_underscores = pool_value.replace(" ", "_")
+                if pool_value_with_underscores in combination:
+                    print(f"  ✅ '{pool_value}' (as '{pool_value_with_underscores}') found in combination")
+                else:
+                    print(f"  ❌ '{pool_value}' (as '{pool_value_with_underscores}') not found in combination")
                     return False
             
+            print(f"  ✅ All pool values matched!")
             return True
             
         except Exception as e:
@@ -381,30 +367,16 @@ class DataPooler:
             return False
     
     def _filter_combination_data(self, df: pd.DataFrame, filtered_identifiers: List[str], x_variables: List[str], y_variable: str) -> pd.DataFrame:
-        """
-        Filter DataFrame to only include identifiers, x_variables, and y_variable columns.
-        
-        Args:
-            df: Input DataFrame
-            filtered_identifiers: List of identifier column names (excluding date-related ones)
-            x_variables: List of feature variable column names
-            y_variable: Target variable column name
-            
-        Returns:
-            Filtered DataFrame with only required columns
-        """
+
         try:
-            # Get all required columns
             required_columns = filtered_identifiers + x_variables + [y_variable]
             
-            # Filter to only include columns that exist in the DataFrame
             available_columns = [col for col in required_columns if col in df.columns]
             missing_columns = [col for col in required_columns if col not in df.columns]
             
             if missing_columns:
                 logger.warning(f"Missing columns in data: {missing_columns}")
             
-            # Create filtered DataFrame
             filtered_df = df[available_columns].copy()
             
             
@@ -532,23 +504,144 @@ class DataPooler:
     def apply_clustering_to_pools(self, pooled_data: Dict[str, pd.DataFrame], numerical_columns: List[str], n_clusters: Optional[int] = None) -> Dict[str, pd.DataFrame]:
 
         try:
-            
             clustered_pools = {}
             
             for pool_key, pool_df in pooled_data.items():
                 
-                # Apply clustering to this pool
-                clustered_df = self.perform_kmeans_clustering(pool_df, numerical_columns, n_clusters)
+                if 'combination' not in pool_df.columns:
+                    logger.warning(f"No 'combination' column found in {pool_key}, skipping clustering")
+                    clustered_pools[pool_key] = pool_df
+                    continue
+
+                combination_aggregated = self._aggregate_combinations_for_clustering(pool_df, numerical_columns)
+                
+                if combination_aggregated is None or len(combination_aggregated) == 0:
+                    logger.warning(f"No valid aggregated data for clustering in {pool_key}")
+                    clustered_pools[pool_key] = pool_df
+                    continue
+
+                combination_clusters = self._cluster_combinations(combination_aggregated, numerical_columns, n_clusters)
+
+                clustered_df = self._merge_cluster_id_to_pool_data(pool_df, combination_clusters)
                 clustered_pools[pool_key] = clustered_df
                 
-                # Log cluster distribution for this pool
                 cluster_counts = clustered_df['cluster_id'].value_counts().to_dict()
             
             return clustered_pools
             
         except Exception as e:
             logger.error(f"Error applying clustering to pools: {e}")
-            return pooled_data  # Return original data if clustering fails
+            return pooled_data 
+    
+    def _aggregate_combinations_for_clustering(self, pool_df: pd.DataFrame, numerical_columns: List[str]) -> Optional[pd.DataFrame]:
+        """
+        Group by combination and aggregate numerical columns for clustering.
+        Returns DataFrame with combination and aggregated numerical values.
+        """
+        try:
+            # Check if all required columns exist
+            required_columns = ['combination'] + numerical_columns
+            missing_columns = [col for col in required_columns if col not in pool_df.columns]
+            
+            if missing_columns:
+                logger.warning(f"Missing columns for aggregation: {missing_columns}")
+                return None
+            
+            # Group by combination and aggregate numerical columns
+            aggregation_dict = {}
+            for col in numerical_columns:
+                aggregation_dict[col] = 'mean'  # Use mean for aggregation
+            
+            aggregated_df = pool_df.groupby('combination').agg(aggregation_dict).reset_index()
+            
+            return aggregated_df
+            
+        except Exception as e:
+            logger.error(f"Error aggregating combinations for clustering: {e}")
+            return None
+    
+    def _cluster_combinations(self, aggregated_df: pd.DataFrame, numerical_columns: List[str], n_clusters: Optional[int] = None) -> Dict[str, int]:
+
+        try:
+  
+            clustering_data = aggregated_df[numerical_columns].copy()
+            clustering_data = clustering_data.dropna()
+            if len(clustering_data) == 0:
+                logger.warning("No valid data for clustering after removing NaN values")
+                return {}
+            
+            valid_combinations = aggregated_df.loc[clustering_data.index, 'combination'].tolist()
+            
+            scaler = StandardScaler()
+            scaled_data = scaler.fit_transform(clustering_data)
+            
+            if n_clusters is None:
+                n_clusters = self.find_optimal_clusters_elbow(clustering_data)
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            cluster_labels = kmeans.fit_predict(scaled_data)
+            
+            combination_clusters = {}
+            for i, combination in enumerate(valid_combinations):
+                combination_clusters[combination] = int(cluster_labels[i])
+            
+            
+            unique_combinations = set(valid_combinations)
+            if len(unique_combinations) != len(valid_combinations):
+                logger.warning(f"Found duplicate combinations! Unique: {len(unique_combinations)}, Total: {len(valid_combinations)}")
+                from collections import Counter
+                combo_counts = Counter(valid_combinations)
+                duplicates = {combo: count for combo, count in combo_counts.items() if count > 1}
+                logger.warning(f"Duplicate combinations: {duplicates}")
+            
+            return combination_clusters
+            
+        except Exception as e:
+            logger.error(f"Error clustering combinations: {e}")
+            return {}
+    
+    def _merge_cluster_id_to_pool_data(self, pool_df: pd.DataFrame, combination_clusters: Dict[str, int]) -> pd.DataFrame:
+        """
+        Merge cluster_id back to the original pool data based on combination using pandas merge.
+        """
+        try:
+            # Create a DataFrame from the combination_clusters dictionary
+            cluster_mapping_df = pd.DataFrame([
+                {'combination': combination, 'cluster_id': cluster_id}
+                for combination, cluster_id in combination_clusters.items()
+            ])
+            
+            # Debug: Log the cluster mapping before merge
+            
+            # Merge with the original pool data
+            result_df = pool_df.merge(
+                cluster_mapping_df, 
+                on='combination', 
+                how='left'
+            )
+            
+            # Fill NaN values with -1 for combinations not found in clustering
+            result_df['cluster_id'] = result_df['cluster_id'].fillna(-1).astype(int)
+            
+            # Debug: Check the final cluster assignments
+            cluster_assignments = result_df.groupby('combination')['cluster_id'].unique()
+            
+            # Check for combinations with multiple cluster_ids
+            multiple_clusters = cluster_assignments[cluster_assignments.apply(len) > 1]
+            if len(multiple_clusters) > 0:
+                logger.error(f"ERROR: Combinations with multiple cluster_ids: {multiple_clusters.to_dict()}")
+            
+            # Check for unmapped combinations
+            unmapped_count = (result_df['cluster_id'] == -1).sum()
+            if unmapped_count > 0:
+                error_msg = f"{unmapped_count} records have unmapped combinations - this indicates a clustering error"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            return result_df
+            
+        except Exception as e:
+            logger.error(f"Error merging cluster_id to pool data: {e}")
+            return pool_df
     
     def get_pool_summary(self, pooled_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
 
@@ -564,7 +657,7 @@ class DataPooler:
             }           
             # Add identifier value counts
             for col in df.columns:
-                if col.startswith('pool_') and col != 'pool_combination' and col != 'pool_key' and col != 'pool_size':
+                if col.startswith('pool_') and col != 'pool_combination' and col != 'pool_size':
                     identifier = col.replace('pool_', '')
                     # Convert numpy types to Python types for JSON serialization
                     unique_values = df[col].unique().tolist()
@@ -576,9 +669,13 @@ class DataPooler:
         
         return summary
     
-    def split_clustered_data_by_clusters(self, clustered_pools: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+    def split_clustered_data_by_clusters(self, clustered_pools: Dict[str, pd.DataFrame], minio_client=None, bucket_name=None) -> Dict[str, pd.DataFrame]:
 
+        from io import BytesIO
+        from datetime import datetime
+        
         split_data = {}
+        saved_files = {}  # Track saved file paths
         
         for pool_key, df in clustered_pools.items():
             if 'cluster_id' not in df.columns:
@@ -592,14 +689,50 @@ class DataPooler:
                 # Filter data for this specific cluster
                 cluster_df = df[df['cluster_id'] == cluster_id].copy()
                 
+                # Create unique key: pool_key_cluster_id
+                unique_key = f"{pool_key}_{int(cluster_id)}"
+                
+                # Save to MinIO if client is provided
+                if minio_client and bucket_name:
+                    try:
+                        # Generate timestamp for file naming
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        
+                        # Create filename
+                        filename = f"split_cluster_{unique_key}_{timestamp}.csv"
+                        
+                        # Create file path (you may want to adjust this path structure)
+                        file_key = f"stack_modeling/split_clusters/{filename}"
+                        
+                        # Convert DataFrame to CSV
+                        csv_buffer = BytesIO()
+                        cluster_df.to_csv(csv_buffer, index=False)
+                        csv_buffer.seek(0)
+                        
+                        # Save to MinIO
+                        minio_client.put_object(
+                            bucket_name,
+                            file_key,
+                            csv_buffer,
+                            length=csv_buffer.getbuffer().nbytes,
+                            content_type='text/csv'
+                        )
+                        
+                        saved_files[unique_key] = file_key
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to save split cluster {unique_key} to MinIO: {e}")
+                        saved_files[unique_key] = None
+                
                 # Remove cluster_id column as it's no longer needed
                 if 'cluster_id' in cluster_df.columns:
                     cluster_df = cluster_df.drop('cluster_id', axis=1)
                 
-                # Create unique key: pool_key_cluster_id
-                unique_key = f"{pool_key}_{int(cluster_id)}"
                 split_data[unique_key] = cluster_df
-                
+        
+        # Log summary of saved files
+        if saved_files:
+            successful_saves = [k for k, v in saved_files.items() if v is not None]
         
         return split_data
     
@@ -608,85 +741,65 @@ class DataPooler:
                                 identifiers: List[str], 
                                 numerical_columns_for_interaction: List[str],
                                 column_classifier_identifiers: List[str] = None) -> Dict[str, pd.DataFrame]:
-
+        """
+        Create interaction terms by encoding combinations and interacting with numerical columns.
+        
+        Process:
+        1. One-hot encode the 'combination' column (not individual identifiers)
+        2. Create interaction terms between encoded combinations and numerical columns
+        
+        Args:
+            pooled_data: Dictionary of DataFrames with combination column
+            identifiers: Not used (kept for compatibility)
+            numerical_columns_for_interaction: List of numerical columns to create interactions with
+            column_classifier_identifiers: Not used (kept for compatibility)
+            
+        Returns:
+            Dictionary of enhanced DataFrames with interaction terms
+        """
         enhanced_pools = {}
         
-        print(f"DEBUG: create_interaction_terms called with {len(pooled_data)} pools")
-        print(f"DEBUG: Identifiers: {identifiers}")
-        print(f"DEBUG: Numerical columns: {numerical_columns_for_interaction}")
         
         for pool_key, df in pooled_data.items():
-            print(f"DEBUG: Processing pool {pool_key} with columns: {df.columns.tolist()}")
             # Make a copy to avoid modifying original data
             enhanced_df = df.copy()
             
-            # Auto-detect identifiers if not provided
-            if identifiers is None:
-                # Use column classifier identifiers if provided
-                if column_classifier_identifiers:
-                    # Filter out date-related identifiers
-                    date_related_identifiers = ['date', 'year', 'week', 'month']
-                    categorical_identifiers = [id for id in column_classifier_identifiers if id not in date_related_identifiers]
-                else:
-                    # Fallback: get all non-numerical, non-metadata columns
-                    categorical_identifiers = []
-                
-                # Get all columns from the dataframe
-                all_columns = df.columns.tolist()
-                metadata_columns = ['pool_key', 'pool_combinations', 'cluster_id']
-                
-                # Filter to only include columns that are in both the dataframe and the column classifier identifiers
-                potential_identifiers = [col for col in all_columns 
-                                       if col in categorical_identifiers 
-                                       and col not in numerical_columns_for_interaction 
-                                       and col not in metadata_columns]
-                print(f"DEBUG: Column classifier identifiers: {categorical_identifiers}")
-                print(f"DEBUG: Auto-detected potential identifiers: {potential_identifiers}")
-            else:
-                potential_identifiers = identifiers
+            # Check if combination column exists and has more than 1 unique value
+            if 'combination' not in df.columns:
+                enhanced_pools[pool_key] = enhanced_df
+                continue
             
-            # Find identifiers that have more than 1 unique value
-            identifiers_to_encode = []
-            for identifier in potential_identifiers:
-                if identifier in df.columns:
-                    unique_values = df[identifier].nunique()
-                    print(f"DEBUG: Identifier {identifier} has {unique_values} unique values")
-                    if unique_values > 1:
-                        identifiers_to_encode.append(identifier)
-                        print(f"DEBUG: Added {identifier} to encode list")
-                else:
-                    print(f"DEBUG: Identifier {identifier} not found in columns")
+            combination_unique_values = df['combination'].nunique()
             
-            print(f"DEBUG: Identifiers to encode: {identifiers_to_encode}")
+            if combination_unique_values <= 1:
+                enhanced_pools[pool_key] = enhanced_df
+                continue
             
-            # One-hot encode identifiers with more than 1 unique value
-            for identifier in identifiers_to_encode:
-                # Create one-hot encoded columns with 'encoded_' prefix
-                dummies = pd.get_dummies(df[identifier], prefix=f"encoded_{identifier}", drop_first=False)
-                
-                # Add one-hot encoded columns to the dataframe
-                for dummy_col in dummies.columns:
-                    enhanced_df[dummy_col] = dummies[dummy_col]
+            # One-hot encode the combination column
+            combination_dummies = pd.get_dummies(df['combination'], prefix="encoded_combination", drop_first=False)
+            
+            # Add one-hot encoded combination columns to the dataframe
+            for dummy_col in combination_dummies.columns:
+                enhanced_df[dummy_col] = combination_dummies[dummy_col]
+            
             
             # Create interaction terms
             interaction_columns_created = []
             
-            # Get all one-hot encoded columns (now with 'encoded_' prefix)
-            one_hot_columns = [col for col in enhanced_df.columns if any(col.startswith(f"encoded_{id_col}_") for id_col in identifiers_to_encode)]
+            # Get all one-hot encoded combination columns
+            encoded_combination_columns = [col for col in enhanced_df.columns if col.startswith("encoded_combination_")]
             
-            # Create interactions between one-hot encoded identifiers and numerical columns
-            for one_hot_col in one_hot_columns:
+            # Create interactions between encoded combinations and numerical columns
+            for encoded_combination_col in encoded_combination_columns:
                 for numerical_col in numerical_columns_for_interaction:
                     if numerical_col in enhanced_df.columns:
-                        # Create interaction term: one_hot_col * numerical_col
-                        interaction_col_name = f"{one_hot_col}_x_{numerical_col}"
-                        enhanced_df[interaction_col_name] = enhanced_df[one_hot_col] * enhanced_df[numerical_col]
+                        # Create interaction term: encoded_combination_col * numerical_col
+                        interaction_col_name = f"{encoded_combination_col}_x_{numerical_col}"
+                        enhanced_df[interaction_col_name] = enhanced_df[encoded_combination_col] * enhanced_df[numerical_col]
                         interaction_columns_created.append(interaction_col_name)
             
+            
             enhanced_pools[pool_key] = enhanced_df
-            print(f"DEBUG: Final columns for {pool_key}: {enhanced_df.columns.tolist()}")
-        
-        print(f"DEBUG: Returning {len(enhanced_pools)} enhanced pools")
         return enhanced_pools
     
     async def _train_models_with_dataframe(
@@ -730,7 +843,7 @@ class DataPooler:
             scaler = MinMaxScaler()
             X = scaler.fit_transform(X)
         
-        # Initialize K-fold cross-validation
+        # Initialize K-fold cross-validation with combination-aware splitting
         kf = KFold(n_splits=k_folds, shuffle=True, random_state=42)
         
         model_results = []
@@ -744,28 +857,46 @@ class DataPooler:
             'target_std': df[y_variable].std()
         }
         
-        # Train each model
+        # Check if we have combination column for stratified splitting
+        has_combination_column = 'combination' in df.columns
+        if has_combination_column:
+            print(f"🔍 Using combination-aware splitting for {df['combination'].nunique()} unique combinations")
+            print(f"  Combinations: {df['combination'].unique().tolist()}")
+        else:
+            print(f"⚠️ No 'combination' column found, using standard K-fold splitting")
+
         for model_name, model_class in models_dict.items():
-            print(f"Training {model_name}...")
             
             fold_results = []
             fold_elasticities = []
             
-            for fold_idx, (train_idx, val_idx) in enumerate(kf.split(X)):
+            if has_combination_column:
+                # Use combination-aware splitting
+                fold_splits = self._create_combination_aware_splits(df, k_folds, random_state=42)
+            else:
+                # Use standard K-fold splitting
+                fold_splits = list(kf.split(X))
+            
+            for fold_idx, (train_idx, val_idx) in enumerate(fold_splits):
                 X_train, X_val = X[train_idx], X[val_idx]
                 y_train, y_val = y[train_idx], y[val_idx]
                 
-                # Train model (create a fresh copy for each fold)
+                # Debug: Check combination distribution in train/val sets
+                if has_combination_column:
+                    train_combinations = df.iloc[train_idx]['combination'].unique()
+                    val_combinations = df.iloc[val_idx]['combination'].unique()
+                    print(f"  Fold {fold_idx + 1}: Train combinations: {len(train_combinations)}, Val combinations: {len(val_combinations)}")
+                    print(f"    Train: {train_combinations.tolist()}")
+                    print(f"    Val: {val_combinations.tolist()}")
+                
                 model = clone(model_class)
                 if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression"]:
                     model.fit(X_train, y_train, x_variables)
                 else:
                     model.fit(X_train, y_train)
-                
-                # Make predictions
+
                 y_pred = model.predict(X_val)
                 
-                # Calculate metrics
                 mape = mean_absolute_percentage_error(y_val, y_pred)
                 r2 = r2_score(y_val, y_pred)
                 
@@ -777,16 +908,7 @@ class DataPooler:
                     'actual': y_val.tolist()
                 })
                 
-                # Calculate elasticities if price column is specified
-                if price_column and price_column in x_variables:
-                    price_idx = x_variables.index(price_column)
-                    if hasattr(model, 'coef_'):
-                        # Calculate price elasticity
-                        price_coef = model.coef_[price_idx]
-                        price_mean = df[price_column].mean()
-                        quantity_mean = df[y_variable].mean()
-                        elasticity = price_coef * (price_mean / quantity_mean)
-                        fold_elasticities.append(elasticity)
+                # Skip elasticity calculations for now
             
             # Calculate average metrics
             avg_mape = np.mean([fold['mape'] for fold in fold_results])
@@ -809,21 +931,124 @@ class DataPooler:
             aic = 2 * k - 2 * log_likelihood
             bic = k * np.log(n) - 2 * log_likelihood
             
+            # Calculate train metrics (using full dataset)
+            y_pred_train = final_model.predict(X)
+            mape_train = mean_absolute_percentage_error(y, y_pred_train)
+            r2_train = r2_score(y, y_pred_train)
+            
+            # Calculate test metrics (average across folds)
+            mape_test = avg_mape
+            r2_test = avg_r2
+            
+            # Prepare coefficients in the expected format
+            coefficients = {}
+            if hasattr(final_model, 'coef_') and hasattr(final_model, 'feature_names_in_'):
+                for i, feature in enumerate(final_model.feature_names_in_):
+                    coefficients[feature] = float(final_model.coef_[i])
+            elif hasattr(final_model, 'coef_'):
+                for i, feature in enumerate(x_variables):
+                    coefficients[feature] = float(final_model.coef_[i])
+            
+            # Skip elasticity and contribution calculations for now - only return betas
             model_result = {
                 'model_name': model_name,
-                'mape': avg_mape,
-                'r2': avg_r2,
-                'aic': aic,
-                'bic': bic,
-                'fold_results': fold_results,
-                'elasticities': fold_elasticities if fold_elasticities else None,
-                'coefficients': final_model.coef_.tolist() if hasattr(final_model, 'coef_') else None,
-                'intercept': final_model.intercept_ if hasattr(final_model, 'intercept_') else None
+                'mape_train': float(mape_train),
+                'mape_test': float(mape_test),
+                'r2_train': float(r2_train),
+                'r2_test': float(r2_test),
+                'mape_train_std': 0.0,  # Not calculated in simplified version
+                'mape_test_std': float(np.std([fold['mape'] for fold in fold_results])),
+                'r2_train_std': 0.0,  # Not calculated in simplified version
+                'r2_test_std': float(np.std([fold['r2'] for fold in fold_results])),
+                'aic': float(aic),
+                'bic': float(bic),
+                'n_parameters': len(x_variables) + 1,  # +1 for intercept
+                'coefficients': coefficients,
+                'intercept': float(final_model.intercept_) if hasattr(final_model, 'intercept_') else 0.0,
+
             }
             
             model_results.append(model_result)
         
         return model_results, variable_data
+    
+    def _create_combination_aware_splits(self, df: pd.DataFrame, n_splits: int, random_state: int = 42) -> List[Tuple[np.ndarray, np.ndarray]]:
+        """
+        Create K-fold splits that ensure each combination is represented in both training and validation sets.
+        
+        Strategy:
+        1. For each combination, split its data into n_splits parts
+        2. For each fold, use 1/n_splits of each combination's data for validation
+        3. Use the remaining (n_splits-1)/n_splits of each combination's data for training
+        
+        Args:
+            df: DataFrame with 'combination' column
+            n_splits: Number of folds
+            random_state: Random seed for reproducibility
+            
+        Returns:
+            List of (train_indices, val_indices) tuples
+        """
+        import numpy as np
+        from sklearn.model_selection import KFold
+        
+        np.random.seed(random_state)
+        
+        # Get unique combinations
+        combinations = df['combination'].unique()
+        print(f"🔍 Creating combination-aware splits for {len(combinations)} combinations")
+        
+        fold_splits = []
+        
+        for fold_idx in range(n_splits):
+            train_indices = []
+            val_indices = []
+            
+            for combination in combinations:
+                # Get all indices for this combination
+                combination_mask = df['combination'] == combination
+                combination_indices = df[combination_mask].index.values
+                
+                # Shuffle the indices for this combination
+                np.random.shuffle(combination_indices)
+                
+                # Calculate split point for this fold
+                n_samples = len(combination_indices)
+                val_size = max(1, n_samples // n_splits)  # Ensure at least 1 sample in validation
+                
+                # Calculate start and end indices for validation set
+                val_start = fold_idx * val_size
+                val_end = min((fold_idx + 1) * val_size, n_samples)
+                
+                # If this is the last fold, include any remaining samples
+                if fold_idx == n_splits - 1:
+                    val_end = n_samples
+                
+                # Split indices
+                val_indices_fold = combination_indices[val_start:val_end]
+                train_indices_fold = np.concatenate([
+                    combination_indices[:val_start],
+                    combination_indices[val_end:]
+                ])
+                
+                train_indices.extend(train_indices_fold)
+                val_indices.extend(val_indices_fold)
+                
+                print(f"  Fold {fold_idx + 1}, Combination '{combination}': {len(train_indices_fold)} train, {len(val_indices_fold)} val")
+            
+            # Convert to numpy arrays and ensure proper indexing
+            train_indices = np.array(train_indices)
+            val_indices = np.array(val_indices)
+            
+            # Convert to positional indices (0-based)
+            train_positions = np.searchsorted(df.index, train_indices)
+            val_positions = np.searchsorted(df.index, val_indices)
+            
+            fold_splits.append((train_positions, val_positions))
+            
+            print(f"  Fold {fold_idx + 1} total: {len(train_positions)} train, {len(val_positions)} val")
+        
+        return fold_splits
     
     async def train_models_for_stacked_data(
         self,
@@ -864,9 +1089,6 @@ class DataPooler:
             models_dict = all_models
         
         for split_key, df in split_clustered_data.items():
-            print(f"DEBUG: Training models for split cluster: {split_key}")
-            print(f"DEBUG: DataFrame shape: {df.shape}")
-            print(f"DEBUG: Available columns: {df.columns.tolist()}")
             
             # Determine feature set based on available columns
             feature_columns = []
@@ -886,28 +1108,20 @@ class DataPooler:
             interaction_columns = [col for col in df.columns 
                                  if col.endswith('_x_') and col not in feature_columns]
             
-            # Combine all feature columns
             all_feature_columns = feature_columns + encoded_columns + interaction_columns
-            
-            print(f"DEBUG: Feature columns breakdown:")
-            print(f"  - Original x_variables: {feature_columns}")
-            print(f"  - Encoded variables: {encoded_columns}")
-            print(f"  - Interaction terms: {interaction_columns}")
-            print(f"  - Total features: {all_feature_columns}")
-            
-            # Validate that we have features and target
             if not all_feature_columns:
-                print(f"WARNING: No features found for {split_key}, skipping...")
                 continue
                 
             if y_variable not in df.columns:
-                print(f"WARNING: Target variable {y_variable} not found in {split_key}, skipping...")
                 continue
             
             # Train models directly with DataFrame (no need for temporary files)
             try:
-                # Select only the columns we need for training
-                training_df = df[all_feature_columns + [y_variable]].copy()
+                # Select only the columns we need for training (include combination column for stratified splitting)
+                training_columns = all_feature_columns + [y_variable]
+                if 'combination' in df.columns:
+                    training_columns.append('combination')
+                training_df = df[training_columns].copy()
                 
                 # Train models using the new DataFrame-based function
                 model_results, variable_data = await self._train_models_with_dataframe(
@@ -935,10 +1149,8 @@ class DataPooler:
                     'total_records': len(df)
                 }
                 
-                print(f"DEBUG: Successfully trained {len(model_results)} models for {split_key}")
                 
             except Exception as e:
-                print(f"ERROR: Failed to train models for {split_key}: {e}")
                 results[split_key] = {
                     'error': str(e),
                     'feature_columns': all_feature_columns,
@@ -1043,14 +1255,10 @@ class StackModelDataProcessor:
             
             # Apply interaction terms to split clustered data if requested
             if apply_interaction_terms and numerical_columns_for_interaction:
-                print(f"DEBUG: Applying interaction terms to {len(split_clustered_data)} split clusters")
-                print(f"DEBUG: Numerical columns: {numerical_columns_for_interaction}")
-                print(f"DEBUG: Split clustered data keys: {list(split_clustered_data.keys())}")
                 
                 # Get column classifier identifiers for interaction terms
                 column_config = await self.get_column_classifier_config()
                 all_identifiers = column_config.get('identifiers', [])
-                logger.info(f"DEBUG: Column classifier identifiers: {all_identifiers}")
                 
                 split_clustered_data = data_pooler.create_interaction_terms(
                     pooled_data=split_clustered_data,
@@ -1059,12 +1267,6 @@ class StackModelDataProcessor:
                     column_classifier_identifiers=all_identifiers
                 )
                 
-                print(f"DEBUG: After interaction terms - keys: {list(split_clustered_data.keys())}")
-                if split_clustered_data:
-                    first_key = list(split_clustered_data.keys())[0]
-                    print(f"DEBUG: First cluster columns: {split_clustered_data[first_key].columns.tolist()}")
-            else:
-                print(f"DEBUG: Interaction terms not applied - apply_interaction_terms: {apply_interaction_terms}, numerical: {numerical_columns_for_interaction}")
             
             # Prepare detailed clustering information for each pool using split_clustered_data
             pool_clustering_details = {}
@@ -1113,7 +1315,6 @@ class StackModelDataProcessor:
                     'columns': df.columns.tolist(),
                     'total_columns': len(df.columns)
                 }
-            logger.info(f"DEBUG: Split clustered columns info: {split_clustered_columns_info}")
             # Prepare response
             result = {
                 'status': 'success',
