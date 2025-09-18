@@ -63,7 +63,8 @@ class StackModelTrainer:
                 x_variables=x_variables,
                 y_variable=y_variable,
                 minio_client=minio_client,
-                bucket_name=bucket_name
+                bucket_name=bucket_name,
+                standardization=standardization
             )
             
             if prepare_result.get('status') != 'success':
@@ -94,7 +95,8 @@ class StackModelTrainer:
                     n_clusters=n_clusters,
                     apply_interaction_terms=apply_interaction_terms,
                     identifiers_for_interaction=None,  # Auto-detect identifiers
-                    numerical_columns_for_interaction=numerical_columns_for_interaction
+                    numerical_columns_for_interaction=numerical_columns_for_interaction,
+                    standardization=standardization
                 )
                 
                 if clustering_result.get('status') == 'success':
@@ -174,6 +176,7 @@ class StackModelTrainer:
                             r2_train=model_result.get('r2_train', 0),
                             r2_test=model_result.get('r2_test', 0),
                             coefficients=model_result.get('coefficients', {}),
+                            standardized_coefficients=model_result.get('standardized_coefficients', None),
                             intercept=model_result.get('intercept', 0),
                             aic=model_result.get('aic', 0),
                             bic=model_result.get('bic', 0),
@@ -216,7 +219,6 @@ class StackModelTrainer:
             return response
             
         except Exception as e:
-            logger.error(f"Error in stack model training: {str(e)}")
             # Return error response in the same format as success
             from .schemas import StackModelTrainingResponse
             return StackModelTrainingResponse(
@@ -237,7 +239,7 @@ class StackModelTrainer:
             )
     
     
-    def calculate_combination_betas(self, model_results: List[Dict[str, Any]], combinations: List[str], x_variables: List[str], numerical_columns_for_interaction: List[str], split_cluster_id: str = None) -> Dict[str, Dict[str, float]]:
+    def calculate_combination_betas(self, model_results: List[Dict[str, Any]], combinations: List[str], x_variables: List[str], numerical_columns_for_interaction: List[str], split_cluster_id: str = None, standardization: str = 'none') -> Dict[str, Dict[str, float]]:
 
         combination_betas = {}
         
@@ -255,9 +257,6 @@ class StackModelTrainer:
                     if combination_name in combinations:
                         available_combinations.append(combination_name)
             
-            logger.info(f"Model {model_name} has coefficients for {len(available_combinations)} combinations: {available_combinations}")
-            logger.info(f"Intercept: {intercept}")
-            
             # Calculate final betas only for combinations that are available in this model
             for combination in available_combinations:
                 combination_key = f"{model_name}_{combination}"
@@ -265,39 +264,49 @@ class StackModelTrainer:
                 # Calculate final intercept
                 combination_intercept_key = f"encoded_combination_{combination}"
                 combination_intercept_beta = coefficients.get(combination_intercept_key, 0.0)
-                logger.info(f"Combination intercept beta: {combination_intercept_beta}")
                 final_betas['intercept'] = intercept + combination_intercept_beta
-
-                logger.info(f"Final betas: {final_betas}")
                 
                 # Calculate final betas for x_variables (main model variables)
                 for x_var in x_variables:
-                    # Common beta for this x_variable
-                    common_beta = coefficients.get(x_var, 0.0)
+                    # Determine the actual variable name used in the model
+                    if standardization == 'standard':
+                        model_var_name = f"standard_{x_var}"
+                    elif standardization == 'minmax':
+                        model_var_name = f"minmax_{x_var}"
+                    else:
+                        model_var_name = x_var
                     
-                    # Individual beta for this combination and x_variable (if interaction exists)
+                    # Common beta for this x_variable (use model variable name)
+                    common_beta = coefficients.get(model_var_name, 0.0)
+
                     interaction_key = f"encoded_combination_{combination}_x_{x_var}"
                     individual_beta = coefficients.get(interaction_key, 0.0)
-                    
-                    # Final beta = common + individual
                     final_betas[x_var] = common_beta + individual_beta
+                    
                 
                 # Calculate final betas for numerical_columns_for_interaction (interaction variables)
                 for interaction_var in numerical_columns_for_interaction:
                     # Only add if it's not already in x_variables to avoid duplication
                     if interaction_var not in x_variables:
-                        # Common beta for this interaction variable
-                        common_beta = coefficients.get(interaction_var, 0.0)
+                        # Determine the actual variable name used in the model
+                        if standardization == 'standard':
+                            model_var_name = f"standard_{interaction_var}"
+                        elif standardization == 'minmax':
+                            model_var_name = f"minmax_{interaction_var}"
+                        else:
+                            model_var_name = interaction_var
+                        
+                        # Common beta for this interaction variable (use model variable name)
+                        common_beta = coefficients.get(model_var_name, 0.0)
                         
                         # Individual beta for this combination and interaction variable
-                        interaction_key = f"encoded_combination_{combination}_x_{interaction_var}"
+                        interaction_key = f"encoded_combination_{combination}_x_{model_var_name}"
                         individual_beta = coefficients.get(interaction_key, 0.0)
                         
                         # Final beta = common + individual
                         final_betas[interaction_var] = common_beta + individual_beta
                 
                 combination_betas[combination_key] = final_betas
-                logger.info(f"Calculated final betas for {combination}: {final_betas}")
         
         return combination_betas
     
@@ -336,10 +345,7 @@ class StackModelTrainer:
         5. Use stack modeling MAPE as train MAPE, individual combination MAPE as test MAPE
         """
         try:
-            logger.info("Starting individual combination metrics calculation")
-            
             # Step 1: Train stack models to get betas
-            logger.info("Step 1: Training stack models to get betas...")
             try:
                 training_result = await self.train_models_for_stacked_data(
                 scope_number=scope_number,
@@ -361,21 +367,16 @@ class StackModelTrainer:
                 price_column=price_column,
                 run_id=run_id
                 )
-                logger.info("Stack model training completed successfully")
             except Exception as e:
-                logger.error(f"Error in stack model training: {e}")
                 raise
             
             # Step 2: Calculate combination betas from stack model results
-            logger.info("Step 2: Calculating combination betas from stack model results...")
-            logger.info(f"Number of stack results: {len(training_result.stack_model_results)}")
             combination_betas_list = []
             all_combinations = set()
             
             for stack_result in training_result.stack_model_results:
 
                 for model_result in stack_result.model_results:
-                    # Convert StackModelResult to dict format expected by calculate_combination_betas
                     model_result_dict = {
                         'model_name': model_result.model_name,
                         'coefficients': model_result.coefficients,
@@ -387,7 +388,8 @@ class StackModelTrainer:
                         combinations=combinations,
                         x_variables=x_variables,
                         numerical_columns_for_interaction=numerical_columns_for_interaction or [],
-                        split_cluster_id=stack_result.split_clustered_data_id
+                        split_cluster_id=stack_result.split_clustered_data_id,
+                        standardization=standardization
                     )
                     
                     for combination_key, betas in model_betas.items():
@@ -417,10 +419,10 @@ class StackModelTrainer:
                 y_variable=y_variable,
                 minio_client=minio_client,
                 bucket_name=bucket_name,
-                stack_model_results=training_result.stack_model_results
+                stack_model_results=training_result.stack_model_results,
+                standardization=standardization
                 )
             except Exception as e:
-                logger.error(f"Error in individual metrics calculation: {e}")
                 raise
             
             # Step 4: Save individual combination metrics to MinIO
@@ -434,9 +436,8 @@ class StackModelTrainer:
                     minio_client=minio_client,
                     bucket_name=bucket_name
                 )
-                logger.info(f"Successfully saved individual combination metrics to MinIO for run_id: {run_id}")
             except Exception as e:
-                logger.error(f"Failed to save individual combination metrics to MinIO: {e}")
+                pass
                 # Don't fail the entire request if MinIO save fails
             
             # Step 5: Prepare response
@@ -467,7 +468,8 @@ class StackModelTrainer:
         y_variable: str,
         minio_client,
         bucket_name: str,
-        stack_model_results: List[Dict[str, Any]]
+        stack_model_results: List[Dict[str, Any]],
+        standardization: str = 'none'
     ) -> Dict[str, Any]:
         """
         Calculate metrics for individual combinations using stack modeling betas.
@@ -508,17 +510,16 @@ class StackModelTrainer:
                     'r2_train': model_result.r2_train,
                     'r2_test': model_result.r2_test,
                     'aic': model_result.aic,
-                    'bic': model_result.bic
+                    'bic': model_result.bic,
+                    'coefficients': model_result.coefficients,
+                    'standardized_coefficients': model_result.standardized_coefficients
                 }
 
         for combination in combinations:
-            logger.info(f"Processing individual metrics for combination: {combination}")
-            
             try:
 
                 df = data_pooler._fetch_combination_file_direct(scope_number, combination)
                 if df is None:
-                    logger.warning(f"Could not fetch data for combination: {combination}")
                     continue
         
                 
@@ -531,7 +532,6 @@ class StackModelTrainer:
                 missing_columns = [col for col in required_columns if col not in df.columns]
                 
                 if missing_columns:
-                    logger.warning(f"Missing columns for {combination}: {missing_columns}")
                     continue
                 
                 # Prepare data
@@ -547,7 +547,24 @@ class StackModelTrainer:
                     
                     betas = betas_by_combination[combination][model_name]
                     
-                    # Make predictions using the betas
+                    # Get variable means and stds for destandardization
+                    variable_means = {}
+                    variable_stds = {}
+                    for x_var in x_variables:
+                        variable_means[x_var] = df[x_var].mean()
+                        variable_stds[x_var] = df[x_var].std()
+                    
+                    # Destandardize betas if standardization was applied
+                    if standardization != 'none':
+                        betas = self._destandardize_betas(
+                            betas=betas,
+                            x_variables=x_variables,
+                            standardization=standardization,
+                            variable_means=variable_means,
+                            variable_stds=variable_stds
+                        )
+                    
+                    # Make predictions using the destandardized betas
                     y_pred = self._predict_with_betas(X, betas, x_variables)
                     
                     # Calculate individual combination metrics
@@ -566,11 +583,9 @@ class StackModelTrainer:
                     elasticities = {}
                     contributions = {}
                     
-                    # Get variable means from the individual combination data
-                    variable_means = {}
-                    for x_var in x_variables:
-                        variable_means[x_var] = df[x_var].mean()
+                    # Get y_mean and y_std from the individual combination data
                     y_mean = df[y_variable].mean()
+                    y_std = df[y_variable].std()
                     
                     # Calculate elasticity and contribution for each x_variable
                     for x_var in x_variables:
@@ -599,8 +614,6 @@ class StackModelTrainer:
                     stack_key = f"{split_cluster_id}_{model_name}"
                     stack_metrics = stack_mape_by_cluster_model.get(stack_key, {})
                     
-                    logger.info(f"  Using stack metrics from split cluster: {split_cluster_id}, model: {model_name}")
-                    
                     combination_metrics[model_name] = {
                         'combination': combination,
                         'model_name': model_name,
@@ -615,17 +628,17 @@ class StackModelTrainer:
                         'stack_bic': stack_metrics.get('bic', 0.0),  # Stack modeling BIC for reference
                         'elasticities': elasticities,  # Individual combination elasticities
                         'contributions': contributions,  # Individual combination contributions
-                        'actual_values': y_actual.tolist(),  # Actual target values
-                        'predicted_values': y_pred.tolist(),  # Predicted values using stack model betas
                         'variable_means': variable_means,  # Variable means from individual combination data
+                        'variable_stds': variable_stds,  # Variable standard deviations from individual combination data
                         'y_mean': y_mean,  # Y variable mean from individual combination data
-                        'betas': betas
+                        'y_std': y_std,  # Y variable standard deviation from individual combination data
+                        'betas': betas,  # Destandardized betas (original scale)
+                        'standardized_betas': stack_metrics.get('standardized_coefficients', {})  # Standardized betas from stack modeling
                     }
                     
                 individual_metrics[combination] = combination_metrics
                 
             except Exception as e:
-                logger.error(f"Error processing combination {combination}: {e}")
                 individual_metrics[combination] = {'error': str(e)}
         
         return individual_metrics
@@ -746,7 +759,6 @@ class StackModelTrainer:
                     summary_data.append(summary_row)
             
             if not summary_data:
-                logger.warning("No valid individual combination metrics to save")
                 return
             
             # Create DataFrame
@@ -769,12 +781,8 @@ class StackModelTrainer:
                 length=arrow_buffer.getbuffer().nbytes,
                 content_type='application/vnd.apache.arrow.file'
             )
-            
-            logger.info(f"Individual combination metrics saved to MinIO: {file_key}")
-            logger.info(f"Saved {len(summary_data)} individual combination metric records")
-            
+                   
         except Exception as e:
-            logger.error(f"Error saving individual combination metrics to MinIO: {e}")
             raise
     
     async def get_combination_betas(
@@ -839,7 +847,8 @@ class StackModelTrainer:
                         model_results=[model_result.dict()],
                         combinations=combinations,
                         x_variables=x_variables,
-                        numerical_columns_for_interaction=numerical_columns_for_interaction
+                        numerical_columns_for_interaction=numerical_columns_for_interaction,
+                        standardization=standardization
                     )
                     
                     for combination_key, betas in model_betas.items():
@@ -883,5 +892,87 @@ class StackModelTrainer:
             return response
             
         except Exception as e:
-            logger.error(f"Error in combination betas calculation: {str(e)}")
             raise
+    
+    def _destandardize_betas(
+        self,
+        betas: Dict[str, Any],
+        x_variables: List[str],
+        standardization: str,
+        variable_means: Dict[str, float],
+        variable_stds: Dict[str, float]
+    ) -> Dict[str, Any]:
+        """
+        Destandardize betas from scaled variables back to original scale.
+        
+        Args:
+            betas: Dictionary containing intercept and coefficients from scaled model
+            x_variables: List of original x_variables
+            standardization: Type of standardization applied ('standard_scaler' or 'minmax_scaler')
+            variable_means: Mean values of original variables
+            variable_stds: Standard deviation values of original variables (for standard scaler)
+            
+        Returns:
+            Dictionary with destandardized intercept and coefficients
+        """
+        try:
+            from sklearn.preprocessing import StandardScaler, MinMaxScaler
+            
+            destandardized_betas = betas.copy()
+            coefficients = betas.get('coefficients', {}).copy()
+            intercept = betas.get('intercept', 0.0)
+            
+            if standardization == 'standard':
+                # For StandardScaler: X_scaled = (X - mean) / std
+                # To destandardize: X = X_scaled * std + mean
+                # For coefficients: β_original = β_scaled / std
+                # For intercept: β0_original = β0_scaled - sum(β_scaled * mean / std)
+                
+                intercept_adjustment = 0.0
+                
+                for x_var in x_variables:
+                    if x_var in coefficients and x_var in variable_stds:
+                        std_val = variable_stds[x_var]
+                        mean_val = variable_means.get(x_var, 0)
+                        
+                        if std_val != 0:
+                            # Store original scaled coefficient for intercept calculation
+                            scaled_coefficient = coefficients[x_var]
+                            
+                            # Destandardize coefficient
+                            coefficients[x_var] = scaled_coefficient / std_val
+                            
+                            # Calculate intercept adjustment using ORIGINAL scaled coefficient
+                            intercept_adjustment += scaled_coefficient * mean_val / std_val
+                
+                # Destandardize intercept
+                destandardized_betas['intercept'] = intercept - intercept_adjustment
+                
+            elif standardization == 'minmax':
+                
+                intercept_adjustment = 0.0
+                
+                for x_var in x_variables:
+                    if x_var in coefficients:
+                        # Store original scaled coefficient
+                        scaled_coefficient = coefficients[x_var]
+                        std_val = variable_stds.get(x_var, 1.0)
+                        mean_val = variable_means.get(x_var, 0)  
+                        if std_val != 0:
+                            approximate_range = std_val * 4
+                            coefficients[x_var] = scaled_coefficient / approximate_range
+                            intercept_adjustment += scaled_coefficient * mean_val / approximate_range
+                
+                destandardized_betas['intercept'] = intercept - intercept_adjustment
+                
+            else:
+                # No standardization applied, return original betas
+                return betas
+            
+            destandardized_betas['coefficients'] = coefficients
+            
+            return destandardized_betas
+            
+        except Exception as e:
+            # Return original betas if destandardization fails
+            return betas

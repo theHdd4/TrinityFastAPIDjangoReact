@@ -143,6 +143,7 @@ class StackModelResult(BaseModel):
     r2_train: float
     r2_test: float
     coefficients: Dict[str, float] = Field(..., description="Beta coefficients")
+    standardized_coefficients: Optional[Dict[str, float]] = Field(None, description="Standardized coefficients for reference")
     intercept: float = Field(..., description="Model intercept")
     aic: float = Field(..., description="Akaike Information Criterion")
     bic: float = Field(..., description="Bayesian Information Criterion")

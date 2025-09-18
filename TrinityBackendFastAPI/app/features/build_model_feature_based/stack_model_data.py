@@ -22,7 +22,7 @@ class CombinationParser:
             values = combination.split('_')
             
             if len(values) != len(identifier_names):
-                logger.warning(f"Combination '{combination}' has {len(values)} values but {len(identifier_names)} identifier names provided")
+                pass
 
                 return {}
             
@@ -35,7 +35,6 @@ class CombinationParser:
             return parsed_values
             
         except Exception as e:
-            logger.error(f"Error parsing combination string '{combination}': {e}")
             return {}
     
 
@@ -92,18 +91,15 @@ class DataPooler:
                     reader = ipc.RecordBatchFileReader(pa.BufferReader(file_data))
                     df = reader.read_all().to_pandas()
                 except Exception as arrow_error:
-                    logger.error(f"Error reading Arrow file: {arrow_error}")
                     return None
             elif file_key.endswith('.csv'):
                 df = pd.read_csv(io.BytesIO(file_data))
             else:
-                logger.warning(f"Unsupported file format: {file_key}")
                 return None
             
             return df
             
         except Exception as e:
-            logger.error(f"Error reading file {file_key}: {e}")
             return None
     
     def find_combination_files(self, scope_number: str, combinations: List[str]) -> Dict[str, str]:
@@ -126,12 +122,11 @@ class DataPooler:
                         break
                 
                 if combination not in combination_files:
-                    logger.warning(f"No file found for combination: {combination}")
+                    pass
             
             return combination_files
             
         except Exception as e:
-            logger.error(f"Error finding combination files: {e}")
             return {}
     
     def pool_data_by_identifiers(
@@ -141,7 +136,8 @@ class DataPooler:
         pool_by_identifiers: List[str],
         x_variables: List[str],
         y_variable: str,
-        all_identifiers: List[str]
+        all_identifiers: List[str],
+        standardization: str = 'none'
     ) -> Dict[str, pd.DataFrame]:
         """
         Pool data from multiple combinations based on selected identifiers.
@@ -179,6 +175,10 @@ class DataPooler:
                     # Filter data to only include identifiers, x_variables, and y_variable
                     filtered_df = self._filter_combination_data(df, all_identifiers, x_variables, y_variable)
                     
+                    # Apply standardization if specified
+                    if standardization != 'none':
+                        filtered_df = self._apply_standardization(filtered_df, x_variables, standardization)
+                    
                     # Validate required variables exist
                     if self._validate_variables(filtered_df, x_variables, y_variable):
                         all_dataframes.append(filtered_df)
@@ -188,9 +188,7 @@ class DataPooler:
                             'columns': list(filtered_df.columns)
                         })
                     else:
-                        logger.warning(f"❌ {combination} missing required variables after filtering")
-                else:
-                    logger.warning(f"❌ Could not fetch data for {combination}")
+                        pass
             
             if not all_dataframes:
                 raise ValueError("No valid data found for any combination")
@@ -203,15 +201,6 @@ class DataPooler:
             merged_df = pd.concat(all_dataframes, ignore_index=True)
             
             # Print unique values for pool_by_identifiers after merging
-            print(f"\n🔍 MERGED DATA - Unique values for pool_by_identifiers:")
-            for identifier in pool_by_identifiers:
-                if identifier in merged_df.columns:
-                    unique_values = merged_df[identifier].unique()
-                    print(f"  {identifier}: {unique_values.tolist()}")
-                else:
-                    print(f"  {identifier}: Column not found in merged data")
-            print(f"Total merged records: {len(merged_df)}")
-            print(f"Available columns: {list(merged_df.columns)}")
             
             # Step 4: Filter the merged data using pool-identifiers selection
             pooled_data = self._filter_by_pool_identifiers(
@@ -222,10 +211,7 @@ class DataPooler:
             return pooled_data
             
         except Exception as e:
-            logger.error(f"Error pooling data: {e}")
-            logger.error(f"Exception details: {type(e).__name__}: {str(e)}")
             import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
             raise  # Re-raise the exception instead of returning empty dict
     
     def _fetch_combination_file_direct(self, scope_number: str, combination: str) -> Optional[pd.DataFrame]:
@@ -251,7 +237,7 @@ class DataPooler:
                     matching_objects.append(obj_name)
             
             if not matching_objects:
-                logger.warning(f"Could not find file for combination: {combination}")
+                pass
                 return None
             
             # Use the first matching file
@@ -261,7 +247,7 @@ class DataPooler:
             return self.read_combination_file(target_file_key)
             
         except Exception as e:
-            logger.error(f"Error fetching combination file {combination}: {e}")
+            pass
             return None
     
     def _filter_by_pool_identifiers(
@@ -280,7 +266,7 @@ class DataPooler:
                     unique_values = merged_df[identifier].unique().tolist()
                     identifier_values[identifier] = unique_values
                 else:
-                    logger.warning(f"Identifier column '{identifier}' not found in merged data")
+                    pass
                     identifier_values[identifier] = []
 
             pool_groups = {}
@@ -316,7 +302,7 @@ class DataPooler:
                     if identifier in merged_df.columns:
                         filter_conditions.append(merged_df[identifier] == value)
                     else:
-                        logger.warning(f"Identifier column '{identifier}' not found in merged data")
+                        pass
                 
                 if filter_conditions:
                     # Combine all conditions with AND (all must be true)
@@ -330,14 +316,11 @@ class DataPooler:
                     if len(filtered_df) > 0:
                         pooled_data[pool_key] = filtered_df
                     else:
-                        logger.warning(f"⚠️ Pool {pool_key}: No records found after filtering")
-                else:
-                    logger.warning(f"⚠️ Pool {pool_key}: No valid filter conditions created")
+                        pass
             
             return pooled_data
             
         except Exception as e:
-            logger.error(f"Error filtering by pool identifiers: {e}")
             raise
     
     def _combination_matches_pool_values(self, combination: str, pool_by_identifiers: List[str], pool_values: tuple) -> bool:
@@ -346,24 +329,16 @@ class DataPooler:
             pool_value_strings = [str(value) for value in pool_values]
             
             # Debug logging
-            print(f"🔍 MATCHING DEBUG:")
-            print(f"  Combination: '{combination}'")
-            print(f"  Pool values: {pool_value_strings}")
-            print(f"  Pool identifiers: {pool_by_identifiers}")
- 
             for pool_value in pool_value_strings:
                 pool_value_with_underscores = pool_value.replace(" ", "_")
                 if pool_value_with_underscores in combination:
-                    print(f"  ✅ '{pool_value}' (as '{pool_value_with_underscores}') found in combination")
+                    pass
                 else:
-                    print(f"  ❌ '{pool_value}' (as '{pool_value_with_underscores}') not found in combination")
                     return False
             
-            print(f"  ✅ All pool values matched!")
             return True
             
         except Exception as e:
-            logger.error(f"Error checking combination match: {e}")
             return False
     
     def _filter_combination_data(self, df: pd.DataFrame, filtered_identifiers: List[str], x_variables: List[str], y_variable: str) -> pd.DataFrame:
@@ -375,7 +350,7 @@ class DataPooler:
             missing_columns = [col for col in required_columns if col not in df.columns]
             
             if missing_columns:
-                logger.warning(f"Missing columns in data: {missing_columns}")
+                pass
             
             filtered_df = df[available_columns].copy()
             
@@ -383,7 +358,58 @@ class DataPooler:
             return filtered_df
             
         except Exception as e:
-            logger.error(f"Error filtering combination data: {e}")
+            pass
+            return df
+    
+    def _apply_standardization(self, df: pd.DataFrame, x_variables: List[str], standardization: str) -> pd.DataFrame:
+        """
+        Apply standardization to x_variables in the DataFrame.
+        
+        Args:
+            df: DataFrame with data
+            x_variables: List of variables to standardize
+            standardization: Type of standardization ('standard_scaler' or 'minmax_scaler')
+            
+        Returns:
+            DataFrame with standardized variables (original variables kept for clustering)
+        """
+        try:
+            from sklearn.preprocessing import StandardScaler, MinMaxScaler
+            
+            df_standardized = df.copy()
+            
+            # Check which x_variables exist in the DataFrame
+            available_x_variables = [var for var in x_variables if var in df.columns]
+            
+            if not available_x_variables:
+                pass
+                return df_standardized
+            
+            # Apply standardization
+            if standardization == 'standard':
+                scaler = StandardScaler()
+                prefix = 'standard_'
+            elif standardization == 'minmax':
+                scaler = MinMaxScaler()
+                prefix = 'minmax_'
+            else:
+                pass
+                return df_standardized
+            
+            # Fit and transform the x_variables
+            scaled_data = scaler.fit_transform(df[available_x_variables])
+            
+            # Create new column names with prefix
+            scaled_columns = [f"{prefix}{var}" for var in available_x_variables]
+            
+            # Add scaled columns to DataFrame
+            for i, scaled_col in enumerate(scaled_columns):
+                df_standardized[scaled_col] = scaled_data[:, i]
+            
+            
+            return df_standardized
+            
+        except Exception as e:
             return df
     
     def _validate_variables(self, df: pd.DataFrame, x_variables: List[str], y_variable: str) -> bool:
@@ -393,7 +419,7 @@ class DataPooler:
         missing_vars = [var for var in all_variables if var not in available_columns]
         
         if missing_vars:
-            logger.warning(f"Missing variables: {missing_vars}")
+            pass
             return False
         
         return True
@@ -411,7 +437,7 @@ class DataPooler:
         """
         try:
             if len(data) < 2:
-                logger.warning("Not enough data points for clustering")
+                pass
                 return 1
             
             # Standardize the data
@@ -495,7 +521,7 @@ class DataPooler:
             return df_with_clusters
             
         except Exception as e:
-            logger.error(f"Error performing K-means clustering: {e}")
+            pass
             # Return original DataFrame with default cluster_id
             df_with_clusters = df.copy()
             df_with_clusters['cluster_id'] = 0
@@ -509,7 +535,7 @@ class DataPooler:
             for pool_key, pool_df in pooled_data.items():
                 
                 if 'combination' not in pool_df.columns:
-                    logger.warning(f"No 'combination' column found in {pool_key}, skipping clustering")
+                    pass
                     clustered_pools[pool_key] = pool_df
                     continue
 
@@ -530,7 +556,7 @@ class DataPooler:
             return clustered_pools
             
         except Exception as e:
-            logger.error(f"Error applying clustering to pools: {e}")
+            pass
             return pooled_data 
     
     def _aggregate_combinations_for_clustering(self, pool_df: pd.DataFrame, numerical_columns: List[str]) -> Optional[pd.DataFrame]:
@@ -587,11 +613,9 @@ class DataPooler:
             
             unique_combinations = set(valid_combinations)
             if len(unique_combinations) != len(valid_combinations):
-                logger.warning(f"Found duplicate combinations! Unique: {len(unique_combinations)}, Total: {len(valid_combinations)}")
                 from collections import Counter
                 combo_counts = Counter(valid_combinations)
                 duplicates = {combo: count for combo, count in combo_counts.items() if count > 1}
-                logger.warning(f"Duplicate combinations: {duplicates}")
             
             return combination_clusters
             
@@ -740,7 +764,8 @@ class DataPooler:
                                 pooled_data: Dict[str, pd.DataFrame], 
                                 identifiers: List[str], 
                                 numerical_columns_for_interaction: List[str],
-                                column_classifier_identifiers: List[str] = None) -> Dict[str, pd.DataFrame]:
+                                column_classifier_identifiers: List[str] = None,
+                                standardization: str = 'none') -> Dict[str, pd.DataFrame]:
         """
         Create interaction terms by encoding combinations and interacting with numerical columns.
         
@@ -792,8 +817,22 @@ class DataPooler:
             # Create interactions between encoded combinations and numerical columns
             for encoded_combination_col in encoded_combination_columns:
                 for numerical_col in numerical_columns_for_interaction:
-                    if numerical_col in enhanced_df.columns:
-                        # Create interaction term: encoded_combination_col * numerical_col
+                    # Use scaled variables if standardization is applied
+                    if standardization == 'standard':
+                        scaled_col = f"standard_{numerical_col}"
+                    elif standardization == 'minmax':
+                        scaled_col = f"minmax_{numerical_col}"
+                    else:
+                        scaled_col = numerical_col
+                    
+                    # Check if the column (scaled or original) exists
+                    if scaled_col in enhanced_df.columns:
+                        # Create interaction term: encoded_combination_col * numerical_col (scaled if available)
+                        interaction_col_name = f"{encoded_combination_col}_x_{numerical_col}"
+                        enhanced_df[interaction_col_name] = enhanced_df[encoded_combination_col] * enhanced_df[scaled_col]
+                        interaction_columns_created.append(interaction_col_name)
+                    elif numerical_col in enhanced_df.columns:
+                        # Fallback to original column if scaled version doesn't exist
                         interaction_col_name = f"{encoded_combination_col}_x_{numerical_col}"
                         enhanced_df[interaction_col_name] = enhanced_df[encoded_combination_col] * enhanced_df[numerical_col]
                         interaction_columns_created.append(interaction_col_name)
@@ -835,13 +874,7 @@ class DataPooler:
         X = df[x_variables].values
         y = df[y_variable].values
         
-        # Apply standardization if requested
-        if standardization == 'standard':
-            scaler = StandardScaler()
-            X = scaler.fit_transform(X)
-        elif standardization == 'minmax':
-            scaler = MinMaxScaler()
-            X = scaler.fit_transform(X)
+        # Standardization is already applied earlier in the pipelin     # No need to apply it again during modeling
         
         # Initialize K-fold cross-validation with combination-aware splitting
         kf = KFold(n_splits=k_folds, shuffle=True, random_state=42)
@@ -885,9 +918,6 @@ class DataPooler:
                 if has_combination_column:
                     train_combinations = df.iloc[train_idx]['combination'].unique()
                     val_combinations = df.iloc[val_idx]['combination'].unique()
-                    print(f"  Fold {fold_idx + 1}: Train combinations: {len(train_combinations)}, Val combinations: {len(val_combinations)}")
-                    print(f"    Train: {train_combinations.tolist()}")
-                    print(f"    Val: {val_combinations.tolist()}")
                 
                 model = clone(model_class)
                 if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression"]:
@@ -964,6 +994,7 @@ class DataPooler:
                 'bic': float(bic),
                 'n_parameters': len(x_variables) + 1,  # +1 for intercept
                 'coefficients': coefficients,
+                'standardized_coefficients': coefficients,  # In stack modeling, coefficients are already standardized if standardization was applied
                 'intercept': float(final_model.intercept_) if hasattr(final_model, 'intercept_') else 0.0,
 
             }
@@ -996,7 +1027,6 @@ class DataPooler:
         
         # Get unique combinations
         combinations = df['combination'].unique()
-        print(f"🔍 Creating combination-aware splits for {len(combinations)} combinations")
         
         fold_splits = []
         
@@ -1034,7 +1064,6 @@ class DataPooler:
                 train_indices.extend(train_indices_fold)
                 val_indices.extend(val_indices_fold)
                 
-                print(f"  Fold {fold_idx + 1}, Combination '{combination}': {len(train_indices_fold)} train, {len(val_indices_fold)} val")
             
             # Convert to numpy arrays and ensure proper indexing
             train_indices = np.array(train_indices)
@@ -1046,7 +1075,6 @@ class DataPooler:
             
             fold_splits.append((train_positions, val_positions))
             
-            print(f"  Fold {fold_idx + 1} total: {len(train_positions)} train, {len(val_positions)} val")
         
         return fold_splits
     
@@ -1093,9 +1121,20 @@ class DataPooler:
             # Determine feature set based on available columns
             feature_columns = []
             
-            # 1. Add original x_variables (if they exist in the data)
+            # 1. Add x_variables (prioritize scaled versions if standardization was applied)
             for var in x_variables:
-                if var in df.columns:
+                # Check if scaled version exists (standard_ or minmax_ prefix)
+                scaled_var = None
+                if standardization == 'standard':
+                    scaled_var = f"standard_{var}"
+                elif standardization == 'minmax':
+                    scaled_var = f"minmax_{var}"
+
+                
+                # Use scaled variable if it exists, otherwise use original
+                if scaled_var and scaled_var in df.columns:
+                    feature_columns.append(scaled_var)
+                elif var in df.columns:
                     feature_columns.append(var)
             
             # 2. Add encoded variables (one-hot encoded identifiers with 'encoded_' prefix)
@@ -1109,21 +1148,21 @@ class DataPooler:
                                  if col.endswith('_x_') and col not in feature_columns]
             
             all_feature_columns = feature_columns + encoded_columns + interaction_columns
+            
+            # Log all features being used for modeling
+            
             if not all_feature_columns:
                 continue
                 
             if y_variable not in df.columns:
                 continue
             
-            # Train models directly with DataFrame (no need for temporary files)
             try:
-                # Select only the columns we need for training (include combination column for stratified splitting)
                 training_columns = all_feature_columns + [y_variable]
                 if 'combination' in df.columns:
                     training_columns.append('combination')
                 training_df = df[training_columns].copy()
                 
-                # Train models using the new DataFrame-based function
                 model_results, variable_data = await self._train_models_with_dataframe(
                     df=training_df,
                     x_variables=all_feature_columns,
@@ -1214,7 +1253,7 @@ class StackModelDataProcessor:
             missing_columns = [col for col in required_columns if col not in df.columns]
             
             if missing_columns:
-                logger.warning(f"Missing columns in data: {missing_columns}")
+                pass
             
             # Create filtered DataFrame
             filtered_df = df[available_columns].copy()
@@ -1223,7 +1262,7 @@ class StackModelDataProcessor:
             return filtered_df
             
         except Exception as e:
-            logger.error(f"Error filtering combination data: {e}")
+            pass
             return df
     
     async def apply_clustering_to_stack_data(
@@ -1235,7 +1274,8 @@ class StackModelDataProcessor:
         n_clusters: Optional[int] = None,
         apply_interaction_terms: bool = True,
         identifiers_for_interaction: List[str] = None,
-        numerical_columns_for_interaction: List[str] = None
+        numerical_columns_for_interaction: List[str] = None,
+        standardization: str = 'none'
     ) -> Dict[str, Any]:
 
         try:
@@ -1264,7 +1304,8 @@ class StackModelDataProcessor:
                     pooled_data=split_clustered_data,
                     identifiers=None,  # Will auto-detect identifiers with >1 unique value
                     numerical_columns_for_interaction=numerical_columns_for_interaction,
-                    column_classifier_identifiers=all_identifiers
+                    column_classifier_identifiers=all_identifiers,
+                    standardization=standardization
                 )
                 
             
@@ -1345,7 +1386,8 @@ class StackModelDataProcessor:
         x_variables: List[str],
         y_variable: str,
         minio_client: Minio,
-        bucket_name: str
+        bucket_name: str,
+        standardization: str = 'none'
     ) -> Dict[str, Any]:
 
         try:
@@ -1374,6 +1416,8 @@ class StackModelDataProcessor:
             if invalid_identifiers:
                 raise ValueError(f"Invalid pooling identifiers: {invalid_identifiers}. Available identifiers: {all_identifiers}")
             
+            # Log data preparation parameters
+            
             # Create data pooler instance
             data_pooler = DataPooler(minio_client, bucket_name)
             
@@ -1384,7 +1428,8 @@ class StackModelDataProcessor:
                 pool_by_identifiers=pool_by_identifiers,
                 x_variables=x_variables,
                 y_variable=y_variable,
-                all_identifiers=filtered_identifiers
+                all_identifiers=filtered_identifiers,
+                standardization=standardization
             )
             
             if not pooled_data:
