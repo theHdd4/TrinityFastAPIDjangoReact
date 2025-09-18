@@ -20,18 +20,23 @@ const Login = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
 
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
-    setLoadingStatus('Authenticating credentials...');
+    setLoadingStatus('Authenticating...');
 
     console.log('Submitting login form for', username);
 
     const success = await login(username, password);
     if (success) {
-      setLoadingStatus('Loading Trinity applications...');
-      navigate('/apps');
+      setLoadingStatus('Succefully Loaded..');
+      await sleep(500);
+      setLoadingStatus('Loading your personalized dashboard...');
+      await sleep(700);
+      navigate('/apps', { state: { fromLogin: true } });
       return;
     }
 
@@ -45,7 +50,7 @@ const Login = () => {
     <div className="min-h-screen flex items-center justify-center p-4 relative">
       {isLoading && (
         <LoadingAnimation
-          status={loadingStatus || 'Preparing Trinity experience...'}
+          status={loadingStatus || 'Loading your personalized dashboard...'}
           className="z-30"
         />
       )}
@@ -58,7 +63,11 @@ const Login = () => {
       >
         <source src="/background.mp4" type="video/mp4" />
       </video>
-      <div className="w-full max-w-md space-y-6 relative z-10">
+      <div
+        className={`w-full max-w-md space-y-6 relative z-10 transition-all duration-500 ${
+          isLoading ? 'opacity-0 translate-y-4 scale-95' : 'opacity-100 translate-y-0 scale-100'
+        }`}
+      >
         <Card className="bg-white/5 backdrop-blur-lg border border-white/10 text-white shadow-2xl">
           <CardHeader className="flex flex-col items-center space-y-2 text-center">
             <AnimatedLogo className="w-20 h-20 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />

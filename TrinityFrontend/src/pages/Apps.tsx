@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import Header from '@/components/Header';
@@ -16,43 +16,66 @@ const Apps = () => {
   const navigate = useNavigate();
   const [appMap, setAppMap] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
-  const [loadingStatus, setLoadingStatus] = useState('Initializing Trinity interface...');
+  const [loadingStatus, setLoadingStatus] = useState('Loading your personalized dashboard...');
+  const [menuLoading, setMenuLoading] = useState(false);
+  const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const clearScheduledTimeouts = () => {
+    timeoutsRef.current.forEach((id) => clearTimeout(id));
+    timeoutsRef.current = [];
+  };
+
+  const scheduleTimeout = (fn: () => void, delay: number) => {
+    const id = setTimeout(() => {
+      fn();
+      timeoutsRef.current = timeoutsRef.current.filter((timeoutId) => timeoutId !== id);
+    }, delay);
+    timeoutsRef.current.push(id);
+    return id;
+  };
 
 
   const loadApps = async () => {
     console.log('Fetching apps from backend...');
+    clearScheduledTimeouts();
     setIsLoading(true);
-    setLoadingStatus('Contacting Trinity mainframe...');
+    setMenuLoading(false);
+    setLoadingStatus('Loading your personalized dashboard...');
     try {
       const res = await fetch(`${REGISTRY_API}/apps/`, { credentials: 'include' });
       console.log('Apps response status', res.status);
       if (res.ok) {
-        setLoadingStatus('Decrypting available experiences...');
         const data: BackendApp[] = await res.json();
         console.log('Loaded apps', data);
-        setLoadingStatus('Calibrating analytics modules...');
         const map: Record<string, number> = {};
         data.forEach((a) => {
           map[a.slug] = a.id;
         });
         setAppMap(map);
-        setLoadingStatus('Synchronizing interface...');
-        setTimeout(() => setIsLoading(false), 300);
+        setLoadingStatus('Succefully Loaded..');
+        scheduleTimeout(() => {
+          setIsLoading(false);
+          setMenuLoading(true);
+          scheduleTimeout(() => setMenuLoading(false), 1200);
+        }, 600);
       } else {
         const text = await res.text();
         console.log('Failed to load apps:', text);
         setLoadingStatus('Unable to load applications. Please try again.');
-        setTimeout(() => setIsLoading(false), 800);
+        scheduleTimeout(() => setIsLoading(false), 800);
       }
     } catch (err) {
       console.log('Apps fetch error', err);
       setLoadingStatus('Connection lost. Attempting reconnection...');
-      setTimeout(() => setIsLoading(false), 800);
+      scheduleTimeout(() => setIsLoading(false), 800);
     }
   };
 
   useEffect(() => {
     loadApps();
+    return () => {
+      clearScheduledTimeouts();
+    };
   }, []);
 
   const apps = [
@@ -156,7 +179,17 @@ const Apps = () => {
       {isLoading && (
         <LoadingAnimation status={loadingStatus} className="z-20" />
       )}
-      <Header />
+      <div className="relative">
+        <Header />
+        {menuLoading && (
+          <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
+            <LoadingAnimation
+              status="Succefully Loaded.."
+              className="!relative h-full w-full"
+            />
+          </div>
+        )}
+      </div>
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-6 py-12">

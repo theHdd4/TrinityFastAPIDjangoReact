@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface LoadingAnimationProps {
   status?: string;
@@ -11,6 +11,7 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
+  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -72,8 +73,17 @@ const LoadingAnimation: React.FC<LoadingAnimationProps> = ({
     };
   }, []);
 
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setVisible(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   return (
-    <div className={`absolute inset-0 flex items-center justify-center bg-white ${className}`}>
+    <div
+      className={`absolute inset-0 flex items-center justify-center bg-white/95 backdrop-blur transition-opacity duration-500 ease-out ${
+        visible ? 'opacity-100' : 'opacity-0'
+      } ${className}`}
+    >
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
       <div className="relative z-10 text-center px-6 flex flex-col items-center">
         <h3 className="loading-text text-2xl font-light mb-2 inline-block px-4 py-2">Loading</h3>
