@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Eye, EyeOff, User, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
+import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 
 const Login = () => {
   const [username, setUsername] = useState('');
@@ -15,6 +16,7 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState('');
   const navigate = useNavigate();
   const { login } = useAuth();
 
@@ -22,22 +24,31 @@ const Login = () => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
+    setLoadingStatus('Authenticating credentials...');
 
     console.log('Submitting login form for', username);
 
     const success = await login(username, password);
     if (success) {
+      setLoadingStatus('Loading Trinity applications...');
       navigate('/apps');
-    } else {
-      setError('Invalid credentials.');
-      console.log('Login failed for', username);
+      return;
     }
 
+    setError('Invalid credentials.');
+    console.log('Login failed for', username);
+    setLoadingStatus('');
     setIsLoading(false);
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative">
+      {isLoading && (
+        <LoadingAnimation
+          status={loadingStatus || 'Preparing Trinity experience...'}
+          className="z-30"
+        />
+      )}
       <video
         autoPlay
         loop

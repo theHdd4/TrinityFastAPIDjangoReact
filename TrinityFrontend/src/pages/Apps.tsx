@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card';
 import Header from '@/components/Header';
 import { BarChart3, Target, Zap, Plus, ArrowRight } from 'lucide-react';
 import { REGISTRY_API } from '@/lib/api';
+import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 
 interface BackendApp {
   id: number;
@@ -14,27 +15,39 @@ interface BackendApp {
 const Apps = () => {
   const navigate = useNavigate();
   const [appMap, setAppMap] = useState<Record<string, number>>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadingStatus, setLoadingStatus] = useState('Initializing Trinity interface...');
 
 
   const loadApps = async () => {
     console.log('Fetching apps from backend...');
+    setIsLoading(true);
+    setLoadingStatus('Contacting Trinity mainframe...');
     try {
       const res = await fetch(`${REGISTRY_API}/apps/`, { credentials: 'include' });
       console.log('Apps response status', res.status);
       if (res.ok) {
+        setLoadingStatus('Decrypting available experiences...');
         const data: BackendApp[] = await res.json();
         console.log('Loaded apps', data);
+        setLoadingStatus('Calibrating analytics modules...');
         const map: Record<string, number> = {};
         data.forEach((a) => {
           map[a.slug] = a.id;
         });
         setAppMap(map);
+        setLoadingStatus('Synchronizing interface...');
+        setTimeout(() => setIsLoading(false), 300);
       } else {
         const text = await res.text();
         console.log('Failed to load apps:', text);
+        setLoadingStatus('Unable to load applications. Please try again.');
+        setTimeout(() => setIsLoading(false), 800);
       }
     } catch (err) {
       console.log('Apps fetch error', err);
+      setLoadingStatus('Connection lost. Attempting reconnection...');
+      setTimeout(() => setIsLoading(false), 800);
     }
   };
 
@@ -82,64 +95,67 @@ const Apps = () => {
   ];
 
 
-const handleAppSelect = async (appId: string) => {
-  // Ensure we have a mapping from slug to backend ID
-  let backendId = appMap[appId];
-  if (!backendId) {
+  const handleAppSelect = async (appId: string) => {
+    // Ensure we have a mapping from slug to backend ID
+    let backendId = appMap[appId];
+    if (!backendId) {
+      try {
+        const res = await fetch(`${REGISTRY_API}/apps/`, { credentials: 'include' });
+        if (res.ok) {
+          const data: BackendApp[] = await res.json();
+          const map: Record<string, number> = {};
+          data.forEach((a) => {
+            map[a.slug] = a.id;
+          });
+          setAppMap(map);
+          backendId = map[appId];
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (!backendId) return;
+
+    localStorage.setItem(
+      'current-app',
+      JSON.stringify({ id: backendId, slug: appId })
+    );
     try {
-      const res = await fetch(`${REGISTRY_API}/apps/`, { credentials: 'include' });
+      const res = await fetch(`${REGISTRY_API}/apps/${backendId}/`, {
+        credentials: 'include'
+      });
       if (res.ok) {
-        const data: BackendApp[] = await res.json();
-        const map: Record<string, number> = {};
-        data.forEach((a) => {
-          map[a.slug] = a.id;
-        });
-        setAppMap(map);
-        backendId = map[appId];
+        const data = await res.json();
+        if (data.environment) {
+          console.log('Environment after app select', data.environment);
+          // Persist the full environment (including identifiers). Explicitly
+          // set the current app's slug/id so the session namespace reflects
+          // the user's selection even if the backend omits these fields.
+          const env = {
+            ...data.environment,
+            APP_NAME: appId,
+            APP_ID: backendId.toString(),
+          };
+          localStorage.setItem('env', JSON.stringify(env));
+        } else {
+          localStorage.setItem(
+            'env',
+            JSON.stringify({ APP_NAME: appId, APP_ID: backendId.toString() })
+          );
+        }
       }
-    } catch {
-      /* ignore */
+    } catch (err) {
+      console.log('App select env fetch error', err);
     }
-  }
-
-  if (!backendId) return;
-
-  localStorage.setItem(
-    'current-app',
-    JSON.stringify({ id: backendId, slug: appId })
-  );
-  try {
-    const res = await fetch(`${REGISTRY_API}/apps/${backendId}/`, {
-      credentials: 'include'
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.environment) {
-        console.log('Environment after app select', data.environment);
-        // Persist the full environment (including identifiers). Explicitly
-        // set the current app's slug/id so the session namespace reflects
-        // the user's selection even if the backend omits these fields.
-        const env = {
-          ...data.environment,
-          APP_NAME: appId,
-          APP_ID: backendId.toString(),
-        };
-        localStorage.setItem('env', JSON.stringify(env));
-      } else {
-        localStorage.setItem(
-          'env',
-          JSON.stringify({ APP_NAME: appId, APP_ID: backendId.toString() })
-        );
-      }
-    }
-  } catch (err) {
-    console.log('App select env fetch error', err);
-  }
-  navigate(`/projects?app=${appId}`);
-};
+    navigate(`/projects?app=${appId}`);
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100">
+    <div className="relative min-h-screen bg-gradient-to-br from-slate-50 to-gray-100">
+      {isLoading && (
+        <LoadingAnimation status={loadingStatus} className="z-20" />
+      )}
       <Header />
 
       {/* Main Content */}
