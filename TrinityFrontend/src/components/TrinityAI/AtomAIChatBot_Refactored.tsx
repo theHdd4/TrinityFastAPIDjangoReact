@@ -165,61 +165,71 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
       if (res.ok) {
         const data = await res.json();
         
-        // Enhanced AI response handling with smart_response as priority (SAME AS OLD FILE)
-        let aiText = '';
-        if (data.success) {
-          // Success case - use smart_response if available, otherwise show completion message
-          aiText = data.smart_response || `I've successfully completed the operation for you. ${data.message || 'The configuration is ready and you can now proceed with the current settings or make further adjustments as needed.'}`;
-        } else if (Array.isArray(data.suggestions) && data.suggestions.length) {
-          // Suggestions case - ALWAYS use smart_response if available, don't add extra content
-          if (data.smart_response) {
-            aiText = data.smart_response;
-          } else {
-            // Only show suggestions if no smart_response
-            aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
-            
-            // Add file analysis if available
-            if (data.file_analysis) {
-              aiText += `\n\n📊 File Analysis:\n`;
-              if (data.file_analysis.total_files) {
-                aiText += `• Total files available: ${data.file_analysis.total_files}\n`;
-              }
-              if (data.file_analysis.recommended_pairs && data.file_analysis.recommended_pairs.length > 0) {
-                aiText += `• Recommended pairs: ${data.file_analysis.recommended_pairs.join(', ')}\n`;
-              }
-              if (data.file_analysis.common_columns && data.file_analysis.common_columns.length > 0) {
-                aiText += `• Common columns: ${data.file_analysis.common_columns.join(', ')}\n`;
-              }
-              if (data.file_analysis.concat_tips && data.file_analysis.concat_tips.length > 0) {
-                aiText += `• Tips: ${data.file_analysis.concat_tips.join(', ')}\n`;
-              }
-              if (data.file_analysis.merge_tips && data.file_analysis.merge_tips.length > 0) {
-                aiText += `• Tips: ${data.file_analysis.merge_tips.join(', ')}\n`;
-              }
-            }
-            
-            // Add next steps if available
-            if (data.next_steps && data.next_steps.length > 0) {
-              aiText += `\n\n🎯 Next Steps:\n${data.next_steps.map((step, idx) => `${idx + 1}. ${step}`).join('\n')}`;
-            }
-          }
+        // Create handler context
+        const handlerContext: AtomHandlerContext = {
+          atomId,
+          atomType,
+          atomTitle,
+          sessionId,
+          updateAtomSettings,
+          setMessages
+        };
+
+        // Check if we have a specific handler for this atom type
+        const handler = atomHandlers[atomType];
+        if (handler && hasAtomData(atomType, data)) {
+          // Use specific handler for success case
+          console.log(`🎯 Using specific handler for ${atomType} success case`);
+          await handler.handleSuccess(data, handlerContext);
+        } else if (handler && !data.success) {
+          // Use specific handler for failure case
+          console.log(`🎯 Using specific handler for ${atomType} failure case`);
+          await handler.handleFailure(data, handlerContext);
         } else {
-          // Fallback case - use smart_response if available
-          aiText = data.smart_response || data.message || data.response || data.final_response || 'AI response received';
-        }
-        
-        // Check if we have specific handlers (SAME LOGIC AS OLD FILE)
-        const hasSpecificHandler = (atomType === 'concat' && data.concat_json) ||
-                                 (atomType === 'merge' && data.merge_json) ||
-                                 (atomType === 'create-column' && data.json) ||
-                                 (atomType === 'groupby-wtg-avg' && data.groupby_json) ||
-                                 (atomType === 'chart-maker' && data.chart_json) ||
-                                 (atomType === 'explore' && data.exploration_config) ||
-                                 (atomType === 'dataframe-operations' && data.dataframe_config);
-        
-        // Only add general AI message if not handled by specific atom types (SAME AS OLD FILE)
-        if (!hasSpecificHandler) {
-          const aiMsg: Message = { id: (Date.now() + 1).toString(), content: aiText, sender: 'ai', timestamp: new Date() };
+          // Fallback to generic handling
+          console.log(`🔍 Using generic handler for ${atomType}`);
+          let aiText = '';
+          if (data.success) {
+            aiText = data.smart_response || `I've successfully completed the operation for you. ${data.message || 'The configuration is ready and you can now proceed with the current settings or make further adjustments as needed.'}`;
+          } else if (Array.isArray(data.suggestions) && data.suggestions.length) {
+            if (data.smart_response) {
+              aiText = data.smart_response;
+            } else {
+              aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
+              
+              if (data.file_analysis) {
+                aiText += `\n\n📊 File Analysis:\n`;
+                if (data.file_analysis.total_files) {
+                  aiText += `• Total files available: ${data.file_analysis.total_files}\n`;
+                }
+                if (data.file_analysis.recommended_pairs && data.file_analysis.recommended_pairs.length > 0) {
+                  aiText += `• Recommended pairs: ${data.file_analysis.recommended_pairs.join(', ')}\n`;
+                }
+                if (data.file_analysis.common_columns && data.file_analysis.common_columns.length > 0) {
+                  aiText += `• Common columns: ${data.file_analysis.common_columns.join(', ')}\n`;
+                }
+                if (data.file_analysis.concat_tips && data.file_analysis.concat_tips.length > 0) {
+                  aiText += `• Tips: ${data.file_analysis.concat_tips.join(', ')}\n`;
+                }
+                if (data.file_analysis.merge_tips && data.file_analysis.merge_tips.length > 0) {
+                  aiText += `• Tips: ${data.file_analysis.merge_tips.join(', ')}\n`;
+                }
+              }
+              
+              if (data.next_steps && data.next_steps.length > 0) {
+                aiText += `\n\n🎯 Next Steps:\n${data.next_steps.map((step: string, idx: number) => `${idx + 1}. ${step}`).join('\n')}`;
+              }
+            }
+          } else {
+            aiText = data.smart_response || data.message || data.response || data.final_response || 'AI response received';
+          }
+          
+          const aiMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            content: aiText,
+            sender: 'ai',
+            timestamp: new Date(),
+          };
           setMessages(prev => [...prev, aiMsg]);
           
           // Store suggestions for potential use
@@ -231,44 +241,24 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             });
           }
         }
-        
-        // Create handler context for modular handlers
-        const handlerContext: AtomHandlerContext = {
-          atomId,
-          atomType,
-          atomTitle,
-          sessionId,
-          updateAtomSettings,
-          setMessages
-        };
-
-        // Use modular handlers if available, otherwise fall back to old inline logic
-        const handler = atomHandlers[atomType];
-        if (handler && hasSpecificHandler) {
-          console.log(`🎯 Using modular handler for ${atomType}`);
-          await handler.handleSuccess(data, handlerContext);
-        } else if (hasSpecificHandler) {
-          console.log(`🔧 Using inline handler for ${atomType} (no modular handler available)`);
-          // This is where we would fall back to old inline logic if needed
-        }
       } else {
         // Handle API response error
-          const aiMsg: Message = {
-            id: (Date.now() + 1).toString(),
+        const aiMsg: Message = { 
+          id: (Date.now() + 1).toString(), 
           content: 'Request failed - please try again', 
-            sender: 'ai',
+          sender: 'ai', 
           timestamp: new Date() 
-          };
-          setMessages(prev => [...prev, aiMsg]);
-              }
-            } catch (error) {
+        };
+        setMessages(prev => [...prev, aiMsg]);
+      }
+    } catch (error) {
       console.error('AI request failed:', error);
       const aiMsg: Message = { 
-              id: (Date.now() + 1).toString(),
+        id: (Date.now() + 1).toString(), 
         content: 'Could not reach AI service', 
-            sender: 'ai', 
-            timestamp: new Date() 
-          };
+        sender: 'ai', 
+        timestamp: new Date() 
+      };
       setMessages(prev => [...prev, aiMsg]);
     }
 
