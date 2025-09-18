@@ -43,18 +43,24 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
       <LoginAnimation active={showAnimation} onComplete={handleAnimationComplete} />
       <video
         autoPlay
         loop
         muted
         playsInline
-        className="absolute inset-0 w-full h-full object-cover"
+        className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${
+          showAnimation ? 'opacity-0' : 'opacity-100'
+        }`}
       >
         <source src="/background.mp4" type="video/mp4" />
       </video>
-      <div className="w-full max-w-md space-y-6 relative z-10">
+      <div
+        className={`relative z-10 w-full max-w-md space-y-6 transition-opacity duration-500 ${
+          showAnimation ? 'pointer-events-none opacity-0' : 'opacity-100'
+        }`}
+      >
         <Card className="bg-white/5 backdrop-blur-lg border border-white/10 text-white shadow-2xl">
           <CardHeader className="flex flex-col items-center space-y-2 text-center">
             <AnimatedLogo className="w-20 h-20 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />

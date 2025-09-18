@@ -1,10 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { BarChart3, Target, Zap, Plus, ArrowRight } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
-import { TrinityAssets, Navigation } from '@/components/PrimaryMenu';
+import Header from '@/components/Header';
 import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
 import { REGISTRY_API } from '@/lib/api';
 
@@ -15,7 +13,6 @@ interface BackendApp {
 
 const Apps = () => {
   const navigate = useNavigate();
-  const { logout } = useAuth();
   const [appMap, setAppMap] = useState<Record<string, number>>({});
   const [playIntro, setPlayIntro] = useState(false);
 
@@ -51,11 +48,6 @@ const Apps = () => {
       sessionStorage.removeItem('trinity-login-anim');
     }
   }, []);
-
-  const handleLogout = async () => {
-    await logout();
-    navigate('/login');
-  };
 
   const handleAppSelect = async (appId: string) => {
     let backendId = appMap[appId];
@@ -157,47 +149,24 @@ const Apps = () => {
   });
 
   return (
-    <div
-      className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 animate-fade-in"
-      style={animationStyle(0)}
-    >
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-50 to-gray-100">
       <div
-        className="relative overflow-hidden border-b border-gray-200 bg-white/95 shadow-lg animate-slide-in-from-top"
-        style={animationStyle(0.2)}
+        className="pointer-events-none absolute inset-x-0 top-0 h-[360px] overflow-hidden animate-fade-in"
+        style={animationStyle(0)}
       >
-        <GreenGlyphRain className="opacity-90" />
-        <div className="relative z-10">
-          <div className="mx-auto flex max-w-7xl flex-col gap-6 px-6 py-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <TrinityAssets.AnimatedLogo className="h-12 w-12 drop-shadow-[0_0_25px_rgba(34,197,94,0.35)]" />
-                <div>
-                  <p className="text-xs font-mono uppercase tracking-[0.35em] text-gray-500">Trinity</p>
-                  <h1 className="text-xl font-semibold text-gray-900">Analytics Command Center</h1>
-                </div>
-              </div>
-              <Button
-                variant="outline"
-                onClick={handleLogout}
-                className="text-gray-600 transition-colors duration-300 hover:text-gray-900"
-              >
-                Sign Out
-              </Button>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-4 text-gray-600">
-              <Navigation />
-              <div className="text-xs font-mono uppercase tracking-[0.35em] text-gray-500">
-                Intelligence Unlocked
-              </div>
-            </div>
-          </div>
-        </div>
+        <GreenGlyphRain className="pointer-events-none opacity-80" />
       </div>
 
-      <div
-        className="mx-auto max-w-7xl px-6 py-12 animate-fade-in"
-        style={animationStyle(0.4)}
-      >
+      <div className="relative z-10 flex min-h-screen flex-col">
+        <div className="animate-slide-in-from-top" style={animationStyle(0.2)}>
+          <Header />
+        </div>
+
+        <main className="flex-1">
+          <div
+            className="mx-auto max-w-7xl px-6 py-12 animate-fade-in"
+            style={animationStyle(0.4)}
+          >
         <div
           className="mb-12 text-center animate-scale-in"
           style={animationStyle(0.6)}
@@ -264,12 +233,14 @@ const Apps = () => {
           })}
         </div>
 
-        <div
-          className="mt-16 text-center text-sm text-gray-500 animate-fade-in"
-          style={animationStyle(1.2)}
-        >
-          "The Matrix has you" – pick your path
-        </div>
+            <div
+              className="mt-16 text-center text-sm text-gray-500 animate-fade-in"
+              style={animationStyle(1.2)}
+            >
+              "The Matrix has you" – pick your path
+            </div>
+          </div>
+        </main>
       </div>
     </div>
   );

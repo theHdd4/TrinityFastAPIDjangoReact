@@ -118,13 +118,12 @@ const LoginAnimation: React.FC<LoginAnimationProps> = ({ active, onComplete }) =
     timeoutsRef.current.push(
       window.setTimeout(() => {
         setExiting(true);
+        timeoutsRef.current.push(
+          window.setTimeout(() => {
+            onComplete();
+          }, 250)
+        );
       }, 3100)
-    );
-
-    timeoutsRef.current.push(
-      window.setTimeout(() => {
-        onComplete();
-      }, 3600)
     );
 
     return () => {
