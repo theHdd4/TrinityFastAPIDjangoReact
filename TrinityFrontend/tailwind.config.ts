@@ -123,6 +123,16 @@ export default {
                                                 opacity: '1'
                                         }
                                 },
+                                'fade-out-enhanced': {
+                                        '0%': {
+                                                opacity: '1',
+                                                transform: 'scale(1)'
+                                        },
+                                        '100%': {
+                                                opacity: '0',
+                                                transform: 'scale(1.03)'
+                                        }
+                                },
                                 'dot-travel': {
                                         '0%': {
                                                 top: '50%',
@@ -147,6 +157,7 @@ export default {
                                 'accordion-up': 'accordion-up 0.2s ease-out',
                                 'fade-in': 'fade-in 0.3s ease-out',
                                 'scale-in': 'scale-in 0.2s ease-out',
+                                'fade-out-enhanced': 'fade-out-enhanced 1.2s ease-out forwards',
                                 'dot-travel': 'dot-travel 4s ease-in-out infinite',
                                 'line-grow': 'line-grow 4s ease-in-out infinite'
                         }
