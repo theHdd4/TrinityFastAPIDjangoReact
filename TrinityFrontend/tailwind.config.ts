@@ -123,6 +123,26 @@ export default {
                                                 opacity: '1'
                                         }
                                 },
+                                'slide-in-from-top': {
+                                        '0%': {
+                                                opacity: '0',
+                                                transform: 'translateY(-16px)'
+                                        },
+                                        '100%': {
+                                                opacity: '1',
+                                                transform: 'translateY(0)'
+                                        }
+                                },
+                                'slide-in-from-bottom': {
+                                        '0%': {
+                                                opacity: '0',
+                                                transform: 'translateY(16px)'
+                                        },
+                                        '100%': {
+                                                opacity: '1',
+                                                transform: 'translateY(0)'
+                                        }
+                                },
                                 'fade-out-enhanced': {
                                         '0%': {
                                                 opacity: '1',
@@ -157,6 +177,8 @@ export default {
                                 'accordion-up': 'accordion-up 0.2s ease-out',
                                 'fade-in': 'fade-in 0.3s ease-out',
                                 'scale-in': 'scale-in 0.2s ease-out',
+                                'slide-in-from-top': 'slide-in-from-top 0.45s ease-out forwards',
+                                'slide-in-from-bottom': 'slide-in-from-bottom 0.45s ease-out forwards',
                                 'fade-out-enhanced': 'fade-out-enhanced 1.2s ease-out forwards',
                                 'dot-travel': 'dot-travel 4s ease-in-out infinite',
                                 'line-grow': 'line-grow 4s ease-in-out infinite'

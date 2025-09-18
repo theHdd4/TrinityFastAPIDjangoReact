@@ -2,8 +2,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
-import Header from '@/components/Header';
+import { Button } from '@/components/ui/button';
 import { BarChart3, Target, Zap, Plus, ArrowRight } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 import { REGISTRY_API } from '@/lib/api';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 
@@ -14,6 +15,7 @@ interface BackendApp {
 
 const Apps = () => {
   const navigate = useNavigate();
+  const { logout } = useAuth();
   const [appMap, setAppMap] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [loadingStatus, setLoadingStatus] = useState('Loading your personalized dashboard...');
@@ -80,41 +82,45 @@ const Apps = () => {
 
   const apps = [
     {
-      id: 'forecasting',
-      title: 'Forecasting Analysis',
-      description: 'Predict future trends and patterns with advanced time series analysis',
-      icon: BarChart3,
-      color: 'from-green-500 to-teal-600',
-      bgGradient: 'from-green-50 to-teal-50',
-      molecules: ['Explore', 'Build']
-    },
-    {
       id: 'marketing-mix',
       title: 'Marketing Mix Modeling',
-      description: 'Optimize marketing spend allocation across different channels',
+      description:
+        'Optimize marketing spend allocation across different channels and measure incremental impact',
       icon: Target,
       color: 'from-blue-500 to-purple-600',
       bgGradient: 'from-blue-50 to-purple-50',
-      molecules: ['Data Pre-Process', 'Explore']
+      molecules: ['Data Pre-Process', 'Explore'],
+    },
+    {
+      id: 'forecasting',
+      title: 'Forecasting Analysis',
+      description:
+        'Predict future trends and patterns with advanced time series analysis and modeling',
+      icon: BarChart3,
+      color: 'from-green-500 to-teal-600',
+      bgGradient: 'from-green-50 to-teal-50',
+      molecules: ['Explore', 'Build'],
     },
     {
       id: 'promo-effectiveness',
       title: 'Promo Effectiveness',
-      description: 'Measure and analyze promotional campaign performance',
+      description:
+        'Measure and analyze promotional campaign performance and ROI across touchpoints',
       icon: Zap,
       color: 'from-orange-500 to-red-600',
       bgGradient: 'from-orange-50 to-red-50',
-      molecules: ['Data Pre-Process', 'Build']
+      molecules: ['Data Pre-Process', 'Build'],
     },
     {
       id: 'blank',
       title: 'Create Blank App',
-      description: 'Start from scratch with a clean canvas',
+      description:
+        'Start from scratch with a clean canvas and build your custom analysis workflow',
       icon: Plus,
       color: 'from-gray-500 to-gray-700',
       bgGradient: 'from-gray-50 to-gray-100',
-      molecules: []
-    }
+      molecules: [],
+    },
   ];
 
 
@@ -174,13 +180,44 @@ const Apps = () => {
     navigate(`/projects?app=${appId}`);
   };
 
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
+
   return (
-    <div className="relative min-h-screen bg-gradient-to-br from-slate-50 to-gray-100">
+    <div
+      className="relative min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 animate-fade-in"
+      style={{ animationDelay: '1.0s', animationFillMode: 'both', opacity: 0 }}
+    >
       {isLoading && (
-        <LoadingAnimation status={loadingStatus} className="z-20" />
+        <LoadingAnimation status={loadingStatus} className="z-30" />
       )}
+
       <div className="relative">
-        <Header />
+        <div
+          className="bg-white shadow-sm border-b animate-slide-in-from-top"
+          style={{ animationDelay: '1.2s', animationFillMode: 'both', opacity: 0 }}
+        >
+          <div className="max-w-7xl mx-auto px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
+                  <div className="w-4 h-4 bg-white rounded-sm" />
+                </div>
+                <h1 className="text-xl font-semibold text-gray-900">Trinity Analytics</h1>
+              </div>
+              <Button
+                variant="outline"
+                onClick={handleLogout}
+                className="text-gray-600 hover:text-gray-900"
+              >
+                Sign Out
+              </Button>
+            </div>
+          </div>
+        </div>
+
         {menuLoading && (
           <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
             <LoadingAnimation
@@ -191,9 +228,14 @@ const Apps = () => {
         )}
       </div>
 
-      {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-6 py-12">
-        <div className="text-center mb-12">
+      <div
+        className="max-w-7xl mx-auto px-6 py-12 animate-fade-in"
+        style={{ animationDelay: '1.4s', animationFillMode: 'both', opacity: 0 }}
+      >
+        <div
+          className="text-center mb-12 animate-scale-in"
+          style={{ animationDelay: '1.6s', animationFillMode: 'both', opacity: 0 }}
+        >
           <h2 className="text-3xl font-bold text-gray-900 mb-4">Choose Your Analytics Application</h2>
           <p className="text-lg text-gray-600 max-w-2xl mx-auto">
             Select the type of analysis you want to perform. Each application comes with pre-configured templates and workflows.
@@ -201,22 +243,30 @@ const Apps = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto">
-          {apps.map((app) => {
+          {apps.map((app, index) => {
             const Icon = app.icon;
             return (
               <Card
                 key={app.id}
-                className="group cursor-pointer hover:shadow-lg transition-all duration-300 border-0 bg-white overflow-hidden"
+                className="group relative cursor-pointer overflow-hidden border-0 bg-white shadow transition-transform duration-300 hover:-translate-y-1 hover:shadow-xl animate-slide-in-from-bottom"
+                style={{
+                  animationDelay: `${1.8 + index * 0.1}s`,
+                  animationFillMode: 'both',
+                  opacity: 0,
+                }}
                 onClick={() => handleAppSelect(app.id)}
               >
-                <div className="p-8">
+                <div
+                  className={`absolute inset-0 bg-gradient-to-br ${app.bgGradient} opacity-0 transition-opacity duration-500 group-hover:opacity-60`}
+                />
+                <div className="relative p-8">
                   <div className="flex items-start space-x-4">
-                    <div className={`w-16 h-16 rounded-xl bg-gradient-to-r ${app.color} flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-lg`}>
+                    <div className={`w-16 h-16 rounded-xl bg-gradient-to-r ${app.color} flex items-center justify-center transition-transform duration-300 shadow-lg group-hover:scale-110`}>
                       <Icon className="w-8 h-8 text-white" />
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-xl font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors">
+                      <h3 className="text-xl font-semibold text-gray-900 mb-2 transition-colors group-hover:text-gray-700">
                         {app.title}
                       </h3>
                       <p className="text-gray-600 text-sm leading-relaxed mb-4">
@@ -227,9 +277,9 @@ const Apps = () => {
                         <div className="mb-4">
                           <p className="text-xs font-medium text-gray-500 mb-2">Pre-configured with:</p>
                           <div className="flex flex-wrap gap-2">
-                            {app.molecules.map((molecule, index) => (
+                            {app.molecules.map((molecule, moleculeIndex) => (
                               <span
-                                key={index}
+                                key={moleculeIndex}
                                 className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800"
                               >
                                 {molecule}
@@ -239,9 +289,9 @@ const Apps = () => {
                         </div>
                       )}
 
-                      <div className="flex items-center text-sm font-medium text-gray-600 group-hover:text-gray-900 transition-colors">
+                      <div className="flex items-center text-sm font-medium text-gray-600 transition-colors group-hover:text-gray-900">
                         Select Application
-                        <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform duration-300" />
+                        <ArrowRight className="w-4 h-4 ml-2 transition-transform duration-300 group-hover:translate-x-1" />
                       </div>
                     </div>
                   </div>
@@ -251,7 +301,7 @@ const Apps = () => {
           })}
         </div>
 
-        <div className="text-center mt-16">
+        <div className="text-center mt-16 animate-fade-in" style={{ animationDelay: '2.2s', animationFillMode: 'both', opacity: 0 }}>
           <p className="text-gray-500 text-sm">"The Matrix has you" - pick your path</p>
         </div>
       </div>
