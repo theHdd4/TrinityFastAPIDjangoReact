@@ -30,6 +30,7 @@ interface FormularBarProps {
   onFormulaInputChange: (value: string) => void;
   onFormulaModeChange: (mode: boolean) => void;
   onFormulaSubmit: () => void;
+  onValidationError?: (message: string | null) => void;
 }
 
 function safeToString(val: unknown): string {
@@ -570,13 +571,13 @@ const FormularBar: React.FC<FormularBarProps> = ({
   onFormulaInputChange,
   onFormulaModeChange,
   onFormulaSubmit,
+  onValidationError,
 }) => {
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFormula, setSelectedFormula] = useState<FormulaItem | null>(null);
   const [activeTab, setActiveTab] = useState<TabValue>('all');
   const [isUsageGuideOpen, setIsUsageGuideOpen] = useState(false);
-  const [showValidationError, setShowValidationError] = useState(false);
 
   useEffect(() => {
     if (!isFormulaMode) {
@@ -631,7 +632,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
     setIsLibraryOpen(false);
     setActiveTab('all');
     setIsUsageGuideOpen(false);
-    setShowValidationError(false);
+    onValidationError?.(null);
   };
 
   const handleFormulaSelect = (formula: FormulaItem) => {
@@ -641,7 +642,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
     onFormulaInputChange(expression);
     onFormulaModeChange(true);
     setIsLibraryOpen(false);
-    setShowValidationError(false);
+    onValidationError?.(null);
   };
 
   const handleLibraryOpenChange = (open: boolean) => {
@@ -667,9 +668,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
   const handleInputChange = (value: string) => {
     onFormulaInputChange(value);
     onFormulaModeChange(true);
-    if (showValidationError) {
-      setShowValidationError(false);
-    }
+    onValidationError?.(null);
   };
 
   const handleTabCompletion = () => {
@@ -712,7 +711,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
 
     onFormulaInputChange(expression);
     onFormulaModeChange(true);
-    setShowValidationError(false);
+    onValidationError?.(null);
     return true;
   };
 
@@ -722,11 +721,11 @@ const FormularBar: React.FC<FormularBarProps> = ({
     }
 
     if (!isValidFormulaInput(formulaInput)) {
-      setShowValidationError(true);
+      onValidationError?.('Please enter a valid formula and then hit Apply');
       return;
     }
 
-    setShowValidationError(false);
+    onValidationError?.(null);
     onFormulaSubmit();
   };
 
@@ -879,11 +878,6 @@ const FormularBar: React.FC<FormularBarProps> = ({
                 }}
               />
             </div>
-            {showValidationError && (
-              <p className='mt-1 text-xs text-destructive font-medium'>
-                Please enter a valid formula and then hit Apply
-              </p>
-            )}
           </div>
         </div>
 
