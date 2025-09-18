@@ -1,4 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  LOGIN_ANIMATION_CURTAIN_DELAY,
+  LOGIN_ANIMATION_CURTAIN_DURATION,
+  LOGIN_ANIMATION_EXIT_FADE,
+} from '@/constants/loginAnimation';
 
 interface LoginAnimationProps {
   active: boolean;
@@ -97,6 +102,9 @@ const LoginAnimation: React.FC<LoginAnimationProps> = ({ active, onComplete }) =
     setCurtainVisible(false);
     setExiting(false);
 
+    const curtainExitTrigger =
+      LOGIN_ANIMATION_CURTAIN_DELAY + LOGIN_ANIMATION_CURTAIN_DURATION;
+
     timeoutsRef.current.push(
       window.setTimeout(() => {
         setStatus(STATUS_SEQUENCE[1]);
@@ -112,7 +120,7 @@ const LoginAnimation: React.FC<LoginAnimationProps> = ({ active, onComplete }) =
             setStatusMode('light');
           }, 350)
         );
-      }, 1700)
+      }, LOGIN_ANIMATION_CURTAIN_DELAY)
     );
 
     timeoutsRef.current.push(
@@ -121,9 +129,9 @@ const LoginAnimation: React.FC<LoginAnimationProps> = ({ active, onComplete }) =
         timeoutsRef.current.push(
           window.setTimeout(() => {
             onComplete();
-          }, 150)
+          }, LOGIN_ANIMATION_EXIT_FADE)
         );
-      }, 2950)
+      }, curtainExitTrigger)
     );
 
     return () => {

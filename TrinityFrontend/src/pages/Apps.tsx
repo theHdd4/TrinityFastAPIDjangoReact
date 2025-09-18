@@ -5,6 +5,7 @@ import { BarChart3, Target, Zap, Plus, ArrowRight } from 'lucide-react';
 import Header from '@/components/Header';
 import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
 import { REGISTRY_API } from '@/lib/api';
+import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 
 interface BackendApp {
   id: number;
@@ -15,6 +16,7 @@ const Apps = () => {
   const navigate = useNavigate();
   const [appMap, setAppMap] = useState<Record<string, number>>({});
   const [playIntro, setPlayIntro] = useState(false);
+  const [introBaseDelay, setIntroBaseDelay] = useState(0);
 
   useEffect(() => {
     const loadApps = async () => {
@@ -43,10 +45,39 @@ const Apps = () => {
   }, []);
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && sessionStorage.getItem('trinity-login-anim') === '1') {
-      setPlayIntro(true);
-      sessionStorage.removeItem('trinity-login-anim');
+    if (typeof window === 'undefined') {
+      return;
     }
+
+    const stored = sessionStorage.getItem('trinity-login-anim');
+    if (!stored) {
+      return;
+    }
+
+    sessionStorage.removeItem('trinity-login-anim');
+
+    try {
+      const meta = JSON.parse(stored) as {
+        startedAt?: number;
+        totalDuration?: number;
+      };
+      if (meta && typeof meta.startedAt === 'number') {
+        const total =
+          typeof meta.totalDuration === 'number'
+            ? meta.totalDuration
+            : LOGIN_ANIMATION_TOTAL_DURATION;
+        const elapsed = Date.now() - meta.startedAt;
+        const remaining = Math.max(0, total - elapsed) / 1000;
+        setIntroBaseDelay(remaining);
+        setPlayIntro(true);
+        return;
+      }
+    } catch (err) {
+      console.log('Login intro metadata parse error', err);
+    }
+
+    setPlayIntro(true);
+    setIntroBaseDelay(0);
   }, []);
 
   const handleAppSelect = async (appId: string) => {
@@ -141,9 +172,8 @@ const Apps = () => {
     },
   ];
 
-  const baseDelay = playIntro ? 2.8 : 0;
   const animationStyle = (offset: number) => ({
-    animationDelay: `${(baseDelay + offset).toFixed(1)}s`,
+    animationDelay: `${(introBaseDelay + offset).toFixed(1)}s`,
     animationFillMode: 'both' as const,
     ...(playIntro ? { opacity: 0 } : {}),
   });

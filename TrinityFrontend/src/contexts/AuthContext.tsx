@@ -22,11 +22,19 @@ interface ProfileInfo {
   avatar_url: string;
 }
 
+interface LoginOptions {
+  onInitialSuccess?: () => void;
+}
+
 interface AuthContextType {
   isAuthenticated: boolean;
   user: UserInfo | null;
   profile: ProfileInfo | null;
-  login: (username: string, password: string) => Promise<boolean>;
+  login: (
+    username: string,
+    password: string,
+    options?: LoginOptions
+  ) => Promise<boolean>;
   logout: () => Promise<void>;
   hasPermission: (permission: AppPermission) => boolean;
 }
@@ -85,7 +93,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [isAuthenticated]);
 
-  const login = async (username: string, password: string) => {
+  const login = async (
+    username: string,
+    password: string,
+    options?: LoginOptions
+  ) => {
     console.log('Attempting login for', username);
     console.log('API base is', API_BASE);
     console.log('Checking backend availability at', `${API_BASE}/users/me/`);
@@ -120,6 +132,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
       if (res.ok) {
+        options?.onInitialSuccess?.();
         const data = await res.json();
         console.log('Login success, user:', data.username);
         if (data.environment) {
