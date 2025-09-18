@@ -121,9 +121,9 @@ const LoginAnimation: React.FC<LoginAnimationProps> = ({ active, onComplete }) =
         timeoutsRef.current.push(
           window.setTimeout(() => {
             onComplete();
-          }, 250)
+          }, 150)
         );
-      }, 3100)
+      }, 2950)
     );
 
     return () => {
@@ -138,7 +138,7 @@ const LoginAnimation: React.FC<LoginAnimationProps> = ({ active, onComplete }) =
 
   return (
     <div
-      className={`fixed inset-0 z-[1000] overflow-hidden transition-opacity duration-700 ${
+      className={`fixed inset-0 z-[1000] overflow-hidden transition-opacity duration-500 ${
         exiting ? 'opacity-0 pointer-events-none' : 'opacity-100'
       }`}
     >
@@ -190,11 +190,11 @@ const LoginAnimation: React.FC<LoginAnimationProps> = ({ active, onComplete }) =
       </div>
 
       <div
-        className={`absolute inset-0 z-20 flex items-start justify-center bg-gradient-to-b from-white via-white to-white ${
-          curtainVisible ? 'animate-slide-up-cover shadow-[0_-40px_80px_rgba(0,0,0,0.35)]' : 'translate-y-full'
+        className={`absolute inset-0 z-20 flex items-start justify-center bg-gradient-to-b from-white/95 via-white/60 to-white/10 backdrop-blur-md ${
+          curtainVisible ? 'animate-slide-up-cover shadow-[0_-30px_70px_rgba(15,23,42,0.28)]' : 'translate-y-full'
         }`}
       >
-        <div className="mt-24 h-1 w-20 rounded-full bg-gray-200 shadow-[0_10px_30px_rgba(0,0,0,0.15)]" />
+        <div className="mt-24 h-1 w-20 rounded-full bg-gray-200/80 shadow-[0_10px_28px_rgba(15,23,42,0.2)]" />
       </div>
     </div>
   );

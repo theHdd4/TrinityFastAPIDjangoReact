@@ -151,10 +151,18 @@ export default {
                                 },
                                 'slide-up-cover': {
                                         '0%': {
-                                                transform: 'translateY(100%)'
+                                                transform: 'translateY(100%)',
+                                                opacity: '0.9'
+                                        },
+                                        '35%': {
+                                                opacity: '0.85'
+                                        },
+                                        '70%': {
+                                                opacity: '0.55'
                                         },
                                         '100%': {
-                                                transform: 'translateY(-5%)'
+                                                transform: 'translateY(-5%)',
+                                                opacity: '0'
                                         }
                                 },
                                 'slide-in-from-top': {
