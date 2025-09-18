@@ -8,6 +8,12 @@ const GreenGlyphRain: React.FC<GreenGlyphRainProps> = ({ className = '' }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>();
+  const maskStyle: React.CSSProperties = {
+    maskImage:
+      'linear-gradient(to bottom, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.75) 45%, rgba(0,0,0,0.35) 75%, rgba(0,0,0,0.1) 90%, transparent 100%)',
+    WebkitMaskImage:
+      'linear-gradient(to bottom, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.75) 45%, rgba(0,0,0,0.35) 75%, rgba(0,0,0,0.1) 90%, transparent 100%)',
+  };
 
   useEffect(() => {
     const container = containerRef.current;
@@ -76,9 +82,14 @@ const GreenGlyphRain: React.FC<GreenGlyphRainProps> = ({ className = '' }) => {
   }, []);
 
   return (
-    <div ref={containerRef} className={`absolute inset-0 overflow-hidden ${className}`}>
+    <div
+      ref={containerRef}
+      className={`absolute inset-0 overflow-hidden ${className}`}
+      style={maskStyle}
+    >
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
-      <div className="absolute inset-0 bg-gradient-to-t from-white via-white/70 to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-b from-emerald-900/40 via-emerald-900/10 to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-white/10 to-white/40" />
     </div>
   );
 };

@@ -181,10 +181,10 @@ const Apps = () => {
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-50 to-gray-100">
       <div
-        className="pointer-events-none absolute inset-x-0 top-0 h-[360px] overflow-hidden animate-fade-in"
+        className="pointer-events-none absolute inset-0 z-0 animate-fade-in"
         style={animationStyle(0)}
       >
-        <GreenGlyphRain className="pointer-events-none opacity-80" />
+        <GreenGlyphRain className="pointer-events-none opacity-90" />
       </div>
 
       <div className="relative z-10 flex min-h-screen flex-col">
