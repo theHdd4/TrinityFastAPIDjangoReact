@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Eye, EyeOff, User, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
+import LoginAnimation from '@/components/LoginAnimation';
 
 const Login = () => {
   const [username, setUsername] = useState('');
@@ -15,8 +16,14 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showAnimation, setShowAnimation] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
+
+  const handleAnimationComplete = useCallback(() => {
+    sessionStorage.setItem('trinity-login-anim', '1');
+    navigate('/apps');
+  }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,17 +34,17 @@ const Login = () => {
 
     const success = await login(username, password);
     if (success) {
-      navigate('/apps');
+      setShowAnimation(true);
     } else {
       setError('Invalid credentials.');
       console.log('Login failed for', username);
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative">
+      <LoginAnimation active={showAnimation} onComplete={handleAnimationComplete} />
       <video
         autoPlay
         loop
