@@ -9,7 +9,6 @@ import { Eye, EyeOff, User, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
-import LoginAnimation from '@/templates/LoginAnimation/LoginAnimation';
 
 const Login = () => {
   const [username, setUsername] = useState('');
@@ -19,7 +18,6 @@ const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [showLoadingOverlay, setShowLoadingOverlay] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('');
-  const [loginSuccess, setLoginSuccess] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
 
@@ -31,7 +29,6 @@ const Login = () => {
     setShowLoadingOverlay(true);
     setError('');
     setLoadingStatus('Authenticating...');
-    setLoginSuccess(false);
 
     console.log('Submitting login form for', username);
 
@@ -40,10 +37,7 @@ const Login = () => {
       setLoadingStatus('Succefully Loaded..');
       await sleep(500);
       setLoadingStatus('Loading your personalized dashboard...');
-      await sleep(700);
-      setShowLoadingOverlay(false);
-      setLoginSuccess(true);
-      await sleep(2400);
+      await sleep(1200);
       navigate('/apps', { state: { fromLogin: true } });
       return;
     }
@@ -57,7 +51,6 @@ const Login = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative">
-      <LoginAnimation loginSuccess={loginSuccess} />
       {showLoadingOverlay && (
         <LoadingAnimation
           status={loadingStatus || 'Loading your personalized dashboard...'}
