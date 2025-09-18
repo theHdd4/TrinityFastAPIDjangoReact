@@ -33,7 +33,7 @@ interface AuthContextType {
   login: (
     username: string,
     password: string,
-    options?: LoginOptions
+    loginOptions?: LoginOptions
   ) => Promise<boolean>;
   logout: () => Promise<void>;
   hasPermission: (permission: AppPermission) => boolean;
@@ -96,7 +96,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (
     username: string,
     password: string,
-    options?: LoginOptions
+    loginOptions?: LoginOptions
   ) => {
     console.log('Attempting login for', username);
     console.log('API base is', API_BASE);
@@ -110,15 +110,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('Backend check failed', err);
     }
     console.log('Posting to', `${API_BASE}/login/`);
-    const options = {
+    const requestOptions = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ username, password }),
     };
-    console.log('Login fetch options', options);
+    console.log('Login fetch options', requestOptions);
     try {
-      let res = await fetch(`${API_BASE}/login/`, options);
+      let res = await fetch(`${API_BASE}/login/`, requestOptions);
       console.log('Login response headers', Array.from(res.headers.entries()));
       console.log('Login response status', res.status);
       if (res.status === 404 || res.status === 405) {
@@ -127,12 +127,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           : API_BASE.replace('/api', '/admin/api');
         if (altBase !== API_BASE) {
           console.log('Retrying login via', `${altBase}/login/`);
-          res = await fetch(`${altBase}/login/`, options);
+          res = await fetch(`${altBase}/login/`, requestOptions);
           console.log('Retry response status', res.status);
         }
       }
       if (res.ok) {
-        options?.onInitialSuccess?.();
+        loginOptions?.onInitialSuccess?.();
         const data = await res.json();
         console.log('Login success, user:', data.username);
         if (data.environment) {
