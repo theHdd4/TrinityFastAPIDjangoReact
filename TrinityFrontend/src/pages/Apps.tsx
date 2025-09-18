@@ -2,9 +2,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import Header from '@/components/Header';
 import { BarChart3, Target, Zap, Plus, ArrowRight } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
 import { REGISTRY_API } from '@/lib/api';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 
@@ -15,7 +14,6 @@ interface BackendApp {
 
 const Apps = () => {
   const navigate = useNavigate();
-  const { logout } = useAuth();
   const [appMap, setAppMap] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [loadingStatus, setLoadingStatus] = useState('Loading your personalized dashboard...');
@@ -35,7 +33,6 @@ const Apps = () => {
     timeoutsRef.current.push(id);
     return id;
   };
-
 
   const loadApps = async () => {
     console.log('Fetching apps from backend...');
@@ -180,11 +177,6 @@ const Apps = () => {
     navigate(`/projects?app=${appId}`);
   };
 
-  const handleLogout = async () => {
-    await logout();
-    navigate('/login');
-  };
-
   return (
     <div
       className="relative min-h-screen bg-gradient-to-br from-slate-50 to-gray-100 animate-fade-in"
@@ -196,26 +188,10 @@ const Apps = () => {
 
       <div className="relative">
         <div
-          className="bg-white shadow-sm border-b animate-slide-in-from-top"
+          className="animate-slide-in-from-top"
           style={{ animationDelay: '1.2s', animationFillMode: 'both', opacity: 0 }}
         >
-          <div className="max-w-7xl mx-auto px-6 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                  <div className="w-4 h-4 bg-white rounded-sm" />
-                </div>
-                <h1 className="text-xl font-semibold text-gray-900">Trinity Analytics</h1>
-              </div>
-              <Button
-                variant="outline"
-                onClick={handleLogout}
-                className="text-gray-600 hover:text-gray-900"
-              >
-                Sign Out
-              </Button>
-            </div>
-          </div>
+          <Header />
         </div>
 
         {menuLoading && (
