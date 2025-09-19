@@ -117,18 +117,30 @@ export const animateLabElementsIn = () => {
     return;
   }
 
-  window.setTimeout(() => {
-    LAB_ELEMENTS.forEach(({ selector, delay }) => {
+  const elementsToAnimate = LAB_ELEMENTS
+    .map(({ selector, delay }) => {
       const element = document.querySelector(selector) as HTMLElement | null;
 
       if (!element || !isElementVisible(element)) {
-        return;
+        return null;
       }
 
       clearLabElementTimeouts(element);
       element.classList.remove(LAB_CLASS);
       applyLabPreparationState(element);
       element.style.willChange = 'opacity, transform';
+
+      return { element, delay };
+    })
+    .filter((value): value is { element: HTMLElement; delay: number } => value !== null);
+
+  if (!elementsToAnimate.length) {
+    return;
+  }
+
+  const runAnimations = () => {
+    elementsToAnimate.forEach(({ element, delay }) => {
+      clearLabElementTimeouts(element);
 
       const ensureVisible = () => {
         element.style.opacity = '1';
@@ -158,7 +170,17 @@ export const animateLabElementsIn = () => {
       element.addEventListener('animationend', handleAnimationEnd);
       element.dataset.labTransitionTimeouts = `${startTimeout},${fallbackTimeout}`;
     });
-  }, LAB_PREP_DELAY_MS);
+  };
+
+  if (LAB_PREP_DELAY_MS > 0) {
+    const prepTimeout = window.setTimeout(runAnimations, LAB_PREP_DELAY_MS);
+
+    elementsToAnimate.forEach(({ element }) => {
+      element.dataset.labTransitionTimeouts = `${prepTimeout}`;
+    });
+  } else {
+    runAnimations();
+  }
 };
 
 type TransitionCleanupScope = 'project' | 'laboratory' | 'all';

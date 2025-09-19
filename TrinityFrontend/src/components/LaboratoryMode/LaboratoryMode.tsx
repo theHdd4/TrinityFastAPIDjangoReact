@@ -43,7 +43,7 @@ const LaboratoryMode = () => {
     return () => cleanupProjectTransition('laboratory');
   }, []);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     animateLabElementsIn();
   }, []);
 
