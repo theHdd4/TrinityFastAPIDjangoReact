@@ -114,6 +114,7 @@ export interface FeatureOverviewSettings {
   activeRow?: number | null;
   dimensionMap?: Record<string, string[]>;
   filterUnique?: boolean;
+  isLoading?: boolean;
 }
 
 export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
@@ -135,6 +136,7 @@ export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   activeRow: null,
   dimensionMap: {},
   filterUnique: true,
+  isLoading: false,
 };
 
 export interface ConcatSettings {
@@ -165,6 +167,7 @@ export interface CorrelationSettings {
     var1Value: number;
     var2Value: number;
   }>;
+  timeSeriesIsDate?: boolean;
   identifiers: {
     identifier3: string;
     identifier4: string;
@@ -238,6 +241,7 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
   selectedVar2: null,
   correlationMatrix: [],
   timeSeriesData: [],
+  timeSeriesIsDate: true,
   identifiers: {
     identifier3: 'All',
     identifier4: 'All',
@@ -299,6 +303,7 @@ export interface ColumnClassifierSettings {
   enableDimensionMapping?: boolean;
   enableColumnView?: boolean;
   filterColumnViewUnique?: boolean;
+  isLoading?: boolean;
 }
 
 export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
@@ -313,6 +318,7 @@ export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
   enableDimensionMapping: false,
   enableColumnView: true,
   filterColumnViewUnique: false,
+  isLoading: false,
 };
 
 export interface DataFrameOperationsSettings {
@@ -1012,10 +1018,6 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   },
 
   updateAtomSettings: (atomId: string, settings: any) => {
-    console.log('=== Store: updateAtomSettings called ===');
-    console.log('Store: atomId:', atomId);
-    console.log('Store: settings to update:', settings);
-    
     set((state) => {
       const updatedCards = state.cards.map((card) => ({
         ...card,

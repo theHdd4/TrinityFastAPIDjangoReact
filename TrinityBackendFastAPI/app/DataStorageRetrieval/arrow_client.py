@@ -132,9 +132,19 @@ def upload_dataframe(df: pd.DataFrame, path: str) -> str:
     client = _get_client()
     table = pa.Table.from_pandas(df)
     descriptor = flight.FlightDescriptor.for_path(path)
-    writer, _ = client.do_put(descriptor, table.schema)
-    writer.write_table(table)
-    writer.close()
+    writer = None
+    try:
+        writer, _ = client.do_put(descriptor, table.schema)
+        writer.write_table(table)
+        writer.close()
+        logger.info("⬆️ uploaded flight table %s rows=%d", path, table.num_rows)
+    except Exception as exc:  # pragma: no cover - network dependent
+        logger.error("❌ flight upload failed for %s: %s", path, exc)
+        if writer:
+            try:
+                writer.close()
+            except Exception:
+                pass
     return path
 
 

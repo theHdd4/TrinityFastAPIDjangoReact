@@ -31,6 +31,12 @@ export interface BuildModelFeatureBasedData {
   outputFileName: string;
   kFolds?: number;
   testSize?: number;
+  // Stack modeling fields
+  stackModeling: boolean;
+  poolByIdentifiers: string[];
+  numericalColumnsForClustering: string[];
+  applyInteractionTerms: boolean;
+  numericalColumnsForInteraction: string[];
 }
 
 export interface BuildModelFeatureBasedSettings {
@@ -72,7 +78,13 @@ const BuildModelFeatureBasedAtom: React.FC<Props> = ({ atomId }) => {
       scopes: ['Scope 1', 'Scope 2', 'Scope 3', 'Scope 4', 'Scope 5'],
       outputFileName: '',
       kFolds: 5,
-      testSize: 0.2
+      testSize: 0.2,
+      // Stack modeling defaults
+      stackModeling: false,
+      poolByIdentifiers: [],
+      numericalColumnsForClustering: [],
+      applyInteractionTerms: false,
+      numericalColumnsForInteraction: []
     };
 
     const defaultSettings = {

@@ -6,6 +6,7 @@ import time
 import numpy as np
 import pandas as pd
 from urllib.parse import unquote
+
 # MongoDB imports - optional (graceful degradation if not available)
 try:
     from .database import column_coll, correlation_coll
@@ -13,6 +14,8 @@ try:
 except ImportError:
     MONGODB_AVAILABLE = False
     print("⚠️ MongoDB collections not available - using fallback mode")
+
+from .matrix_settings import router as matrix_settings_router
 from .schema import (
     FilterPayload, 
     BucketCheckResponse,
@@ -28,12 +31,13 @@ from .service import (
     check_bucket_and_file,
     load_csv_from_minio, 
     calculate_correlations,
-    save_correlation_results_to_minio,
+    save_correlation_results_to_db,
     parse_minio_path,
     apply_identifier_filters,
     apply_measure_filters,
     save_filtered_data_to_minio,
     get_unique_values,
+    apply_time_aggregation,
     get_time_series_axis_data,
     find_highest_correlation_pair,
     get_filtered_time_series_values
@@ -52,6 +56,7 @@ from app.DataStorageRetrieval.db import get_dataset_info
 from app.features.data_upload_validate.app.routes import get_object_prefix
 
 router = APIRouter()
+router.include_router(matrix_settings_router, prefix="/matrix-settings")
 
 @router.get("/")
 async def root():
@@ -59,10 +64,10 @@ async def root():
     return {
         "message": "Correlation backend is running", 
         "endpoints": [
-            "/ping", 
-            "/check-file", 
-            "/columns", 
-            "/filter", 
+            "/ping",
+            "/check-file",
+            "/columns",
+            "/filter",
             "/filter-and-correlate",
             "/buckets",
             "/column-values",
@@ -72,7 +77,8 @@ async def root():
             "/load-dataframe",
             "/time-series-axis",
             "/highest-correlation-pair",
-            "/time-series-data"
+            "/time-series-data",
+            "/matrix-settings"
         ]
     }
 
@@ -314,20 +320,44 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
         if request.date_range_filter and request.date_column:
             from .service import apply_date_range_filter
             try:
-                df = apply_date_range_filter(df, request.date_column, request.date_range_filter)
+                df = apply_date_range_filter(
+                    df, request.date_column, request.date_range_filter
+                )
                 date_filtered_rows = len(df)
                 filtered_rows = date_filtered_rows  # Update filtered rows count
-                print(f"🗓️ Date filter applied: {date_filtered_rows} rows remaining")
+                print(
+                    f"🗓️ Date filter applied: {date_filtered_rows} rows remaining"
+                )
             except Exception as e:
                 print(f"⚠️ Date filtering failed: {e}")
-        
+
+        # Apply time aggregation if requested
+        if (
+            request.aggregation_level
+            and request.aggregation_level.lower() != "none"
+            and request.date_column
+        ):
+            from .service import apply_time_aggregation
+
+            try:
+                df = apply_time_aggregation(
+                    df, request.date_column, request.aggregation_level
+                )
+                filtered_rows = len(df)
+                print(f"⏱️ Time aggregation applied: {filtered_rows} rows")
+            except Exception as e:
+                print(f"⚠️ Time aggregation failed: {e}")
+
         # Perform date analysis if requested
         date_analysis = None
         if request.include_date_analysis:
             from .service import analyze_date_columns
+
             try:
                 date_analysis = analyze_date_columns(df)
-                print(f"📅 Date analysis completed: {date_analysis['has_date_data']}")
+                print(
+                    f"📅 Date analysis completed: {date_analysis['has_date_data']}"
+                )
             except Exception as e:
                 print(f"⚠️ Date analysis failed: {e}")
         
@@ -367,7 +397,9 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
         print(f"🔍 correlation_matrix sample: {sample if correlation_matrix is not None else 'no matrix'}")
                 
         # Save correlation results
-        correlation_file_path = save_correlation_results_to_minio(df, correlation_results, request.file_path)
+        correlation_id = await save_correlation_results_to_db(
+            df, correlation_results, request.file_path
+        )
         
         # Prepare preview if requested
         preview_data = None
@@ -382,7 +414,7 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
         metadata = {
             "input_path": request.file_path,
             "filtered_file_path": filtered_file_path,
-            "correlation_file_path": correlation_file_path,
+            "correlation_id": correlation_id,
             "original_rows": original_rows,
             "filtered_rows": filtered_rows,
             "filters_applied": filters_applied,
@@ -411,7 +443,7 @@ async def filter_and_correlate(request: FilterAndCorrelateRequest):
             filtered_file_path=filtered_file_path,
             correlation_method=request.method,
             correlation_results=correlation_results,
-            correlation_file_path=correlation_file_path,
+            correlation_id=correlation_id,
             preview_data=preview_data,
             date_analysis=date_analysis,
             date_filtered_rows=date_filtered_rows,

@@ -29,8 +29,9 @@ interface ColumnClassifierSettingsProps {
 const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ atomId, onClassification }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: SettingsType = (atom?.settings as SettingsType) || {
-    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS
+  const settings: SettingsType = {
+    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
+    ...(atom?.settings as SettingsType)
   };
 
   const [frames, setFrames] = useState<Frame[]>([]);

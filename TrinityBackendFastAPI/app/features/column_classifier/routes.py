@@ -637,6 +637,8 @@ async def save_config(req: SaveConfigRequest):
     postgres_result = await save_classifier_config_to_postgres(data)
     print(f"📦 mongo save result {mongo_result}")
     print(f"🗃 postgres save result {postgres_result}")
+    if mongo_result.get("status") != "success":
+        raise HTTPException(status_code=500, detail=mongo_result.get("error", "Mongo save failed"))
     return {
         "status": "success",
         "key": key,

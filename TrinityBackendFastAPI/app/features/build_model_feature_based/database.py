@@ -161,9 +161,6 @@ async def get_scope_combinations(scope_id: str) -> Dict[str, Any]:
             combo = cfile.get("combination", {})
             combinations.append({
                 "combination_id": f"{combo.get('Channel','')}_{combo.get('Brand','')}_{combo.get('PPG','')}",
-                "channel": combo.get("Channel", ""),
-                "brand": combo.get("Brand", ""),
-                "ppg": combo.get("PPG", ""),
                 "file_key": cfile.get("file_key", ""),
                 "filename": cfile.get("filename", ""),
                 "set_name": set_name,
@@ -220,9 +217,6 @@ async def get_scope_set_with_columns(scope_id: str, set_name: str) -> Optional[D
                 combo = cfile.get("combination", {})
                 filtered_combinations.append({
                     "combination_id": f"{combo.get('Channel','')}_{combo.get('Brand','')}_{combo.get('PPG','')}",
-                    "channel": combo.get("Channel", ""),
-                    "brand": combo.get("Brand", ""),
-                    "ppg": combo.get("PPG", ""),
                     "file_key": cfile.get("file_key", ""),
                     "filename": cfile.get("filename", ""),
                     "set_name": fset.get("set_name", ""),
@@ -476,21 +470,29 @@ async def train_models_for_combination_enhanced(
                     import pyarrow.ipc as ipc
                     reader = ipc.RecordBatchFileReader(pa.BufferReader(file_data))
                     df = reader.read_all().to_pandas()
+                    # Convert columns to lowercase for consistency
+                    df.columns = df.columns.str.lower()
                     logger.info(f"Successfully read Arrow file: {file_key}, shape: {df.shape}")
                 except Exception as arrow_error:
                     logger.error(f"Error reading Arrow file: {arrow_error}")
                     raise
             elif file_key.endswith('.csv'):
                 df = pd.read_csv(io.BytesIO(file_data))
+                # Convert columns to lowercase for consistency
+                df.columns = df.columns.str.lower()
                 logger.info(f"Successfully read CSV file: {file_key}, shape: {df.shape}")
             else:
                 # Try CSV as fallback
                 df = pd.read_csv(io.BytesIO(file_data))
+                # Convert columns to lowercase for consistency
+                df.columns = df.columns.str.lower()
                 logger.info(f"Read file as CSV (fallback): {file_key}, shape: {df.shape}")
         else:
             # Fallback to original method
             file_data = get_file_from_source(file_key)
             df = pd.read_csv(file_data)
+            # Convert columns to lowercase for consistency
+            df.columns = df.columns.str.lower()
         
         # Debug: Log available columns and required variables
         logger.info(f"Available columns in data: {list(df.columns)}")
@@ -852,9 +854,6 @@ async def save_model_results_enhanced(
                 "scope_name": scope_name,
                 "set_name": set_name,
                 "combination_id": combination["combination_id"],
-                "channel": combination["channel"],
-                "brand": combination["brand"],
-                "ppg": combination["ppg"],
                 "file_key": combination["file_key"],
                 "model_name": model_result["model_name"],
                 "model_type": "regression",
@@ -994,7 +993,7 @@ async def export_results_to_csv_and_minio(
         # Scope Information
         'run_id', 'scope_id', 'scope_name', 'set_name',
         # Combination Details
-        'combination_id', 'channel', 'brand', 'ppg', 'file_key',
+        'combination_id', 'file_key',
         # Model Information
         'model_name', 'model_type', 'total_records', 'training_date',
         # Performance Metrics
@@ -1041,9 +1040,6 @@ async def export_results_to_csv_and_minio(
             'set_name': doc.get('set_name', ''),
             # Combination Details
             'combination_id': doc.get('combination_id', ''),
-            'channel': doc.get('channel', ''),
-            'brand': doc.get('brand', ''),
-            'ppg': doc.get('ppg', ''),
             'file_key': doc.get('file_key', ''),
             # Model Information
             'model_name': doc.get('model_name', ''),

@@ -19,8 +19,6 @@ logger = logging.getLogger(__name__)
 
 
 
-# Add this function to marketing_helpers.py
-
 def create_constrained_model(
     model_type: str,
     variable_constraints: List[Dict[str, str]],
