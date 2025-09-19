@@ -153,9 +153,6 @@ class StackModelResult(BaseModel):
 class CombinationModelResults(BaseModel):
     """Results for all models on a single combination."""
     combination_id: str
-    channel: str
-    brand: str
-    ppg: str
     file_key: str
     total_records: int
     model_results: List[ModelResult]

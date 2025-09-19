@@ -425,20 +425,9 @@ class StackModelTrainer:
             except Exception as e:
                 raise
             
-            # Step 4: Save individual combination metrics to MinIO
-            try:
-                await self._save_individual_combination_metrics_to_minio(
-                    individual_metrics=individual_metrics,
-                    scope_number=scope_number,
-                    run_id=run_id,
-                    x_variables=x_variables,
-                    y_variable=y_variable,
-                    minio_client=minio_client,
-                    bucket_name=bucket_name
-                )
-            except Exception as e:
-                pass
-                # Don't fail the entire request if MinIO save fails
+            # Step 4: Skip separate MinIO saving - results will be included in main individual model results file
+            # The stack model results are now merged into the main combination_results and will be saved together
+            # with individual model results in the main train-models-direct endpoint
             
             # Step 5: Prepare response
             result = {
@@ -533,26 +522,27 @@ class StackModelTrainer:
                 
                 if missing_columns:
                     continue
-                
-                # Prepare data
+
                 X = df[x_variables].values
                 y_actual = df[y_variable].values
                 
                 combination_metrics = {}
-                
-                # Calculate metrics for each model
+
                 for model_name in betas_by_combination.get(combination, {}):
                     if model_name not in betas_by_combination[combination]:
                         continue
                     
                     betas = betas_by_combination[combination][model_name]
-                    
-                    # Get variable means and stds for destandardization
+                              
                     variable_means = {}
                     variable_stds = {}
+                    variable_mins = {}
+                    variable_maxs = {}
                     for x_var in x_variables:
                         variable_means[x_var] = df[x_var].mean()
                         variable_stds[x_var] = df[x_var].std()
+                        variable_mins[x_var] = df[x_var].min()
+                        variable_maxs[x_var] = df[x_var].max()
                     
                     # Destandardize betas if standardization was applied
                     if standardization != 'none':
@@ -561,7 +551,9 @@ class StackModelTrainer:
                             x_variables=x_variables,
                             standardization=standardization,
                             variable_means=variable_means,
-                            variable_stds=variable_stds
+                            variable_stds=variable_stds,
+                            variable_mins=variable_mins,
+                            variable_maxs=variable_maxs
                         )
                     
                     # Make predictions using the destandardized betas
@@ -676,114 +668,6 @@ class StackModelTrainer:
         
         return 1 - (ss_res / ss_tot)
     
-    async def _save_individual_combination_metrics_to_minio(
-        self,
-        individual_metrics: Dict[str, Any],
-        scope_number: str,
-        run_id: str,
-        x_variables: List[str],
-        y_variable: str,
-        minio_client,
-        bucket_name: str
-    ) -> None:
-        """
-        Save individual combination metrics to MinIO in the same flattened format as individual combination models.
-        """
-        import pandas as pd
-        import pyarrow as pa
-        import pyarrow.feather as feather
-        from io import BytesIO
-        from datetime import datetime
-        
-        try:
-            # Prepare data for saving in flattened format
-            summary_data = []
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            
-            for combination, combination_metrics in individual_metrics.items():
-                if 'error' in combination_metrics:
-                    continue
-                    
-                for model_name, metrics in combination_metrics.items():
-                    # Create base summary row (flattened format like individual combination models)
-                    summary_row = {
-                        'Scope': f'Scope_{scope_number}',
-                        'combination_id': combination,
-                        'y_variable': y_variable,
-                        'x_variables': x_variables,  # Keep as list
-                        'model_name': model_name,
-                        'model_type': 'stack_individual_combination',
-                        'mape_train': metrics.get('mape_train', 0.0),
-                        'mape_test': metrics.get('mape_test', 0.0),
-                        'r2_train': metrics.get('r2_train', 0.0),
-                        'r2_test': metrics.get('r2_test', 0.0),
-                        'aic': metrics.get('aic', 0.0),
-                        'bic': metrics.get('bic', 0.0),
-                        'intercept': metrics.get('betas', {}).get('intercept', 0.0),
-                        'n_parameters': len(x_variables) + 1,
-                        'individual_samples': metrics.get('individual_samples', 0),
-                        'run_id': run_id,
-                        'timestamp': timestamp
-                    }
-                    
-                    # Stack model reference metrics are not needed in saved data
-                    
-                    # Add average values for each variable (from individual combination data)
-                    variable_means = metrics.get('variable_means', {})
-                    for x_var in x_variables:
-                        avg_key = f"{x_var}_avg"
-                        summary_row[avg_key] = variable_means.get(x_var, 0)
-                    
-                    # Add Y variable average
-                    y_avg_key = f"{y_variable}_avg"
-                    summary_row[y_avg_key] = metrics.get('y_mean', 0)
-                    
-                    # Add beta coefficients for each X-variable (flattened)
-                    coefficients = metrics.get('betas', {}).get('coefficients', {})
-                    for x_var in x_variables:
-                        beta_key = f"{x_var}_beta"
-                        summary_row[beta_key] = coefficients.get(x_var, 0)
-                    
-                    # Add elasticity values for each X-variable (flattened)
-                    elasticities = metrics.get('elasticities', {})
-                    for x_var in x_variables:
-                        elasticity_key = f"{x_var}_elasticity"
-                        summary_row[elasticity_key] = elasticities.get(x_var, 0)
-                    
-                    # Add contribution values for each X-variable (flattened)
-                    contributions = metrics.get('contributions', {})
-                    for x_var in x_variables:
-                        contribution_key = f"{x_var}_contribution"
-                        summary_row[contribution_key] = contributions.get(x_var, 0)
-                          
-                    summary_data.append(summary_row)
-            
-            if not summary_data:
-                return
-            
-            # Create DataFrame
-            summary_df = pd.DataFrame(summary_data)
-            
-            # Create file key for MinIO
-            file_key = f"stack-modeling/individual-combination-metrics/{run_id}/individual_combination_metrics_{timestamp}.arrow"
-            
-            # Convert to Arrow format
-            arrow_buffer = BytesIO()
-            table = pa.Table.from_pandas(summary_df)
-            feather.write_feather(table, arrow_buffer)
-            arrow_buffer.seek(0)
-            
-            # Save to MinIO
-            minio_client.put_object(
-                bucket_name,
-                file_key,
-                arrow_buffer,
-                length=arrow_buffer.getbuffer().nbytes,
-                content_type='application/vnd.apache.arrow.file'
-            )
-                   
-        except Exception as e:
-            raise
     
     async def get_combination_betas(
         self,
@@ -900,7 +784,9 @@ class StackModelTrainer:
         x_variables: List[str],
         standardization: str,
         variable_means: Dict[str, float],
-        variable_stds: Dict[str, float]
+        variable_stds: Dict[str, float],
+        variable_mins: Dict[str, float] = None,
+        variable_maxs: Dict[str, float] = None
     ) -> Dict[str, Any]:
         """
         Destandardize betas from scaled variables back to original scale.
@@ -908,16 +794,16 @@ class StackModelTrainer:
         Args:
             betas: Dictionary containing intercept and coefficients from scaled model
             x_variables: List of original x_variables
-            standardization: Type of standardization applied ('standard_scaler' or 'minmax_scaler')
+            standardization: Type of standardization applied ('standard' or 'minmax')
             variable_means: Mean values of original variables
             variable_stds: Standard deviation values of original variables (for standard scaler)
+            variable_mins: Minimum values of original variables (for minmax scaler)
+            variable_maxs: Maximum values of original variables (for minmax scaler)
             
         Returns:
             Dictionary with destandardized intercept and coefficients
         """
         try:
-            from sklearn.preprocessing import StandardScaler, MinMaxScaler
-            
             destandardized_betas = betas.copy()
             coefficients = betas.get('coefficients', {}).copy()
             intercept = betas.get('intercept', 0.0)
@@ -950,19 +836,29 @@ class StackModelTrainer:
                 
             elif standardization == 'minmax':
                 
+                if variable_mins is None or variable_maxs is None:
+                    logger.warning("MinMax destandardization requires variable_mins and variable_maxs")
+                    return betas
+                
                 intercept_adjustment = 0.0
                 
                 for x_var in x_variables:
-                    if x_var in coefficients:
-                        # Store original scaled coefficient
-                        scaled_coefficient = coefficients[x_var]
-                        std_val = variable_stds.get(x_var, 1.0)
-                        mean_val = variable_means.get(x_var, 0)  
-                        if std_val != 0:
-                            approximate_range = std_val * 4
-                            coefficients[x_var] = scaled_coefficient / approximate_range
-                            intercept_adjustment += scaled_coefficient * mean_val / approximate_range
+                    if x_var in coefficients and x_var in variable_mins and x_var in variable_maxs:
+                        min_val = variable_mins[x_var]
+                        max_val = variable_maxs[x_var]
+                        range_val = max_val - min_val
+                        
+                        if range_val != 0:
+                            # Store original scaled coefficient
+                            scaled_coefficient = coefficients[x_var]
+                            
+                            # Destandardize coefficient
+                            coefficients[x_var] = scaled_coefficient / range_val
+                            
+                            # Calculate intercept adjustment
+                            intercept_adjustment += scaled_coefficient * min_val / range_val
                 
+                # Destandardize intercept
                 destandardized_betas['intercept'] = intercept - intercept_adjustment
                 
             else:
@@ -974,5 +870,6 @@ class StackModelTrainer:
             return destandardized_betas
             
         except Exception as e:
+            logger.error(f"Error in destandardization: {e}")
             # Return original betas if destandardization fails
             return betas

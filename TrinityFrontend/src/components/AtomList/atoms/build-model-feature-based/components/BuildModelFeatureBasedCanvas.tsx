@@ -182,7 +182,13 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
       k_folds: finalData.kFolds || 5, // Use value from settings or default
       test_size: finalData.testSize || 0.2, // Use value from settings or default
       models_to_run: finalData.selectedModels || null, // Use selected models from settings
-      custom_model_configs: null // Can be enhanced later
+      custom_model_configs: null, // Can be enhanced later
+      // Stack modeling fields
+      stack_modeling: finalData.stackModeling || false,
+      pool_by_identifiers: finalData.poolByIdentifiers || [],
+      numerical_columns_for_clustering: finalData.numericalColumnsForClustering || [],
+      apply_interaction_terms: finalData.applyInteractionTerms || true,
+      numerical_columns_for_interaction: finalData.numericalColumnsForInteraction || []
     };
 
     // Model training started

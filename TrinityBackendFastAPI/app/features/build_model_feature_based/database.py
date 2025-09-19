@@ -476,21 +476,29 @@ async def train_models_for_combination_enhanced(
                     import pyarrow.ipc as ipc
                     reader = ipc.RecordBatchFileReader(pa.BufferReader(file_data))
                     df = reader.read_all().to_pandas()
+                    # Convert columns to lowercase for consistency
+                    df.columns = df.columns.str.lower()
                     logger.info(f"Successfully read Arrow file: {file_key}, shape: {df.shape}")
                 except Exception as arrow_error:
                     logger.error(f"Error reading Arrow file: {arrow_error}")
                     raise
             elif file_key.endswith('.csv'):
                 df = pd.read_csv(io.BytesIO(file_data))
+                # Convert columns to lowercase for consistency
+                df.columns = df.columns.str.lower()
                 logger.info(f"Successfully read CSV file: {file_key}, shape: {df.shape}")
             else:
                 # Try CSV as fallback
                 df = pd.read_csv(io.BytesIO(file_data))
+                # Convert columns to lowercase for consistency
+                df.columns = df.columns.str.lower()
                 logger.info(f"Read file as CSV (fallback): {file_key}, shape: {df.shape}")
         else:
             # Fallback to original method
             file_data = get_file_from_source(file_key)
             df = pd.read_csv(file_data)
+            # Convert columns to lowercase for consistency
+            df.columns = df.columns.str.lower()
         
         # Debug: Log available columns and required variables
         logger.info(f"Available columns in data: {list(df.columns)}")

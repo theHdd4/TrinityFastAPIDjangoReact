@@ -1,12 +1,13 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Database, Target, Cpu } from 'lucide-react';
-import { VALIDATE_API } from '@/lib/api';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Database, Target, Cpu, ChevronDown } from 'lucide-react';
+import { VALIDATE_API, BUILD_MODEL_API } from '@/lib/api';
 import { BuildModelFeatureBasedData, BuildModelFeatureBasedSettings as SettingsType, ModelConfig } from '../BuildModelFeatureBasedAtom';
 
 interface BuildModelFeatureBasedSettingsProps {
@@ -34,6 +35,13 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
   onSettingsChange,
   onDataUpload
 }) => {
+  // State for numerical columns from API
+  const [numericalColumns, setNumericalColumns] = useState<string[]>([]);
+  const [isLoadingColumns, setIsLoadingColumns] = useState(false);
+  
+  // State for pool identifiers from API
+  const [poolIdentifiers, setPoolIdentifiers] = useState<string[]>([]);
+  const [isLoadingIdentifiers, setIsLoadingIdentifiers] = useState(false);
   // fetch saved dataframes list on mount
   useEffect(() => {
     fetch(`${VALIDATE_API}/list_saved_dataframes`)
@@ -46,6 +54,76 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
       })
       .catch(() => {/* ignore */});
   }, [data?.availableFiles]);
+
+  // Fetch numerical columns when scope and combinations are selected
+  useEffect(() => {
+    const fetchNumericalColumns = async () => {
+      if (data?.selectedScope && data?.selectedCombinations && data.selectedCombinations.length > 0) {
+        setIsLoadingColumns(true);
+        try {
+          // Use the first selected combination to get column info
+          const firstCombination = data.selectedCombinations[0];
+          
+          // Create URLSearchParams for form data
+          const formData = new URLSearchParams();
+          formData.append('scope', data.selectedScope);
+          formData.append('combination', firstCombination);
+          
+          const response = await fetch(`${BUILD_MODEL_API}/get_columns`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData
+          });
+          
+          if (response.ok) {
+            const responseData = await response.json();
+            
+            // Use the numerical_columns directly from the backend response
+            const numericalCols = responseData.numerical_columns || [];
+            setNumericalColumns(numericalCols);
+          } else {
+            setNumericalColumns([]);
+          }
+        } catch (error) {
+          setNumericalColumns([]);
+        } finally {
+          setIsLoadingColumns(false);
+        }
+      }
+    };
+
+    fetchNumericalColumns();
+  }, [data?.selectedScope, data?.selectedCombinations]);
+
+  // Fetch pool identifiers when scope is selected
+  useEffect(() => {
+    const fetchPoolIdentifiers = async () => {
+      if (data?.selectedScope) {
+        setIsLoadingIdentifiers(true);
+        try {
+          const response = await fetch(`${BUILD_MODEL_API}/pool-identifiers/${data.selectedScope}`);
+          
+          if (response.ok) {
+            const responseData = await response.json();
+            const identifiers = responseData.identifiers || [];
+            setPoolIdentifiers(identifiers);
+          } else {
+            // Fallback to empty array if API fails
+            setPoolIdentifiers([]);
+          }
+        } catch (error) {
+          // Fallback to empty array if API fails
+          setPoolIdentifiers([]);
+        } finally {
+          setIsLoadingIdentifiers(false);
+        }
+      } else {
+        setPoolIdentifiers([]);
+      }
+    };
+
+    fetchPoolIdentifiers();
+  }, [data?.selectedScope]);
 
   // Filter files that contain "Scope" and extract unique scope numbers
   const scopeFiles = (data?.availableFiles || []).filter(file => 
@@ -301,7 +379,7 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
                     <Checkbox
                       id={option.value}
                       checked={data?.selectedCombinations?.includes(option.value) || false}
-                      onCheckedChange={(checked) => handleCombinationToggle(option.value, checked as boolean)}
+                      onCheckedChange={(checked) => handleCombinationToggle(option.value, !!checked)}
                       onClick={(e) => e.stopPropagation()}
                     />
                     <Label htmlFor={option.value} className="text-sm truncate">{option.label}</Label>
@@ -418,6 +496,228 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
         </div>
       </Card>
 
+      {/* Pool Regression */}
+      <Card>
+        <div className="p-4 border-b bg-muted/30">
+          <h4 className="font-medium text-foreground flex items-center gap-2">
+            <Cpu className="w-4 h-4 text-primary" />
+            Pool Regression
+          </h4>
+        </div>
+        <div className="p-4 space-y-4">
+          {/* Enable Stack Modeling Toggle */}
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="stack-modeling"
+              checked={data?.stackModeling || false}
+              onCheckedChange={(checked) => onDataChange({ stackModeling: checked as boolean })}
+            />
+            <Label htmlFor="stack-modeling" className="text-sm font-medium">
+              Enable Stack Modeling
+            </Label>
+          </div>
+
+          {/* Stack Modeling Configuration - Only show when enabled */}
+          {data?.stackModeling && (
+            <div className="space-y-4 pl-6 border-l-2 border-border">
+              {/* Pool by Identifiers */}
+              <div>
+                <Label className="text-sm font-medium">Pool by Identifiers</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      className="w-full justify-between mt-2"
+                      disabled={isLoadingIdentifiers}
+                    >
+                      <span>
+                        {isLoadingIdentifiers 
+                          ? "Loading..." 
+                          : data?.poolByIdentifiers?.length > 0 
+                            ? `${data.poolByIdentifiers.length} identifier${data.poolByIdentifiers.length > 1 ? 's' : ''} selected`
+                            : "Select Identifiers"
+                        }
+                      </span>
+                      <ChevronDown className="w-4 h-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
+                    {isLoadingIdentifiers ? (
+                      <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading identifiers...</div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 py-1 border-b mb-2">
+                          <Checkbox
+                            checked={data?.poolByIdentifiers?.length === poolIdentifiers.length}
+                            onCheckedChange={(checked) => {
+                              onDataChange({ poolByIdentifiers: checked ? poolIdentifiers : [] });
+                            }}
+                          />
+                          <span className="text-sm font-medium">Select All</span>
+                        </div>
+                        {poolIdentifiers.map(identifier => {
+                          const isChecked = data?.poolByIdentifiers?.includes(identifier) || false;
+                          return (
+                            <div key={identifier} className="flex items-center gap-2 py-1">
+                              <Checkbox
+                                checked={isChecked}
+                                onCheckedChange={(checked) => {
+                                  const current = data?.poolByIdentifiers || [];
+                                  const updated = checked 
+                                    ? [...current, identifier]
+                                    : current.filter(id => id !== identifier);
+                                  onDataChange({ poolByIdentifiers: updated });
+                                }}
+                              />
+                              <span className="text-sm">{identifier}</span>
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {/* Numerical Columns for Clustering */}
+              <div>
+                <Label className="text-sm font-medium">Columns for Clustering</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      className="w-full justify-between mt-2"
+                      disabled={isLoadingColumns}
+                    >
+                      <span>
+                        {isLoadingColumns 
+                          ? "Loading..." 
+                          : data?.numericalColumnsForClustering?.length > 0 
+                            ? `${data.numericalColumnsForClustering.length} column${data.numericalColumnsForClustering.length > 1 ? 's' : ''} selected`
+                            : "Select Columns"
+                        }
+                      </span>
+                      <ChevronDown className="w-4 h-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
+                    {isLoadingColumns ? (
+                      <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading numerical columns...</div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 py-1 border-b mb-2">
+                          <Checkbox
+                            checked={data?.numericalColumnsForClustering?.length === numericalColumns.length}
+                            onCheckedChange={(checked) => {
+                              onDataChange({ 
+                                numericalColumnsForClustering: checked ? numericalColumns : [] 
+                              });
+                            }}
+                          />
+                          <span className="text-sm font-medium">Select All</span>
+                        </div>
+                        {numericalColumns.map(column => {
+                          const isChecked = data?.numericalColumnsForClustering?.includes(column) || false;
+                          return (
+                            <div key={column} className="flex items-center gap-2 py-1">
+                              <Checkbox
+                                checked={isChecked}
+                                onCheckedChange={(checked) => {
+                                  const current = data?.numericalColumnsForClustering || [];
+                                  const updated = checked 
+                                    ? [...current, column]
+                                    : current.filter(col => col !== column);
+                                  onDataChange({ numericalColumnsForClustering: updated });
+                                }}
+                              />
+                              <span className="text-sm">{column}</span>
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {/* Apply Interaction Terms Toggle */}
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="apply-interaction-terms"
+                  checked={data?.applyInteractionTerms || true}
+                  onCheckedChange={(checked) => onDataChange({ applyInteractionTerms: !!checked })}
+                />
+                <Label htmlFor="apply-interaction-terms" className="text-sm font-medium">
+                  Apply Interaction Terms
+                </Label>
+              </div>
+
+              {/* Numerical Columns for Interaction - Only show when interaction terms enabled */}
+              {data?.applyInteractionTerms && (
+                <div>
+                  <Label className="text-sm font-medium">Numerical Columns for Interaction</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button 
+                        variant="outline" 
+                        className="w-full justify-between mt-2"
+                        disabled={isLoadingColumns}
+                      >
+                        <span>
+                          {isLoadingColumns 
+                            ? "Loading..." 
+                            : data?.numericalColumnsForInteraction?.length > 0 
+                              ? `${data.numericalColumnsForInteraction.length} column${data.numericalColumnsForInteraction.length > 1 ? 's' : ''} selected`
+                              : "Select Columns"
+                            }
+                        </span>
+                        <ChevronDown className="w-4 h-4" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
+                      {isLoadingColumns ? (
+                        <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading numerical columns...</div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2 py-1 border-b mb-2">
+                            <Checkbox
+                              checked={data?.numericalColumnsForInteraction?.length === numericalColumns.length}
+                              onCheckedChange={(checked) => {
+                                onDataChange({ 
+                                  numericalColumnsForInteraction: checked ? numericalColumns : [] 
+                                });
+                              }}
+                            />
+                            <span className="text-sm font-medium">Select All</span>
+                          </div>
+                          {numericalColumns.map(column => {
+                            const isChecked = data?.numericalColumnsForInteraction?.includes(column) || false;
+                            return (
+                              <div key={column} className="flex items-center gap-2 py-1">
+                                <Checkbox
+                                  checked={isChecked}
+                                  onCheckedChange={(checked) => {
+                                    const current = data?.numericalColumnsForInteraction || [];
+                                    const updated = checked 
+                                      ? [...current, column]
+                                      : current.filter(col => col !== column);
+                                    onDataChange({ numericalColumnsForInteraction: updated });
+                                  }}
+                                />
+                                <span className="text-sm">{column}</span>
+                              </div>
+                            );
+                          })}
+                        </>
+                      )}
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Card>
 
     </div>
   );

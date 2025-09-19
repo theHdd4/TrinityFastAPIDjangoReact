@@ -90,10 +90,14 @@ class DataPooler:
                     import pyarrow.ipc as ipc
                     reader = ipc.RecordBatchFileReader(pa.BufferReader(file_data))
                     df = reader.read_all().to_pandas()
+                    # Convert columns to lowercase for consistency
+                    df.columns = df.columns.str.lower()
                 except Exception as arrow_error:
                     return None
             elif file_key.endswith('.csv'):
                 df = pd.read_csv(io.BytesIO(file_data))
+                # Convert columns to lowercase for consistency
+                df.columns = df.columns.str.lower()
             else:
                 return None
             
