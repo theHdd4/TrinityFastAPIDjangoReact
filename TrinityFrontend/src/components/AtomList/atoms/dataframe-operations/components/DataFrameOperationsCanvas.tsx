@@ -73,6 +73,15 @@ function highlightMatch(text: string, search: string) {
   </>;
 }
 
+const areFormulaMapsEqual = (a: Record<string, string>, b: Record<string, string>) => {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) {
+    return false;
+  }
+  return aKeys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && b[key] === a[key]);
+};
+
 // Helper to generate a unique valid column key
 function getNextColKey(headers: string[]): string {
   let idx = 1;
@@ -118,7 +127,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: string } | null>(null);
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
   const [formulaInput, setFormulaInput] = useState('');
-  const [columnFormulas, setColumnFormulas] = useState<Record<string, string>>({});
+  const [columnFormulas, setColumnFormulas] = useState<Record<string, string>>(settings.columnFormulas || {});
+  const [formulaValidationError, setFormulaValidationError] = useState<string | null>(null);
   const headersKey = useMemo(() => (data?.headers || []).join('|'), [data?.headers]);
   const [isFormulaMode, setIsFormulaMode] = useState(true);
   const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter'>(null);
@@ -197,11 +207,20 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   }, [selectedColumn]);
 
   useEffect(() => {
-    if (!data?.headers?.length) {
-      setColumnFormulas(prev => (Object.keys(prev).length ? {} : prev));
-      return;
-    }
+    const incoming = settings.columnFormulas || {};
+    setColumnFormulas(prev => (areFormulaMapsEqual(prev, incoming) ? prev : incoming));
+  }, [settings.columnFormulas]);
+
+  useEffect(() => {
     setColumnFormulas(prev => {
+      if (!data?.headers?.length) {
+        if (Object.keys(prev).length) {
+          onSettingsChange({ columnFormulas: {} });
+          return {};
+        }
+        return prev;
+      }
+
       const allowed = new Set(data.headers);
       const next: Record<string, string> = {};
       let changed = false;
@@ -217,9 +236,11 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       if (!changed && Object.keys(next).length === Object.keys(prev).length) {
         return prev;
       }
+
+      onSettingsChange({ columnFormulas: next });
       return next;
     });
-  }, [headersKey]);
+  }, [headersKey, data?.headers, onSettingsChange]);
 
   useEffect(() => {
     const stored = selectedColumn ? columnFormulas[selectedColumn] : undefined;
@@ -232,6 +253,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         } else {
           setFormulaInput('');
         }
+        setFormulaValidationError(null);
       }
       return;
     }
@@ -243,10 +265,12 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       } else {
         setFormulaInput('');
       }
+      setFormulaValidationError(null);
     }
 
     if (!selectedColumn) {
       previousStoredFormulaRef.current = undefined;
+      setFormulaValidationError(null);
     }
   }, [selectedColumn, columnFormulas]);
   // 1. Add state for filter range
@@ -722,10 +746,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
         return prev;
       }
       const { [oldHeader]: stored, ...rest } = prev;
-      if (stored === undefined) {
-        return rest;
-      }
-      return { ...rest, [newHeader]: stored };
+      const next = stored === undefined ? rest : { ...rest, [newHeader]: stored };
+      onSettingsChange({ columnFormulas: next });
+      return next;
     });
   } catch (err) {
     handleApiError('Rename column failed', err);
@@ -942,7 +965,14 @@ const handleFormulaSubmit = async () => {
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
     });
-    setColumnFormulas(prev => ({ ...prev, [selectedColumn]: trimmedFormula }));
+    setColumnFormulas(prev => {
+      if (prev[selectedColumn] === trimmedFormula) {
+        return prev;
+      }
+      const next = { ...prev, [selectedColumn]: trimmedFormula };
+      onSettingsChange({ columnFormulas: next });
+      return next;
+    });
     setFormulaInput(trimmedFormula);
   } catch (err) {
     handleApiError('Apply formula failed', err);
@@ -1155,10 +1185,24 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   className="pl-9 w-64"
                 />
               </div>
-              <Button variant="outline" size="sm" onClick={onClearAll}>
-                <RotateCcw className="w-4 h-4 mr-1" />
-                Reset
-              </Button>
+              <div className="flex items-center space-x-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setFormulaValidationError(null);
+                    onClearAll();
+                  }}
+                >
+                  <RotateCcw className="w-4 h-4 mr-1" />
+                  Reset
+                </Button>
+                {formulaValidationError && (
+                  <span className="text-xs font-medium text-destructive max-w-xs leading-snug">
+                    {formulaValidationError}
+                  </span>
+                )}
+              </div>
             </div>
             <div className="relative flex flex-col items-center" style={{ minWidth: 180 }}>
               <Button
@@ -1185,6 +1229,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 onFormulaInputChange={setFormulaInput}
                 onFormulaModeChange={setIsFormulaMode}
                 onFormulaSubmit={handleFormulaSubmit}
+                onValidationError={setFormulaValidationError}
               />
             )}
             <div className="flex-1 overflow-auto min-h-0">

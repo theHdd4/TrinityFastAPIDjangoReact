@@ -33,6 +33,7 @@ export interface DataFrameSettings {
   fileId?: string | null; // Persist backend dataframe id
   columnWidths: { [key: string]: number };
   rowHeights: { [key: number]: number };
+  columnFormulas: Record<string, string>;
 }
 
 interface Props {
@@ -43,7 +44,8 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   const cards = useLaboratoryStore(state => state.cards);
   const atom = cards.flatMap(card => card.atoms).find(a => a.id === atomId);
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: DataFrameSettings = atom?.settings || {
+  const baseSettings = (atom?.settings as Partial<DataFrameSettings> | undefined) || {};
+  const settings: DataFrameSettings = {
     rowsPerPage: 15,
     searchTerm: '',
     sortColumns: [],
@@ -54,6 +56,9 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     fileId: null,
     columnWidths: {},
     rowHeights: {},
+    columnFormulas: {},
+    ...baseSettings,
+    columnFormulas: baseSettings.columnFormulas || {},
   };
   // Always use tableData as the source of truth
   const data = settings.tableData || null;
@@ -80,6 +85,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
       fileId: backendFileId || settings.fileId || null,
       columnWidths: {},
       rowHeights: {},
+      columnFormulas: {},
     };
     updateSettings(atomId, newSettings);
   };
@@ -124,6 +130,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
         enableEditing: true,
         columnWidths: {},
         rowHeights: {},
+        columnFormulas: {},
       });
     }
   };
