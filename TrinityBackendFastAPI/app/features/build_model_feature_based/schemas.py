@@ -20,9 +20,6 @@ class Health(BaseModel):
 class ScopeCombination(BaseModel):
     """Schema for individual combination within a scope."""
     combination_id: str
-    channel: str
-    brand: str
-    ppg: str
     file_key: str
     filename: str
     set_name: str
@@ -61,9 +58,6 @@ class ScopeSetRequest(BaseModel):
 class Combination(BaseModel):
     """Basic combination information."""
     combination_id: str
-    channel: str
-    brand: str
-    ppg: str
     file_key: str
 
 class CombinationList(BaseModel):
@@ -219,9 +213,6 @@ class ModelResultDocument(BaseModel):
     scope_name: str
     set_name: str
     combination_id: str
-    channel: str
-    brand: str
-    ppg: str
     file_key: str
     model_name: str
     model_type: str = "regression"

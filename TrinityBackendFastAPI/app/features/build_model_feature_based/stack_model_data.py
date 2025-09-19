@@ -931,7 +931,8 @@ class DataPooler:
 
                 y_pred = model.predict(X_val)
                 
-                mape = mean_absolute_percentage_error(y_val, y_pred)
+                from .models import safe_mape
+                mape = safe_mape(y_val, y_pred)
                 r2 = r2_score(y_val, y_pred)
                 
                 fold_results.append({
@@ -967,7 +968,8 @@ class DataPooler:
             
             # Calculate train metrics (using full dataset)
             y_pred_train = final_model.predict(X)
-            mape_train = mean_absolute_percentage_error(y, y_pred_train)
+            from .models import safe_mape
+            mape_train = safe_mape(y, y_pred_train)
             r2_train = r2_score(y, y_pred_train)
             
             # Calculate test metrics (average across folds)
@@ -1415,8 +1417,9 @@ class StackModelDataProcessor:
             filtered_identifiers = [id for id in all_identifiers if id not in date_related_identifiers]
            
             
-            # Validate that pool_by_identifiers are valid identifiers
-            invalid_identifiers = [id for id in pool_by_identifiers if id not in all_identifiers]
+            # Validate that pool_by_identifiers are valid identifiers (case-insensitive)
+            all_identifiers_lower = [id.lower() for id in all_identifiers]
+            invalid_identifiers = [id for id in pool_by_identifiers if id.lower() not in all_identifiers_lower]
             if invalid_identifiers:
                 raise ValueError(f"Invalid pooling identifiers: {invalid_identifiers}. Available identifiers: {all_identifiers}")
             
@@ -1521,9 +1524,10 @@ def validate_pooling_request(
         if not y_variable:
             return False, "No y_variable provided"
         
-        # Check if pooling identifiers are available
+        # Check if pooling identifiers are available (case-insensitive)
         available_identifiers = CombinationParser.get_available_identifiers(combinations)
-        invalid_identifiers = [id for id in pool_by_identifiers if id not in available_identifiers]
+        available_identifiers_lower = [id.lower() for id in available_identifiers]
+        invalid_identifiers = [id for id in pool_by_identifiers if id.lower() not in available_identifiers_lower]
         
         if invalid_identifiers:
             return False, f"Invalid pooling identifiers: {invalid_identifiers}. Available: {available_identifiers}"

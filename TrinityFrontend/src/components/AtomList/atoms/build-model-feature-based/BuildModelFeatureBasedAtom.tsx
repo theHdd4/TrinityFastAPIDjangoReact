@@ -83,7 +83,7 @@ const BuildModelFeatureBasedAtom: React.FC<Props> = ({ atomId }) => {
       stackModeling: false,
       poolByIdentifiers: [],
       numericalColumnsForClustering: [],
-      applyInteractionTerms: true,
+      applyInteractionTerms: false,
       numericalColumnsForInteraction: []
     };
 

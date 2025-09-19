@@ -644,7 +644,7 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
               <div className="flex items-center space-x-2">
                 <Checkbox
                   id="apply-interaction-terms"
-                  checked={data?.applyInteractionTerms || true}
+                  checked={data?.applyInteractionTerms ?? false}
                   onCheckedChange={(checked) => onDataChange({ applyInteractionTerms: !!checked })}
                 />
                 <Label htmlFor="apply-interaction-terms" className="text-sm font-medium">

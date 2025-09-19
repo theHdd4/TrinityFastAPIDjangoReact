@@ -185,10 +185,10 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
       custom_model_configs: null, // Can be enhanced later
       // Stack modeling fields
       stack_modeling: finalData.stackModeling || false,
-      pool_by_identifiers: finalData.poolByIdentifiers || [],
-      numerical_columns_for_clustering: finalData.numericalColumnsForClustering || [],
+      pool_by_identifiers: (finalData.poolByIdentifiers || []).map(id => id.toLowerCase()),
+      numerical_columns_for_clustering: (finalData.numericalColumnsForClustering || []).map(col => col.toLowerCase()),
       apply_interaction_terms: finalData.applyInteractionTerms || true,
-      numerical_columns_for_interaction: finalData.numericalColumnsForInteraction || []
+      numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map(col => col.toLowerCase())
     };
 
     // Model training started
@@ -1403,8 +1403,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                       <TableCell className="font-semibold text-purple-600">{variable}</TableCell>
                                       {combination.model_results.map((model, index) => (
                                         <TableCell key={index} className="font-mono text-sm">
-                                           {model.coefficients && model.coefficients[`Beta_${variable}`] !== undefined
-                                             ? model.coefficients[`Beta_${variable}`].toFixed(1) 
+                                           {model.coefficients && model.coefficients[`Beta_${variable.toLowerCase()}`] !== undefined
+                                             ? model.coefficients[`Beta_${variable.toLowerCase()}`].toFixed(1) 
                                              : 'N/A'}
                                          </TableCell>
                                        ))}
@@ -1439,8 +1439,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                        <TableCell className="font-semibold text-orange-600">{variable}</TableCell>
                                        {combination.model_results.map((model, index) => (
                                          <TableCell key={index} className="font-mono text-sm">
-                                           {model.elasticities && model.elasticities[variable] !== undefined
-                                             ? model.elasticities[variable].toFixed(1)
+                                           {model.elasticities && model.elasticities[variable.toLowerCase()] !== undefined
+                                             ? model.elasticities[variable.toLowerCase()].toFixed(1)
                                              : 'N/A'}
                                          </TableCell>
                                        ))}
@@ -1475,8 +1475,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                        <TableCell className="font-semibold text-teal-600">{variable}</TableCell>
                                        {combination.model_results.map((model, index) => (
                                          <TableCell key={index} className="font-mono text-sm">
-                                           {model.contributions && model.contributions[variable] !== undefined
-                                             ? (model.contributions[variable] * 100).toFixed(1) + '%'
+                                           {model.contributions && model.contributions[variable.toLowerCase()] !== undefined
+                                             ? (model.contributions[variable.toLowerCase()] * 100).toFixed(1) + '%'
                                             : 'N/A'}
                                         </TableCell>
                                       ))}

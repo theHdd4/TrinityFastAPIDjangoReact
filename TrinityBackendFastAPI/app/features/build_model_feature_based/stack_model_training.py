@@ -523,7 +523,10 @@ class StackModelTrainer:
                 if missing_columns:
                     continue
 
+                # Use original X variables for predictions with destandardized coefficients
+                # The original variables should always be available in the DataFrame
                 X = df[x_variables].values
+                
                 y_actual = df[y_variable].values
                 
                 combination_metrics = {}
@@ -559,8 +562,9 @@ class StackModelTrainer:
                     # Make predictions using the destandardized betas
                     y_pred = self._predict_with_betas(X, betas, x_variables)
                     
-                    # Calculate individual combination metrics
-                    individual_mape = mean_absolute_percentage_error(y_actual, y_pred)
+                    # Calculate individual combination metrics using same safe_mape as individual models
+                    from .models import safe_mape
+                    individual_mape = safe_mape(y_actual, y_pred)
                     individual_r2 = self._calculate_r2(y_actual, y_pred)
                     
                     # Calculate AIC and BIC for individual combination
@@ -669,114 +673,6 @@ class StackModelTrainer:
         return 1 - (ss_res / ss_tot)
     
     
-    async def get_combination_betas(
-        self,
-        scope_number: str,
-        combinations: List[str],
-        pool_by_identifiers: List[str],
-        x_variables: List[str],
-        y_variable: str,
-        minio_client,
-        bucket_name: str,
-        # Clustering parameters
-        apply_clustering: bool = False,
-        numerical_columns_for_clustering: List[str] = None,
-        n_clusters: Optional[int] = None,
-        # Interaction terms parameters
-        apply_interaction_terms: bool = True,
-        numerical_columns_for_interaction: List[str] = None,
-        # Model training parameters
-        standardization: str = 'none',
-        k_folds: int = 5,
-        models_to_run: Optional[List[str]] = None,
-        custom_configs: Optional[Dict[str, Any]] = None,
-        price_column: Optional[str] = None,
-        run_id: str = None
-    ) -> Dict[str, Any]:
-        """
-        Get combination betas using pooled regression approach.
-        This method trains models and returns only the final betas for each combination.
-        """
-        try:
-            
-            # First, train the models using the existing method
-            training_result = await self.train_models_for_stacked_data(
-                scope_number=scope_number,
-                combinations=combinations,
-                pool_by_identifiers=pool_by_identifiers,
-                x_variables=x_variables,
-                y_variable=y_variable,
-                minio_client=minio_client,
-                bucket_name=bucket_name,
-                apply_clustering=apply_clustering,
-                numerical_columns_for_clustering=numerical_columns_for_clustering,
-                n_clusters=n_clusters,
-                apply_interaction_terms=apply_interaction_terms,
-                numerical_columns_for_interaction=numerical_columns_for_interaction,
-                standardization=standardization,
-                k_folds=k_folds,
-                models_to_run=models_to_run,
-                custom_configs=custom_configs,
-                price_column=price_column,
-                run_id=run_id
-            )
-            
-            # Extract model results from training
-            combination_betas_list = []
-            all_combinations = set()
-            
-            for stack_result in training_result.stack_model_results:
-                for model_result in stack_result.model_results:
-                    model_betas = self.calculate_combination_betas(
-                        model_results=[model_result.dict()],
-                        combinations=combinations,
-                        x_variables=x_variables,
-                        numerical_columns_for_interaction=numerical_columns_for_interaction,
-                        standardization=standardization
-                    )
-                    
-                    for combination_key, betas in model_betas.items():
-                        model_name = combination_key.split('_', 1)[0]  
-                        combination = combination_key.split('_', 1)[1] if '_' in combination_key else combination_key
-                        
-                        # Remove intercept from coefficients
-                        coefficients = {k: v for k, v in betas.items() if k != 'intercept'}
-                        
-                        combination_beta = {
-                            'combination': combination,
-                            'model_name': model_name,
-                            'intercept': betas.get('intercept', 0.0),
-                            'coefficients': coefficients
-                        }
-                        
-                        combination_betas_list.append(combination_beta)
-                        all_combinations.add(combination)
-            
-            # Prepare response
-            from .schemas import CombinationBetasResponse
-            response = CombinationBetasResponse(
-                scope_id=f"scope_{scope_number}",
-                set_name=f"Scope_{scope_number}",
-                x_variables=x_variables,
-                y_variable=y_variable,
-                standardization=standardization,
-                k_folds=k_folds,
-                total_combinations=len(all_combinations),
-                combination_betas=combination_betas_list,
-                summary={
-                    "run_id": run_id,
-                    "total_combinations": len(all_combinations),
-                    "total_combination_betas": len(combination_betas_list),
-                    "clustering_applied": apply_clustering,
-                    "interaction_terms_applied": apply_interaction_terms and apply_clustering,
-                    "models_used": models_to_run or ["All available models"]
-                }
-            )
-            
-            return response
-            
-        except Exception as e:
-            raise
     
     def _destandardize_betas(
         self,
