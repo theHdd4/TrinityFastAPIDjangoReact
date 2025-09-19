@@ -10,9 +10,9 @@ const GreenGlyphRain: React.FC<GreenGlyphRainProps> = ({ className = '' }) => {
   const animationRef = useRef<number>();
   const maskStyle: React.CSSProperties = {
     maskImage:
-      'linear-gradient(to bottom, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.15) 20%, rgba(0,0,0,0.45) 55%, rgba(0,0,0,0.75) 80%, rgba(0,0,0,0.9) 100%)',
+      'linear-gradient(to bottom, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.18) 22%, rgba(0,0,0,0.52) 58%, rgba(0,0,0,0.82) 82%, rgba(0,0,0,0.97) 100%)',
     WebkitMaskImage:
-      'linear-gradient(to bottom, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.15) 20%, rgba(0,0,0,0.45) 55%, rgba(0,0,0,0.75) 80%, rgba(0,0,0,0.9) 100%)',
+      'linear-gradient(to bottom, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.18) 22%, rgba(0,0,0,0.52) 58%, rgba(0,0,0,0.82) 82%, rgba(0,0,0,0.97) 100%)',
   };
 
   useEffect(() => {
@@ -47,10 +47,10 @@ const GreenGlyphRain: React.FC<GreenGlyphRainProps> = ({ className = '' }) => {
     observer.observe(container);
 
     const draw = () => {
-      ctx.fillStyle = 'rgba(10, 26, 15, 0.08)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
       ctx.fillRect(0, 0, width, height);
 
-      ctx.fillStyle = '#16a34a';
+      ctx.fillStyle = '#00ff41';
       ctx.textAlign = 'center';
       ctx.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`;
 
@@ -88,8 +88,8 @@ const GreenGlyphRain: React.FC<GreenGlyphRainProps> = ({ className = '' }) => {
       style={maskStyle}
     >
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
-      <div className="absolute inset-0 bg-gradient-to-b from-white/90 via-white/50 to-transparent" />
-      <div className="absolute inset-0 bg-gradient-to-t from-emerald-950/80 via-emerald-900/50 to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-b from-white/90 via-white/55 to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black via-emerald-950/80 to-transparent" />
     </div>
   );
 };
