@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -20,11 +20,8 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-// Import chart template components
+import D3LineChart from "./D3LineChart";
 import RechartsChartRenderer from "@/templates/charts/RechartsChartRenderer";
-import "@/templates/charts/chart.css";
-// Comment out current D3LineChart implementation
-// import D3LineChart from "./D3LineChart";
 import { useAuth } from "@/contexts/AuthContext";
 import { logSessionState, addNavigationItem } from "@/lib/session";
 import { useLaboratoryStore } from "@/components/LaboratoryMode/store/laboratoryStore";
@@ -82,6 +79,10 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     settings.activeMetric || settings.yAxes?.[0] || "",
   );
   const [error, setError] = useState<string | null>(null);
+  const [dimensionError, setDimensionError] = useState<string | null>(null);
+  
+  // Ref to track the last fetched data source
+  const lastFetchedSource = useRef<string | null>(null);
   
   // Sorting and filtering state for Cardinality View
   const [sortColumn, setSortColumn] = useState<string>('unique_count');
@@ -132,27 +133,67 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   }, [settings.dimensionMap]);
 
   useEffect(() => {
+    let active = true;
     const loadMapping = async () => {
+      if (!settings.dataSource) {
+        setDimensionError(null);
+        lastFetchedSource.current = null;
+        return;
+      }
+      
       try {
-        const result = await fetchDimensionMapping();
-        const mapping = filterUnattributed(result.mapping || {});
+        const { mapping: rawMapping } = await fetchDimensionMapping({
+          objectName: settings.dataSource,
+        });
+        if (!active) return;
+        const mapping = filterUnattributed(rawMapping);
         setDimensionMap(mapping);
         onUpdateSettings({ dimensionMap: mapping });
+        
+        // Check if mapping has any valid entries
+        const hasValidMapping = Object.values(mapping).some(
+          (ids) => Array.isArray(ids) && ids.length > 0,
+        );
+        
+        if (hasValidMapping) {
+          setDimensionError(null);
+        } else {
+          const message =
+            "Column Classifier is not configured for the selected dataframe. Configure it to view hierarchical dimensions.";
+          setDimensionError(message);
+        }
       } catch (error) {
-        console.warn('Failed to fetch dimension mapping:', error);
-        setDimensionMap({});
+        if (!active) return;
+        console.error("Failed to fetch dimension mapping:", error);
+        const message =
+          "Column Classifier is not configured for the selected dataframe. Configure it to view hierarchical dimensions.";
+        setDimensionError(message);
       }
     };
     loadMapping();
-  }, []);
+    return () => {
+      active = false;
+    };
+  }, [settings.dataSource]);
 
-  useEffect(() => {
-    if (hasMappedIdentifiers && skuRows.length === 0 && settings.dataSource) {
-      // prefill SKUs only when a data source is configured
-      displaySkus();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dimensionMap, settings.dataSource]);
+   useEffect(() => {
+     if (!settings.dataSource) {
+       lastFetchedSource.current = null;
+       return;
+     }
+
+     if (hasMappedIdentifiers) {
+       if (
+         lastFetchedSource.current === settings.dataSource &&
+         skuRows.length > 0
+       ) {
+         return;
+       }
+       lastFetchedSource.current = settings.dataSource;
+       displaySkus();
+     }
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [settings.dataSource, hasMappedIdentifiers, skuRows.length, dimensionMap]);
 
   useEffect(() => {
     setSkuRows(Array.isArray(settings.skuTable) ? settings.skuTable : []);
@@ -544,17 +585,17 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       }));
     setSkuRows(table);
     const newSettings: any = { skuTable: table };
-      if (!Array.isArray(settings.yAxes) || settings.yAxes.length === 0) {
-        const lower = Array.isArray(settings.numericColumns)
-          ? settings.numericColumns.map((c) => c.toLowerCase())
-          : [];
-        const defaults = ["salesvalue", "volume"].filter((d) =>
-          lower.includes(d),
-        );
-      if (defaults.length > 0) {
-        newSettings.yAxes = defaults;
-      }
-      }
+       if (!Array.isArray(settings.yAxes) || settings.yAxes.length === 0) {
+         const lower = Array.isArray(settings.numericColumns)
+           ? settings.numericColumns.map((c) => c.toLowerCase())
+           : [];
+         const defaults = ["salesvalue", "volume"].filter((d) =>
+           lower.includes(d),
+         );
+       if (defaults.length > 0) {
+         newSettings.yAxes = defaults;
+       }
+       }
       onUpdateSettings(newSettings);
       addNavigationItem(user?.id, {
         atom: 'feature-overview',
@@ -577,14 +618,14 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       .forEach((d) => {
         combo[d] = row[d.toLowerCase()];
       });
-    if (!settings.yAxes || settings.yAxes.length === 0) {
-      toast({
-        title:
-          "Can not display trend - configure Dependant Variables in properties section to view stat.",
-        variant: "destructive",
-      });
-      return;
-    }
+     if (!Array.isArray(settings.yAxes) || settings.yAxes.length === 0) {
+       toast({
+         title:
+           "Can not display trend - configure Dependant Variables in properties section to view stat.",
+         variant: "destructive",
+       });
+       return;
+     }
     setError(null);
     try {
       const result: Record<
@@ -594,7 +635,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           summary: { avg: number; min: number; max: number };
         }
       > = {};
-      for (const y of (Array.isArray(settings.yAxes) ? settings.yAxes : [])) {
+      for (const y of settings.yAxes) {
         const params = new URLSearchParams({
           object_name: settings.dataSource,
           y_column: y,
@@ -610,19 +651,19 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         result[y] = await res.json();
       }
       setStatDataMap(result);
-      setActiveMetric(Array.isArray(settings.yAxes) && settings.yAxes.length > 0 ? settings.yAxes[0] : "");
+      setActiveMetric(settings.yAxes[0]);
       setActiveRow(row.id);
       setShowStatsSummary(true);
       setExpandedMetrics(new Set());
       onUpdateSettings({
         statDataMap: result,
-        activeMetric: Array.isArray(settings.yAxes) && settings.yAxes.length > 0 ? settings.yAxes[0] : "",
+        activeMetric: settings.yAxes[0],
         activeRow: row.id,
       });
       addNavigationItem(user?.id, {
         atom: 'feature-overview',
         action: 'viewStats',
-        metric: Array.isArray(settings.yAxes) && settings.yAxes.length > 0 ? settings.yAxes[0] : "",
+        metric: settings.yAxes[0],
         combination: combo,
       });
       logSessionState(user?.id);
@@ -666,14 +707,14 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
 
   return (
     <div className="w-full h-full p-6 pb-[50px] bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
-      {error && (
-        <div
-          className="mb-4 text-sm text-red-600 font-medium"
-          data-testid="fo-error"
-        >
-          {error}
-        </div>
-      )}
+       {error && (
+         <div
+           className="mb-4 text-sm text-red-600 font-medium"
+           data-testid="fo-error"
+         >
+           {error}
+         </div>
+       )}
       {summaryList.length > 0 && (
         <div className="mb-8">
           <Table
@@ -865,12 +906,21 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                       </div>
                     </td>
                   </tr>
-                ))}
-            </Table>
-        </div>
-      )}
+                 ))}
+             </Table>
+         </div>
+       )}
+       
+       {dimensionError && (
+         <div
+           className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800 font-medium"
+           data-testid="fo-dimension-error"
+         >
+           {dimensionError}
+         </div>
+       )}
 
-      {settings.selectedColumns?.length > 0 && (
+       {settings.selectedColumns?.length > 0 && (
         <div className="space-y-4">
           {/* <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {Object.keys(dimensionMap).length > 0 ? (
@@ -900,9 +950,11 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                 </Card>
               ))
             ) : (
-              <div className="col-span-1 text-sm text-gray-500">
-                Please configure dimensions using Column Classifier
-              </div>
+              !dimensionError && (
+                <div className="col-span-1 text-sm font-medium text-red-600">
+                  Please configure dimensions using Column Classifier
+                </div>
+              )
             )}
           </div> */}
 
