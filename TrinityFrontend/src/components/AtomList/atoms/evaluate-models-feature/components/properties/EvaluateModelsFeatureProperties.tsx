@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Upload, Eye } from 'lucide-react';
 
 import EvaluateModelsFeatureSettings from '../EvaluateModelsFeatureSettings';
 import EvaluateModelsFeatureExhibition from '../EvaluateModelsFeatureExhibition';
@@ -24,16 +25,22 @@ const InternalEvaluateModelsFeatureProperties: React.FC<StandaloneProps> = ({
   onSettingsChange,
   onDataUpload
 }) => {
-  const [tab, setTab] = useState('settings');
+  const [tab, setTab] = useState('inputs');
 
   return (
-    <Tabs value={tab} onValueChange={setTab} className="w-full h-full flex flex-col">
-      <TabsList className="grid w-full grid-cols-2 bg-gray-50 mb-4 shrink-0 mx-4 mt-4">
-        <TabsTrigger value="settings" className="font-medium">Settings</TabsTrigger>
-        <TabsTrigger value="exhibition" className="font-medium">Exhibition</TabsTrigger>
-      </TabsList>
-      <div className="flex-1 overflow-auto px-4">
-        <TabsContent value="settings" className="mt-0 h-full" forceMount>
+    <div className="h-full flex flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="inputs" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Input
+          </TabsTrigger>
+          <TabsTrigger value="exhibition" className="text-xs font-medium">
+            <Eye className="w-3 h-3 mr-1" />
+            Exhibition
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="inputs" className="flex-1 mt-0" forceMount>
           <EvaluateModelsFeatureSettings
             data={data}
             settings={settings}
@@ -42,11 +49,11 @@ const InternalEvaluateModelsFeatureProperties: React.FC<StandaloneProps> = ({
             onDataUpload={onDataUpload}
           />
         </TabsContent>
-        <TabsContent value="exhibition" className="mt-0 h-full" forceMount>
-          <EvaluateModelsFeatureExhibition data={data} />
+        <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
+          {/* Exhibition tab content - empty for now */}
         </TabsContent>
-      </div>
-    </Tabs>
+      </Tabs>
+    </div>
   );
 };
 
@@ -86,8 +93,10 @@ const EvaluateModelsFeatureProperties: React.FC<Props> = (props) => {
       graphs: [
         { id: '1', name: 'Waterfall Chart', type: 'waterfall', selected: true },
         { id: '2', name: 'Contribution Chart', type: 'contribution', selected: true },
-        { id: '3', name: 'Scatter Plot', type: 'scatter', selected: false },
-        { id: '4', name: 'Line Chart', type: 'line', selected: false },
+        { id: '3', name: 'Actual vs Predicted', type: 'actual-vs-predicted', selected: true },
+        { id: '4', name: 'Elasticity', type: 'elasticity', selected: true },
+        { id: '5', name: 'Beta', type: 'beta', selected: true },
+        { id: '6', name: 'Averages', type: 'averages', selected: true },
       ],
       availableColumns: ['Column 1', 'Column 2', 'Column 3', 'Column 4'],
       modelResults: [] as any[],

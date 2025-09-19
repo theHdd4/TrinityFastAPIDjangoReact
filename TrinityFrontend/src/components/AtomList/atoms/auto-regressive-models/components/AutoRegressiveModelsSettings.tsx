@@ -1,33 +1,31 @@
 import React, { useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Database, Target, Cpu } from 'lucide-react';
+import { Database, Target, Cpu, Settings2 } from 'lucide-react';
 import { VALIDATE_API } from '@/lib/api';
-import { BuildModelFeatureBasedData, BuildModelFeatureBasedSettings as SettingsType, ModelConfig } from '../BuildModelFeatureBasedAtom';
+import { AutoRegressiveModelsData, AutoRegressiveModelsSettings as SettingsType } from '../AutoRegressiveModelsAtom';
 
-interface BuildModelFeatureBasedSettingsProps {
-  data: BuildModelFeatureBasedData;
+interface AutoRegressiveModelsSettingsProps {
+  data: AutoRegressiveModelsData;
   settings: SettingsType;
-  onDataChange: (data: Partial<BuildModelFeatureBasedData>) => void;
+  onDataChange: (data: Partial<AutoRegressiveModelsData>) => void;
   onSettingsChange: (settings: Partial<SettingsType>) => void;
   onDataUpload: (file: File, fileId: string) => void;
 }
 
 const availableModels = [
-  { id: 'Linear Regression', name: 'Linear Regression', params: [] },
-  { id: 'Ridge Regression', name: 'Ridge Regression', params: ['Alpha'] },
-  { id: 'Lasso Regression', name: 'Lasso Regression', params: ['Alpha'] },
-  { id: 'ElasticNet Regression', name: 'ElasticNet Regression', params: ['Alpha', 'L1 Ratio'] },
-  { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', params: [] },
-  { id: 'Custom Constrained Ridge', name: 'Custom Constrained Ridge', params: ['L2 Penalty', 'Learning Rate', 'Iterations', 'Adam'] },
-  { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', params: ['Learning Rate', 'Iterations', 'Adam'] }
+  { id: 'ARIMA', name: 'ARIMA', params: [] },
+  { id: 'SARIMA', name: 'SARIMA', params: [] },
+  { id: 'Holt-Winters', name: 'Holt-Winters', params: [] },
+  { id: 'ETS', name: 'ETS', params: [] },
+  { id: 'Prophet', name: 'Prophet', params: [] }
 ];
 
-const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsProps> = ({
+const AutoRegressiveModelsSettings: React.FC<AutoRegressiveModelsSettingsProps> = ({
   data,
   settings,
   onDataChange,
@@ -46,6 +44,24 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
       })
       .catch(() => {/* ignore */});
   }, [data?.availableFiles]);
+
+  // Ensure all models are selected by default on first load
+  useEffect(() => {
+    console.log('🔧 AutoRegressiveModelsSettings: useEffect triggered, current selectedModels:', data?.selectedModels);
+    console.log('🔧 AutoRegressiveModelsSettings: availableModels:', availableModels);
+    
+    // Only auto-select on initial load when selectedModels is undefined (not when it's an empty array)
+    // This allows users to deselect all models without them being auto-selected again
+    if (data?.selectedModels === undefined) {
+      const allModelIds = availableModels.map(model => model.id);
+      console.log('🔧 AutoRegressiveModelsSettings: Auto-selecting all models on first load:', allModelIds);
+      onDataChange({
+        selectedModels: allModelIds
+      });
+    } else {
+      console.log('🔧 AutoRegressiveModelsSettings: Models already selected or explicitly empty, count:', data.selectedModels?.length || 0);
+    }
+  }, []); // Only run once on mount, not when any dependencies change
 
   // Filter files that contain "Scope" and extract unique scope numbers
   const scopeFiles = (data?.availableFiles || []).filter(file => 
@@ -71,8 +87,6 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
   const filesForSelectedScope = data?.selectedScope ? 
     scopeFiles.filter(file => file.includes(`Scope_${data.selectedScope}_`)) : [];
 
-  // Settings data processing
-
   // Extract combinations after scope number (e.g., "Channel_Convenience_Variant_Flavoured_Brand_HEINZ_Flavoured_PPG_Small_Single")
   const scopeCombinations = filesForSelectedScope.map(file => {
     const match = file.match(/Scope_\d+_(.+?)_\d{8}_\d{6}\.arrow$/);
@@ -94,67 +108,24 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
   };
 
   const handleModelSelection = (modelId: string, checked: boolean) => {
-    let updatedModels = [...data.selectedModels];
-    let updatedConfigs = [...data.modelConfigs];
+    let updatedModels = [...(data.selectedModels || [])];
 
     if (checked) {
       updatedModels.push(modelId);
-      const model = availableModels.find(m => m.id === modelId);
-      if (model) {
-        // Get default parameters from the default data structure
-        const defaultModelConfigs = [
-          { id: 'Linear Regression', name: 'Linear Regression', parameters: {} },
-          { id: 'Ridge Regression', name: 'Ridge Regression', parameters: { 'Alpha': '1.0' } },
-          { id: 'Lasso Regression', name: 'Lasso Regression', parameters: { 'Alpha': '1.0' } },
-          { id: 'ElasticNet Regression', name: 'ElasticNet Regression', parameters: { 'Alpha': '1.0', 'L1 Ratio': '0.5' } },
-          { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', parameters: {} },
-          { id: 'Custom Constrained Ridge', name: 'Custom Constrained Ridge', parameters: { 'L2 Penalty': '0.1', 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' } },
-          { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', parameters: { 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' } }
-        ];
-        
-        // Find the default config for this model
-        const defaultConfig = defaultModelConfigs.find(config => config.id === modelId);
-        const defaultParams = defaultConfig?.parameters || {};
-        
-        // Ensure all required parameters have default values
-        model.params.forEach(param => {
-          if (!(param in defaultParams)) {
-            defaultParams[param] = '';
-          }
-        });
-        
-        updatedConfigs.push({
-          id: modelId,
-          name: model.name,
-          parameters: defaultParams
-        });
-      }
     } else {
       updatedModels = updatedModels.filter(id => id !== modelId);
-      updatedConfigs = updatedConfigs.filter(config => config.id !== modelId);
     }
 
+    console.log('🔧 AutoRegressiveModelsSettings: Model selection changed:', {
+      modelId,
+      checked,
+      previousModels: data.selectedModels,
+      updatedModels
+    });
+
     onDataChange({
-      selectedModels: updatedModels,
-      modelConfigs: updatedConfigs
+      selectedModels: updatedModels
     });
-  };
-
-  const handleParameterChange = (modelId: string, paramName: string, value: string) => {
-    const updatedConfigs = data.modelConfigs.map(config => {
-      if (config.id === modelId) {
-        return {
-          ...config,
-          parameters: {
-            ...config.parameters,
-            [paramName]: value
-          }
-        };
-      }
-      return config;
-    });
-
-    onDataChange({ modelConfigs: updatedConfigs });
   };
 
   const handleCombinationToggle = (combination: string, checked: boolean) => {
@@ -182,37 +153,30 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
   };
 
   const handleSelectAllModels = (checked: boolean) => {
-    if (checked) {
+    console.log('🔧 AutoRegressiveModelsSettings: handleSelectAllModels called with checked:', checked);
+    console.log('🔧 AutoRegressiveModelsSettings: Current selectedModels:', data?.selectedModels);
+    console.log('🔧 AutoRegressiveModelsSettings: allModelsSelected:', allModelsSelected);
+    console.log('🔧 AutoRegressiveModelsSettings: onDataChange function:', !!onDataChange);
+    
+    // Ensure we have a valid boolean value
+    const shouldSelectAll = Boolean(checked);
+    console.log('🔧 AutoRegressiveModelsSettings: shouldSelectAll:', shouldSelectAll);
+    
+    if (shouldSelectAll) {
       // Select all models
       const allModelIds = availableModels.map(model => model.id);
-      const allModelConfigs = availableModels.map(model => {
-        const defaultParams: Record<string, any> = {};
-        model.params.forEach(param => {
-          // Set default values based on model type
-          if (param === 'Alpha') defaultParams[param] = '1.0';
-          else if (param === 'L1 Ratio') defaultParams[param] = '0.5';
-          else if (param === 'L2 Penalty') defaultParams[param] = '0.1';
-          else if (param === 'Learning Rate') defaultParams[param] = '0.001';
-          else if (param === 'Iterations') defaultParams[param] = '10000';
-          else if (param === 'Adam') defaultParams[param] = 'false';
-          else defaultParams[param] = '';
-        });
-        return {
-          id: model.id,
-          name: model.name,
-          parameters: defaultParams
-        };
-      });
+      console.log('🔧 AutoRegressiveModelsSettings: Select all models:', allModelIds);
       onDataChange({
-        selectedModels: allModelIds,
-        modelConfigs: allModelConfigs
+        selectedModels: allModelIds
       });
+      console.log('🔧 AutoRegressiveModelsSettings: onDataChange called for select all');
     } else {
       // Deselect all models
+      console.log('🔧 AutoRegressiveModelsSettings: Deselect all models');
       onDataChange({
-        selectedModels: [],
-        modelConfigs: []
+        selectedModels: []
       });
+      console.log('🔧 AutoRegressiveModelsSettings: onDataChange called for deselect all');
     }
   };
 
@@ -222,10 +186,20 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
 
   // Check if all models are selected
   const allModelsSelected = availableModels.length > 0 && 
-    availableModels.every(model => data?.selectedModels?.includes(model.id));
+    data?.selectedModels && 
+    data.selectedModels.length > 0 &&
+    availableModels.every(model => data.selectedModels.includes(model.id));
   
-  // Debug logging to ensure the logic works correctly
-  
+  // Debug logging for model selection state
+  console.log('🔧 AutoRegressiveModelsSettings: allModelsSelected calculation:', {
+    availableModelsCount: availableModels.length,
+    selectedModelsCount: data?.selectedModels?.length || 0,
+    selectedModels: data?.selectedModels || [],
+    allModelsSelected: allModelsSelected,
+    availableModelIds: availableModels.map(m => m.id)
+  });
+
+
 
   return (
     <div className="space-y-6">
@@ -293,7 +267,6 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
               </div>
             )}
             
-            {/* <Label>Select File from Bucket</Label> */}
             <div className="max-h-60 overflow-y-auto overflow-x-auto mt-2 border rounded p-2">
               <div className="grid grid-cols-1 gap-2 min-w-max">
                 {uniqueCombinations.map(option => (
@@ -302,7 +275,6 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
                       id={option.value}
                       checked={data?.selectedCombinations?.includes(option.value) || false}
                       onCheckedChange={(checked) => handleCombinationToggle(option.value, checked as boolean)}
-                      onClick={(e) => e.stopPropagation()}
                     />
                     <Label htmlFor={option.value} className="text-sm truncate">{option.label}</Label>
                   </div>
@@ -318,109 +290,76 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
         </div>
       </Card>
 
-
-
       {/* Select Model */}
       <Card>
         <div className="p-4 border-b bg-muted/30">
           <h4 className="font-medium text-foreground flex items-center gap-2">
-            <Cpu className="w-4 h-4 text-primary" />
+            <Target className="w-4 h-4 text-primary" />
             Select Model
           </h4>
         </div>
         <div className="p-4 space-y-4">
-          {/* Training Parameters */}
-          <div className="space-y-4">
-            <div>
-              <Label>K-Fold Cross Validation</Label>
-              <Input
-                type="number"
-                min="2"
-                max="10"
-                value={data?.kFolds || 5}
-                onChange={(e) => onDataChange({ kFolds: parseInt(e.target.value) || 5 })}
-                placeholder="5"
-                className="mt-1"
+          {/* Select All Models Checkbox */}
+          <div className="mb-3 p-2 border rounded bg-muted/20">
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="select-all-models"
+                checked={allModelsSelected}
+                onCheckedChange={(checked) => {
+                  console.log('🔧 AutoRegressiveModelsSettings: Checkbox clicked with checked:', checked, 'type:', typeof checked);
+                  console.log('🔧 AutoRegressiveModelsSettings: Current allModelsSelected:', allModelsSelected);
+                  console.log('🔧 AutoRegressiveModelsSettings: Current selectedModels:', data?.selectedModels);
+                  
+                  // Ensure checked is a boolean
+                  const isChecked = checked === true;
+                  console.log('🔧 AutoRegressiveModelsSettings: Converted to boolean:', isChecked);
+                  handleSelectAllModels(isChecked);
+                }}
               />
-            </div>
-            
-            <div>
-              <Label>Test Size Ratio</Label>
-              <Input
-                type="number"
-                min="0.1"
-                max="0.5"
-                step="0.1"
-                value={data?.testSize || 0.2}
-                onChange={(e) => onDataChange({ testSize: parseFloat(e.target.value) || 0.2 })}
-                placeholder="0.2"
-                className="mt-1"
-              />
-              {/* <p className="text-xs text-muted-foreground mt-1">Ratio of data for testing (0.1-0.5)</p> */}
+              <Label htmlFor="select-all-models" className="text-sm font-medium">
+                Select All Models
+              </Label>
             </div>
           </div>
           
-          {/* Separator Line */}
-          <div className="border-t border-blue-200 my-4"></div>
-          
-          <div>
-            {/* Select All Models Checkbox */}
-            <div className="mb-3 p-2 border rounded bg-muted/20">
-              <div className="flex items-center space-x-2">
+          <div className="space-y-3 mt-2">
+            {availableModels.map(model => (
+              <div key={model.id} className="flex items-center space-x-2">
                 <Checkbox
-                  id="select-all-models"
-                  checked={allModelsSelected}
-                  onCheckedChange={(checked) => handleSelectAllModels(checked as boolean)}
+                  id={model.id}
+                  checked={data?.selectedModels?.includes(model.id) || false}
+                  onCheckedChange={(checked) => handleModelSelection(model.id, checked as boolean)}
                 />
-                <Label htmlFor="select-all-models" className="text-sm font-medium">
-                  Select All Models
-                </Label>
+                <Label htmlFor={model.id} className="text-sm">{model.name}</Label>
               </div>
-            </div>
-            
-            {/* <Label>Multi Selection</Label> */}
-            <div className="space-y-3 mt-2">
-              {availableModels.map(model => (
-                <div key={model.id} className="space-y-3">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id={model.id}
-                      checked={data?.selectedModels?.includes(model.id) || false}
-                      onCheckedChange={(checked) => handleModelSelection(model.id, checked as boolean)}
-                    />
-                    <Label htmlFor={model.id} className="text-sm">{model.name}</Label>
-                  </div>
-                  
-                  {data?.selectedModels?.includes(model.id) && (
-                    <div className="ml-6 space-y-2 border-l-2 border-border pl-4">
-                      {model.params.map(param => {
-                        const config = data?.modelConfigs?.find(c => c.id === model.id);
-                        const value = config?.parameters?.[param] || '';
-                        
-                        return (
-                          <div key={param}>
-                            <Label className="text-xs text-muted-foreground">{param}</Label>
-                            <Input
-                              value={value}
-                              onChange={(e) => handleParameterChange(model.id, param, e.target.value)}
-                              placeholder="Insert Value"
-                              className="mt-1"
-                            />
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+            ))}
           </div>
         </div>
       </Card>
 
-
+      {/* Output Configuration */}
+      <Card>
+        <div className="p-4 border-b bg-muted/30">
+          <h4 className="font-medium text-foreground flex items-center gap-2">
+            <Settings2 className="w-4 h-4 text-primary" />
+            Output Configuration
+          </h4>
+        </div>
+        <div className="p-4 space-y-4">
+          <div>
+            <Label>Output File Name</Label>
+            <Input
+              type="text"
+              value={data.outputFileName || ''}
+              onChange={(e) => onDataChange({ outputFileName: e.target.value })}
+              placeholder="Enter output file name"
+              className="mt-1"
+            />
+          </div>
+        </div>
+      </Card>
     </div>
   );
 };
 
-export default BuildModelFeatureBasedSettings;
+export default AutoRegressiveModelsSettings;

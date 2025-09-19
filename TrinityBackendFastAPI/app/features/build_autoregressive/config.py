@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     # MongoDB Configuration
     mongo_details: str = Field(..., alias="MONGO_URI")
     database_name: str = "autoregressive_db"
+    autoregressive_database: str = "autoregressive_db"
+    combination_save_status_database: str = "trinity_prod"
+    combination_save_status_collection: str = "autoregressive_combination_save_status"
     collection_name: str = "autoreg_results"
     
     # MinIO Configuration

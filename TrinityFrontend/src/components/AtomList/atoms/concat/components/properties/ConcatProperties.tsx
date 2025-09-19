@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Database, Settings, Eye } from 'lucide-react';
+import { Upload, Settings, Eye } from 'lucide-react';
 import ConcatInputFiles from '../ConcatInputFiles';
 import ConcatOptions from '../ConcatOptions';
 import ConcatExhibition from '../ConcatExhibition';
@@ -20,7 +20,12 @@ const ConcatProperties: React.FC<Props> = ({ atomId }) => {
   const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_CONCAT_SETTINGS };
 
   const handleChange = (newSettings: Partial<SettingsType>) => {
-    updateSettings(atomId, newSettings);
+    // Ensure direction is set to default if not specified
+    const updatedSettings = {
+      ...newSettings,
+      direction: newSettings.direction || settings.direction || DEFAULT_CONCAT_SETTINGS.direction
+    };
+    updateSettings(atomId, updatedSettings);
   };
 
   // Helper function to check if all required options are selected
@@ -77,45 +82,42 @@ const ConcatProperties: React.FC<Props> = ({ atomId }) => {
   };
 
   return (
-    <div className="w-full">
-      <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-          <TabsTrigger value="inputs" className="text-xs">
-            <Database className="w-3 h-3 mr-1" />
-            Input Files
+    <div className="h-full flex flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="inputs" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Input
           </TabsTrigger>
-          <TabsTrigger value="options" className="text-xs">
+          <TabsTrigger value="options" className="text-xs font-medium">
             <Settings className="w-3 h-3 mr-1" />
-            Concat Options
+            Settings
           </TabsTrigger>
-          <TabsTrigger value="exhibition" className="text-xs">
+          <TabsTrigger value="exhibition" className="text-xs font-medium">
             <Eye className="w-3 h-3 mr-1" />
             Exhibition
           </TabsTrigger>
         </TabsList>
-
-        <div className="px-4">
-          <TabsContent value="inputs" className="space-y-4" forceMount>
-            <ConcatInputFiles 
-              settings={settings} 
-              onSettingsChange={handleChange}
-              onPerformConcat={handlePerformConcat}
-            />
-          </TabsContent>
-          <TabsContent value="options" className="space-y-4" forceMount>
-            <ConcatOptions 
-              settings={settings} 
-              onSettingsChange={handleChange}
-              onPerformConcat={handlePerformConcat}
-            />
-          </TabsContent>
-          <TabsContent value="exhibition" className="space-y-4" forceMount>
-            <ConcatExhibition 
-              settings={settings}
-              onPerformConcat={handlePerformConcat}
-            />
-          </TabsContent>
-        </div>
+        <TabsContent value="inputs" className="flex-1 mt-0" forceMount>
+          <ConcatInputFiles 
+            settings={settings} 
+            onSettingsChange={handleChange}
+            onPerformConcat={handlePerformConcat}
+          />
+        </TabsContent>
+        <TabsContent value="options" className="flex-1 mt-0" forceMount>
+          <ConcatOptions 
+            settings={settings} 
+            onSettingsChange={handleChange}
+            onPerformConcat={handlePerformConcat}
+          />
+        </TabsContent>
+        <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
+          <ConcatExhibition 
+            settings={settings}
+            onPerformConcat={handlePerformConcat}
+          />
+        </TabsContent>
       </Tabs>
     </div>
   );

@@ -1460,8 +1460,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           )}
         </div>
         </div>
-        </div>
-        {contextMenu && data && typeof contextMenu.col === 'string' && (
+      </div>
+      {contextMenu && data && typeof contextMenu.col === 'string' && (
         <div
           id="df-ops-context-menu"
           style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 200 }}

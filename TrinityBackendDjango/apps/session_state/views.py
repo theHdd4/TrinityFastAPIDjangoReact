@@ -12,7 +12,7 @@ from pymongo import MongoClient
 from django.conf import settings
 from asgiref.sync import async_to_sync
 from apps.accounts.utils import get_env_vars
-from app.features.column_classifier.database import get_classifier_config_from_mongo
+# Removed import to avoid circular dependency with FastAPI backend
 
 TTL = 3600 * 2  # 2 hours
 TRINITY_DB_NAME = "trinity_db"
@@ -79,16 +79,8 @@ class SessionInitView(APIView):
                     )
                 except Exception:
                     pass
-                try:
-                    cfg = get_classifier_config_from_mongo(
-                        client_name, app_name, project_name
-                    )
-                    if cfg:
-                        identifiers = cfg.get("identifiers", [])
-                        measures = cfg.get("measures", [])
-                        dimensions = cfg.get("dimensions", {})
-                except Exception:
-                    pass
+                # Removed classifier config import to avoid circular dependency
+                # Default values will be used for identifiers, measures, and dimensions
                 session = {
                     "envvars": envvars,
                     "identifiers": identifiers,
@@ -157,14 +149,8 @@ class SessionStateView(APIView):
                     )
                 except Exception:
                     pass
-                try:
-                    cfg = get_classifier_config_from_mongo(parts[1], parts[3], parts[4]) if len(parts) == 5 else None
-                    if cfg:
-                        identifiers = cfg.get("identifiers", [])
-                        measures = cfg.get("measures", [])
-                        dimensions = cfg.get("dimensions", {})
-                except Exception:
-                    pass
+                # Removed classifier config import to avoid circular dependency
+                # Default values will be used for identifiers, measures, and dimensions
                 session = {
                     "envvars": envvars,
                     "identifiers": identifiers,

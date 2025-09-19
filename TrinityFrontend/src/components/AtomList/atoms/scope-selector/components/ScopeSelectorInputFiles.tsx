@@ -130,44 +130,6 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
         </Select>
       </Card>
 
-      {settings.allColumns?.length > 0 && (
-        <Card className="p-4 space-y-3 bg-gradient-to-br from-yellow-50 to-yellow-100">
-          <div className="overflow-x-auto rounded-lg border border-gray-100 bg-white">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-2 text-left font-semibold text-gray-700">Column Name</th>
-                  <th className="px-4 py-2 text-left font-semibold text-gray-700">Type</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {settings.allColumns.map((col: any) => {
-                  const isCategorical = settings.availableIdentifiers?.includes(col.column);
-                  const dataType = col.data_type?.toLowerCase() || '';
-                  
-                  return (
-                    <tr key={col.column} className="hover:bg-yellow-50 transition-colors">
-                      <td className="px-4 py-2 font-medium text-gray-900">
-                        {col.column}
-                      </td>
-                      <td className="px-4 py-2">
-                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold 
-                          ${dataType.includes('int') || dataType.includes('float') || dataType.includes('number') ? 'bg-blue-100 text-blue-700' :
-                            dataType === 'object' || dataType === 'category' || dataType === 'string' ? 'bg-yellow-100 text-yellow-700' :
-                            dataType === 'bool' || dataType === 'boolean' ? 'bg-purple-100 text-purple-700' :
-                            'bg-gray-100 text-gray-700'}
-                        `}>
-                          {col.data_type}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
     </div>
   );
 };

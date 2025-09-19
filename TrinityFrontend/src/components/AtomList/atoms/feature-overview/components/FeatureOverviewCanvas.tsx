@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FEATURE_OVERVIEW_API } from "@/lib/api";
 import { fetchDimensionMapping } from "@/lib/dimensions";
-import { BarChart3, TrendingUp, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Plus } from "lucide-react";
+import { BarChart3, TrendingUp, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Plus, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -21,6 +21,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import D3LineChart from "./D3LineChart";
+import RechartsChartRenderer from "@/templates/charts/RechartsChartRenderer";
 import { useAuth } from "@/contexts/AuthContext";
 import { logSessionState, addNavigationItem } from "@/lib/session";
 import { useLaboratoryStore } from "@/components/LaboratoryMode/store/laboratoryStore";
@@ -57,7 +58,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     filterUnattributed(settings.dimensionMap || {}),
   );
   const hasMappedIdentifiers = Object.values(dimensionMap).some(
-    (ids) => ids.length > 0,
+    (ids) => Array.isArray(ids) && ids.length > 0,
   );
   const [skuRows, setSkuRows] = useState<any[]>(
     Array.isArray(settings.skuTable) ? settings.skuTable : [],
@@ -80,12 +81,25 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [dimensionError, setDimensionError] = useState<string | null>(null);
   
+  // Ref to track the last fetched data source
+  const lastFetchedSource = useRef<string | null>(null);
+  
   // Sorting and filtering state for Cardinality View
   const [sortColumn, setSortColumn] = useState<string>('unique_count');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
 
-  const lastFetchedSource = useRef<string | null>(null);
+  // Chart type and theme state for chart type changes
+  const [chartType, setChartType] = useState<string>('line_chart');
+  const [chartTheme, setChartTheme] = useState<string>('default');
+  
+  // Chart display options state
+  const [showDataLabels, setShowDataLabels] = useState<boolean>(false);
+  const [showAxisLabels, setShowAxisLabels] = useState<boolean>(true);
+  
+  // State for managing expanded views
+  const [showStatsSummary, setShowStatsSummary] = useState<boolean>(false);
+  const [expandedMetrics, setExpandedMetrics] = useState<Set<string>>(new Set());
 
   // Get atom settings to access the input file name
   const atom = useLaboratoryStore(state => atomId ? state.getAtom(atomId) : undefined);
@@ -105,7 +119,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const [skuColumnFilters, setSkuColumnFilters] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
-    if (settings.yAxes && settings.yAxes.length > 0) {
+    if (Array.isArray(settings.yAxes) && settings.yAxes.length > 0) {
       setActiveMetric((prev) =>
         prev && settings.yAxes.includes(prev) ? prev : settings.yAxes[0],
       );
@@ -122,18 +136,39 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     let active = true;
     const loadMapping = async () => {
       if (!settings.dataSource) {
+        setDimensionError(null);
+        lastFetchedSource.current = null;
         return;
       }
-      if (settings.dimensionMap && Object.keys(settings.dimensionMap).length > 0) {
-        return;
+      
+      try {
+        const { mapping: rawMapping } = await fetchDimensionMapping({
+          objectName: settings.dataSource,
+        });
+        if (!active) return;
+        const mapping = filterUnattributed(rawMapping);
+        setDimensionMap(mapping);
+        onUpdateSettings({ dimensionMap: mapping });
+        
+        // Check if mapping has any valid entries
+        const hasValidMapping = Object.values(mapping).some(
+          (ids) => Array.isArray(ids) && ids.length > 0,
+        );
+        
+        if (hasValidMapping) {
+          setDimensionError(null);
+        } else {
+          const message =
+            "Column Classifier is not configured for the selected dataframe. Configure it to view hierarchical dimensions.";
+          setDimensionError(message);
+        }
+      } catch (error) {
+        if (!active) return;
+        console.error("Failed to fetch dimension mapping:", error);
+        const message =
+          "Column Classifier is not configured for the selected dataframe. Configure it to view hierarchical dimensions.";
+        setDimensionError(message);
       }
-      const { mapping: rawMapping } = await fetchDimensionMapping({
-        objectName: settings.dataSource,
-      });
-      if (!active) return;
-      const mapping = filterUnattributed(rawMapping);
-      setDimensionMap(mapping);
-      onUpdateSettings({ dimensionMap: mapping });
     };
     loadMapping();
     return () => {
@@ -141,33 +176,24 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     };
   }, [settings.dataSource]);
 
-  useEffect(() => {
-    if (!settings.dataSource) {
-      setDimensionError(null);
-      lastFetchedSource.current = null;
-      return;
-    }
+   useEffect(() => {
+     if (!settings.dataSource) {
+       lastFetchedSource.current = null;
+       return;
+     }
 
-    if (hasMappedIdentifiers) {
-      setDimensionError(null);
-    } else {
-      const message =
-        "Column Classifier is not configured for the selected dataframe. Configure it to view hierarchical dimensions.";
-      setDimensionError(message);
-      lastFetchedSource.current = null;
-      return;
-    }
-
-    if (
-      lastFetchedSource.current === settings.dataSource &&
-      skuRows.length > 0
-    ) {
-      return;
-    }
-    lastFetchedSource.current = settings.dataSource;
-    displaySkus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.dataSource, hasMappedIdentifiers, skuRows.length, dimensionMap]);
+     if (hasMappedIdentifiers) {
+       if (
+         lastFetchedSource.current === settings.dataSource &&
+         skuRows.length > 0
+       ) {
+         return;
+       }
+       lastFetchedSource.current = settings.dataSource;
+       displaySkus();
+     }
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [settings.dataSource, hasMappedIdentifiers, skuRows.length, dimensionMap]);
 
   useEffect(() => {
     setSkuRows(Array.isArray(settings.skuTable) ? settings.skuTable : []);
@@ -260,18 +286,51 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     return Array.from(new Set(values)).sort();
   };
 
-  const handleSort = (column: string, direction?: 'asc' | 'desc') => {
-    if (sortColumn === column) {
-      if (sortDirection === 'asc') {
-        setSortDirection('desc');
-      } else if (sortDirection === 'desc') {
-        setSortColumn('');
-        setSortDirection('asc');
-      }
-    } else {
-      setSortColumn(column);
-      setSortDirection(direction || 'asc');
-    }
+  const handleSort = (column: string, direction: 'asc' | 'desc') => {
+    setSortColumn(column);
+    setSortDirection(direction);
+  };
+
+  // Handle chart type change
+  const handleChartTypeChange = (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
+    setChartType(newType);
+  };
+
+  // Handle chart theme change
+  const handleChartThemeChange = (newTheme: string) => {
+    setChartTheme(newTheme);
+  };
+
+  // Handle data labels toggle
+  const handleDataLabelsToggle = (show: boolean) => {
+    setShowDataLabels(show);
+  };
+
+  // Handle axis labels toggle
+  const handleAxisLabelsToggle = (show: boolean) => {
+    setShowAxisLabels(show);
+  };
+
+  // Handle metric graph expansion
+  const handleMetricView = (metric: string) => {
+    setActiveMetric(metric);
+    onUpdateSettings({ activeMetric: metric });
+    setExpandedMetrics(prev => new Set(prev).add(metric));
+  };
+
+  // Handle closing metric graph
+  const handleCloseMetric = (metric: string) => {
+    setExpandedMetrics(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(metric);
+      return newSet;
+    });
+  };
+
+  // Handle closing stats summary
+  const handleCloseStatsSummary = () => {
+    setShowStatsSummary(false);
+    setExpandedMetrics(new Set());
   };
 
   const handleColumnFilter = (column: string, values: string[]) => {
@@ -334,7 +393,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     onUpdateSettings({ filterUnique: val });
   };
 
-  const dimensionCols = Object.values(dimensionMap).flat();
+  const dimensionCols = Object.values(dimensionMap)
+    .filter(Array.isArray)
+    .flat();
   const colSpan = dimensionCols.length + 2; // SR NO. + View Stat
 
   // SKU Table filtering and sorting logic
@@ -524,17 +585,17 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       }));
     setSkuRows(table);
     const newSettings: any = { skuTable: table };
-      if (!settings.yAxes || settings.yAxes.length === 0) {
-        const lower = Array.isArray(settings.numericColumns)
-          ? settings.numericColumns.map((c) => c.toLowerCase())
-          : [];
-        const defaults = ["salesvalue", "volume"].filter((d) =>
-          lower.includes(d),
-        );
-      if (defaults.length > 0) {
-        newSettings.yAxes = defaults;
-      }
-      }
+       if (!Array.isArray(settings.yAxes) || settings.yAxes.length === 0) {
+         const lower = Array.isArray(settings.numericColumns)
+           ? settings.numericColumns.map((c) => c.toLowerCase())
+           : [];
+         const defaults = ["salesvalue", "volume"].filter((d) =>
+           lower.includes(d),
+         );
+       if (defaults.length > 0) {
+         newSettings.yAxes = defaults;
+       }
+       }
       onUpdateSettings(newSettings);
       addNavigationItem(user?.id, {
         atom: 'feature-overview',
@@ -557,14 +618,14 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       .forEach((d) => {
         combo[d] = row[d.toLowerCase()];
       });
-    if (!settings.yAxes || settings.yAxes.length === 0) {
-      toast({
-        title:
-          "Can not display trend - configure Dependant Variables in properties section to view stat.",
-        variant: "destructive",
-      });
-      return;
-    }
+     if (!Array.isArray(settings.yAxes) || settings.yAxes.length === 0) {
+       toast({
+         title:
+           "Can not display trend - configure Dependant Variables in properties section to view stat.",
+         variant: "destructive",
+       });
+       return;
+     }
     setError(null);
     try {
       const result: Record<
@@ -592,6 +653,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       setStatDataMap(result);
       setActiveMetric(settings.yAxes[0]);
       setActiveRow(row.id);
+      setShowStatsSummary(true);
+      setExpandedMetrics(new Set());
       onUpdateSettings({
         statDataMap: result,
         activeMetric: settings.yAxes[0],
@@ -610,20 +673,51 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     }
   };
 
+  // Show placeholder when no data is loaded
+  if (summaryList.length === 0) {
+    return (
+      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-green-50/30 to-green-50/50 overflow-y-auto relative">
+        <div className="absolute inset-0 opacity-20">
+          <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
+            <defs>
+              <pattern id="emptyGrid" width="80" height="80" patternUnits="userSpaceOnUse">
+                <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(148 163 184 / 0.15)" strokeWidth="1"/>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#emptyGrid)" />
+          </svg>
+        </div>
+
+        <div className="relative z-10 flex items-center justify-center h-full">
+          <div className="text-center max-w-md">
+            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+              <BarChart3 className="w-12 h-12 text-white drop-shadow-lg" />
+            </div>
+            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-green-500 to-green-600 bg-clip-text text-transparent">
+              Feature Overview Operation
+            </h3>
+            <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
+              Select a data source from the properties panel to get started
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-full h-full p-6 pb-[50px] bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
-      {error && (
-        <div
-          className="mb-4 text-sm text-red-600 font-medium"
-          data-testid="fo-error"
-        >
-          {error}
-        </div>
-      )}
+       {error && (
+         <div
+           className="mb-4 text-sm text-red-600 font-medium"
+           data-testid="fo-error"
+         >
+           {error}
+         </div>
+       )}
       {summaryList.length > 0 && (
         <div className="mb-8">
-          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <Table
+          <Table
               headers={[
                 <ContextMenu key="Columns">
                   <ContextMenuTrigger asChild>
@@ -768,14 +862,14 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                 displayedSummary.map((c: ColumnInfo) => (
                   <tr key={c.column} className="table-row">
                     <td className="table-cell-primary">{c.column}</td>
-                    <td className="table-cell">
-                      <Badge
-                        variant="outline"
-                        className={`text-xs font-medium ${getDataTypeColor(c.data_type)} shadow-sm`}
-                      >
-                        {c.data_type}
-                      </Badge>
-                    </td>
+                     <td className="table-cell">
+                       <Badge
+                         variant="outline"
+                         className="text-xs font-medium shadow-sm"
+                       >
+                         {c.data_type}
+                       </Badge>
+                     </td>
                     <td className="table-cell">{c.unique_count}</td>
                     <td className="table-cell">
                       <div className="flex flex-wrap items-center gap-1">
@@ -812,24 +906,23 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                       </div>
                     </td>
                   </tr>
-                ))}
-            </Table>
-          </div>
-        </div>
-      )}
+                 ))}
+             </Table>
+         </div>
+       )}
+       
+       {dimensionError && (
+         <div
+           className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800 font-medium"
+           data-testid="fo-dimension-error"
+         >
+           {dimensionError}
+         </div>
+       )}
 
-      {settings.hierarchicalView && dimensionError && (
-        <div
-          className="mb-4 text-sm font-medium text-red-600"
-          data-testid="fo-dimension-warning"
-        >
-          {dimensionError}
-        </div>
-      )}
-
-      {settings.hierarchicalView && settings.selectedColumns?.length > 0 && (
+       {settings.selectedColumns?.length > 0 && (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {Object.keys(dimensionMap).length > 0 ? (
               Object.entries(dimensionMap).map(([dim, ids]) => (
                 <Card
@@ -863,7 +956,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                 </div>
               )
             )}
-          </div>
+          </div> */}
 
           {skuRows.length > 0 && (
             <div className="mt-8 mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -940,7 +1033,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                   )),
                   "View Stat"
                 ]}
-                bodyClassName="max-h-[440px] overflow-y-auto"
+                bodyClassName="max-h-[600px] overflow-y-auto"
                 borderColor="border-green-500"
                 customHeader={{
                   title: "SKU Table"
@@ -961,99 +1054,145 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                         </Button>
                       </td>
                     </tr>
-                    {activeRow === row.id && (
+                    {activeRow === row.id && showStatsSummary && (
                       <tr className="table-row">
                         <td className="table-cell" colSpan={colSpan}>
-                          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mt-6">
-                            <div className="xl:col-span-1">
-                              <Card className="border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] hover:-translate-y-1 transition-all duration-300 relative flex flex-col group hover:shadow-2xl h-[460px]">
-                                <div className="bg-white border-b border-black p-4 flex items-center justify-between relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
-                                  <h4 className="font-bold text-gray-900 text-lg flex items-center">
-                                    <TrendingUp className="w-5 h-5 mr-2 text-gray-900" />
-                                    {activeMetric || "Trend Analysis"}
-                                  </h4>
-                                  <Dialog>
-                                    <DialogTrigger asChild>
-                                      <button type="button" aria-label="Full screen">
-                                        <Maximize2 className="w-5 h-5 text-gray-900" />
-                                      </button>
-                                    </DialogTrigger>
-                                    <DialogContent className="max-w-4xl">
-                                      <D3LineChart
-                                        data={statDataMap[activeMetric]?.timeseries || []}
-                                        width={900}
-                                        height={500}
-                                        xLabel={settings.xAxis || "Date"}
-                                        yLabel={activeMetric || "Value"}
-                                      />
-                                    </DialogContent>
-                                  </Dialog>
-                                </div>
-                                <div className="p-6 flex-1 flex items-center justify-center">
-                                  <D3LineChart
-                                    data={statDataMap[activeMetric]?.timeseries || []}
-                                    height={360}
-                                    xLabel={settings.xAxis || "Date"}
-                                    yLabel={activeMetric || "Value"}
-                                  />
-                                </div>
-                              </Card>
+                          <Card className="border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] hover:-translate-y-1 transition-all duration-300 relative flex flex-col group hover:shadow-2xl">
+                            <div className="bg-white border-b border-black px-4 py-2 flex items-center justify-between relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
+                              <h5 className="font-bold text-gray-900 text-sm flex items-center">
+                                <BarChart3 className="w-4 h-4 mr-2 text-gray-900" />
+                                Statistical Summary
+                              </h5>
+                              <button
+                                onClick={handleCloseStatsSummary}
+                                className="text-gray-500 hover:text-gray-700 transition-colors"
+                                aria-label="Close statistical summary"
+                              >
+                                <X className="w-5 h-5" />
+                              </button>
                             </div>
-                            <div className="xl:col-span-1">
-                              <Card className="border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] hover:-translate-y-1 transition-all duration-300 flex flex-col hover:shadow-2xl h-[460px]">
-                                <div className="bg-white border-b border-black p-4 relative flex-shrink-0">
-                                  <h5 className="font-bold text-gray-900 text-sm flex items-center">
-                                    <BarChart3 className="w-4 h-4 mr-2 text-gray-900" />
-                                    Statistical Summary
-                                  </h5>
-                                </div>
-                                <div className="p-4 overflow-auto flex-1">
-                                  <div className="overflow-x-auto">
-                                    <table className="min-w-full text-xs whitespace-nowrap">
-                                      <thead>
-                                        <tr className="border-b border-gray-200">
-                                          <th className="p-2 text-left whitespace-nowrap sticky left-0 bg-white z-10">
-                                            Metric
-                                          </th>
-                                          <th className="p-2 text-right whitespace-nowrap">Avg</th>
-                                          <th className="p-2 text-right whitespace-nowrap">Min</th>
-                                          <th className="p-2 text-right whitespace-nowrap">Max</th>
-                                          <th className="p-2 text-right whitespace-nowrap">Action</th>
+                            <div className="p-4 overflow-auto flex-1">
+                              <div className="overflow-x-auto">
+                                <table className="min-w-full text-sm whitespace-nowrap">
+                                  <thead>
+                                    <tr className="border-b border-gray-200">
+                                      <th className="p-3 text-left whitespace-nowrap sticky left-0 bg-white z-10 font-semibold">
+                                        Metric
+                                      </th>
+                                      <th className="p-3 text-right whitespace-nowrap font-semibold">Avg</th>
+                                      <th className="p-3 text-right whitespace-nowrap font-semibold">Min</th>
+                                      <th className="p-3 text-right whitespace-nowrap font-semibold">Max</th>
+                                      <th className="p-3 text-right whitespace-nowrap font-semibold">Action</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {(Array.isArray(settings.yAxes) ? settings.yAxes : []).map((m) => (
+                                      <React.Fragment key={m}>
+                                        <tr className="border-b last:border-0 hover:bg-gray-50">
+                                          <td className="p-3 whitespace-nowrap sticky left-0 bg-white z-10 font-medium">{m}</td>
+                                          <td className="p-3 text-right whitespace-nowrap">
+                                            {statDataMap[m]?.summary.avg?.toFixed(2) ?? "-"}
+                                          </td>
+                                          <td className="p-3 text-right whitespace-nowrap">
+                                            {statDataMap[m]?.summary.min?.toFixed(2) ?? "-"}
+                                          </td>
+                                          <td className="p-3 text-right whitespace-nowrap">
+                                            {statDataMap[m]?.summary.max?.toFixed(2) ?? "-"}
+                                          </td>
+                                          <td className="p-3 text-right whitespace-nowrap">
+                                            <button
+                                              className="text-blue-600 hover:text-blue-800 font-medium underline transition-colors"
+                                              onClick={() => handleMetricView(m)}
+                                            >
+                                              View
+                                            </button>
+                                          </td>
                                         </tr>
-                                      </thead>
-                                      <tbody>
-                                        {(Array.isArray(settings.yAxes) ? settings.yAxes : []).map((m) => (
-                                          <tr key={m} className="border-b last:border-0">
-                                            <td className="p-2 whitespace-nowrap sticky left-0 bg-white z-10">{m}</td>
-                                            <td className="p-2 text-right whitespace-nowrap">
-                                              {statDataMap[m]?.summary.avg?.toFixed(2) ?? "-"}
-                                            </td>
-                                            <td className="p-2 text-right whitespace-nowrap">
-                                              {statDataMap[m]?.summary.min?.toFixed(2) ?? "-"}
-                                            </td>
-                                            <td className="p-2 text-right whitespace-nowrap">
-                                              {statDataMap[m]?.summary.max?.toFixed(2) ?? "-"}
-                                            </td>
-                                            <td className="p-2 text-right whitespace-nowrap">
-                                              <button
-                                                className="text-blue-600 hover:text-blue-800 font-medium underline transition-colors"
-                                                onClick={() => {
-                                                  setActiveMetric(m);
-                                                  onUpdateSettings({ activeMetric: m });
-                                                }}
-                                              >
-                                                View
-                                              </button>
+                                        {expandedMetrics.has(m) && (
+                                          <tr className="border-b last:border-0">
+                                            <td className="p-0" colSpan={5}>
+                                              <Card className="border border-gray-200 shadow-lg bg-white/95 backdrop-blur-sm overflow-hidden transform transition-all duration-300 relative flex flex-col group hover:shadow-xl m-4">
+                                                <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-between relative flex-shrink-0">
+                                                  <h6 className="font-bold text-gray-900 text-md flex items-center">
+                                                    <TrendingUp className="w-4 h-4 mr-2 text-gray-900" />
+                                                    {m} - Trend Analysis
+                                                  </h6>
+                                                  <div className="flex items-center gap-2">
+                                                    <Dialog>
+                                                      <DialogTrigger asChild>
+                                                        <button type="button" aria-label="Full screen" className="text-gray-500 hover:text-gray-700 transition-colors">
+                                                          <Maximize2 className="w-4 h-4" />
+                                                        </button>
+                                                      </DialogTrigger>
+                                                      <DialogContent className="max-w-7xl w-[95vw] h-[90vh]">
+                                                        <div className="w-full h-full flex flex-col">
+                                                          <div className="flex-1 min-h-0">
+                                                            <RechartsChartRenderer
+                                                              type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
+                                                              data={statDataMap[m]?.timeseries || []}
+                                                              xField="date"
+                                                              yField="value"
+                                                              width={undefined}
+                                                              height={undefined}
+                                                              title=""
+                                                              xAxisLabel={settings.xAxis || "Date"}
+                                                              yAxisLabel={m || "Value"}
+                                                              showDataLabels={showDataLabels}
+                                                              showAxisLabels={showAxisLabels}
+                                                              theme={chartTheme}
+                                                              onChartTypeChange={handleChartTypeChange}
+                                                              onThemeChange={handleChartThemeChange}
+                                                              onDataLabelsToggle={handleDataLabelsToggle}
+                                                              onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                            />
+                                                          </div>
+                                                        </div>
+                                                      </DialogContent>
+                                                    </Dialog>
+                                                    <button
+                                                      onClick={() => handleCloseMetric(m)}
+                                                      className="text-gray-500 hover:text-gray-700 transition-colors"
+                                                      aria-label="Close graph"
+                                                    >
+                                                      <X className="w-4 h-4" />
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                                <div className="p-4 flex-1 flex items-center justify-center min-h-0">
+                                                  <div className="w-full h-[400px] flex items-center justify-center">
+                                                    <div className="w-full h-full">
+                                                      <RechartsChartRenderer
+                                                        type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
+                                                        data={statDataMap[m]?.timeseries || []}
+                                                        xField="date"
+                                                        yField="value"
+                                                        width={undefined}
+                                                        height={undefined}
+                                                        title=""
+                                                        xAxisLabel={settings.xAxis || "Date"}
+                                                        yAxisLabel={m || "Value"}
+                                                        showDataLabels={showDataLabels}
+                                                        showAxisLabels={showAxisLabels}
+                                                        theme={chartTheme}
+                                                        onChartTypeChange={handleChartTypeChange}
+                                                        onThemeChange={handleChartThemeChange}
+                                                        onDataLabelsToggle={handleDataLabelsToggle}
+                                                        onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                      />
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              </Card>
                                             </td>
                                           </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </div>
-                              </Card>
+                                        )}
+                                      </React.Fragment>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
                             </div>
-                          </div>
+                          </Card>
                         </td>
                       </tr>
                     )}

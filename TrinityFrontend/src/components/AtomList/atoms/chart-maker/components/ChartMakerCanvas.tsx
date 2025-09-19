@@ -576,9 +576,9 @@ const renderChart = (
 };
 
 
-  if (charts.length === 0) {
+  if (!data) {
     return (
-      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-blue-50/30 to-blue-50/50 overflow-y-auto relative">
+      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-pink-50/30 to-pink-50/50 overflow-y-auto relative">
         {/* Subtle background pattern */}
         <div className="absolute inset-0 opacity-20">
           <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
@@ -593,14 +593,14 @@ const renderChart = (
         
         <div className="relative z-10 flex items-center justify-center h-full">
           <div className="text-center max-w-md">
-            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
-              <BarChart3 className="w-12 h-12 text-white drop-shadow-lg" />
+            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-pink-500 to-pink-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+              <PieChartIcon className="w-12 h-12 text-white drop-shadow-lg" />
             </div>
-            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-blue-500 to-blue-600 bg-clip-text text-transparent">
-              Chart Maker
+            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-pink-500 to-pink-600 bg-clip-text text-transparent">
+              Chart Maker Operation
             </h3>
             <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
-              Create beautiful interactive charts and visualizations
+              Select a file from the properties panel to get started
             </p>
           </div>
         </div>
