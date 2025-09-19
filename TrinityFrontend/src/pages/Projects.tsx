@@ -141,8 +141,8 @@ const Projects = () => {
   const Icon = appDetails.icon;
 
   useEffect(() => {
-    cleanupProjectTransition();
-    return () => cleanupProjectTransition();
+    cleanupProjectTransition('project');
+    return () => cleanupProjectTransition('project');
   }, []);
 
   useEffect(() => {

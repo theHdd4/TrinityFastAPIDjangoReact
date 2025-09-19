@@ -32,7 +32,7 @@ const LaboratoryMode = () => {
 
   useEffect(() => {
     animateLabElementsIn();
-    return () => cleanupProjectTransition();
+    return () => cleanupProjectTransition('laboratory');
   }, []);
 
   useEffect(() => {
