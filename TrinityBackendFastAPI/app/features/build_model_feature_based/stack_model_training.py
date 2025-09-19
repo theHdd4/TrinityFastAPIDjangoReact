@@ -511,8 +511,6 @@ class StackModelTrainer:
                 if df is None:
                     continue
         
-                
-                # Convert column names to lowercase for consistency
                 df.columns = df.columns.str.lower()
                 
                 # Filter to only include required columns
