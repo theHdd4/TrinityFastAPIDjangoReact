@@ -16,6 +16,7 @@ import {
   BarChart3,
   Zap,
   Clock,
+  Loader2,
   BookmarkPlus,
   Copy,
   MoreHorizontal,
@@ -74,6 +75,7 @@ const Projects = () => {
   const [editingTemplateName, setEditingTemplateName] = useState('');
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [projectsLoading, setProjectsLoading] = useState(true);
   const [playIntro, setPlayIntro] = useState(false);
   const [introBaseDelay, setIntroBaseDelay] = useState(0);
   const navigate = useNavigate();
@@ -170,7 +172,12 @@ const Projects = () => {
 
   useEffect(() => {
     const loadProjects = async () => {
-      if (!appId) return;
+      if (!appId) {
+        setProjects([]);
+        setProjectsLoading(false);
+        return;
+      }
+      setProjectsLoading(true);
       try {
         const res = await fetch(`${REGISTRY_API}/projects/?app=${appId}`, {
           credentials: 'include'
@@ -189,6 +196,8 @@ const Projects = () => {
         }
       } catch (err) {
         console.error('Projects load error', err);
+      } finally {
+        setProjectsLoading(false);
       }
     };
 
@@ -857,7 +866,17 @@ const Projects = () => {
               ))}
             </div>
 
-            {filteredProjects.length === 0 && !searchQuery && (
+            {projectsLoading && (
+              <div className="text-center mt-20">
+                <div className="w-20 h-20 rounded-full bg-white/60 backdrop-blur-sm flex items-center justify-center mx-auto mb-6 shadow-inner">
+                  <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">Loading your projects</h3>
+                <p className="text-gray-500">Preparing your workspace…</p>
+              </div>
+            )}
+
+            {!projectsLoading && filteredProjects.length === 0 && !searchQuery && (
               <div className="text-center mt-20">
                 <div className={`w-32 h-32 rounded-3xl bg-gradient-to-br ${appDetails.lightBg} flex items-center justify-center mx-auto mb-8 shadow-inner`}>
                   <Icon className="w-16 h-16 text-gray-400" />
@@ -876,7 +895,7 @@ const Projects = () => {
               </div>
             )}
 
-            {filteredProjects.length === 0 && searchQuery && (
+            {!projectsLoading && filteredProjects.length === 0 && searchQuery && (
               <div className="text-center mt-20">
                 <div className="w-24 h-24 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-6">
                   <Search className="w-12 h-12 text-gray-400" />
