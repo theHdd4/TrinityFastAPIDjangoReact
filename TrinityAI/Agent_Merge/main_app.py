@@ -23,7 +23,7 @@ def get_llm_config():
     return {
         "api_url": api_url,
         "model_name": os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b"),
-        "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
+        "bearer_token": os.getenv("LLM_BEARER_TOKEN", "sushant_api_key"),
     }
 
 # Initialize agent
@@ -79,6 +79,29 @@ def merge_files(request: MergeRequest):
         logger.info(f"MERGE REQUEST COMPLETED:")
         logger.info(f"Success: {result.get('success', False)}")
         logger.info(f"Processing Time: {processing_time}s")
+
+        # 🔧 SMART RESPONSE FALLBACK: Ensure smart_response is always present
+        if "smart_response" not in result or not result["smart_response"]:
+            if result.get("success") and result.get("merge_json"):
+                # Merge configuration success - create smart response
+                cfg = result["merge_json"]
+                file1 = cfg.get("file1", "")
+                file2 = cfg.get("file2", "")
+                join_columns = cfg.get("join_columns", [])
+                join_type = cfg.get("join_type", "inner")
+                
+                if isinstance(file1, list):
+                    file1 = file1[0] if file1 else ""
+                if isinstance(file2, list):
+                    file2 = file2[0] if file2 else ""
+                
+                result["smart_response"] = f"I've configured the merge operation for you. The files '{file1}' and '{file2}' will be joined using {join_columns} columns with {join_type} join. You can now proceed with the merge or make adjustments as needed."
+            else:
+                # Suggestions or error - create smart response
+                if result.get("suggestions"):
+                    result["smart_response"] = "I can help you merge your data files! Based on your available files, I can suggest the best file combinations and join strategies. What would you like to merge?"
+                else:
+                    result["smart_response"] = "I'm here to help you merge your data files. Please describe what files you'd like to merge or ask me for suggestions."
 
         # If merge configuration was successful, return the configuration for frontend to handle
         if result.get("success") and result.get("merge_json"):

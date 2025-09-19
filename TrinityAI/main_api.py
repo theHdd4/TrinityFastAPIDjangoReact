@@ -397,7 +397,7 @@ async def perform_operation(request: PerformRequest):
                 f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8001')}/api/concat/perform",
             )
             
-            resp = requests.post(concat_url, json=payload, timeout=60)
+            resp = requests.post(concat_url, json=payload, timeout=300)
             resp.raise_for_status()
             result = resp.json()
             
@@ -449,7 +449,7 @@ async def perform_operation(request: PerformRequest):
                     f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8001')}/api/create/perform",
                 )
                 
-                resp = requests.post(create_url, data=payload, timeout=60)
+                resp = requests.post(create_url, data=payload, timeout=300)
                 resp.raise_for_status()
                 result = resp.json()
                 
@@ -476,7 +476,7 @@ async def perform_operation(request: PerformRequest):
                 f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8001')}/api/groupby/run",
             )
             
-            resp = requests.post(groupby_url, data=payload, timeout=60)
+            resp = requests.post(groupby_url, data=payload, timeout=300)
             resp.raise_for_status()
             result = resp.json()
             

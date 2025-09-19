@@ -114,8 +114,42 @@ export const dataframeOperationsHandler: AtomHandler = {
     const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
     const existingDfId = currentSettings?.currentDfId || currentSettings?.fileId;
     const hasExistingData = currentSettings?.hasData && currentSettings?.dataLoaded;
+    const lastLoadedFile = currentSettings?.lastLoadedFileName || currentSettings?.originalAIFilePath;
+    const lastSessionId = currentSettings?.lastSessionId;
     
-    console.log(`🔍 EXISTING STATE CHECK: existingDfId=${existingDfId}, hasData=${hasExistingData}`);
+    // 🔧 SESSION ISOLATION: Check if this is a new session - if so, reset state
+    const isNewSession = !lastSessionId || lastSessionId !== sessionId;
+    
+    console.log(`🔍 EXISTING STATE CHECK: existingDfId=${existingDfId}, hasData=${hasExistingData}, lastLoadedFile=${lastLoadedFile}`);
+    console.log(`🔍 SESSION CHECK: isNewSession=${isNewSession}, lastSessionId=${lastSessionId}, currentSessionId=${sessionId}`);
+    
+    // 🔧 SESSION ISOLATION: Determine session-specific state
+    let sessionExistingDfId: string | null = null;
+    let sessionHasExistingData = false;
+    let sessionLastLoadedFile: string | null = null;
+    
+    if (isNewSession) {
+      console.log(`🆕 NEW SESSION DETECTED: Resetting all DataFrame state for fresh start`);
+      // Don't use existing state for new sessions
+      sessionExistingDfId = null;
+      sessionHasExistingData = false;
+      sessionLastLoadedFile = null;
+      
+      console.log(`🔄 SESSION RESET: dfId=${sessionExistingDfId}, hasData=${sessionHasExistingData}, lastFile=${sessionLastLoadedFile}`);
+      
+      // Update settings to mark this as the current session
+      updateAtomSettings(atomId, {
+        ...currentSettings,
+        lastSessionId: sessionId,
+        sessionStartTime: Date.now()
+      });
+    } else {
+      console.log(`🔄 EXISTING SESSION: Using preserved DataFrame state`);
+      // Use existing state for same session
+      sessionExistingDfId = existingDfId;
+      sessionHasExistingData = hasExistingData;
+      sessionLastLoadedFile = lastLoadedFile;
+    }
     
     // Update atom settings with the AI configuration
     updateAtomSettings(atomId, { 
@@ -126,26 +160,35 @@ export const dataframeOperationsHandler: AtomHandler = {
       reasoning: data.reasoning,
       envContext,
       lastUpdateTime: Date.now(),
-      // 🔧 CRITICAL: Preserve existing DataFrame state
-      currentDfId: existingDfId,
-      existingDataAvailable: hasExistingData
+      // 🔧 CRITICAL: Preserve existing DataFrame state (session-specific)
+      currentDfId: sessionExistingDfId,
+      existingDataAvailable: sessionHasExistingData
     });
     
-    // Add AI success message with operation details
-    const operationsCount = config.operations ? config.operations.length : 0;
-    const successDetails = {
-      'Operations': operationsCount.toString(),
-      'Auto Execute': data.execution_plan?.auto_execute ? 'Yes' : 'No',
-      'Session': sessionId
-    };
-    
-    if (data.reasoning) {
-      successDetails['Reasoning'] = data.reasoning.substring(0, 100) + (data.reasoning.length > 100 ? '...' : '');
+    // Add AI smart response message (prioritize smart_response over generic success message)
+    if (data.smart_response) {
+      // Use the AI's smart response for a more conversational experience
+      const aiMessage = createMessage(data.smart_response);
+      setMessages(prev => [...prev, aiMessage]);
+      console.log('🤖 AI Smart Response displayed:', data.smart_response);
+    } else {
+      // Fallback to detailed success message if no smart_response
+      const operationsCount = config.operations ? config.operations.length : 0;
+      const successDetails = {
+        'Operations': operationsCount.toString(),
+        'Auto Execute': data.execution_plan?.auto_execute ? 'Yes' : 'No',
+        'Session': sessionId
+      };
+      
+      if (data.reasoning) {
+        successDetails['Reasoning'] = data.reasoning.substring(0, 100) + (data.reasoning.length > 100 ? '...' : '');
+      }
+      
+      const successMsg = createSuccessMessage('DataFrame operations configuration completed', successDetails);
+      successMsg.content += '\n\n🔄 Ready to execute operations!';
+      setMessages(prev => [...prev, successMsg]);
+      console.log('⚠️ No smart_response found, using fallback success message');
     }
-    
-    const successMsg = createSuccessMessage('DataFrame operations configuration completed', successDetails);
-    successMsg.content += '\n\n🔄 Ready to execute operations!';
-    setMessages(prev => [...prev, successMsg]);
     
     // Automatically execute operations if auto_execute is enabled
     if (data.execution_plan?.auto_execute && config.operations) {
@@ -154,9 +197,9 @@ export const dataframeOperationsHandler: AtomHandler = {
       
        try {
          // Execute operations sequentially (SAME as Atom_ai_chat.tsx)
-         // 🔧 CRITICAL: Start with existing DataFrame if available (for operation continuity)
+         // 🔧 CRITICAL: Start with existing DataFrame if available (for operation continuity within session)
          const currentAtomSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
-         let currentDfId: string | null = existingDfId;
+         let currentDfId: string | null = sessionExistingDfId;
          let availableColumns: string[] = currentAtomSettings?.selectedColumns || []; // Track columns for case correction
          const results: any[] = [];
          
@@ -175,12 +218,40 @@ export const dataframeOperationsHandler: AtomHandler = {
             console.log(`🔍 Operation identification: opName="${opName}", apiEndpoint="${apiEndpoint}"`);
             
             if (operation.api_endpoint === "/load_cached" || operation.api_endpoint === "/load_file") {
-              // 🔧 STRATEGY CHANGE: Always load file to get fresh column information
-              // This ensures we have the correct columns for AI operations
-              console.log(`📥 LOADING FILE: Getting fresh column data for accurate AI operations`);
+              // 🔧 SMART FILE HANDLING: Check if we're loading the same file as before (within same session)
+              const currentFileName = operation.parameters.object_name;
+              const isSameFile = sessionLastLoadedFile && currentFileName && 
+                (sessionLastLoadedFile.includes(currentFileName) || currentFileName.includes(sessionLastLoadedFile.split('/').pop() || ''));
               
-              // Note: We'll still use existing df_id for subsequent operations if available
-              // But we need to load the file to get column information
+              console.log(`📥 LOADING FILE: ${currentFileName}`);
+              console.log(`🔍 FILE COMPARISON: isSameFile=${isSameFile}, sessionLastLoadedFile=${sessionLastLoadedFile}, currentFileName=${currentFileName}`);
+              
+              if (isSameFile && sessionExistingDfId && sessionHasExistingData) {
+                // 🔧 SAME FILE: Skip loading, use existing DataFrame with all previous operations
+                console.log(`✅ SAME FILE DETECTED: Skipping load operation, preserving existing DataFrame with ID=${sessionExistingDfId}`);
+                console.log(`🔗 PRESERVING: All previous operations and changes are maintained`);
+                
+                // Skip this operation entirely - don't call the API
+                // Just update the currentDfId to maintain the chain
+                currentDfId = sessionExistingDfId;
+                
+                // Update available columns from existing settings to maintain column info for subsequent operations
+                const currentAtomSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
+                availableColumns = currentAtomSettings?.selectedColumns || [];
+                
+                console.log(`🔗 MAINTAINED: df_id=${currentDfId}, columns=${availableColumns.length}`);
+                
+                // Mark this operation as skipped for logging
+                operation._skipped = true;
+                operation._reason = 'Same file as previous load, preserving existing DataFrame';
+                
+                // Continue to next operation
+                continue;
+              } else {
+                // 🔧 DIFFERENT FILE: Load the new file and start fresh
+                console.log(`🆕 NEW FILE DETECTED: Loading new file, starting fresh operations`);
+                console.log(`📥 LOADING FILE: Getting fresh column data for accurate AI operations`);
+              }
               
               // Handle both load_cached and load_file operations (SAME as Atom_ai_chat.tsx lines 2512-2535)
               if (operation.parameters.file_path && !operation.parameters.object_name) {
@@ -386,32 +457,44 @@ export const dataframeOperationsHandler: AtomHandler = {
             console.log(`📊 Updated available columns (${availableColumns.length}): ${availableColumns.join(', ')}`);
             
             // 🔧 STRATEGY: If this is a load operation and we have existing data, 
-            // use the existing df_id for subsequent operations instead of the new one
-            if ((operation.api_endpoint === "/load_cached" || apiEndpoint === "/load_cached") && existingDfId && hasExistingData) {
-              console.log(`🔗 COLUMN INFO ACQUIRED: Using existing df_id=${existingDfId} for subsequent operations`);
+            // use the existing df_id for subsequent operations instead of the new one (within same session)
+            if ((operation.api_endpoint === "/load_cached" || apiEndpoint === "/load_cached") && sessionExistingDfId && sessionHasExistingData) {
+              console.log(`🔗 COLUMN INFO ACQUIRED: Using existing df_id=${sessionExistingDfId} for subsequent operations`);
               console.log(`🔗 COLUMN INFO: Fresh columns loaded, now AI operations will use correct column names`);
-              currentDfId = existingDfId; // Use existing modified DataFrame, not the fresh loaded one
+              currentDfId = sessionExistingDfId; // Use existing modified DataFrame, not the fresh loaded one
             }
           }
           
-          results.push(result);
-          console.log(`✅ Operation completed: ${operation.operation_name}`);
+          // Only push results for operations that were actually executed
+          if (!operation._skipped) {
+            results.push(result);
+            console.log(`✅ Operation completed: ${operation.operation_name}`);
+          } else {
+            console.log(`⏭️ Operation skipped: ${operation.operation_name} - ${operation._reason}`);
+          }
           
           // 🔧 CRITICAL: Update UI after each operation if it returns data (SAME as Atom_ai_chat.tsx)
-          if (result.headers && result.rows) {
-            // 🔧 CRITICAL FIX: Always use the original selected file name (not temporary names)
+          if (result && result.headers && result.rows) {
+            // 🔧 CRITICAL FIX: Always use the actual file name from the current operation or load operation
             const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
-            const originalFileName = currentSettings?.originalAIFilePath?.split('/').pop() || 
-                                   currentSettings?.selectedFile?.split('/').pop() || 
-                                   operation.parameters?.object_name?.split('/').pop() || 
-                                   'D0_KHC_UK_Beans.arrow';
             
-            console.log(`🔧 PRESERVING ORIGINAL FILE NAME: ${originalFileName} (not temporary name)`);
+            // 🔧 PRIORITY: Find the load operation in current config to get the actual file being processed
+            const loadOperation = config.operations.find(op => 
+              op.api_endpoint === "/load_cached" || op.api_endpoint === "/load_file"
+            );
+            
+            const actualFileName = loadOperation?.parameters?.object_name?.split('/').pop() || 
+                                 operation.parameters?.object_name?.split('/').pop() || 
+                                 currentSettings?.originalAIFilePath?.split('/').pop() || 
+                                 currentSettings?.selectedFile?.split('/').pop() || 
+                                 'Unknown_File.arrow';
+            
+            console.log(`🔧 USING ACTUAL FILE NAME: ${actualFileName} (from load operation: ${loadOperation?.parameters?.object_name})`);
             
             const dataFrameData = {
               headers: result.headers,
               rows: result.rows,
-              fileName: originalFileName, // 🔧 CRITICAL: Use original file name, not temporary
+              fileName: actualFileName, // 🔧 CRITICAL: Use actual AI file name, not temporary
               columnTypes: Object.keys(result.types || {}).reduce((acc, col) => {
                 const type = result.types[col];
                 acc[col] = type.includes('Float') || type.includes('Int') ? 'number' : 'text';
@@ -490,7 +573,9 @@ export const dataframeOperationsHandler: AtomHandler = {
             ...finalUIData, // Apply combined UI data
             execution_results: results,
             currentDfId: currentDfId,
-            operationCompleted: true
+            operationCompleted: true,
+            lastLoadedFileName: loadOperation._uiData.selectedFile, // 🔧 Track last loaded file
+            lastSessionId: sessionId // 🔧 Track current session
           });
           
           console.log(`✅ BATCH UPDATE COMPLETE: UI updated with combined state (${finalUIData.selectedFile})`);
@@ -499,12 +584,19 @@ export const dataframeOperationsHandler: AtomHandler = {
           console.log(`🔄 BATCH UPDATE: Using last operation data only`);
           
           const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
+          // Find the load operation to track the file name
+          const loadOp = config.operations.find(op => 
+            (op.api_endpoint === "/load_cached" || op.api_endpoint === "/load_file") && !op._skipped
+          );
+          
           updateAtomSettings(atomId, {
             ...currentSettings, // 🔧 CRITICAL: Preserve existing settings
             ...lastDataOperation._uiData, // Apply final operation UI data
             execution_results: results,
             currentDfId: currentDfId,
-            operationCompleted: true
+            operationCompleted: true,
+            lastLoadedFileName: loadOp?.parameters?.object_name || lastDataOperation._uiData.selectedFile, // 🔧 Track last loaded file
+            lastSessionId: sessionId // 🔧 Track current session
           });
           
           console.log(`✅ BATCH UPDATE COMPLETE: UI updated with last operation (${lastDataOperation._uiData.selectedFile})`);
@@ -513,23 +605,39 @@ export const dataframeOperationsHandler: AtomHandler = {
           console.log(`⚠️ FALLBACK UPDATE: No UI data found, updating metadata only`);
           
           const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
+          
+          // Find the load operation to track the file name
+          const loadOp = config.operations.find(op => 
+            (op.api_endpoint === "/load_cached" || op.api_endpoint === "/load_file") && !op._skipped
+          );
+          
           updateAtomSettings(atomId, {
             ...currentSettings, // 🔧 CRITICAL: Preserve existing settings
             execution_results: results,
             currentDfId: currentDfId,
-            operationCompleted: true
+            operationCompleted: true,
+            lastLoadedFileName: loadOp?.parameters?.object_name || currentSettings?.lastLoadedFileName, // 🔧 Track last loaded file
+            lastSessionId: sessionId // 🔧 Track current session
           });
         }
         
-        // Add success message for auto-execution
-        const completionDetails = {
-          'Operations': operationsCount.toString(),
-          'Status': 'All completed',
-          'Final DataFrame ID': currentDfId || 'N/A'
-        };
-        const executionSuccessMsg = createSuccessMessage('DataFrame operations auto-execution', completionDetails);
-        executionSuccessMsg.content += '\n\n📊 All operations completed! The updated DataFrame should now be visible in the interface.';
-        setMessages(prev => [...prev, executionSuccessMsg]);
+        // 🔧 SMART RESPONSE FIX: Don't add duplicate message if smart_response was already shown
+        // The smart_response is already displayed in the configuration phase above
+        // Only add completion message if no smart_response was provided
+        if (!data.smart_response) {
+          // Fallback to detailed success message only if no smart response was shown
+          const completionDetails = {
+            'Operations': operationsCount.toString(),
+            'Status': 'All completed',
+            'Final DataFrame ID': currentDfId || 'N/A'
+          };
+          const executionSuccessMsg = createSuccessMessage('DataFrame operations auto-execution', completionDetails);
+          executionSuccessMsg.content += '\n\n📊 All operations completed! The updated DataFrame should now be visible in the interface.';
+          setMessages(prev => [...prev, executionSuccessMsg]);
+          console.log('⚠️ No smart_response available, using fallback completion message');
+        } else {
+          console.log('✅ Smart response already displayed, skipping duplicate completion message');
+        }
         
         console.log('📊 Final progress summary:', progressTracker.getStatus());
         

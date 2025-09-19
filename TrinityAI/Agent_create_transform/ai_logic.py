@@ -48,6 +48,7 @@ You are an expert AI data transformation specialist that converts natural langua
     }}
   ],
   "message": "Create/Transform configuration completed successfully",
+  "smart_response": "I've configured the data transformation for you. The specified operations will be applied to create new columns. You can now proceed with the transformation or make adjustments as needed.",
   "session_id": "{session_id}"
 }}
 ```
@@ -59,6 +60,7 @@ You are an expert AI data transformation specialist that converts natural langua
 {{
   "success": false,
   "message": "I need more information to complete your request",
+  "smart_response": "I can help you create and transform data columns! Based on your available files, I can suggest the best transformation operations. What specific transformations would you like to perform?",
   "suggestions": [
     "Specific suggestion 1",
     "Specific suggestion 2"

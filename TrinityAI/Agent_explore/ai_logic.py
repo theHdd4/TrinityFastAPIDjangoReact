@@ -566,7 +566,7 @@ def call_explore_llm(api_url: str, model_name: str, bearer_token: str, prompt: s
         logger.info(f"🔍 LLM API Request - URL: {api_url}")
         logger.info(f"🔍 LLM API Request - Model: {model_name}")
         
-        response = requests.post(api_url, headers=headers, json=data, timeout=60)  # Increased timeout
+        response = requests.post(api_url, headers=headers, json=data, timeout=300)  # Increased timeout to 5 minutes
         response.raise_for_status()
         
         # Handle streaming response format
@@ -1373,7 +1373,7 @@ def call_explore_llm(api_url: str, model_name: str, bearer_token: str, prompt: s
         logger.info(f"🔍 LLM API Request - URL: {api_url}")
         logger.info(f"🔍 LLM API Request - Model: {model_name}")
         
-        response = requests.post(api_url, headers=headers, json=data, timeout=60)  # Increased timeout
+        response = requests.post(api_url, headers=headers, json=data, timeout=300)  # Increased timeout to 5 minutes
         response.raise_for_status()
         
         # Handle streaming response format

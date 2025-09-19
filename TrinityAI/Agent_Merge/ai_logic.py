@@ -33,6 +33,7 @@ SUCCESS RESPONSE (when you have all required info):
     "join_type": "outer"
   }},
   "message": "Merge configuration completed successfully",
+  "smart_response": "I've configured the merge operation for you. The files will be joined using the specified columns and join type. You can now proceed with the merge or make adjustments as needed.",
   "reasoning": "Found all required components with context from history",
   "used_memory": true
 }}
@@ -49,6 +50,7 @@ GENERAL RESPONSE (for questions, file info, suggestions):
     "Or say 'yes' to use my suggestions"
   ],
   "message": "Here's what I can help you with",
+  "smart_response": "I can help you merge your data files! Based on your available files, I can suggest the best file combinations and join strategies. What would you like to merge?",
   "reasoning": "Providing helpful information and guidance",
   "file_analysis": {{
     "total_files": "number",

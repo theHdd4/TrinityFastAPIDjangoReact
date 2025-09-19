@@ -399,10 +399,26 @@ export const dataframeOperationsHandler: AtomHandler = {
           
           // 🔧 CRITICAL: Update UI after each operation if it returns data (SAME as Atom_ai_chat.tsx)
           if (result.headers && result.rows) {
+            // 🔧 CRITICAL FIX: Always use the actual file name from the current operation or load operation
+            const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
+            
+            // 🔧 PRIORITY: Find the load operation in current config to get the actual file being processed
+            const loadOperation = config.operations.find(op => 
+              op.api_endpoint === "/load_cached" || op.api_endpoint === "/load_file"
+            );
+            
+            const actualFileName = loadOperation?.parameters?.object_name?.split('/').pop() || 
+                                 operation.parameters?.object_name?.split('/').pop() || 
+                                 currentSettings?.originalAIFilePath?.split('/').pop() || 
+                                 currentSettings?.selectedFile?.split('/').pop() || 
+                                 'Unknown_File.arrow';
+            
+            console.log(`🔧 USING ACTUAL FILE NAME: ${actualFileName} (from load operation: ${loadOperation?.parameters?.object_name})`);
+            
             const dataFrameData = {
               headers: result.headers,
               rows: result.rows,
-              fileName: operation.parameters?.object_name?.split('/').pop() || `AI_Step_${Date.now()}.csv`,
+              fileName: actualFileName, // 🔧 CRITICAL: Use actual AI file name, not temporary
               columnTypes: Object.keys(result.types || {}).reduce((acc, col) => {
                 const type = result.types[col];
                 acc[col] = type.includes('Float') || type.includes('Int') ? 'number' : 'text';
@@ -428,7 +444,7 @@ export const dataframeOperationsHandler: AtomHandler = {
                 selectedFile: operation.parameters.object_name,
                 fileId: currentDfId,
                 selectedColumns: result.headers || [],
-                isTemporaryData: false,
+                // 🔧 CRITICAL FIX: Don't set isTemporaryData at all - let UI handle it naturally
                 hasData: true,
                 dataLoaded: true,
                 originalAIFilePath: operation.parameters.object_name
@@ -445,7 +461,8 @@ export const dataframeOperationsHandler: AtomHandler = {
                 selectedFile: originalAIFilePath,
                 fileId: currentDfId,
                 selectedColumns: result.headers || [],
-                isTemporaryData: true,
+                // 🔧 CRITICAL FIX: Don't set isTemporaryData - let it show the actual file name like manual
+                // isTemporaryData: true, // ❌ This causes "Temporary Data" banner instead of file name
                 hasData: true,
                 dataLoaded: true,
                 originalAIFilePath: originalAIFilePath

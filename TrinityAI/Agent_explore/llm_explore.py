@@ -301,7 +301,7 @@ class ExploreAgent:
                 logger.info(f"🔍 Fetching dynamic path from: {url}")
                 logger.info(f"🔍 With params: {params}")
                 
-                response = requests.get(url, params=params, timeout=10)
+                response = requests.get(url, params=params, timeout=30)
                 if response.status_code == 200:
                     data = response.json()
                     current = data.get("prefix", "")

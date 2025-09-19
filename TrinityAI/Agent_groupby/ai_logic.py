@@ -31,6 +31,7 @@ SUCCESS RESPONSE (when you have all required info):
   "success": true,
   "groupby_json": {{ operation object matching format below }},
   "message": "GroupBy configuration completed successfully",
+  "smart_response": "I've configured the groupby operation for you. The data will be grouped and aggregated according to your specifications. You can now proceed with the operation or make adjustments as needed.",
   "reasoning": "Found all required components with context from history",
   "used_memory": true,
   "session_id": "{session_id}"
@@ -48,6 +49,7 @@ GENERAL RESPONSE (for questions, file info, suggestions):
     "Or say 'yes' to use my suggestions"
   ],
   "message": "Here's what I can help you with",
+  "smart_response": "I can help you perform groupby operations on your data! Based on your available files, I can suggest the best grouping strategies and aggregation functions. What would you like to group and aggregate?",
   "reasoning": "Providing helpful information and guidance",
   "file_analysis": {{
     "total_files": "number",

@@ -649,7 +649,7 @@ All operations map directly to backend APIs at `/api/dataframe-operations/`:
   • Data: BIN (binning), MAP (lookup), ISNULL, FILLNA
   • Conditional: IF(condition,true_value,false_value)
   **EXAMPLES:**
-  • Price calculation: "=DIV(Revenue,Volume)"
+  • Price calculation: "=DIV(Sales,Volume)"
   • Z-score normalization: "=ZSCORE(Sales)"
   • Conditional logic: "=IF(Volume>100,'High','Low')"
   • Complex: "=IF(Volume>0,DIV(Revenue,Volume),0)"
@@ -861,8 +861,7 @@ All operations map directly to backend APIs at `/api/dataframe-operations/`:
 - ALWAYS return valid JSON
 - ALWAYS include smart_response field (REQUIRED) - this is what the user sees
 - ALWAYS include execution_plan with auto_execute: true (REQUIRED for operations to run)
-- USE MINIMAL JSON: Include essential keys - success, dataframe_config.operations, execution_plan, smart_response
-- DETECT FILENAME: Extract filename from user input and convert to .arrow format
+- USE MINIMAL JSON: Include essential keys - success, dataframe_config.operations, execution_plan, smart_response- DETECT FILENAME: Extract filename from user input and convert to .arrow format
 - USE CORRECT ENDPOINTS: ALWAYS use "/load_cached" for existing files, NEVER use "/load_file"
 - **MANDATORY SEQUENCING**: EVERY operation sequence MUST start with "/load_cached" as operation_id "1"
 - ADD OPERATIONS: Based on user context (sort, filter, move, etc.), add operations AFTER file loading
@@ -919,7 +918,7 @@ def call_dataframe_operations_llm(api_url: str, model_name: str, bearer_token: s
         logger.info(f"🔍 DataFrame Operations LLM API Request - URL: {api_url}")
         logger.info(f"🔍 DataFrame Operations LLM API Request - Model: {model_name}")
         
-        response = requests.post(api_url, headers=headers, json=data, timeout=60)
+        response = requests.post(api_url, headers=headers, json=data, timeout=300)
         response.raise_for_status()
         
         response_text = response.text.strip()
@@ -1127,7 +1126,7 @@ What specific operations would you like me to perform and which file should I us
     logger.info("Using LLM response as smart_response fallback")
     
     return {
-        "success": False,
+        "success": False, 
         "message": "Could not parse LLM response as valid JSON",
         "smart_response": smart_response,
         "suggestions": [
