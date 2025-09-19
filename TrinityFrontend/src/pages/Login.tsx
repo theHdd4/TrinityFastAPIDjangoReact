@@ -110,8 +110,6 @@ const Login = () => {
     setAnimationCompleted(false);
     animationCompletionMetaRef.current = null;
 
-    console.log('Submitting login form for', username);
-
     const success = await login(username, password, {
       onInitialSuccess: () => {
         const startedAt = Date.now();
@@ -137,7 +135,6 @@ const Login = () => {
       }
     } else {
       setError('Invalid credentials.');
-      console.log('Login failed for', username);
       setIsLoading(false);
       animationStartRef.current = null;
       animationCompletionMetaRef.current = null;

@@ -75,6 +75,8 @@ const Projects = () => {
   const [editingTemplateName, setEditingTemplateName] = useState('');
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [templateToDelete, setTemplateToDelete] = useState<Template | null>(null);
+  const [templateDeleteDialogOpen, setTemplateDeleteDialogOpen] = useState(false);
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [playIntro, setPlayIntro] = useState(false);
   const [introBaseDelay, setIntroBaseDelay] = useState(0);
@@ -461,6 +463,14 @@ const Projects = () => {
     setProjectToDelete(null);
   };
 
+  const handleProjectDialogOpenChange = (open: boolean) => {
+    if (open) {
+      setDeleteDialogOpen(true);
+    } else {
+      cancelDelete();
+    }
+  };
+
   const startTemplateRename = (template: Template, e?: React.MouseEvent) => {
     e?.stopPropagation();
     setEditingTemplateId(template.id);
@@ -501,18 +511,37 @@ const Projects = () => {
     setEditingTemplateId(null);
   };
 
-  const deleteTemplate = async (template: Template) => {
-    if (!confirm(`Delete template "${template.name}"?`)) return;
+  const requestDeleteTemplate = (template: Template) => {
+    setTemplateToDelete(template);
+    setTemplateDeleteDialogOpen(true);
+  };
+
+  const cancelTemplateDelete = () => {
+    setTemplateDeleteDialogOpen(false);
+    setTemplateToDelete(null);
+  };
+
+  const confirmDeleteTemplate = async () => {
+    if (!templateToDelete) return;
     try {
-      const res = await fetch(`${REGISTRY_API}/templates/${template.id}/`, {
+      const res = await fetch(`${REGISTRY_API}/templates/${templateToDelete.id}/`, {
         method: 'DELETE',
         credentials: 'include'
       });
       if (res.ok) {
-        setTemplates(templates.filter(t => t.id !== template.id));
+        setTemplates(prev => prev.filter(t => t.id !== templateToDelete.id));
       }
     } catch (err) {
       console.error('Delete template error', err);
+    }
+    cancelTemplateDelete();
+  };
+
+  const handleTemplateDialogOpenChange = (open: boolean) => {
+    if (open) {
+      setTemplateDeleteDialogOpen(true);
+    } else {
+      cancelTemplateDelete();
     }
   };
 
@@ -572,11 +601,24 @@ const Projects = () => {
     <>
       <ConfirmationDialog
         open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
+        onOpenChange={handleProjectDialogOpenChange}
         onConfirm={confirmDeleteProject}
         onCancel={cancelDelete}
         title="Delete project?"
         description={`Deleting project "${projectToDelete?.name || ''}" will delete all saved files, workflows, exhibitions and other details.`}
+        icon={<Trash2 className="w-6 h-6 text-white" />}
+        iconBgClass="bg-red-500"
+        confirmLabel="Yes, delete"
+        cancelLabel="Cancel"
+        confirmButtonClass="bg-red-500 hover:bg-red-600"
+      />
+      <ConfirmationDialog
+        open={templateDeleteDialogOpen}
+        onOpenChange={handleTemplateDialogOpenChange}
+        onConfirm={confirmDeleteTemplate}
+        onCancel={cancelTemplateDelete}
+        title="Delete template?"
+        description={`Deleting template "${templateToDelete?.name || ''}" will remove it from your workspace.`}
         icon={<Trash2 className="w-6 h-6 text-white" />}
         iconBgClass="bg-red-500"
         confirmLabel="Yes, delete"
@@ -1036,7 +1078,7 @@ const Projects = () => {
                                   <DropdownMenuItem
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      deleteTemplate(template);
+                                      requestDeleteTemplate(template);
                                     }}
                                   >
                                     <Trash2 className="w-4 h-4 mr-2" />
@@ -1159,7 +1201,7 @@ const Projects = () => {
                                 <DropdownMenuItem
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    deleteTemplate(template);
+                                    requestDeleteTemplate(template);
                                   }}
                                 >
                                   <Trash2 className="w-4 h-4 mr-2" />
