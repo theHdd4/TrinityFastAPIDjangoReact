@@ -52,7 +52,7 @@ const LoginAnimation: React.FC<LoginAnimationProps> = ({ active, onComplete }) =
     const drops: number[] = Array.from({ length: columns }, () => Math.random() * -100);
 
     const draw = () => {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.08)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       ctx.fillStyle = '#00ff41';
@@ -150,7 +150,7 @@ const LoginAnimation: React.FC<LoginAnimationProps> = ({ active, onComplete }) =
         exiting ? 'opacity-0 pointer-events-none' : 'opacity-100'
       }`}
     >
-      <div className="absolute inset-0 bg-black">
+      <div className="absolute inset-0 bg-black/70">
         <canvas
           ref={canvasRef}
           className="absolute inset-0 h-full w-full"
