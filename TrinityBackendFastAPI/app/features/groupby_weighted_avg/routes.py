@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Form, HTTPException, Query, Response, Body
-from typing import Dict, List
+from typing import Dict, List, Any
 from .deps import get_minio_df, get_validator_atoms_collection, fetch_dimensions_dict, get_column_classifications_collection, fetch_measures_list, fetch_identifiers_and_measures, minio_client, MINIO_BUCKET, redis_client
 from app.features.data_upload_validate.app.routes import get_object_prefix
 import io
@@ -254,27 +254,30 @@ async def get_dimensions_and_measures(
         key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
         cfg: dict[str, Any] | None = None
         
-        # Try Redis first
-        try:
-            from .deps import redis_client
-            cached = redis_client.get(key)
-            if cached:
-                cfg = json.loads(cached)
-        except Exception as exc:
-            print(f"⚠️ Redis read error for {key}: {exc}")
+        # COMMENTED OUT: Try Redis first
+        # try:
+        #     from .deps import redis_client
+        #     cached = redis_client.get(key)
+        #     if cached:
+        #         cfg = json.loads(cached)
+        # except Exception as exc:
+        #     print(f"⚠️ Redis read error for {key}: {exc}")
         
-        # Try MongoDB if Redis failed
-        if cfg is None:
-            try:
-                from app.features.column_classifier.database import get_classifier_config_from_mongo
-                cfg = get_classifier_config_from_mongo(client_name, app_name, project_name)
-                if cfg and redis_client:
-                    try:
-                        redis_client.setex(key, 3600, json.dumps(cfg, default=str))
-                    except Exception as exc:
-                        print(f"⚠️ Redis write error for {key}: {exc}")
-            except Exception as exc:
-                print(f"⚠️ Mongo classifier config lookup failed: {exc}")
+        # DIRECT MongoDB fetch (primary source) - with file-specific lookup
+        try:
+            from app.features.column_classifier.database import get_classifier_config_from_mongo
+            # Use the complete file_key path for file-specific lookup
+            cfg = get_classifier_config_from_mongo(client_name, app_name, project_name, file_key)
+            print(f"🔍 Direct MongoDB fetch result (file_key={file_key}): {cfg}")
+            
+            # COMMENTED OUT: Cache back to Redis
+            # if cfg and redis_client:
+            #     try:
+            #         redis_client.setex(key, 3600, json.dumps(cfg, default=str))
+            #     except Exception as exc:
+            #         print(f"⚠️ Redis write error for {key}: {exc}")
+        except Exception as exc:
+            print(f"⚠️ Mongo classifier config lookup failed: {exc}")
         
         identifiers: list[str] = []
         measures: list[str] = []
