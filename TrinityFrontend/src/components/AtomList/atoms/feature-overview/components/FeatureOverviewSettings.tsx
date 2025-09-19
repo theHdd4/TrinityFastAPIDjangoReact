@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { VALIDATE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
+import { VALIDATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import { cancelPrefillController } from '@/components/AtomList/atoms/column-classifier/prefillManager';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
@@ -111,15 +111,25 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
         await cache.text();
       }
       onSettingsChange({ loadingStatus: 'Fetching column summary' });
-      const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(normalized)}`
-      );
+      
+      // Use create column cardinality endpoint instead of column_summary
+      const formData = new FormData();
+      formData.append('validator_atom_id', atomId);
+      formData.append('file_key', normalized);
+      formData.append('bucket_name', 'trinity');
+      formData.append('object_names', normalized);
+      
+      const res = await fetch(`${GROUPBY_API}/cardinality`, {
+        method: 'POST',
+        body: formData,
+      });
+      
       let numeric: string[] = [];
       let summary: ColumnInfo[] = [];
       let xField = settings.xAxis || '';
       if (res.ok) {
         const data = await res.json();
-        summary = (data.summary || []).filter(Boolean);
+        summary = (data.cardinality || []).filter(Boolean);
         setColumns(summary);
         numeric = summary
           .filter((c: ColumnInfo) => !['object', 'string'].includes(c.data_type.toLowerCase()))

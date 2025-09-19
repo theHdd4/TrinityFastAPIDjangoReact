@@ -522,10 +522,44 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     );
   };
 
+  // Show appropriate error message based on the state
   if (summaryList.length === 0) {
+    // If we have a data source but no column summary, show column classifier error
+    if (settings.dataSource && dimensionError) {
+      return (
+        <div className="w-full h-full flex items-center justify-center text-gray-500">
+          <div className="text-center">
+            <div className="text-lg font-medium text-yellow-700 mb-2">
+              {dimensionError}
+            </div>
+            <div className="text-sm text-gray-600">
+              Please run Column Classifier on this dataset first
+            </div>
+          </div>
+        </div>
+      );
+    }
+    
+    // If no data source selected, show configuration message
+    if (!settings.dataSource) {
+      return (
+        <div className="w-full h-full flex items-center justify-center text-gray-500">
+          <div className="text-center">
+            <div className="text-lg font-medium text-blue-700 mb-2">
+              Please configure Feature Overview Settings
+            </div>
+            <div className="text-sm text-gray-600">
+              Select a data source from the properties panel to get started
+            </div>
+          </div>
+        </div>
+      );
+    }
+    
+    // If data source exists but no summary (loading or error)
     return (
       <div className="w-full h-full flex items-center justify-center text-gray-500">
-        {error || "Please configure Feature Overview Settings"}
+        {error || "Loading data..."}
       </div>
     );
   }
@@ -916,7 +950,16 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
            className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800 font-medium"
            data-testid="fo-dimension-error"
          >
-           {dimensionError}
+           <div className="flex items-center gap-2">
+             <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
+             <span className="font-semibold">Column Classifier Required:</span>
+           </div>
+           <div className="mt-1 ml-4">
+             {dimensionError}
+           </div>
+           <div className="mt-2 text-xs text-yellow-700">
+             Run Column Classifier on this dataset to enable hierarchical dimension analysis.
+           </div>
          </div>
        )}
 
