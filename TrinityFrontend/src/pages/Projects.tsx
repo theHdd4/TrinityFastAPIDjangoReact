@@ -9,6 +9,7 @@ import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
 import { REGISTRY_API } from '@/lib/api';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 import { clearProjectState, saveCurrentProject } from '@/utils/projectStorage';
+import { startProjectTransition, cleanupProjectTransition } from '@/utils/projectTransition';
 import {
   Plus,
   FolderOpen,
@@ -80,6 +81,7 @@ const Projects = () => {
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [playIntro, setPlayIntro] = useState(false);
   const [introBaseDelay, setIntroBaseDelay] = useState(0);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const navigate = useNavigate();
   const currentApp = JSON.parse(localStorage.getItem('current-app') || '{}');
   const selectedApp = currentApp.slug;
@@ -137,6 +139,11 @@ const Projects = () => {
 
   const appDetails = getAppDetails();
   const Icon = appDetails.icon;
+
+  useEffect(() => {
+    cleanupProjectTransition();
+    return () => cleanupProjectTransition();
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -267,6 +274,11 @@ const Projects = () => {
   };
 
   const openProject = async (project: Project) => {
+    if (isTransitioning) return;
+
+    setIsTransitioning(true);
+    startProjectTransition(navigate);
+
     clearProjectState();
     saveCurrentProject(project);
 
@@ -312,7 +324,6 @@ const Projects = () => {
     } catch (err) {
       console.log('Project env fetch error', err);
     }
-    navigate('/');
   };
 
   const duplicateProject = async (project: Project) => {
@@ -715,6 +726,7 @@ const Projects = () => {
                       }
                     >
               <Card
+                data-project-card="true"
                 className="group cursor-pointer overflow-hidden border-2 border-dashed border-gray-200 bg-gradient-to-br from-white to-gray-50/30 transition-all duration-500 hover:-translate-y-1 hover:border-gray-300 hover:from-white hover:to-gray-50/50 hover:shadow-xl animate-slide-in-from-bottom"
                 style={animationStyle(0.9)}
                 onClick={createNewProject}
@@ -732,6 +744,7 @@ const Projects = () => {
 
               {filteredProjects.map((project, index) => (
                 <Card
+                  data-project-card="true"
                   key={project.id}
                   className="group cursor-pointer overflow-hidden border-0 bg-white transition-all duration-500 hover:-translate-y-1 hover:bg-gradient-to-br hover:from-white hover:to-gray-50/30 hover:shadow-xl animate-slide-in-from-bottom"
                   style={animationStyle(1 + index * 0.08)}

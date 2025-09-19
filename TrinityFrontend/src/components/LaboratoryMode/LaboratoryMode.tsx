@@ -15,6 +15,7 @@ import { REGISTRY_API, LAB_ACTIONS_API } from '@/lib/api';
 import { useLaboratoryStore } from './store/laboratoryStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { addNavigationItem, logSessionState } from '@/lib/session';
+import { animateLabElementsIn, cleanupProjectTransition } from '@/utils/projectTransition';
 
 const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
@@ -28,6 +29,11 @@ const LaboratoryMode = () => {
   const setExhibitionCards = useExhibitionStore(state => state.setCards);
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
+
+  useEffect(() => {
+    animateLabElementsIn();
+    return () => cleanupProjectTransition();
+  }, []);
 
   useEffect(() => {
     if (localStorage.getItem('laboratory-config')) {
@@ -212,14 +218,17 @@ const LaboratoryMode = () => {
       )}
       
       {/* Laboratory Header */}
-      <div className="bg-white/80 backdrop-blur-sm border-b border-gray-200/60 px-6 py-6 flex-shrink-0 shadow-sm">
+      <div
+        data-lab-header="true"
+        className="bg-white/80 backdrop-blur-sm border-b border-gray-200/60 px-6 py-6 flex-shrink-0 shadow-sm"
+      >
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-3xl font-light text-gray-900 mb-2">Laboratory Mode</h2>
             <p className="text-gray-600 font-light">Build sophisticated applications with modular atoms</p>
           </div>
-          
-          <div className="flex items-center space-x-3">
+
+          <div data-lab-toolbar="true" className="flex items-center space-x-3">
             <Button
               variant="outline"
               size="sm"
@@ -272,12 +281,13 @@ const LaboratoryMode = () => {
 
         <div className="flex-1 flex overflow-hidden">
           {/* Atoms Sidebar */}
-          <div className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
+          <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
             <AuxiliaryMenuLeft onAtomDragStart={handleAtomDragStart} />
           </div>
 
           {/* Main Canvas Area */}
           <div
+            data-lab-canvas="true"
             className={`flex-1 p-6 ${canEdit ? '' : 'cursor-not-allowed'}`}
             onClick={
               canEdit
@@ -298,7 +308,7 @@ const LaboratoryMode = () => {
           </div>
 
           {/* Auxiliary menu */}
-          <div className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
+          <div data-lab-settings="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
             <AuxiliaryMenu
               selectedAtomId={selectedAtomId}
               selectedCardId={selectedCardId}
