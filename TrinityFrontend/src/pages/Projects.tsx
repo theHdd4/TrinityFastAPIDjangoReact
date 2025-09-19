@@ -650,7 +650,12 @@ const Projects = () => {
           </div>
           <main className="flex-1">
             <div className="mx-auto max-w-7xl px-6 py-8">
-              <div className="mb-8 animate-fade-in" style={animationStyle(0.4)}>
+              <div
+                className="mb-8 animate-fade-in"
+                style={animationStyle(0.4)}
+                data-project-transition="section"
+                data-project-transition-order="10"
+              >
                 <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
                   <div className="flex-1">
                     <h2 className="mb-2 text-3xl font-bold text-gray-900">Workspace</h2>
@@ -697,11 +702,18 @@ const Projects = () => {
                 </div>
               </div>
 
-              <div className="animate-fade-in" style={animationStyle(0.6)}>
+              <div
+                className="animate-fade-in"
+                style={animationStyle(0.6)}
+                data-project-transition="section"
+                data-project-transition-order="18"
+              >
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-8">
                   <TabsList
                     className="grid w-full max-w-md grid-cols-2 animate-slide-in-from-top mb-6"
                     style={animationStyle(0.7)}
+                    data-project-transition="tabs-list"
+                    data-project-transition-order="20"
                   >
                     <TabsTrigger value="templates" className="flex items-center space-x-2">
                       <Bookmark className="h-4 w-4" />
@@ -727,6 +739,8 @@ const Projects = () => {
                     >
               <Card
                 data-project-card="true"
+                data-project-transition="card"
+                data-project-transition-order="30"
                 className="group cursor-pointer overflow-hidden border-2 border-dashed border-gray-200 bg-gradient-to-br from-white to-gray-50/30 transition-all duration-500 hover:-translate-y-1 hover:border-gray-300 hover:from-white hover:to-gray-50/50 hover:shadow-xl animate-slide-in-from-bottom"
                 style={animationStyle(0.9)}
                 onClick={createNewProject}
@@ -745,6 +759,8 @@ const Projects = () => {
               {filteredProjects.map((project, index) => (
                 <Card
                   data-project-card="true"
+                  data-project-transition="card"
+                  data-project-transition-order={String(31 + index)}
                   key={project.id}
                   className="group cursor-pointer overflow-hidden border-0 bg-white transition-all duration-500 hover:-translate-y-1 hover:bg-gradient-to-br hover:from-white hover:to-gray-50/30 hover:shadow-xl animate-slide-in-from-bottom"
                   style={animationStyle(1 + index * 0.08)}
@@ -922,7 +938,11 @@ const Projects = () => {
             </div>
 
             {projectsLoading && (
-              <div className="text-center mt-20">
+              <div
+                className="text-center mt-20"
+                data-project-transition="state"
+                data-project-transition-order="40"
+              >
                 <div className="w-20 h-20 rounded-full bg-white/60 backdrop-blur-sm flex items-center justify-center mx-auto mb-6 shadow-inner">
                   <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
                 </div>
@@ -932,7 +952,11 @@ const Projects = () => {
             )}
 
             {!projectsLoading && filteredProjects.length === 0 && !searchQuery && (
-              <div className="text-center mt-20">
+              <div
+                className="text-center mt-20"
+                data-project-transition="state"
+                data-project-transition-order="40"
+              >
                 <div className={`w-32 h-32 rounded-3xl bg-gradient-to-br ${appDetails.lightBg} flex items-center justify-center mx-auto mb-8 shadow-inner`}>
                   <Icon className="w-16 h-16 text-gray-400" />
                 </div>
@@ -951,7 +975,11 @@ const Projects = () => {
             )}
 
             {!projectsLoading && filteredProjects.length === 0 && searchQuery && (
-              <div className="text-center mt-20">
+              <div
+                className="text-center mt-20"
+                data-project-transition="state"
+                data-project-transition-order="40"
+              >
                 <div className="w-24 h-24 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-6">
                   <Search className="w-12 h-12 text-gray-400" />
                 </div>
@@ -976,6 +1004,8 @@ const Projects = () => {
               {filteredTemplates.map((template, index) => (
                 <Card
                   key={template.id}
+                  data-project-transition="card"
+                  data-project-transition-order={String(31 + index)}
                   className="group cursor-pointer overflow-hidden border-0 bg-white transition-all duration-500 hover:-translate-y-1 hover:bg-gradient-to-br hover:from-white hover:to-gray-50/30 hover:shadow-xl animate-slide-in-from-bottom"
                   style={animationStyle(1.1 + index * 0.08)}
                   onMouseEnter={() => setHoveredTemplate(template.id)}
