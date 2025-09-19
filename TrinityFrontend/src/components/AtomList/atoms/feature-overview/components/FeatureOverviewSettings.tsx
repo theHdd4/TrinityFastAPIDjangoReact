@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { VALIDATE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
 import { cancelPrefillController } from '@/components/AtomList/atoms/column-classifier/prefillManager';
 import { fetchDimensionMapping } from '@/lib/dimensions';
+import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
 
 interface FeatureOverviewSettingsProps {
   atomId: string;
@@ -58,7 +59,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
       settings.dataSource &&
       (!settings.allColumns || settings.allColumns.length === 0)
     ) {
-      handleFrameChange(settings.dataSource);
+      applyFrameChange(settings.dataSource);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.dataSource]);
@@ -70,33 +71,48 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
     }
   }, [settings.allColumns]);
 
-  const handleFrameChange = async (val: string) => {
+  const applyFrameChange = async (value: string) => {
     cancelPrefillController(atomId);
+    const normalized = value.endsWith('.arrow') ? value : `${value}.arrow`;
+    const frameList = Array.isArray(frames) ? frames : [];
+
     onSettingsChange({
+      dataSource: normalized,
+      csvDisplay:
+        frameList.find(f => f.object_name === normalized)?.csv_name || '',
+      selectedColumns: [],
+      columnSummary: [],
+      allColumns: [],
+      numericColumns: [],
+      yAxes: [],
+      xAxis: '',
+      skuTable: [],
+      statDataMap: {},
+      activeRow: null,
+      activeMetric: '',
+      dimensionMap: {},
       isLoading: true,
       loadingMessage: 'Loading',
       loadingStatus: 'Fetching flight table',
     });
-    if (!val.endsWith('.arrow')) {
-      val += '.arrow';
-    }
+
     try {
       const ft = await fetch(
-        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(val)}`
+        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(normalized)}`
       );
       if (ft.ok) {
         await ft.arrayBuffer();
       }
       onSettingsChange({ loadingStatus: 'Prefetching Dataframe' });
       const cache = await fetch(
-        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(val)}`
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(normalized)}`
       );
       if (cache.ok) {
         await cache.text();
       }
       onSettingsChange({ loadingStatus: 'Fetching column summary' });
       const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`
+        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(normalized)}`
       );
       let numeric: string[] = [];
       let summary: ColumnInfo[] = [];
@@ -121,23 +137,37 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
       const mapping = Object.fromEntries(
         Object.entries(rawMap).filter(([k]) => k.toLowerCase() !== 'unattributed')
       );
+      const activeMetric = '';
       onSettingsChange({
-        dataSource: val,
+        dataSource: normalized,
         csvDisplay:
-          (Array.isArray(frames) ? frames : [])
-            .find(f => f.object_name === val)?.csv_name || val,
+          frameList.find(f => f.object_name === normalized)?.csv_name || normalized,
         selectedColumns: selected,
         columnSummary: filtered,
         allColumns: summary,
         numericColumns: numeric,
         xAxis: xField,
         dimensionMap: mapping,
+        yAxes: [],
+        skuTable: [],
+        statDataMap: {},
+        activeRow: null,
+        activeMetric,
         isLoading: false,
         loadingStatus: '',
         loadingMessage: '',
       });
     } catch {
-      onSettingsChange({ isLoading: false, loadingStatus: '', loadingMessage: '' });
+      setColumns([]);
+      onSettingsChange({
+        isLoading: false,
+        loadingStatus: '',
+        loadingMessage: '',
+        skuTable: [],
+        statDataMap: {},
+        activeRow: null,
+        activeMetric: '',
+      });
     }
   };
 
@@ -146,7 +176,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
     <div className="space-y-4 p-2">
       <Card className="p-4 space-y-3">
         <label className="text-sm font-medium text-gray-700 block">Data Source</label>
-        <Select value={settings.dataSource} onValueChange={handleFrameChange}>
+        <Select value={settings.dataSource} onValueChange={applyFrameChange}>
           <SelectTrigger className="bg-white border-gray-300">
             <SelectValue placeholder="Select saved dataframe" />
           </SelectTrigger>

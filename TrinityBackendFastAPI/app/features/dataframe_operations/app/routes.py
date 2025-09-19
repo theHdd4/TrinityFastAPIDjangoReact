@@ -8,7 +8,12 @@ import numba as nb
 import io
 import uuid
 import re
-from typing import Dict, Any, List
+import datetime
+import math
+from bisect import bisect_right
+from typing import Dict, Any, List, Tuple
+from numbers import Real
+from pydantic import BaseModel
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
 from app.features.data_upload_validate.app.routes import get_object_prefix
 
@@ -51,6 +56,372 @@ def _df_payload(df: pl.DataFrame, df_id: str) -> Dict[str, Any]:
     }
 
 
+def _is_null(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, float):
+        return math.isnan(value)
+    return False
+
+
+def _to_number(value: Any) -> float | None:
+    if _is_null(value):
+        return None
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_datetime(value: Any) -> datetime.datetime | None:
+    if _is_null(value):
+        return None
+    if isinstance(value, datetime.datetime):
+        return value
+    if isinstance(value, datetime.date):
+        return datetime.datetime.combine(value, datetime.time())
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.datetime.fromtimestamp(float(value))
+        except (OverflowError, OSError, ValueError):
+            return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return datetime.datetime.fromisoformat(text)
+        except ValueError:
+            pass
+        for fmt in (
+            "%Y-%m-%d",
+            "%Y/%m/%d",
+            "%m/%d/%Y",
+            "%d-%m-%Y",
+            "%Y-%m-%d %H:%M:%S",
+        ):
+            try:
+                return datetime.datetime.strptime(text, fmt)
+            except ValueError:
+                continue
+    return None
+
+
+def _format_value(value: Any) -> str:
+    if _is_null(value):
+        return "None"
+    if isinstance(value, datetime.datetime):
+        return repr(value.isoformat())
+    if isinstance(value, datetime.date):
+        return repr(value.isoformat())
+    return repr(value)
+
+
+def _fn_if(condition: Any, true_val: Any, false_val: Any) -> Any:
+    return true_val if condition else false_val
+
+
+def _fn_lower(value: Any) -> Any:
+    if _is_null(value):
+        return None
+    return str(value).lower()
+
+
+def _fn_upper(value: Any) -> Any:
+    if _is_null(value):
+        return None
+    return str(value).upper()
+
+
+def _fn_len(value: Any) -> int:
+    if _is_null(value):
+        return 0
+    return len(str(value))
+
+
+def _fn_substr(value: Any, start: Any, end: Any | None = None) -> Any:
+    if _is_null(value):
+        return None
+    text = str(value)
+    try:
+        start_idx = int(start)
+    except (TypeError, ValueError):
+        start_idx = 0
+    end_idx: int | None
+    if end is None:
+        end_idx = None
+    else:
+        try:
+            end_idx = int(end)
+        except (TypeError, ValueError):
+            end_idx = None
+    return text[start_idx:end_idx]
+
+
+def _fn_str_replace(value: Any, old: Any, new: Any) -> Any:
+    if _is_null(value):
+        return None
+    return str(value).replace(str(old), str(new))
+
+
+def _fn_year(value: Any) -> Any:
+    dt = _parse_datetime(value)
+    return dt.year if dt else None
+
+
+def _fn_month(value: Any) -> Any:
+    dt = _parse_datetime(value)
+    return dt.month if dt else None
+
+
+def _fn_day(value: Any) -> Any:
+    dt = _parse_datetime(value)
+    return dt.day if dt else None
+
+
+def _fn_weekday(value: Any) -> Any:
+    dt = _parse_datetime(value)
+    return dt.strftime("%A") if dt else None
+
+
+def _fn_date_diff(a: Any, b: Any) -> Any:
+    dt_a = _parse_datetime(a)
+    dt_b = _parse_datetime(b)
+    if not dt_a or not dt_b:
+        return None
+    return (dt_a - dt_b).days
+
+
+def _fn_abs(value: Any) -> Any:
+    num = _to_number(value)
+    return abs(num) if num is not None else None
+
+
+def _fn_round(value: Any, digits: Any = 0) -> Any:
+    num = _to_number(value)
+    if num is None:
+        return None
+    try:
+        places = int(digits)
+    except (TypeError, ValueError):
+        places = 0
+    return round(num, places)
+
+
+def _fn_floor(value: Any) -> Any:
+    num = _to_number(value)
+    return math.floor(num) if num is not None else None
+
+
+def _fn_ceil(value: Any) -> Any:
+    num = _to_number(value)
+    return math.ceil(num) if num is not None else None
+
+
+def _fn_exp(value: Any) -> Any:
+    num = _to_number(value)
+    return math.exp(num) if num is not None else None
+
+
+def _fn_log(value: Any) -> Any:
+    num = _to_number(value)
+    if num is None or num <= 0:
+        return None
+    return math.log(num)
+
+
+def _fn_sqrt(value: Any) -> Any:
+    num = _to_number(value)
+    if num is None or num < 0:
+        return None
+    return math.sqrt(num)
+
+
+def _fn_sum(*values: Any) -> Any:
+    nums = [n for v in values if (n := _to_number(v)) is not None]
+    return sum(nums)
+
+
+def _fn_prod(*values: Any) -> Any:
+    nums = [n for v in values if (n := _to_number(v)) is not None]
+    result = 1.0
+    if not nums:
+        return 0
+    for n in nums:
+        result *= n
+    return result
+
+
+def _fn_div(*values: Any) -> Any:
+    nums = [n for v in values if (n := _to_number(v)) is not None]
+    if not nums:
+        return None
+    result = nums[0]
+    for n in nums[1:]:
+        if n == 0:
+            continue
+        result /= n
+    return result
+
+
+def _fn_avg(*values: Any) -> Any:
+    nums = [n for v in values if (n := _to_number(v)) is not None]
+    if not nums:
+        return None
+    return sum(nums) / len(nums)
+
+
+def _fn_max(*values: Any) -> Any:
+    nums = [n for v in values if (n := _to_number(v)) is not None]
+    return max(nums) if nums else None
+
+
+def _fn_min(*values: Any) -> Any:
+    nums = [n for v in values if (n := _to_number(v)) is not None]
+    return min(nums) if nums else None
+
+
+def _fn_bin(value: Any, bins: Any) -> Any:
+    try:
+        edges = [float(b) for b in bins]
+    except TypeError:
+        return None
+    if len(edges) < 2:
+        return None
+    edges.sort()
+    num = _to_number(value)
+    if num is None:
+        return None
+    if num < edges[0]:
+        return f"<{edges[0]}"
+    idx = bisect_right(edges, num) - 1
+    if idx >= len(edges) - 1:
+        return f">={edges[-1]}"
+    lower = edges[idx]
+    upper = edges[idx + 1]
+    return f"[{lower}, {upper})"
+
+
+def _fn_map(value: Any, mapping: Any) -> Any:
+    if not isinstance(mapping, dict):
+        return value
+    if value in mapping:
+        return mapping[value]
+    key = str(value) if not isinstance(value, str) else value
+    return mapping.get(key, value)
+
+
+def _fn_isnull(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip() == ""
+    return _is_null(value)
+
+
+def _fn_fillna(value: Any, replacement: Any) -> Any:
+    return replacement if _fn_isnull(value) else value
+
+
+SAFE_EVAL_GLOBALS: Dict[str, Any] = {
+    "__builtins__": {},
+    "True": True,
+    "False": False,
+    "None": None,
+    "IF": _fn_if,
+    "LOWER": _fn_lower,
+    "UPPER": _fn_upper,
+    "LEN": _fn_len,
+    "SUBSTR": _fn_substr,
+    "STR_REPLACE": _fn_str_replace,
+    "YEAR": _fn_year,
+    "MONTH": _fn_month,
+    "DAY": _fn_day,
+    "WEEKDAY": _fn_weekday,
+    "DATE_DIFF": _fn_date_diff,
+    "ABS": _fn_abs,
+    "ROUND": _fn_round,
+    "FLOOR": _fn_floor,
+    "CEIL": _fn_ceil,
+    "EXP": _fn_exp,
+    "LOG": _fn_log,
+    "SQRT": _fn_sqrt,
+    "SUM": _fn_sum,
+    "AVG": _fn_avg,
+    "MEAN": _fn_avg,
+    "PROD": _fn_prod,
+    "DIV": _fn_div,
+    "MAX": _fn_max,
+    "MIN": _fn_min,
+    "BIN": _fn_bin,
+    "MAP": _fn_map,
+    "ISNULL": _fn_isnull,
+    "FILLNA": _fn_fillna,
+}
+
+SAFE_EVAL_FUNCTIONS = {
+    name for name in SAFE_EVAL_GLOBALS if name not in {"__builtins__", "True", "False", "None"}
+}
+
+
+def _normalize_formula_functions(expr: str) -> str:
+    """Normalize function names to match the casing expected by SAFE_EVAL_GLOBALS."""
+
+    result: List[str] = []
+    i = 0
+    in_quote: str | None = None
+    length = len(expr)
+
+    while i < length:
+        ch = expr[i]
+
+        if in_quote:
+            result.append(ch)
+            if ch == "\\" and i + 1 < length:
+                # Preserve escaped characters within strings
+                result.append(expr[i + 1])
+                i += 2
+                continue
+            if ch == in_quote:
+                in_quote = None
+            i += 1
+            continue
+
+        if ch in {'"', "'"}:
+            in_quote = ch
+            result.append(ch)
+            i += 1
+            continue
+
+        if ch.isalpha() or ch == "_":
+            start = i
+            while i < length and (expr[i].isalnum() or expr[i] == "_"):
+                i += 1
+            name = expr[start:i]
+            j = i
+            while j < length and expr[j].isspace():
+                j += 1
+            if j < length and expr[j] == "(":
+                canonical = name.upper()
+                if canonical in SAFE_EVAL_FUNCTIONS:
+                    result.append(canonical)
+                else:
+                    result.append(name)
+            else:
+                result.append(name)
+            if j > i:
+                result.append(expr[i:j])
+            i = j
+            continue
+
+        result.append(ch)
+        i += 1
+
+    return "".join(result)
+
+
 def _fetch_df_from_object(object_name: str) -> pl.DataFrame:
     """Fetch a DataFrame from the Flight server or MinIO given an object key."""
     object_name = unquote(object_name)
@@ -84,25 +455,41 @@ async def load_cached_dataframe(object_name: str = Body(..., embed=True)):
     SESSIONS[df_id] = df
     return _df_payload(df, df_id)
 
+class SaveRequest(BaseModel):
+    csv_data: str | None = None
+    filename: str | None = None
+    df_id: str | None = None
+
+
 @router.post("/save")
-async def save_dataframe(
-    csv_data: str = Body(..., embed=True),
-    filename: str = Body(..., embed=True)
-):
-    """Save a dataframe (CSV) to MinIO under a `dataframe operations` folder using the original file name."""
+async def save_dataframe(payload: SaveRequest):
+    """Save a dataframe session to MinIO, falling back to CSV payloads when no session is available."""
+
+    df: pl.DataFrame | None = None
+    session_id = payload.df_id
+
+    if session_id:
+        df = SESSIONS.get(session_id)
+        if df is None and payload.csv_data is None:
+            raise HTTPException(status_code=404, detail="DataFrame session not found")
+
+    if df is None:
+        if not payload.csv_data:
+            raise HTTPException(status_code=400, detail="csv_data is required when df_id is missing")
+        try:
+            df = pl.read_csv(io.StringIO(payload.csv_data))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid csv_data: {exc}") from exc
+
+    filename = (payload.filename or "").strip()
+    if not filename:
+        stub = (session_id or str(uuid.uuid4())).replace("-", "")[:8]
+        filename = f"{stub}_dataframe_ops.arrow"
+    if not filename.endswith(".arrow"):
+        filename += ".arrow"
+
     try:
-        df = pl.read_csv(io.StringIO(csv_data))
-
-        # Generate a filename if none supplied
-        if not filename:
-            df_id = str(uuid.uuid4())[:8]
-            filename = f"{df_id}_dataframe_ops.arrow"
-        if not filename.endswith(".arrow"):
-            filename += ".arrow"
-
-        # Determine current prefix and ensure folder exists
         prefix = await get_object_prefix()
-        # Place results inside a dedicated "dataframe operations" folder
         dfops_prefix = f"{prefix}dataframe operations/"
         try:
             minio_client.stat_object(MINIO_BUCKET, dfops_prefix)
@@ -111,7 +498,6 @@ async def save_dataframe(
 
         object_name = f"{dfops_prefix}{filename}"
 
-        # Convert to Arrow and upload
         arrow_buffer = io.BytesIO()
         df.write_ipc(arrow_buffer)
         arrow_bytes = arrow_buffer.getvalue()
@@ -123,14 +509,19 @@ async def save_dataframe(
             content_type="application/octet-stream",
         )
 
-        return {
+        response = {
             "result_file": object_name,
             "shape": df.shape,
             "columns": list(df.columns),
             "message": "DataFrame saved successfully",
         }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        if session_id:
+            response["df_id"] = session_id
+        return response
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -273,56 +664,117 @@ async def apply_formula(
     expr = formula.strip()
     rows = df.to_dicts()
     if expr.startswith("="):
-        expr_body = expr[1:]
-        func_match = re.match(r"^(SUM|AVG|CORR|PROD|DIV|MAX|MIN)\(([^)]+)\)$", expr_body, re.IGNORECASE)
-        if func_match:
-            func = func_match.group(1).upper()
-            cols = [c.strip() for c in func_match.group(2).split(",")]
-            if func == "CORR" and len(cols) == 2:
-                c1, c2 = cols
-                try:
-                    corr_val = df.select(pl.corr(pl.col(c1), pl.col(c2))).to_series()[0]
-                except Exception as e:
-                    raise HTTPException(status_code=400, detail=str(e))
-                df = df.with_columns(pl.lit(corr_val).alias(target_column))
-            else:
-                new_vals: List[Any] = []
-                for r in rows:
-                    vals = [
-                        float(r.get(c))
-                        for c in cols
-                        if r.get(c) is not None and str(r.get(c)).strip() != ""
-                        and not (isinstance(r.get(c), float) and r.get(c) != r.get(c))
-                    ]
-                    res = 0.0
-                    if func == "SUM":
-                        res = sum(vals)
-                    elif func == "AVG":
-                        res = sum(vals) / len(vals) if vals else 0
-                    elif func == "PROD":
-                        res = 1
-                        for v in vals:
-                            res *= v
-                    elif func == "DIV":
-                        if vals:
-                            res = vals[0]
-                            for v in vals[1:]:
-                                if v != 0:
-                                    res /= v
-                    elif func == "MAX":
-                        res = max(vals) if vals else 0
-                    elif func == "MIN":
-                        res = min(vals) if vals else 0
-                    new_vals.append(res)
-                df = df.with_columns(pl.Series(target_column, new_vals))
+        expr_body = expr[1:].strip()
+        corr_match = re.match(r"^CORR\(([^,]+),([^)]+)\)$", expr_body, re.IGNORECASE)
+        if corr_match:
+            cols = [c.strip() for c in corr_match.groups()]
+            if len(cols) != 2:
+                raise HTTPException(status_code=400, detail="CORR requires two columns")
+            c1, c2 = cols
+            try:
+                corr_val = df.select(pl.corr(pl.col(c1), pl.col(c2))).to_series()[0]
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            df = df.with_columns(pl.lit(corr_val).alias(target_column))
         else:
-            headers_pattern = "|".join(re.escape(h) for h in df.columns)
-            regex = re.compile(f"\\b({headers_pattern})\\b")
+            zscore_pattern = re.compile(r"(?i)\b(ZSCORE|NORM)\s*\(([^)]+)\)")
+            zscore_placeholders: List[Tuple[str, str]] = []
+
+            def _capture_zscore(match: re.Match) -> str:
+                column_name = match.group(2).strip()
+                if (column_name.startswith("\"") and column_name.endswith("\"")) or (
+                    column_name.startswith("'") and column_name.endswith("'")
+                ):
+                    column_name = column_name[1:-1]
+                placeholder = f"__ZFUNC_{len(zscore_placeholders)}__"
+                zscore_placeholders.append((placeholder, column_name))
+                return placeholder
+
+            expr_body_processed = zscore_pattern.sub(_capture_zscore, expr_body)
+            expr_body_processed = _normalize_formula_functions(expr_body_processed)
+
+            zscore_values: Dict[str, List[Any]] = {}
+            if zscore_placeholders:
+                for column_name in {col for _, col in zscore_placeholders}:
+                    if column_name not in df.columns:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Column '{column_name}' not found for ZSCORE/NORM",
+                        )
+                    try:
+                        series = df.get_column(column_name)
+                    except Exception as e:
+                        raise HTTPException(status_code=400, detail=str(e))
+                    try:
+                        numeric_series = series.cast(pl.Float64, strict=False)
+                        numeric_series = numeric_series.fill_nan(None)
+                    except Exception as e:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Column '{column_name}' could not be converted to numeric values for ZSCORE/NORM: {e}",
+                        )
+
+                    values = numeric_series.to_list()
+                    valid_values = [
+                        float(v)
+                        for v in values
+                        if v is not None and isinstance(v, Real) and math.isfinite(float(v))
+                    ]
+
+                    if not valid_values:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Column '{column_name}' has no numeric values for ZSCORE/NORM",
+                        )
+
+                    mean_val = numeric_series.mean()
+                    std_val = numeric_series.std()
+
+                    mean_val_f: float | None = None
+                    if isinstance(mean_val, Real) and math.isfinite(float(mean_val)):
+                        mean_val_f = float(mean_val)
+
+                    std_val_f: float | None = None
+                    if isinstance(std_val, Real) and math.isfinite(float(std_val)):
+                        std_val_f = float(std_val)
+
+                    if mean_val_f is None:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Unable to compute mean for column '{column_name}'",
+                        )
+
+                    if std_val_f is None or math.isclose(std_val_f, 0.0, rel_tol=1e-12, abs_tol=1e-12):
+                        zscore_values[column_name] = [
+                            None if v is None else 0.0
+                            for v in values
+                        ]
+                    else:
+                        zscore_values[column_name] = [
+                            None
+                            if v is None
+                            else (float(v) - mean_val_f) / std_val_f
+                            for v in values
+                        ]
+
+            headers_pattern = "|".join(re.escape(h) for h in df.columns if h)
+            regex = re.compile(f"\\b({headers_pattern})\\b") if headers_pattern else None
             new_vals: List[Any] = []
-            for r in rows:
-                replaced = regex.sub(lambda m: str(r.get(m.group(0), 0)), expr_body)
+            for row_idx, r in enumerate(rows):
+                replaced = expr_body_processed
+                if regex:
+                    replaced = regex.sub(lambda m: _format_value(r.get(m.group(0))), replaced)
+                if zscore_placeholders:
+                    for placeholder, column_name in zscore_placeholders:
+                        column_series = zscore_values.get(column_name)
+                        z_val = (
+                            column_series[row_idx]
+                            if column_series is not None and row_idx < len(column_series)
+                            else None
+                        )
+                        replaced = replaced.replace(placeholder, _format_value(z_val))
                 try:
-                    val = eval(replaced)
+                    val = eval(replaced, SAFE_EVAL_GLOBALS, {})
                 except Exception:
                     val = None
                 new_vals.append(val)

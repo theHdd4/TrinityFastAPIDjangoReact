@@ -11,6 +11,7 @@ import {
   ColumnClassifierSettings as SettingsType,
   DEFAULT_COLUMN_CLASSIFIER_SETTINGS
 } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
 
 interface Frame { object_name: string; csv_name: string; arrow_name?: string }
 
@@ -39,6 +40,24 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
   const [savedId, setSavedId] = useState(settings.validatorId || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const hasExistingUpdates = Boolean(
+    (settings.assignments && Object.keys(settings.assignments).length > 0) ||
+    (settings.validatorId && settings.validatorId.length > 0)
+  );
+
+  const applySavedIdChange = (value: string) => {
+    setSavedId(value);
+  };
+
+  const { requestChange: confirmSavedIdChange, dialog } = useDataSourceChangeWarning(async value => {
+    applySavedIdChange(value);
+  });
+
+  const handleSavedIdChange = (value: string) => {
+    const isDifferentSource = value !== savedId;
+    confirmSavedIdChange(value, hasExistingUpdates && isDifferentSource);
+  };
 
   useEffect(() => {
     let query = '';
@@ -130,7 +149,7 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
       <Card className="p-4 space-y-4">
         <div>
           <Label className="text-sm mb-2 block">Saved Dataframe</Label>
-          <Select value={savedId} onValueChange={setSavedId}>
+          <Select value={savedId} onValueChange={handleSavedIdChange}>
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select dataframe" />
             </SelectTrigger>
@@ -154,6 +173,8 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
           Classify Columns
         </Button>
       </Card>
+
+      {dialog}
 
     </div>
   );

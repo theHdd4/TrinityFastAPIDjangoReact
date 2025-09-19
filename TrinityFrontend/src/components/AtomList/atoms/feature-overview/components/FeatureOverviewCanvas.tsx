@@ -61,7 +61,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     filterUnattributed(settings.dimensionMap || {}),
   );
   const hasMappedIdentifiers = Object.values(dimensionMap).some(
-    (ids) => ids.length > 0,
+    (ids) => Array.isArray(ids) && ids.length > 0,
   );
   const [skuRows, setSkuRows] = useState<any[]>(
     Array.isArray(settings.skuTable) ? settings.skuTable : [],
@@ -118,7 +118,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const [skuColumnFilters, setSkuColumnFilters] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
-    if (settings.yAxes && settings.yAxes.length > 0) {
+    if (Array.isArray(settings.yAxes) && settings.yAxes.length > 0) {
       setActiveMetric((prev) =>
         prev && settings.yAxes.includes(prev) ? prev : settings.yAxes[0],
       );
@@ -133,10 +133,15 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
 
   useEffect(() => {
     const loadMapping = async () => {
-      const raw = await fetchDimensionMapping();
-      const mapping = filterUnattributed(raw);
-      setDimensionMap(mapping);
-      onUpdateSettings({ dimensionMap: mapping });
+      try {
+        const result = await fetchDimensionMapping();
+        const mapping = filterUnattributed(result.mapping || {});
+        setDimensionMap(mapping);
+        onUpdateSettings({ dimensionMap: mapping });
+      } catch (error) {
+        console.warn('Failed to fetch dimension mapping:', error);
+        setDimensionMap({});
+      }
     };
     loadMapping();
   }, []);
@@ -347,7 +352,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     onUpdateSettings({ filterUnique: val });
   };
 
-  const dimensionCols = Object.values(dimensionMap).flat();
+  const dimensionCols = Object.values(dimensionMap)
+    .filter(Array.isArray)
+    .flat();
   const colSpan = dimensionCols.length + 2; // SR NO. + View Stat
 
   // SKU Table filtering and sorting logic
@@ -537,7 +544,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       }));
     setSkuRows(table);
     const newSettings: any = { skuTable: table };
-      if (!settings.yAxes || settings.yAxes.length === 0) {
+      if (!Array.isArray(settings.yAxes) || settings.yAxes.length === 0) {
         const lower = Array.isArray(settings.numericColumns)
           ? settings.numericColumns.map((c) => c.toLowerCase())
           : [];
@@ -587,7 +594,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           summary: { avg: number; min: number; max: number };
         }
       > = {};
-      for (const y of settings.yAxes) {
+      for (const y of (Array.isArray(settings.yAxes) ? settings.yAxes : [])) {
         const params = new URLSearchParams({
           object_name: settings.dataSource,
           y_column: y,
@@ -603,19 +610,19 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         result[y] = await res.json();
       }
       setStatDataMap(result);
-      setActiveMetric(settings.yAxes[0]);
+      setActiveMetric(Array.isArray(settings.yAxes) && settings.yAxes.length > 0 ? settings.yAxes[0] : "");
       setActiveRow(row.id);
       setShowStatsSummary(true);
       setExpandedMetrics(new Set());
       onUpdateSettings({
         statDataMap: result,
-        activeMetric: settings.yAxes[0],
+        activeMetric: Array.isArray(settings.yAxes) && settings.yAxes.length > 0 ? settings.yAxes[0] : "",
         activeRow: row.id,
       });
       addNavigationItem(user?.id, {
         atom: 'feature-overview',
         action: 'viewStats',
-        metric: settings.yAxes[0],
+        metric: Array.isArray(settings.yAxes) && settings.yAxes.length > 0 ? settings.yAxes[0] : "",
         combination: combo,
       });
       logSessionState(user?.id);

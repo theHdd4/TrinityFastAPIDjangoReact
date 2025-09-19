@@ -93,8 +93,10 @@ const EvaluateModelsFeatureProperties: React.FC<Props> = (props) => {
       graphs: [
         { id: '1', name: 'Waterfall Chart', type: 'waterfall', selected: true },
         { id: '2', name: 'Contribution Chart', type: 'contribution', selected: true },
-        { id: '3', name: 'Scatter Plot', type: 'scatter', selected: false },
-        { id: '4', name: 'Line Chart', type: 'line', selected: false },
+        { id: '3', name: 'Actual vs Predicted', type: 'actual-vs-predicted', selected: true },
+        { id: '4', name: 'Elasticity', type: 'elasticity', selected: true },
+        { id: '5', name: 'Beta', type: 'beta', selected: true },
+        { id: '6', name: 'Averages', type: 'averages', selected: true },
       ],
       availableColumns: ['Column 1', 'Column 2', 'Column 3', 'Column 4'],
       modelResults: [] as any[],

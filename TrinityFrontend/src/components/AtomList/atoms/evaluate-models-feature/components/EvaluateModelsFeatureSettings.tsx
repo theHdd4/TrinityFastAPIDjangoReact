@@ -9,6 +9,7 @@ import { Separator } from '@/components/ui/separator';
 // Removed Badge and icon imports to avoid type issues
 import { EvaluateModelsFeatureData, type EvaluateModelsFeatureSettings } from '../EvaluateModelsFeatureAtom';
 import { VALIDATE_API, EVALUATE_API, SELECT_API } from '@/lib/api';
+import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
 
 interface EvaluateModelsFeatureSettingsProps {
   data: EvaluateModelsFeatureData;
@@ -27,6 +28,30 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
 }) => {
   const [frames, setFrames] = useState<{ object_name: string; csv_name?: string }[]>([]);
   const [localGraphs, setLocalGraphs] = useState(data.graphs || []);
+
+  const hasExistingUpdates = Boolean(
+    (Array.isArray(data.modelResults) && data.modelResults.length > 0) ||
+    (Array.isArray(data.performanceData) && data.performanceData.length > 0) ||
+    (Array.isArray(data.yoyData) && data.yoyData.length > 0) ||
+    (Array.isArray(data.weightedEnsembleData) && data.weightedEnsembleData.length > 0) ||
+    (Array.isArray(data.elasticityData) && data.elasticityData.length > 0)
+  );
+
+  const applyDatasetChange = (value: string) => {
+    onDataChange({
+      selectedDataframe: value,
+      selectedCombinations: []
+    });
+  };
+
+  const { requestChange: confirmDatasetChange, dialog } = useDataSourceChangeWarning(async value => {
+    applyDatasetChange(value);
+  });
+
+  const handleDatasetChange = (value: string) => {
+    const isDifferentSource = value !== (data.selectedDataframe || '');
+    confirmDatasetChange(value, hasExistingUpdates && isDifferentSource);
+  };
   
   // Update local state when data.graphs changes
   React.useEffect(() => {
@@ -196,16 +221,10 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label className="text-xs">Dataset</Label>
-                         <Select 
-               value={data.selectedDataframe} 
-               onValueChange={(value) => {
-                 // When dataset changes, we'll populate combinations in useEffect
-                 onDataChange({ 
-                   selectedDataframe: value,
-                   selectedCombinations: []
-                 });
-               }}
-             >
+            <Select
+              value={data.selectedDataframe}
+              onValueChange={handleDatasetChange}
+            >
               <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select a dataset" />
               </SelectTrigger>
@@ -220,6 +239,8 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
           </div>
         </CardContent>
       </Card>
+
+      {dialog}
 
       {/* Combination Selection */}
       <Card>
