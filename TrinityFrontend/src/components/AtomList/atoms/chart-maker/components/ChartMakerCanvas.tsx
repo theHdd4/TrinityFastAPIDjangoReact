@@ -98,6 +98,9 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   const [emphasizedTrace, setEmphasizedTrace] = useState<Record<string, string | null>>({});
   const [dimmedXValues, setDimmedXValues] = useState<Record<string, Set<string>>>({});
 
+  // Chart sort order state
+  const [chartSortOrder, setChartSortOrder] = useState<Record<string, 'asc' | 'desc' | null>>({});
+
   // Cardinality View state
   const [cardinalityData, setCardinalityData] = useState<any[]>([]);
   const [cardinalityLoading, setCardinalityLoading] = useState(false);
@@ -416,6 +419,14 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     }
   };
 
+  // Handle chart sort order changes
+  const handleChartSortOrderChange = (chartId: string, sortOrder: 'asc' | 'desc' | null) => {
+    setChartSortOrder(prev => ({
+      ...prev,
+      [chartId]: sortOrder
+    }));
+  };
+
   const handleCloseChatBubble = () => {
     setChatBubble({ ...chatBubble, visible: false });
   };
@@ -539,7 +550,7 @@ const renderChart = (
     type: rendererType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
     data: chartData,
     xField: xAxisConfig.dataKey,
-    yField: traces.length ? undefined : yAxisConfig.dataKey,
+    yField: traces.length ? traces[0]?.dataKey : yAxisConfig.dataKey,
     yFields: traces.length ? traces.map((t: any) => t.dataKey) : undefined,
     title: chart.title,
     xAxisLabel: xAxisConfig.label || xAxisConfig.dataKey,
@@ -552,6 +563,9 @@ const renderChart = (
     showDataLabels: chart.chartConfig?.showDataLabels,
     showGrid: chart.chartConfig?.showGrid,
     height: chartHeightValue,
+    sortOrder: chartSortOrder[chart.id] || chart.chartConfig?.sortOrder || null,
+    onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => onChartTypeChange?.(chart.id, newType.replace('_chart', '') as ChartMakerConfig['type']),
+    onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleChartSortOrderChange(chart.id, newSortOrder),
   } as const;
 
   return (
@@ -562,9 +576,9 @@ const renderChart = (
 };
 
 
-  if (charts.length === 0) {
+  if (!data) {
     return (
-      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-blue-50/30 to-blue-50/50 overflow-y-auto relative">
+      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-pink-50/30 to-pink-50/50 overflow-y-auto relative">
         {/* Subtle background pattern */}
         <div className="absolute inset-0 opacity-20">
           <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
@@ -579,14 +593,14 @@ const renderChart = (
         
         <div className="relative z-10 flex items-center justify-center h-full">
           <div className="text-center max-w-md">
-            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
-              <BarChart3 className="w-12 h-12 text-white drop-shadow-lg" />
+            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-pink-500 to-pink-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+              <PieChartIcon className="w-12 h-12 text-white drop-shadow-lg" />
             </div>
-            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-blue-500 to-blue-600 bg-clip-text text-transparent">
-              Chart Maker
+            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-pink-500 to-pink-600 bg-clip-text text-transparent">
+              Chart Maker Operation
             </h3>
             <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
-              Create beautiful interactive charts and visualizations
+              Select a file from the properties panel to get started
             </p>
           </div>
         </div>
@@ -644,8 +658,7 @@ const renderChart = (
         ) : cardinalityError ? (
           <div className="p-4 text-red-600">{cardinalityError}</div>
         ) : cardinalityData && cardinalityData.length > 0 ? (
-          <div className="w-full mb-6">
-            <Table
+          <Table
               headers={[
                 <ContextMenu key="Column">
                   <ContextMenuTrigger asChild>
@@ -853,7 +866,6 @@ const renderChart = (
                 </tr>
               ))}
             </Table>
-          </div>
         ) : null}
 
         <div
@@ -910,8 +922,8 @@ const renderChart = (
                             setFullscreenIndex(index);
                           }
                         }}
-                        onContextMenu={e => handleContextMenu(e, chart.id)}
-                        title="Alt+Click to expand, Right-click to change chart type"
+                        /* onContextMenu={e => handleContextMenu(e, chart.id)} */
+                        title="Alt+Click to expand"
                       />
                      </div>
                      

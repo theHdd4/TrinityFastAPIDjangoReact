@@ -4,7 +4,7 @@ from datetime import datetime
 import json
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
-from urllib.parse import unquote
+from urllib.parse import unquote, quote
 import os
 import pyarrow as pa
 import pyarrow.ipc as ipc
@@ -14,6 +14,7 @@ from app.DataStorageRetrieval.flight_registry import get_flight_path_for_csv, se
 from app.DataStorageRetrieval.db import get_dataset_info
 from app.DataStorageRetrieval.minio_utils import get_client, MINIO_BUCKET
 from app.features.feature_overview.deps import redis_client
+import redis
 
 # Import your existing database functions
 # Change these lines at the top of routes.py:
@@ -54,6 +55,8 @@ extraction_results = {}
 # MinIO client for loading saved dataframes
 minio_client = get_client()
 
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+binary_redis = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=False)
 
 # =============================================================================
 # HEALTH CHECK ENDPOINT
@@ -197,16 +200,16 @@ async def classify_columns(
     if df is None:
         if not object_name.endswith(".arrow"):
             raise HTTPException(status_code=400, detail="Unsupported file format")
-        content = redis_client.get(object_name)
+        content = binary_redis.get(object_name)
         if content is None:
             try:
                 response = minio_client.get_object(MINIO_BUCKET, object_name)
                 content = response.read()
-                redis_client.setex(object_name, 3600, content)
+                binary_redis.setex(object_name, 3600, content)
             except S3Error as e:
                 code = getattr(e, "code", "")
                 if code in {"NoSuchKey", "NoSuchBucket"}:
-                    redis_client.delete(object_name)
+                    binary_redis.delete(object_name)
                     raise HTTPException(status_code=404, detail="File not found")
                 raise HTTPException(status_code=500, detail=str(e))
         reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
@@ -592,6 +595,7 @@ class SaveConfigRequest(BaseModel):
     identifiers: List[str]
     measures: List[str]
     dimensions: Dict[str, List[str]]
+    file_name: Optional[str] = None
 
 
 @router.post("/save_config")
@@ -605,7 +609,7 @@ async def save_config(req: SaveConfigRequest):
     )
     env = env or {}
     print(f"🔧 save_config env {env}")
-    data = {
+    data: Dict[str, Any] = {
         "project_id": req.project_id,
         "client_name": req.client_name,
         "app_name": req.app_name,
@@ -615,7 +619,14 @@ async def save_config(req: SaveConfigRequest):
         "dimensions": req.dimensions,
         "env": env,
     }
+    if req.file_name:
+        data["file_name"] = req.file_name
     redis_client.setex(key, 3600, json.dumps(data, default=str))
+
+    if req.file_name:
+        safe_file = quote(req.file_name, safe="")
+        specific_key = f"{key}:{safe_file}"
+        redis_client.setex(specific_key, 3600, json.dumps(data, default=str))
 
     # Keep the cached environment in sync so downstream features like
     # Feature Overview pick up the latest dimension mapping after a
@@ -624,7 +635,14 @@ async def save_config(req: SaveConfigRequest):
     env["identifiers"] = req.identifiers
     env["measures"] = req.measures
     env["dimensions"] = req.dimensions
+    if req.file_name:
+        env["file_name"] = req.file_name
     redis_client.setex(env_key, 3600, json.dumps(env, default=str))
+
+    if req.file_name:
+        safe_file = quote(req.file_name, safe="")
+        file_env_key = f"{env_key}:file:{safe_file}"
+        redis_client.setex(file_env_key, 3600, json.dumps(env, default=str))
 
     if req.project_id:
         map_key = f"project:{req.project_id}:dimensions"
@@ -649,16 +667,47 @@ async def save_config(req: SaveConfigRequest):
 
 
 @router.get("/get_config")
-async def get_config(client_name: str, app_name: str, project_name: str):
+async def get_config(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    file_name: Optional[str] = None,
+):
     """Retrieve saved column classifier configuration."""
     key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
+    decoded_file = unquote(file_name) if file_name else None
+    specific_key = None
+    if decoded_file:
+        safe_file = quote(decoded_file, safe="")
+        specific_key = f"{key}:{safe_file}"
+        cached_specific = redis_client.get(specific_key)
+        if cached_specific:
+            return {
+                "status": "success",
+                "source": "redis",
+                "data": json.loads(cached_specific),
+            }
+
     cached = redis_client.get(key)
     if cached:
-        return {"status": "success", "source": "redis", "data": json.loads(cached)}
+        data = json.loads(cached)
+        if decoded_file:
+            stored_file = data.get("file_name")
+            if stored_file and stored_file != decoded_file:
+                data = None
+        if data is not None:
+            return {"status": "success", "source": "redis", "data": data}
 
-    mongo_data = get_classifier_config_from_mongo(client_name, app_name, project_name)
+    mongo_data = get_classifier_config_from_mongo(
+        client_name,
+        app_name,
+        project_name,
+        decoded_file,
+    )
     if mongo_data:
         redis_client.setex(key, 3600, json.dumps(mongo_data, default=str))
+        if specific_key:
+            redis_client.setex(specific_key, 3600, json.dumps(mongo_data, default=str))
         return {"status": "success", "source": "mongo", "data": mongo_data}
 
     raise HTTPException(status_code=404, detail="Configuration not found")

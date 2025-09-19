@@ -81,6 +81,13 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     }
   };
 
+  // Settings modification functions for Laboratory Mode
+  const handleSettingsChange = (newSettings: any) => {
+    if (atomId && updateSettings) {
+      updateSettings(atomId, newSettings);
+    }
+  };
+
   const addXVariable = () => {
     handleDataChange({
       xVariables: [...(finalData?.xVariables || []), []],
@@ -196,6 +203,9 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     // Reset previous results and errors
     setModelResult(null);
     setModelError(null);
+    
+    // Save to global store
+    handleSettingsChange({ modelResult: null, modelError: null });
     setIsRunningModel(true);
     
         // Initialize progress tracking
@@ -246,6 +256,9 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         setModelResult(result);
         setModelError(null);
         
+        // Save to global store
+        handleSettingsChange({ modelResult: result, modelError: null });
+        
         // Automatically minimize all combinations by default
         if (result.combination_results && result.combination_results.length > 0) {
           const allIndices = Array.from({ length: result.combination_results.length }, (_, i) => i);
@@ -253,12 +266,20 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         }
       } else {
         const errorText = await response.text();
-        setModelError(`Model training failed: ${response.status} - ${errorText}`);
+        const errorMessage = `Model training failed: ${response.status} - ${errorText}`;
+        setModelError(errorMessage);
         setModelResult(null);
+        
+        // Save to global store
+        handleSettingsChange({ modelResult: null, modelError: errorMessage });
       }
     } catch (error) {
-      setModelError(`Error running model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const errorMessage = `Error running model: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      setModelError(errorMessage);
       setModelResult(null);
+      
+      // Save to global store
+      handleSettingsChange({ modelResult: null, modelError: errorMessage });
     } finally {
       // Clear progress polling interval and reset
       if (progressPollingInterval) {
@@ -352,8 +373,12 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
   const [isLoadingColumns, setIsLoadingColumns] = useState(false);
   const [openPopovers, setOpenPopovers] = useState<{ [key: number]: boolean }>({});
   const [isRunningModel, setIsRunningModel] = useState(false);
-  const [modelResult, setModelResult] = useState<any>(null);
-  const [modelError, setModelError] = useState<string | null>(null);
+  const [modelResult, setModelResult] = useState<any>(() => {
+    return data.modelResult || null;
+  });
+  const [modelError, setModelError] = useState<string | null>(() => {
+    return data.modelError || null;
+  });
   const [modelProgress, setModelProgress] = useState<{ 
     current: number; 
     total: number; 
@@ -457,6 +482,19 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
       addXVariable();
     }
   }, [finalData?.xVariables?.length]);
+
+  // Sync with global store changes
+  useEffect(() => {
+    if (data.modelResult !== undefined) {
+      setModelResult(data.modelResult);
+    }
+  }, [data.modelResult]);
+
+  useEffect(() => {
+    if (data.modelError !== undefined) {
+      setModelError(data.modelError);
+    }
+  }, [data.modelError]);
 
   // Automatically minimize all combinations by default when model results are available
   useEffect(() => {
@@ -680,6 +718,38 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     
     return filtered;
   };
+
+  // Show placeholder when no scope or combinations are selected
+  if (!finalData?.selectedScope || !finalData?.selectedCombinations || finalData.selectedCombinations.length === 0) {
+    return (
+      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-orange-50/30 to-orange-50/50 overflow-y-auto relative">
+        <div className="absolute inset-0 opacity-20">
+          <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
+            <defs>
+              <pattern id="emptyGrid" width="80" height="80" patternUnits="userSpaceOnUse">
+                <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(148 163 184 / 0.15)" strokeWidth="1"/>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#emptyGrid)" />
+          </svg>
+        </div>
+
+        <div className="relative z-10 flex items-center justify-center h-full">
+          <div className="text-center max-w-md">
+            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+              <Zap className="w-12 h-12 text-white drop-shadow-lg" />
+            </div>
+            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-orange-500 to-orange-600 bg-clip-text text-transparent">
+              Build Model Operation
+            </h3>
+            <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
+              Select a scope and combinations from the properties panel to get started
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-full bg-background p-6 overflow-y-auto">

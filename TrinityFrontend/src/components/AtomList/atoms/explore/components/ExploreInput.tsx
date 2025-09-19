@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Database } from 'lucide-react'
 import type { ExploreData, ExploreSettings } from "../ExploreAtom"
 import { VALIDATE_API, EXPLORE_API } from "@/lib/api"
+import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning'
 
 interface ExploreInputProps {
   data: ExploreData
@@ -272,14 +273,27 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
     }
   }
 
-  const handleFrameChange = (val: string) => {
-    if (!val) return
+  const applyFrameChange = (val: string) => {
     setSelected(val)
-    // Set the dataframe immediately
     onDataChange({ dataframe: val })
-    // Fetch both column classifier config and column summary for the selected file
     fetchColumnClassifierConfig(val)
     fetchColumnSummary(val)
+  }
+
+  const { requestChange: confirmFrameChange, dialog } = useDataSourceChangeWarning(async nextValue => {
+    applyFrameChange(nextValue)
+  })
+
+  const handleFrameChange = (val: string) => {
+    if (!val) return
+    const hasExistingUpdates = Boolean(
+      data.applied ||
+      (data.chartDataSets && Object.keys(data.chartDataSets).length > 0) ||
+      (data.chartReadyData && Object.keys(data.chartReadyData).length > 0) ||
+      (Array.isArray(data.columnSummary) && data.columnSummary.length > 0)
+    )
+    const isDifferentSource = val !== (data.dataframe || '')
+    confirmFrameChange(val, hasExistingUpdates && isDifferentSource)
   }
 
   // Helper: columns to show based on unique filter (use original for dropdown)
@@ -401,6 +415,8 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
 
 
       </Card>
+
+      {dialog}
 
     </div>
   )

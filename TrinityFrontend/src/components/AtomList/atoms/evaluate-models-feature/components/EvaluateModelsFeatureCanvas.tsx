@@ -29,9 +29,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell, Legend, Tooltip as RechartsTooltip, ScatterChart, Scatter } from 'recharts';
-import { Maximize2, X, MessageSquare, Send, Edit3, Trash2, Filter, ChevronDown, ChevronRight, ChevronUp, ArrowUp, ArrowDown, Filter as FilterIcon, Plus } from 'lucide-react';
-import { EvaluateModelsFeatureData, EvaluateModelsFeatureSettings } from '../EvaluateModelsFeatureAtom';
-import { EVALUATE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
+import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
+import { Maximize2, X, MessageSquare, Send, Edit3, Trash2, Filter, ChevronDown, ChevronRight, ChevronUp, ArrowUp, ArrowDown, Filter as FilterIcon, Plus, BarChart3 } from 'lucide-react';
+import { EvaluateModelsFeatureData } from '../EvaluateModelsFeatureAtom';
+import { EvaluateModelsFeatureSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { EVALUATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   ContextMenu,
@@ -76,9 +78,9 @@ const getColor = (index: number) => {
 interface EvaluateModelsFeatureCanvasProps {
   atomId: string;
   data: EvaluateModelsFeatureData;
-  settings: EvaluateModelsFeatureSettings;
+  settings: EvaluateModelsFeatureSettings['settings'];
   onDataChange: (data: Partial<EvaluateModelsFeatureData>) => void;
-  onSettingsChange: (settings: Partial<EvaluateModelsFeatureSettings>) => void;
+  onSettingsChange: (settings: Partial<EvaluateModelsFeatureSettings['settings']>) => void;
   onDataUpload: (file: File, fileId: string) => void;
   onClose?: () => void;
 }
@@ -127,9 +129,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     }
   };
 
-  // Comment state management
-  const [comments, setComments] = useState<Record<string, Array<{id: string, text: string, timestamp: string}>>>({});
-  const [newComments, setNewComments] = useState<Record<string, string>>({});
+  // Comment state management - use data from props instead of local state
+  const comments = data.comments || {};
+  const newComments = data.newComments || {};
   const [isSaving, setIsSaving] = useState<Record<string, boolean>>({});
 
   const saveComment = async (chartId: string) => {
@@ -164,11 +166,16 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           text: newComment,
           timestamp: new Date().toISOString()
         };
-        setComments(prev => ({
-          ...prev,
-          [chartId]: [...(prev[chartId] || []), newCommentObj]
-        }));
-        setNewComments(prev => ({ ...prev, [chartId]: '' }));
+        onDataChange({
+          comments: {
+            ...comments,
+            [chartId]: [...(comments[chartId] || []), newCommentObj]
+          },
+          newComments: {
+            ...newComments,
+            [chartId]: ''
+          }
+        });
       } else {
         console.error('Failed to save comments');
       }
@@ -180,53 +187,65 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   };
 
   const renderCommentSection = (chartId: string) => {
-    const chartComments = comments[chartId] || [];
     const newComment = newComments[chartId] || '';
-    const isSavingChart = isSaving[chartId] || false;
+    const chartComments = comments[chartId] || [];
+    const isCurrentlySaving = isSaving[chartId] || false;
 
     return (
-      <div className="mt-4 p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
-
-        
-        {/* Display existing comments */}
-        <div className="space-y-3 mb-4 max-h-48 overflow-y-auto custom-scrollbar-orange">
-          {chartComments.map((comment) => (
-            <div key={comment.id} className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
-              <div className="flex justify-between items-start mb-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
-                  <span className="text-gray-400 text-xs font-medium">{new Date(comment.timestamp).toLocaleString()}</span>
+      <div className="mt-4">
+        {/* Existing Comments */}
+        {chartComments.length > 0 && (
+          <div className="mb-3 space-y-2">
+            {chartComments.map((comment) => (
+              <div key={comment.id} className="bg-gray-50 p-3 rounded-lg border border-gray-200">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <p className="text-sm text-gray-800">{comment.text}</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {new Date(comment.timestamp).toLocaleString()}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => deleteComment(chartId, comment.id)}
+                    className="ml-2 text-red-500 hover:text-red-700 text-sm"
+                    title="Delete comment"
+                  >
+                    ✕
+                  </button>
                 </div>
-                <button
-                  onClick={() => deleteComment(chartId, comment.id)}
-                  className="text-gray-400 hover:text-red-500 transition-colors duration-200 p-1 hover:bg-red-50 rounded"
-                  title="Delete comment"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
               </div>
-              <p className="text-gray-700 text-sm leading-relaxed">{comment.text}</p>
-            </div>
-          ))}
-        </div>
-        
-        {/* Add new comment */}
-        <div className="flex gap-3">
+            ))}
+          </div>
+        )}
+
+        {/* New Comment Input */}
+        <div className="relative">
           <textarea
             value={newComment}
-            onChange={(e) => setNewComments(prev => ({ ...prev, [chartId]: e.target.value }))}
+            onChange={(e) => onDataChange({
+              newComments: {
+                ...newComments,
+                [chartId]: e.target.value
+              }
+            })}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                if (newComment.trim() && !isSavingChart) {
+                if (newComment.trim()) {
                   saveComment(chartId);
                 }
               }
             }}
             placeholder="Add your notes or comments here... (Press Enter to save)"
+            className="w-full p-3 border border-gray-200 rounded-lg resize-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-all duration-200 text-sm shadow-md"
             rows={3}
-            className="flex-1 text-sm px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 resize-none transition-all duration-200"
+            disabled={isCurrentlySaving}
           />
+          {isCurrentlySaving && (
+            <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center rounded-lg">
+              <div className="text-sm text-orange-600">Saving...</div>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -250,9 +269,10 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   const [cardinalityData, setCardinalityData] = useState<any[]>([]);
   const [cardinalityLoading, setCardinalityLoading] = useState(false);
   const [cardinalityError, setCardinalityError] = useState<string | null>(null);
-  const [sortColumn, setSortColumn] = useState<string>('');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [columnFilters, setColumnFilters] = useState<{ [key: string]: string[] }>({});
+  // Use filtering state from global store instead of local state
+  const sortColumn = data.sortColumn || '';
+  const sortDirection = data.sortDirection || 'desc';
+  const columnFilters = data.columnFilters || {};
   
   const selectedCombinations = data.selectedCombinations || [];
   
@@ -277,6 +297,46 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     averages: true
   });
   const [selectedIdentifierValues, setSelectedIdentifierValues] = useState<{[key: string]: string[]}>({});
+  
+  // State for contribution chart types and themes (similar to explore atom)
+  const [contributionChartTypes, setContributionChartTypes] = useState<{[key: string]: string}>({});
+  const [contributionChartThemes, setContributionChartThemes] = useState<{[key: string]: string}>({});
+  
+  // State for actual vs predicted chart types and themes
+  const [actualVsPredictedChartTypes, setActualVsPredictedChartTypes] = useState<{[key: string]: string}>({});
+  const [actualVsPredictedChartThemes, setActualVsPredictedChartThemes] = useState<{[key: string]: string}>({});
+  
+  // State for beta coefficients chart types and themes
+  const [betaCoefficientsChartTypes, setBetaCoefficientsChartTypes] = useState<{[key: string]: string}>({});
+  const [betaCoefficientsChartThemes, setBetaCoefficientsChartThemes] = useState<{[key: string]: string}>({});
+  
+  // State for elasticity chart types and themes
+  const [elasticityChartTypes, setElasticityChartTypes] = useState<{[key: string]: string}>({});
+  const [elasticityChartThemes, setElasticityChartThemes] = useState<{[key: string]: string}>({});
+  
+  // State for averages chart types and themes
+  const [averagesChartTypes, setAveragesChartTypes] = useState<{[key: string]: string}>({});
+  const [averagesChartThemes, setAveragesChartThemes] = useState<{[key: string]: string}>({});
+  
+  // State for waterfall chart types and themes
+  const [waterfallChartTypes, setWaterfallChartTypes] = useState<{[key: string]: string}>({});
+  const [waterfallChartThemes, setWaterfallChartThemes] = useState<{[key: string]: string}>({});
+  
+  // State for data labels for each chart type
+  const [contributionChartDataLabels, setContributionChartDataLabels] = useState<{[key: string]: boolean}>({});
+  const [actualVsPredictedChartDataLabels, setActualVsPredictedChartDataLabels] = useState<{[key: string]: boolean}>({});
+  const [betaCoefficientsChartDataLabels, setBetaCoefficientsChartDataLabels] = useState<{[key: string]: boolean}>({});
+  const [elasticityChartDataLabels, setElasticityChartDataLabels] = useState<{[key: string]: boolean}>({});
+  const [averagesChartDataLabels, setAveragesChartDataLabels] = useState<{[key: string]: boolean}>({});
+  const [waterfallChartDataLabels, setWaterfallChartDataLabels] = useState<{[key: string]: boolean}>({});
+  
+  // State for sort order for each chart type
+  const [contributionChartSortOrder, setContributionChartSortOrder] = useState<{[key: string]: 'asc' | 'desc' | null}>({});
+  const [actualVsPredictedChartSortOrder, setActualVsPredictedChartSortOrder] = useState<{[key: string]: 'asc' | 'desc' | null}>({});
+  const [betaCoefficientsChartSortOrder, setBetaCoefficientsChartSortOrder] = useState<{[key: string]: 'asc' | 'desc' | null}>({});
+  const [elasticityChartSortOrder, setElasticityChartSortOrder] = useState<{[key: string]: 'asc' | 'desc' | null}>({});
+  const [averagesChartSortOrder, setAveragesChartSortOrder] = useState<{[key: string]: 'asc' | 'desc' | null}>({});
+  const [waterfallChartSortOrder, setWaterfallChartSortOrder] = useState<{[key: string]: 'asc' | 'desc' | null}>({});
   
   useEffect(() => {
     const fetchScope = async () => {
@@ -718,6 +778,188 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     }));
   };
 
+  // Handle contribution chart type change
+  const handleContributionChartTypeChange = (combinationName: string, newType: string) => {
+    setContributionChartTypes(prev => ({
+      ...prev,
+      [combinationName]: newType
+    }));
+  };
+
+  // Handle contribution chart theme change
+  const handleContributionChartThemeChange = (combinationName: string, newTheme: string) => {
+    setContributionChartThemes(prev => ({
+      ...prev,
+      [combinationName]: newTheme
+    }));
+  };
+
+  // Handle actual vs predicted chart type change
+  const handleActualVsPredictedChartTypeChange = (combinationName: string, newType: string) => {
+    setActualVsPredictedChartTypes(prev => ({
+      ...prev,
+      [combinationName]: newType
+    }));
+  };
+
+  // Handle actual vs predicted chart theme change
+  const handleActualVsPredictedChartThemeChange = (combinationName: string, newTheme: string) => {
+    setActualVsPredictedChartThemes(prev => ({
+      ...prev,
+      [combinationName]: newTheme
+    }));
+  };
+
+  // Handle beta coefficients chart type change
+  const handleBetaCoefficientsChartTypeChange = (combinationName: string, newType: string) => {
+    setBetaCoefficientsChartTypes(prev => ({
+      ...prev,
+      [combinationName]: newType
+    }));
+  };
+
+  // Handle beta coefficients chart theme change
+  const handleBetaCoefficientsChartThemeChange = (combinationName: string, newTheme: string) => {
+    setBetaCoefficientsChartThemes(prev => ({
+      ...prev,
+      [combinationName]: newTheme
+    }));
+  };
+
+  // Handle elasticity chart type change
+  const handleElasticityChartTypeChange = (combinationName: string, newType: string) => {
+    setElasticityChartTypes(prev => ({
+      ...prev,
+      [combinationName]: newType
+    }));
+  };
+
+  // Handle elasticity chart theme change
+  const handleElasticityChartThemeChange = (combinationName: string, newTheme: string) => {
+    setElasticityChartThemes(prev => ({
+      ...prev,
+      [combinationName]: newTheme
+    }));
+  };
+
+  // Handle averages chart type change
+  const handleAveragesChartTypeChange = (combinationName: string, newType: string) => {
+    setAveragesChartTypes(prev => ({
+      ...prev,
+      [combinationName]: newType
+    }));
+  };
+
+  // Handle averages chart theme change
+  const handleAveragesChartThemeChange = (combinationName: string, newTheme: string) => {
+    setAveragesChartThemes(prev => ({
+      ...prev,
+      [combinationName]: newTheme
+    }));
+  };
+
+  // Handle waterfall chart type change
+  const handleWaterfallChartTypeChange = (combinationName: string, newType: string) => {
+    setWaterfallChartTypes(prev => ({
+      ...prev,
+      [combinationName]: newType
+    }));
+  };
+
+  // Handle waterfall chart theme change
+  const handleWaterfallChartThemeChange = (combinationName: string, newTheme: string) => {
+    setWaterfallChartThemes(prev => ({
+      ...prev,
+      [combinationName]: newTheme
+    }));
+  };
+
+  // Handle data label toggles for each chart type
+  const handleContributionChartDataLabelsChange = (combinationName: string, showDataLabels: boolean) => {
+    setContributionChartDataLabels(prev => ({
+      ...prev,
+      [combinationName]: showDataLabels
+    }));
+  };
+
+  const handleActualVsPredictedChartDataLabelsChange = (combinationName: string, showDataLabels: boolean) => {
+    setActualVsPredictedChartDataLabels(prev => ({
+      ...prev,
+      [combinationName]: showDataLabels
+    }));
+  };
+
+  const handleBetaCoefficientsChartDataLabelsChange = (combinationName: string, showDataLabels: boolean) => {
+    setBetaCoefficientsChartDataLabels(prev => ({
+      ...prev,
+      [combinationName]: showDataLabels
+    }));
+  };
+
+  const handleElasticityChartDataLabelsChange = (combinationName: string, showDataLabels: boolean) => {
+    setElasticityChartDataLabels(prev => ({
+      ...prev,
+      [combinationName]: showDataLabels
+    }));
+  };
+
+  const handleAveragesChartDataLabelsChange = (combinationName: string, showDataLabels: boolean) => {
+    setAveragesChartDataLabels(prev => ({
+      ...prev,
+      [combinationName]: showDataLabels
+    }));
+  };
+
+  const handleWaterfallChartDataLabelsChange = (combinationName: string, showDataLabels: boolean) => {
+    setWaterfallChartDataLabels(prev => ({
+      ...prev,
+      [combinationName]: showDataLabels
+    }));
+  };
+
+  // Handle sort order changes for each chart type
+  const handleContributionChartSortOrderChange = (combinationName: string, sortOrder: 'asc' | 'desc' | null) => {
+    setContributionChartSortOrder(prev => ({
+      ...prev,
+      [combinationName]: sortOrder
+    }));
+  };
+
+  const handleActualVsPredictedChartSortOrderChange = (combinationName: string, sortOrder: 'asc' | 'desc' | null) => {
+    setActualVsPredictedChartSortOrder(prev => ({
+      ...prev,
+      [combinationName]: sortOrder
+    }));
+  };
+
+  const handleBetaCoefficientsChartSortOrderChange = (combinationName: string, sortOrder: 'asc' | 'desc' | null) => {
+    setBetaCoefficientsChartSortOrder(prev => ({
+      ...prev,
+      [combinationName]: sortOrder
+    }));
+  };
+
+  const handleElasticityChartSortOrderChange = (combinationName: string, sortOrder: 'asc' | 'desc' | null) => {
+    setElasticityChartSortOrder(prev => ({
+      ...prev,
+      [combinationName]: sortOrder
+    }));
+  };
+
+  const handleAveragesChartSortOrderChange = (combinationName: string, sortOrder: 'asc' | 'desc' | null) => {
+    setAveragesChartSortOrder(prev => ({
+      ...prev,
+      [combinationName]: sortOrder
+    }));
+  };
+
+  const handleWaterfallChartSortOrderChange = (combinationName: string, sortOrder: 'asc' | 'desc' | null) => {
+    setWaterfallChartSortOrder(prev => ({
+      ...prev,
+      [combinationName]: sortOrder
+    }));
+  };
+
   // Ensure graphs data is available with defaults
   const defaultGraphs = [
     { id: '1', name: 'Waterfall Chart', type: 'waterfall', selected: true },
@@ -759,19 +1001,25 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       timestamp: new Date().toLocaleString()
     };
 
-    setComments(prev => ({
-      ...prev,
-      [chartId]: [...(prev[chartId] || []), comment]
-    }));
-
-          setNewComments(prev => ({ ...prev, [chartId]: "" }));
+    onDataChange({
+      comments: {
+        ...comments,
+        [chartId]: [...(comments[chartId] || []), comment]
+      },
+      newComments: {
+        ...newComments,
+        [chartId]: ""
+      }
+    });
   };
 
   const deleteComment = (chartId: string, commentId: string) => {
-    setComments(prev => ({
-      ...prev,
-      [chartId]: prev[chartId]?.filter(comment => comment.id !== commentId) || []
-    }));
+    onDataChange({
+      comments: {
+        ...comments,
+        [chartId]: comments[chartId]?.filter(comment => comment.id !== commentId) || []
+      }
+    });
   };
 
 
@@ -786,7 +1034,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     if (isLoadingYoyData) {
       return (
-        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[600px]">
           <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
           <div className="h-[150px] flex items-center justify-center">
             <p className="text-xs text-orange-600 text-center">Loading YoY data...</p>
@@ -797,7 +1045,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     if (!yoyData) {
       return (
-        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[600px]">
           <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
           <div className="h-[150px] flex items-center justify-center">
             <p className="text-xs text-orange-600 text-center">No data available</p>
@@ -814,26 +1062,44 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     console.log('🔍 DEBUG: Waterfall chart data:', chartData);
     
+    // Get chart type and theme for this combination
+    const chartType = waterfallChartTypes[combinationName] || 'bar_chart';
+    const chartTheme = waterfallChartThemes[combinationName] || 'default';
+    const showDataLabels = waterfallChartDataLabels[combinationName] !== undefined ? waterfallChartDataLabels[combinationName] : true;
+    const sortOrder = waterfallChartSortOrder[combinationName] || null;
+    const isExpanded = !collapsedGraphs.waterfall;
+    
+    const rendererProps = {
+      key: `waterfall-chart-${combinationName}-${chartType}-${chartTheme}`,
+      type: chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
+      data: chartData,
+      xField: 'name',
+      yField: 'value',
+      xKey: 'name',
+      yKey: 'value',
+      xAxisLabel: 'Period',
+      yAxisLabel: 'Value',
+      theme: chartTheme,
+      enableScroll: false,
+      width: isExpanded ? 400 : 500,
+      height: isExpanded ? 350 : 400,
+      showDataLabels: showDataLabels,
+      showLegend: chartType === 'pie_chart',
+      sortOrder: sortOrder,
+      onThemeChange: (newTheme: string) => handleWaterfallChartThemeChange(combinationName, newTheme),
+      onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleWaterfallChartTypeChange(combinationName, newType),
+      onDataLabelsToggle: (newShowDataLabels: boolean) => handleWaterfallChartDataLabelsChange(combinationName, newShowDataLabels),
+      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleWaterfallChartSortOrderChange(combinationName, newSortOrder)
+    };
+    
     return (
-      <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
         <h5 className="text-sm font-medium text-orange-800 mb-3">
           {combinationName} 
         </h5>
-        <ResponsiveContainer width="100%" height={150}>
-          <BarChart data={chartData}>
-            <Bar 
-              dataKey="value" 
-              fill={getColor(2)}
-              radius={4} 
-            />
-            <XAxis dataKey="name" fontSize={10} />
-            <YAxis fontSize={10} />
-            <RechartsTooltip 
-              formatter={(value: any) => [value.toFixed(2), 'Value']}
-              labelFormatter={(label) => `Period: ${label}`}
-            />
-          </BarChart>
-        </ResponsiveContainer>
+        <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
+          <RechartsChartRenderer {...rendererProps} />
+        </div>
         
         {/* Comment Section */}
         {renderCommentSection(chartId)}
@@ -849,7 +1115,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     if (isLoadingContributionData) {
       return (
-        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[600px]">
           <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
           <div className="h-[150px] flex items-center justify-center">
             <p className="text-xs text-orange-600 text-center">Loading contribution data...</p>
@@ -860,7 +1126,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     if (!combinationContributionData || combinationContributionData.length === 0) {
       return (
-        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[600px]">
           <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
           <div className="h-[150px] flex items-center justify-center">
             <p className="text-xs text-orange-600 text-center">No contribution data available</p>
@@ -869,51 +1135,52 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       );
     }
     
-    // Transform contribution data for the pie chart
+    // Transform contribution data for the chart
     const contributionChartData = combinationContributionData.map((contribution, index) => ({
       name: contribution.name,
-      value: Math.abs(contribution.value),
-      color: `hsl(${(index * 60) % 360}, 70%, 50%)`
+      value: Math.abs(contribution.value)
     }));
     
+    // console.log('🔍 DEBUG: Contribution chart data for', combinationName, ':', contributionChartData);
+    
+    // Get chart type and theme for this combination (default to pie_chart)
+    const chartType = contributionChartTypes[combinationName] || 'pie_chart';
+    const chartTheme = contributionChartThemes[combinationName] || 'default';
+    const showDataLabels = contributionChartDataLabels[combinationName] !== undefined ? contributionChartDataLabels[combinationName] : false;
+    const sortOrder = contributionChartSortOrder[combinationName] || null;
+    const isExpanded = !collapsedGraphs.contribution;
+    
+    // Prepare props for RechartsChartRenderer
+    const rendererProps = {
+      key: `contribution-chart-${combinationName}-${chartType}-${chartTheme}`,
+      type: chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
+      data: contributionChartData,
+      xField: 'name',
+      yField: 'value',
+      xKey: 'name',
+      yKey: 'value',
+      xAxisLabel: 'Variable',
+      yAxisLabel: 'Contribution',
+      theme: chartTheme,
+      enableScroll: false,
+      width: isExpanded ? 400 : 500,
+      height: isExpanded ? 350 : 400,
+      showDataLabels: showDataLabels,
+      showLegend: chartType === 'pie_chart',
+      sortOrder: sortOrder,
+      onThemeChange: (newTheme: string) => handleContributionChartThemeChange(combinationName, newTheme),
+      onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleContributionChartTypeChange(combinationName, newType),
+      onDataLabelsToggle: (newShowDataLabels: boolean) => handleContributionChartDataLabelsChange(combinationName, newShowDataLabels),
+      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleContributionChartSortOrderChange(combinationName, newSortOrder)
+    };
+    
     return (
-      <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
         <h5 className="text-sm font-medium text-orange-800 mb-3">
           {combinationName} 
         </h5>
-        <ResponsiveContainer width="100%" height={150}>
-          <PieChart>
-            <Pie
-              data={contributionChartData}
-              cx="50%"
-              cy="50%"
-              innerRadius={30}
-              outerRadius={70}
-              paddingAngle={2}
-              dataKey="value"
-            >
-              {contributionChartData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} />
-              ))}
-            </Pie>
-            <RechartsTooltip 
-              formatter={(value: any, name: any) => [value.toFixed(2), name]}
-              labelFormatter={(label) => `Variable: ${label}`}
-            />
-          </PieChart>
-        </ResponsiveContainer>
-        <div className="mt-2 space-y-1 max-h-20 overflow-y-auto">
-          {contributionChartData.map((item, i) => (
-            <div key={i} className="text-xs flex items-center gap-2">
-              <div 
-                className="w-3 h-3 rounded-full" 
-                style={{ backgroundColor: item.color }}
-              ></div>
-              <span className="text-orange-600">
-                {item.name}: {item.value.toFixed(2)}
-              </span>
-            </div>
-          ))}
+        <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
+          <RechartsChartRenderer {...rendererProps} />
         </div>
         
         {/* Comment Section */}
@@ -934,7 +1201,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     if (isLoadingActualVsPredictedData) {
       return (
-        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[600px]">
           <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
           <div className="h-[150px] flex items-center justify-center">
             <p className="text-xs text-orange-600 text-center">Loading actual vs predicted data...</p>
@@ -945,7 +1212,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     if (!combinationData || !combinationData.actual_values || !combinationData.predicted_values) {
       return (
-        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[600px]">
           <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
           <div className="h-[150px] flex items-center justify-center">
             <p className="text-xs text-orange-600 text-center">No actual vs predicted data available</p>
@@ -954,76 +1221,57 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       );
     }
     
-    // Transform data for scatter chart and sort by actual values (low to high) - same as select atom
+    // Transform data for chart and sort by actual values (low to high)
     const chartData = combinationData.actual_values.map((actual: number, index: number) => ({
       actual: actual,
       predicted: combinationData.predicted_values[index] || 0
-    })).sort((a, b) => a.actual - b.actual); // Sort by actual values (low to high)
+    })).sort((a, b) => a.actual - b.actual);
     
     console.log('🔍 DEBUG: Actual vs Predicted chart data:', chartData);
     
-    // Calculate dynamic domain ranges with padding - same as select atom
-    const actualMin = Math.min(...chartData.map(d => d.actual));
-    const actualMax = Math.max(...chartData.map(d => d.actual));
-    const predictedMin = Math.min(...chartData.map(d => d.predicted));
-    const predictedMax = Math.max(...chartData.map(d => d.predicted));
+    // Get chart type and theme for this combination (default to scatter_chart)
+    const chartType = actualVsPredictedChartTypes[combinationName] || 'scatter_chart';
+    const chartTheme = actualVsPredictedChartThemes[combinationName] || 'default';
+    const showDataLabels = actualVsPredictedChartDataLabels[combinationName] !== undefined ? actualVsPredictedChartDataLabels[combinationName] : false;
+    const sortOrder = actualVsPredictedChartSortOrder[combinationName] || null;
+    const isExpanded = !collapsedGraphs['actual-vs-predicted'];
     
-    // Add 10% padding to the ranges for better visualization
-    const actualPadding = (actualMax - actualMin) * 0.1;
-    const predictedPadding = (predictedMax - predictedMin) * 0.1;
-    
-    const xDomain = [Math.max(0, actualMin - actualPadding), actualMax + actualPadding];
-    const yDomain = [Math.max(0, predictedMin - predictedPadding), predictedMax + predictedPadding];
-    
-    console.log('🔍 DEBUG: Dynamic axis domains - X:', xDomain, 'Y:', yDomain);
+    // Prepare props for RechartsChartRenderer
+    const rendererProps = {
+      key: `actual-vs-predicted-chart-${combinationName}-${chartType}-${chartTheme}`,
+      type: chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
+      data: chartData,
+      xField: 'actual',
+      yField: 'predicted',
+      xKey: 'actual',
+      yKey: 'predicted',
+      xAxisLabel: 'Actual',
+      yAxisLabel: 'Predicted',
+      theme: chartTheme,
+      enableScroll: false,
+      width: isExpanded ? 400 : 500,
+      height: isExpanded ? 350 : 400,
+      showDataLabels: showDataLabels,
+      showLegend: chartType === 'pie_chart',
+      sortOrder: sortOrder,
+      onThemeChange: (newTheme: string) => handleActualVsPredictedChartThemeChange(combinationName, newTheme),
+      onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleActualVsPredictedChartTypeChange(combinationName, newType),
+      onDataLabelsToggle: (newShowDataLabels: boolean) => handleActualVsPredictedChartDataLabelsChange(combinationName, newShowDataLabels),
+      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleActualVsPredictedChartSortOrderChange(combinationName, newSortOrder)
+    };
     
     return (
-      <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
         <h5 className="text-sm font-medium text-orange-800 mb-3">
           {combinationName} 
         </h5>
-        <ResponsiveContainer width="100%" height={150}>
-          <ScatterChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis 
-              dataKey="actual" 
-              name="Actual" 
-              fontSize={10}
-              label={{ value: 'Actual', position: 'insideBottom', offset: -5 }}
-              domain={xDomain}
-              tickFormatter={(value) => Math.round(value).toString()}
-            />
-            <YAxis 
-              dataKey="predicted" 
-              name="Predicted" 
-              fontSize={10}
-              label={{ value: 'Predicted', position: 'insideLeft', angle: -90, offset: 0 }}
-              domain={yDomain}
-              tickFormatter={(value) => Math.round(value).toString()}
-            />
-            <RechartsTooltip 
-              formatter={(value: any, name: any) => [value.toFixed(2), name]}
-              labelFormatter={(label) => `Data Point`}
-            />
-            <Scatter 
-              dataKey="predicted" 
-              fill={getColor(0)}
-              name="Predicted vs Actual"
-            />
-          </ScatterChart>
-        </ResponsiveContainer>
+        <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
+          <RechartsChartRenderer {...rendererProps} />
+        </div>
         <div className="mt-2 space-y-1">
           <div className="text-xs text-orange-600">
             Model: {combinationData.model_name || 'Unknown'}
           </div>
-          {/* <div className="text-xs text-orange-600">
-            Data Points: {chartData.length}
-          </div>
-          {combinationData.performance_metrics && (
-            <div className="text-xs text-orange-600">
-              R²: {combinationData.performance_metrics.r2?.toFixed(3) || 'N/A'}
-            </div>
-          )} */}
         </div>
         
         {/* Comment Section */}
@@ -1038,7 +1286,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     if (isLoadingBetaData) {
       return (
-        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[600px]">
           <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
           <div className="h-[150px] flex items-center justify-center">
             <p className="text-xs text-orange-600 text-center">Loading beta data...</p>
@@ -1050,7 +1298,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     const combinationData = betaData[combinationName];
     if (!combinationData || !combinationData.beta_data || combinationData.beta_data.length === 0) {
       return (
-        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[600px]">
           <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
           <div className="h-[150px] flex items-center justify-center">
             <p className="text-xs text-orange-600 text-center">No beta data available</p>
@@ -1064,18 +1312,42 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       value: item.value
     }));
     
+    // Get chart type and theme for this combination
+    const chartType = betaCoefficientsChartTypes[combinationName] || 'bar_chart';
+    const chartTheme = betaCoefficientsChartThemes[combinationName] || 'default';
+    const showDataLabels = betaCoefficientsChartDataLabels[combinationName] !== undefined ? betaCoefficientsChartDataLabels[combinationName] : true;
+    const sortOrder = betaCoefficientsChartSortOrder[combinationName] || null;
+    const isExpanded = !collapsedGraphs.beta;
+    
+    const rendererProps = {
+      key: `beta-chart-${combinationName}-${chartType}-${chartTheme}`,
+      type: chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
+      data: chartData,
+      xField: 'name',
+      yField: 'value',
+      xKey: 'name',
+      yKey: 'value',
+      xAxisLabel: 'Feature',
+      yAxisLabel: 'Beta Coefficient',
+      theme: chartTheme,
+      enableScroll: false,
+      width: isExpanded ? 400 : 500,
+      height: isExpanded ? 350 : 400,
+      showDataLabels: showDataLabels,
+      showLegend: chartType === 'pie_chart',
+      sortOrder: sortOrder,
+      onThemeChange: (newTheme: string) => handleBetaCoefficientsChartThemeChange(combinationName, newTheme),
+      onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleBetaCoefficientsChartTypeChange(combinationName, newType),
+      onDataLabelsToggle: (newShowDataLabels: boolean) => handleBetaCoefficientsChartDataLabelsChange(combinationName, newShowDataLabels),
+      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleBetaCoefficientsChartSortOrderChange(combinationName, newSortOrder)
+    };
+    
     return (
-      <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
         <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
-        <ResponsiveContainer width="100%" height={150}>
-          <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" fontSize={10} />
-            <YAxis fontSize={10} />
-            <RechartsTooltip formatter={(value: any) => [value.toFixed(4), 'Beta']} />
-            <Bar dataKey="value" fill={getColor(0)} />
-          </BarChart>
-        </ResponsiveContainer>
+        <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
+          <RechartsChartRenderer {...rendererProps} />
+        </div>
         
         {/* Comment Section */}
         {renderCommentSection(chartId)}
@@ -1089,7 +1361,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     if (isLoadingElasticityData) {
       return (
-        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[600px]">
           <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
           <div className="h-[150px] flex items-center justify-center">
             <p className="text-xs text-orange-600 text-center">Loading elasticity data...</p>
@@ -1101,7 +1373,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     const combinationData = elasticityData[combinationName];
     if (!combinationData || !combinationData.elasticity_data || combinationData.elasticity_data.length === 0) {
       return (
-        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[600px]">
           <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
           <div className="h-[150px] flex items-center justify-center">
             <p className="text-xs text-orange-600 text-center">No elasticity data available</p>
@@ -1115,18 +1387,42 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       value: item.value
     }));
     
+    // Get chart type and theme for this combination
+    const chartType = elasticityChartTypes[combinationName] || 'bar_chart';
+    const chartTheme = elasticityChartThemes[combinationName] || 'default';
+    const showDataLabels = elasticityChartDataLabels[combinationName] !== undefined ? elasticityChartDataLabels[combinationName] : true;
+    const sortOrder = elasticityChartSortOrder[combinationName] || null;
+    const isExpanded = !collapsedGraphs.elasticity;
+    
+    const rendererProps = {
+      key: `elasticity-chart-${combinationName}-${chartType}-${chartTheme}`,
+      type: chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
+      data: chartData,
+      xField: 'name',
+      yField: 'value',
+      xKey: 'name',
+      yKey: 'value',
+      xAxisLabel: 'Feature',
+      yAxisLabel: 'Elasticity',
+      theme: chartTheme,
+      enableScroll: false,
+      width: isExpanded ? 400 : 500,
+      height: isExpanded ? 350 : 400,
+      showDataLabels: showDataLabels,
+      showLegend: chartType === 'pie_chart',
+      sortOrder: sortOrder,
+      onThemeChange: (newTheme: string) => handleElasticityChartThemeChange(combinationName, newTheme),
+      onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleElasticityChartTypeChange(combinationName, newType),
+      onDataLabelsToggle: (newShowDataLabels: boolean) => handleElasticityChartDataLabelsChange(combinationName, newShowDataLabels),
+      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleElasticityChartSortOrderChange(combinationName, newSortOrder)
+    };
+    
     return (
-      <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
         <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
-        <ResponsiveContainer width="100%" height={150}>
-          <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" fontSize={10} />
-            <YAxis fontSize={10} />
-            <RechartsTooltip formatter={(value: any) => [value.toFixed(4), 'Elasticity']} />
-            <Bar dataKey="value" fill={getColor(1)} />
-          </BarChart>
-        </ResponsiveContainer>
+        <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
+          <RechartsChartRenderer {...rendererProps} />
+        </div>
         
         {/* Comment Section */}
         {renderCommentSection(chartId)}
@@ -1140,7 +1436,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     if (isLoadingAveragesData) {
       return (
-        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[600px]">
           <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
           <div className="h-[150px] flex items-center justify-center">
             <p className="text-xs text-orange-600 text-center">Loading averages data...</p>
@@ -1152,7 +1448,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     const combinationData = averagesData[combinationName];
     if (!combinationData || !combinationData.averages_data || combinationData.averages_data.length === 0) {
       return (
-        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[600px]">
           <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
           <div className="h-[150px] flex items-center justify-center">
             <p className="text-xs text-orange-600 text-center">No averages data available</p>
@@ -1166,18 +1462,42 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       value: item.value
     }));
     
+    // Get chart type and theme for this combination
+    const chartType = averagesChartTypes[combinationName] || 'bar_chart';
+    const chartTheme = averagesChartThemes[combinationName] || 'default';
+    const showDataLabels = averagesChartDataLabels[combinationName] !== undefined ? averagesChartDataLabels[combinationName] : true;
+    const sortOrder = averagesChartSortOrder[combinationName] || null;
+    const isExpanded = !collapsedGraphs.averages;
+    
+    const rendererProps = {
+      key: `averages-chart-${combinationName}-${chartType}-${chartTheme}`,
+      type: chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
+      data: chartData,
+      xField: 'name',
+      yField: 'value',
+      xKey: 'name',
+      yKey: 'value',
+      xAxisLabel: 'Feature',
+      yAxisLabel: 'Average',
+      theme: chartTheme,
+      enableScroll: false,
+      width: isExpanded ? 400 : 500,
+      height: isExpanded ? 350 : 400,
+      showDataLabels: showDataLabels,
+      showLegend: chartType === 'pie_chart',
+      sortOrder: sortOrder,
+      onThemeChange: (newTheme: string) => handleAveragesChartThemeChange(combinationName, newTheme),
+      onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleAveragesChartTypeChange(combinationName, newType),
+      onDataLabelsToggle: (newShowDataLabels: boolean) => handleAveragesChartDataLabelsChange(combinationName, newShowDataLabels),
+      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleAveragesChartSortOrderChange(combinationName, newSortOrder)
+    };
+    
     return (
-      <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
         <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
-        <ResponsiveContainer width="100%" height={150}>
-          <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" fontSize={10} />
-            <YAxis fontSize={10} />
-            <RechartsTooltip formatter={(value: any) => [value.toFixed(2), 'Average']} />
-            <Bar dataKey="value" fill="#8B5CF6" />
-          </BarChart>
-        </ResponsiveContainer>
+        <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
+          <RechartsChartRenderer {...rendererProps} />
+        </div>
         
         {/* Comment Section */}
         {renderCommentSection(chartId)}
@@ -1193,29 +1513,35 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     setCardinalityError(null);
     
     try {
-      // Add .arrow extension if not present, like other atoms do
-      const objectName = data.selectedDataframe.endsWith('.arrow') ? data.selectedDataframe : `${data.selectedDataframe}.arrow`;
-      const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(objectName)}`
-      );
-      
-      if (!res.ok) {
-        setCardinalityError('Failed to fetch cardinality data');
-        return;
+      // Extract the object name by removing the prefix (default_client/default_app/default_project/)
+      // The groupby endpoint will add the prefix back, so we need to pass the path without the prefix
+      let objectName = data.selectedDataframe;
+      if (data.selectedDataframe.includes('/')) {
+        const parts = data.selectedDataframe.split('/');
+        // Remove the first 3 parts (default_client/default_app/default_project)
+        if (parts.length > 3) {
+          objectName = parts.slice(3).join('/');
+        } else {
+          // If less than 3 parts, just use the last part
+          objectName = parts[parts.length - 1];
+        }
       }
       
-      const response = await res.json();
-      const summary = Array.isArray(response.summary) ? response.summary.filter(Boolean) : [];
+      // Use GROUPBY_API cardinality endpoint instead of FEATURE_OVERVIEW_API
+      const formData = new FormData();
+      formData.append('validator_atom_id', atomId); // Use atomId as validator_atom_id
+      formData.append('file_key', objectName);
+      formData.append('bucket_name', 'trinity');
+      formData.append('object_names', objectName);
       
-      // Transform the data to match the expected format
-      const cardinalityData = summary.map((col: any) => ({
-        column: col.column,
-        data_type: col.data_type,
-        unique_count: col.unique_count,
-        unique_values: col.unique_values || []
-      }));
+      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
+      const data_result = await res.json();
       
-      setCardinalityData(cardinalityData);
+      if (data_result.status === 'SUCCESS' && data_result.cardinality) {
+        setCardinalityData(data_result.cardinality);
+      } else {
+        setCardinalityError(data_result.error || 'Failed to fetch cardinality data');
+      }
     } catch (e: any) {
       setCardinalityError(e.message || 'Error fetching cardinality data');
     } finally {
@@ -1224,11 +1550,13 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   };
 
   const displayedCardinality = useMemo(() => {
+    console.log('🔍 displayedCardinality recalculating:', { cardinalityData: cardinalityData.length, columnFilters, sortColumn, sortDirection });
     let filtered = cardinalityData.filter(c => c.unique_count > 0);
 
     // Apply column filters
     Object.entries(columnFilters).forEach(([column, filterValues]) => {
       if (Array.isArray(filterValues) && filterValues.length > 0) {
+        console.log('🔍 Applying filter:', { column, filterValues });
         filtered = filtered.filter(row => {
           const cellValue = String(row[column] || '');
           return filterValues.includes(cellValue);
@@ -1252,6 +1580,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       });
     }
 
+    console.log('🔍 displayedCardinality result:', { originalCount: cardinalityData.length, filteredCount: filtered.length, filtered });
     return filtered;
   }, [cardinalityData, columnFilters, sortColumn, sortDirection]);
 
@@ -1280,36 +1609,46 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   const handleSort = (column: string, direction?: 'asc' | 'desc') => {
     if (sortColumn === column) {
       if (sortDirection === 'asc') {
-        setSortDirection('desc');
+        onDataChange({ sortDirection: 'desc' });
       } else if (sortDirection === 'desc') {
-        setSortColumn('');
-        setSortDirection('asc');
+        onDataChange({ 
+          sortColumn: '',
+          sortDirection: 'asc'
+        });
       }
     } else {
-      setSortColumn(column);
-      setSortDirection(direction || 'asc');
+      onDataChange({
+        sortColumn: column,
+        sortDirection: direction || 'asc'
+      });
     }
   };
 
   const handleColumnFilter = (column: string, values: string[]) => {
-    setColumnFilters(prev => ({
-      ...prev,
-      [column]: values
-    }));
+    console.log('🔍 handleColumnFilter called:', { column, values, currentFilters: columnFilters });
+    onDataChange({
+      columnFilters: {
+        ...columnFilters,
+        [column]: values
+      }
+    });
   };
 
   const clearColumnFilter = (column: string) => {
-    setColumnFilters(prev => {
-      const cpy = { ...prev };
-      delete cpy[column];
-      return cpy;
-    });
+    const newFilters = { ...columnFilters };
+    delete newFilters[column];
+    onDataChange({ columnFilters: newFilters });
   };
 
   const FilterMenu = ({ column }: { column: string }) => {
     const uniqueValues = getUniqueColumnValues(column);
     const current = columnFilters[column] || [];
     const [temp, setTemp] = useState<string[]>(current);
+
+    // Sync temp state with global state when it changes
+    useEffect(() => {
+      setTemp(current);
+    }, [current]);
 
     const toggleVal = (val: string) => {
       setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
@@ -1353,6 +1692,38 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       fetchCardinalityData();
     }
   }, [data.selectedDataframe]);
+
+  // Show placeholder when no dataframe is selected
+  if (!data.selectedDataframe) {
+    return (
+      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-orange-50/30 to-orange-50/50 overflow-y-auto relative">
+        <div className="absolute inset-0 opacity-20">
+          <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
+            <defs>
+              <pattern id="emptyGrid" width="80" height="80" patternUnits="userSpaceOnUse">
+                <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(148 163 184 / 0.15)" strokeWidth="1"/>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#emptyGrid)" />
+          </svg>
+        </div>
+
+        <div className="relative z-10 flex items-center justify-center h-full">
+          <div className="text-center max-w-md">
+            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+              <BarChart3 className="w-12 h-12 text-white drop-shadow-lg" />
+            </div>
+            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-orange-500 to-orange-600 bg-clip-text text-transparent">
+              Evaluate Models Operation
+            </h3>
+            <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
+              Select a dataframe from the properties panel to get started
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col bg-background">

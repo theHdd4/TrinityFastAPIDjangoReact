@@ -7,7 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Plus, Settings, Calendar, X, Loader2, Target, Check, BarChart3, ArrowUp, ArrowDown, Filter as FilterIcon } from 'lucide-react';
-import { SCOPE_SELECTOR_API, CLASSIFIER_API, FEATURE_OVERVIEW_API } from '@/lib/api';
+import { SCOPE_SELECTOR_API, CLASSIFIER_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import { ScopeSelectorData, ScopeData } from '../ScopeSelectorAtom';
 import Table from '@/templates/tables/table';
 import scopeSelector from '../index';
@@ -46,14 +46,24 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
   const [filteredLoading, setFilteredLoading] = useState<{ [scopeId: string]: { [key: string]: boolean } }>({});
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
-  // Preview row counts per scope after save
-  type PreviewRow = { scopeId: string; values: Record<string, string>; count: number; pctPass?: boolean };
-  const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
-  
   // Get atom settings to access the input file name
   const atom = useLaboratoryStore(state => atomId ? state.getAtom(atomId) : undefined);
+  const updateAtomSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const atomSettings = (atom?.settings as any) || {};
   const inputFileName = atomSettings.dataSource || data.dataSource || '';
+
+  // Preview row counts per scope after save
+  type PreviewRow = { scopeId: string; values: Record<string, string>; count: number; pctPass?: boolean };
+  const [previewRows, setPreviewRows] = useState<PreviewRow[]>(() => {
+    return atomSettings.previewRows || [];
+  });
+
+  // Sync with global store changes
+  React.useEffect(() => {
+    if (atomSettings.previewRows) {
+      setPreviewRows(atomSettings.previewRows);
+    }
+  }, [atomSettings.previewRows]);
 
   // Handle opening the input file in a new tab
   const handleViewDataClick = () => {
@@ -320,6 +330,14 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
 
       await Promise.all(comboPromises);
       setPreviewRows(previewRowsAccum);
+      
+      // Save preview data to global store
+      if (atomId) {
+        updateAtomSettings(atomId, {
+          previewRows: previewRowsAccum
+        });
+      }
+      
       toast({ title: 'Success', description: 'Scope saved successfully.' });
       // Notify other components (e.g., SavedDataFramesPanel) to refresh list
       window.dispatchEvent(new CustomEvent('savedDataFrame'));
@@ -717,27 +735,20 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     setCardinalityError(null);
     
     try {
-      const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(data.dataSource)}`
-      );
+      const formData = new FormData();
+      formData.append('validator_atom_id', '');
+      formData.append('file_key', data.dataSource);
+      formData.append('bucket_name', 'trinity');
+      formData.append('object_names', data.dataSource);
       
-      if (!res.ok) {
-        setCardinalityError('Failed to fetch cardinality data');
-        return;
+      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
+      const data_result = await res.json();
+      
+      if (data_result.status === 'SUCCESS' && data_result.cardinality) {
+        setCardinalityData(data_result.cardinality);
+      } else {
+        setCardinalityError(data_result.error || 'Failed to fetch cardinality data');
       }
-      
-      const result = await res.json();
-      const summary = Array.isArray(result.summary) ? result.summary.filter(Boolean) : [];
-      
-      // Transform the data to match the expected format
-      const cardinalityData = summary.map((col: any) => ({
-        column: col.column,
-        data_type: col.data_type,
-        unique_count: col.unique_count,
-        unique_values: col.unique_values || []
-      }));
-      
-      setCardinalityData(cardinalityData);
     } catch (e: any) {
       setCardinalityError(e.message || 'Error fetching cardinality data');
     } finally {
@@ -1075,6 +1086,38 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
       </div>
     </div>
   );
+
+  // Show placeholder when no data source is selected
+  if (!data.dataSource) {
+    return (
+      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-green-50/30 to-green-50/50 overflow-y-auto relative">
+        <div className="absolute inset-0 opacity-20">
+          <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
+            <defs>
+              <pattern id="emptyGrid" width="80" height="80" patternUnits="userSpaceOnUse">
+                <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(148 163 184 / 0.15)" strokeWidth="1"/>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#emptyGrid)" />
+          </svg>
+        </div>
+
+        <div className="relative z-10 flex items-center justify-center h-full">
+          <div className="text-center max-w-md">
+            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+              <Target className="w-12 h-12 text-white drop-shadow-lg" />
+            </div>
+            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-green-500 to-green-600 bg-clip-text text-transparent">
+              Scope Selector Operation
+            </h3>
+            <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
+              Select a data source and identifiers from the properties panel to get started
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // If no scopes exist, show a message to add one
   if (data.scopes.length === 0) {

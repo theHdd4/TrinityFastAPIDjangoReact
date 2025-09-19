@@ -1,0 +1,40 @@
+DataFrame Operations Atom – Formula Bar API Usage
+=================================================
+
+Overview
+--------
+The DataFrame Operations atom exposes an enhanced formula bar that sits directly above the grid. The bar shows the active cell reference, the pending target column, and surfaces the inline usage guide alongside the categorized formula library. Apply runs the current expression through the dataframe operations API while Cancel resets the selections.【F:TrinityFrontend/src/components/AtomList/atoms/dataframe-operations/components/FormularBar.tsx†L663-L836】
+
+Column & Formula Input
+----------------------
+* Click a header to set the column that should receive the results; the Apply button stays disabled until a column and non-empty formula are present.【F:TrinityFrontend/src/components/AtomList/atoms/dataframe-operations/components/DataFrameOperationsCanvas.tsx†L855-L858】【F:TrinityFrontend/src/components/AtomList/atoms/dataframe-operations/components/FormularBar.tsx†L817-L836】
+* After a formula runs, reselecting that column automatically repopulates the bar with the saved expression so edits start from the last applied formula.【F:TrinityFrontend/src/components/AtomList/atoms/dataframe-operations/components/DataFrameOperationsCanvas.tsx†L224-L245】【F:TrinityFrontend/src/components/AtomList/atoms/dataframe-operations/components/DataFrameOperationsCanvas.tsx†L861-L883】
+* The input is always treated as a formula box, so type spreadsheet-style expressions (prefixed with `=`) and press Escape to clear the bar and close the helpers.【F:TrinityFrontend/src/components/AtomList/atoms/dataframe-operations/components/FormularBar.tsx†L756-L771】【F:TrinityFrontend/src/components/AtomList/atoms/dataframe-operations/components/FormularBar.tsx†L628-L631】
+
+Formula Library & Usage Guide
+-----------------------------
+* The **Library** popover groups formulas into mathematical, statistical, logical, text, date, mapping, and null-handling tabs and supports fuzzy search. Selecting an item injects the example expression and highlights the category so you can continue editing.【F:TrinityFrontend/src/components/AtomList/atoms/dataframe-operations/components/FormularBar.tsx†L53-L380】【F:TrinityFrontend/src/components/AtomList/atoms/dataframe-operations/components/FormularBar.tsx†L794-L812】
+* The Σ usage button toggles an inline guide beneath the bar. When a recognised formula is active it surfaces syntax, description, quick column badges, and the currently selected cell; otherwise it prompts users to insert a legitimate expression and check the library for details.【F:TrinityFrontend/src/components/AtomList/atoms/dataframe-operations/components/FormularBar.tsx†L679-L752】
+
+Available Operations
+--------------------
+The library lists the existing math, correlation, and aggregation helpers alongside the requested additions (IF variants, LOWER/UPPER, LEN, `SUBSTR`, `STR_REPLACE`, `DATE_DIFF`, `ABS`, `ROUND`, `FLOOR`, `CEIL`, `EXP`, `LOG`, `SQRT`, exponentiation, Z-score normalisation, `BIN`, `MAP`, `ISNULL`, and `FILLNA`). Each operation’s syntax, description, and example appear in both the library cards and the usage guide for quick reference.【F:TrinityFrontend/src/components/AtomList/atoms/dataframe-operations/components/FormularBar.tsx†L53-L380】
+
+Backend Evaluation
+------------------
+Submitting a formula triggers `POST /apply_formula` with the dataframe session id, the selected column, and the trimmed formula string. The backend replaces column references with row values, evaluates the expression with the vetted helper functions, writes the computed series back into the dataframe, and returns the refreshed payload to the UI.【F:TrinityBackendFastAPI/app/features/dataframe_operations/app/routes.py†L596-L640】【F:TrinityFrontend/src/components/AtomList/atoms/dataframe-operations/components/DataFrameOperationsCanvas.tsx†L787-L808】
+
+Execution Example
+-----------------
+Applying `=IF(colA > 10, colB, colC)` against column `Result` results in the following payload:
+
+```json
+POST /apply_formula
+{
+  "df_id": "<session-id>",
+  "target_column": "Result",
+  "formula": "=IF(colA > 10, colB, colC)"
+}
+```
+
+The backend substitutes each row’s `colA`, `colB`, and `colC` values, evaluates the IF expression with the registered helpers, and returns the updated dataframe payload to the UI.【F:TrinityBackendFastAPI/app/features/dataframe_operations/app/routes.py†L596-L640】

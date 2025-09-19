@@ -58,15 +58,15 @@ try:
     marketing_collection = marketing_db["marketing_models"]
 
     # ADD CREATEANDTRANSFORM COLLECTION HERE
-    trinity_prod_db = mongo_client["trinity_prod"]
-    createandtransform_configs_collection = trinity_prod_db["createandtransform_configs"]
+    trinity_db_db = mongo_client["trinity_db"]
+    createandtransform_configs_collection = trinity_db_db["createandtransform_configs"]
 
     logger.info("✅ MongoDB connected - collections ready:")
     logger.info("    • Scope_selection.Scopes")
     logger.info("    • Builddatabase.simple")  # Assuming these are your settings
     logger.info("    • Marketing.marketing_metadata")
     logger.info("    • Marketing.marketing_models")
-    logger.info("    • trinity_prod.createandtransform_configs")
+    logger.info("    • trinity_db.createandtransform_configs")
 
     logger.info(f"    • {settings.database_name}.{settings.collection_name}")
     
@@ -75,7 +75,7 @@ except Exception as e:
     mongo_client = None
     scope_db = None
     build_db = None
-    trinity_prod_db = None
+    trinity_db_db = None
     scopes_collection = None
     build_collection = None
     createandtransform_configs_collection = None

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Database, Eye, BarChart3 } from 'lucide-react';
+import { Upload, Settings, Eye } from 'lucide-react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import DataFrameOperationsExhibition from '../DataFrameOperationsExhibition';
@@ -8,6 +8,7 @@ import DataFrameOperationsCharts from './DataFrameOperationsCharts';
 import { DataFrameData } from '../../DataFrameOperationsAtom';
 import { VALIDATE_API } from '@/lib/api';
 import { loadDataframeByKey } from '../../services/dataframeOperationsApi';
+import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
 
 // Define DataFrameOperationsSettings interface and default settings locally
 export interface DataFrameOperationsSettings {
@@ -54,13 +55,11 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
   const [error, setError] = React.useState<string | null>(null);
   const [selectedFrame, setSelectedFrame] = React.useState<any>(null);
 
-  // Fetch and load data when a file is selected
-  const handleFileSelect = async (fileId: string) => {
+  const applyFileSelect = async (fileId: string) => {
     setSelectedFile(fileId);
     setLoading(true);
     setError(null);
     try {
-      // Fetch the list of frames to resolve the display name
       const framesRes = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
       const framesData = await framesRes.json();
       const frames = Array.isArray(framesData.files)
@@ -70,10 +69,17 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
       setSelectedFrame(foundFrame || null);
       const resp = await loadDataframeByKey(fileId);
 
-      const columnTypes: Record<string, string> = {};
+      const columnTypes: Record<string, 'text' | 'number' | 'date'> = {};
       resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+        const rawType = resp.types[h];
+        const normalized = (typeof rawType === 'string' ? rawType : String(rawType || '')).toLowerCase();
+        if (['float', 'double', 'int', 'decimal', 'numeric', 'number'].some(token => normalized.includes(token))) {
+          columnTypes[h] = 'number';
+        } else if (['datetime', 'date', 'time', 'timestamp'].some(token => normalized.includes(token))) {
+          columnTypes[h] = 'date';
+        } else {
+          columnTypes[h] = 'text';
+        }
       });
       const newData: DataFrameData = {
         headers: resp.headers,
@@ -102,24 +108,32 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
     }
   };
 
+  const { requestChange: confirmFileChange, dialog } = useDataSourceChangeWarning(applyFileSelect);
+
+  const handleFileSelect = (fileId: string) => {
+    const hasExistingUpdates = Boolean(settings.tableData && Array.isArray(settings.tableData.rows) && settings.tableData.rows.length > 0);
+    const isDifferentSource = fileId !== (settings.selectedFile || '');
+    confirmFileChange(fileId, hasExistingUpdates && isDifferentSource);
+  };
+
   return (
-    <Tabs value={tab} onValueChange={setTab} className="w-full">
-      <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-        <TabsTrigger value="inputs" className="text-xs">
-          <Database className="w-3 h-3 mr-1" />
-          Inputs
-        </TabsTrigger>
-        <TabsTrigger value="charts" className="text-xs">
-          <BarChart3 className="w-3 h-3 mr-1" />
-          Charts
-        </TabsTrigger>
-        <TabsTrigger value="exhibition" className="text-xs">
-          <Eye className="w-3 h-3 mr-1" />
-          Exhibition
-        </TabsTrigger>
-      </TabsList>
-      <div className="px-4">
-        <TabsContent value="inputs">
+    <div className="h-full flex flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="inputs" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Input
+          </TabsTrigger>
+          <TabsTrigger value="charts" className="text-xs font-medium">
+            <Settings className="w-3 h-3 mr-1" />
+            Settings
+          </TabsTrigger>
+          <TabsTrigger value="exhibition" className="text-xs font-medium">
+            <Eye className="w-3 h-3 mr-1" />
+            Exhibition
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="inputs" className="flex-1 mt-0">
           <DataFrameOperationsInputs
             data={data}
             settings={settings}
@@ -129,14 +143,14 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
           {loading && <div className="text-slate-700 text-xs p-2">Loading data...</div>}
           {error && <div className="text-red-600 text-xs p-2">{error}</div>}
         </TabsContent>
-        <TabsContent value="charts">
+        <TabsContent value="charts" className="flex-1 mt-0">
           <DataFrameOperationsCharts data={data} settings={settings} />
         </TabsContent>
-        <TabsContent value="exhibition">
+        <TabsContent value="exhibition" className="flex-1 mt-0">
           <DataFrameOperationsExhibition data={(settings as any).tableData || data} />
         </TabsContent>
-      </div>
-    </Tabs>
+      </Tabs>
+    </div>
   );
 };
 

@@ -3,13 +3,15 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
+import { VALIDATE_API, CLASSIFIER_API, FEATURE_OVERVIEW_API } from '@/lib/api';
+import { cancelPrefillController } from '../prefillManager';
 import type { FileClassification, ColumnData } from '../ColumnClassifierAtom';
 import {
   useLaboratoryStore,
   ColumnClassifierSettings as SettingsType,
   DEFAULT_COLUMN_CLASSIFIER_SETTINGS
 } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
 
 interface Frame { object_name: string; csv_name: string; arrow_name?: string }
 
@@ -38,6 +40,24 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
   const [savedId, setSavedId] = useState(settings.validatorId || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const hasExistingUpdates = Boolean(
+    (settings.assignments && Object.keys(settings.assignments).length > 0) ||
+    (settings.validatorId && settings.validatorId.length > 0)
+  );
+
+  const applySavedIdChange = (value: string) => {
+    setSavedId(value);
+  };
+
+  const { requestChange: confirmSavedIdChange, dialog } = useDataSourceChangeWarning(async value => {
+    applySavedIdChange(value);
+  });
+
+  const handleSavedIdChange = (value: string) => {
+    const isDifferentSource = value !== savedId;
+    confirmSavedIdChange(value, hasExistingUpdates && isDifferentSource);
+  };
 
   useEffect(() => {
     let query = '';
@@ -68,9 +88,29 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
 
   const classify = async () => {
     if (!savedId) return;
+    cancelPrefillController(atomId);
     setLoading(true);
     setError('');
+    updateSettings(atomId, {
+      isLoading: true,
+      loadingMessage: 'Loading',
+      loadingStatus: 'Fetching flight table',
+    });
     try {
+      const flightRes = await fetch(
+        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(savedId)}`
+      );
+      if (flightRes.ok) {
+        await flightRes.arrayBuffer();
+      }
+      updateSettings(atomId, { loadingStatus: 'Prefetching Dataframe' });
+      const cacheRes = await fetch(
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(savedId)}`
+      );
+      if (cacheRes.ok) {
+        await cacheRes.text();
+      }
+      updateSettings(atomId, { loadingStatus: 'Classifying Dataframe' });
       const form = new FormData();
       form.append('dataframe', savedId);
       const res = await fetch(`${CLASSIFIER_API}/classify_columns`, {
@@ -89,9 +129,16 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
       ];
       const custom = Object.fromEntries((settings.dimensions || []).map(d => [d, []]));
       onClassification({ fileName: savedId, columns: cols, customDimensions: custom });
-      updateSettings(atomId, { validatorId: savedId, assignments: {} });
+      updateSettings(atomId, {
+        validatorId: savedId,
+        assignments: {},
+        isLoading: false,
+        loadingStatus: '',
+        loadingMessage: '',
+      });
     } catch (e: any) {
       setError(e.message);
+      updateSettings(atomId, { isLoading: false, loadingStatus: '', loadingMessage: '' });
     } finally {
       setLoading(false);
     }
@@ -102,7 +149,7 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
       <Card className="p-4 space-y-4">
         <div>
           <Label className="text-sm mb-2 block">Saved Dataframe</Label>
-          <Select value={savedId} onValueChange={setSavedId}>
+          <Select value={savedId} onValueChange={handleSavedIdChange}>
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select dataframe" />
             </SelectTrigger>
@@ -126,6 +173,8 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
           Classify Columns
         </Button>
       </Card>
+
+      {dialog}
 
     </div>
   );

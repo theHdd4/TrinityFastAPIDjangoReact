@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Upload, Settings, Eye } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
@@ -212,30 +213,30 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
   }, [fallbackIdentifiers, fallbackMeasures]);
 
   return (
-    <Tabs value={tab} onValueChange={setTab} className="w-full h-full flex flex-col">
-      <TabsList className="grid w-full grid-cols-3 bg-gray-50 mb-4 shrink-0 mx-4 mt-4 sticky top-0 z-10">
-        <TabsTrigger value="input" className="flex items-center gap-2">
-          
-          Input Files
-        </TabsTrigger>
-        <TabsTrigger value="settings" className="flex items-center gap-2">
-          
-          Settings
-        </TabsTrigger>
-        <TabsTrigger value="exhibition" className="flex items-center gap-2">
-          
-          Exhibition
-        </TabsTrigger>
-      </TabsList>
-      <div className="flex-1 overflow-auto px-4">
+    <div className="h-full flex flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="input" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Input
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="text-xs font-medium">
+            <Settings className="w-3 h-3 mr-1" />
+            Settings
+          </TabsTrigger>
+          <TabsTrigger value="exhibition" className="text-xs font-medium">
+            <Eye className="w-3 h-3 mr-1" />
+            Exhibition
+          </TabsTrigger>
+        </TabsList>
 
         {/* Input Files Tab */}
-        <TabsContent value="input" className="space-y-4 h-full overflow-auto">
+        <TabsContent value="input" className="flex-1 mt-0" forceMount>
           <GroupByInputFiles atomId={atomId} />
         </TabsContent>
 
         {/* Settings Tab */}
-        <TabsContent value="settings" className="space-y-4 h-full overflow-auto">
+        <TabsContent value="settings" className="flex-1 mt-0" forceMount>
           <Card className="border-l-4 border-l-blue-500"
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, 'identifiers')}>
@@ -338,11 +339,11 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
         </TabsContent>
 
         {/* Exhibition Tab */}
-        <TabsContent value="exhibition" className="mt-0 h-full" forceMount>
+        <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
           <GroupByExhibition settings={settings} />
         </TabsContent>
-      </div>
-    </Tabs>
+      </Tabs>
+    </div>
   );
 };
 

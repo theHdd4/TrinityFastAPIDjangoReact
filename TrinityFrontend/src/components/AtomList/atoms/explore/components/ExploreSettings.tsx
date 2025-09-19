@@ -134,11 +134,12 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
   }, [data?.dataframe, columnNames.length]);
 
   // Fetch date range if data source is available
-  useEffect(() => {
-    if (data?.dataframe && !availableDateRange) {
-      fetchDateRange();
-    }
-  }, [data?.dataframe, availableDateRange]);
+  // COMMENTED OUT - causing excessive API calls
+  // useEffect(() => {
+  //   if (data?.dataframe && !availableDateRange) {
+  //     fetchDateRange();
+  //   }
+  // }, [data?.dataframe, availableDateRange]);
 
   const fetchColumnNames = async () => {
     if (!data?.dataframe) return;
