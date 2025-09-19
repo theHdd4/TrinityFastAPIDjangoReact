@@ -1141,8 +1141,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data) return;
     const el = containerRef.current;
     if (el) {
-      // Reset any phantom scroll area after heavy table mount
-      el.style.height = 'auto';
+      // Only reset scroll position, don't modify height to preserve flex layout
       el.scrollTop = 0;
     }
   }, [data]);
@@ -1157,7 +1156,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         className="hidden"
       />
 
-      <div ref={containerRef} className="flex flex-col h-full min-h-0">
+      <div ref={containerRef} className="w-full h-full p-6 overflow-y-auto" style={{position: 'relative'}}>
+        <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
+        {/* File name display in separate blue header section */}
         {data?.fileName && (
           <div className="border-b border-blue-200 bg-blue-50">
             <div className="flex items-center px-6 py-4">
@@ -1170,11 +1171,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             </div>
           </div>
         )}
-        <div className="flex-1 p-4 overflow-hidden min-h-0">
-          <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-col h-full min-h-0">
         {/* Controls section */}
         <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
-            <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-4">
               <div className="relative">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -1702,7 +1701,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           <div className="px-3 py-2 text-xs text-gray-400">Right-click to close</div>
         </div>
       )}
-      </div>
     </>
   );
 };
