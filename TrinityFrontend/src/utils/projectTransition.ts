@@ -21,6 +21,11 @@ const LAB_ELEMENTS = [
 const LAB_PREP_DELAY_MS = 200;
 const LAB_ANIMATION_DURATION_MS = 600;
 
+const applyLabPreparationState = (element: HTMLElement) => {
+  element.style.opacity = LAB_PREPARE_STYLE.opacity;
+  element.style.transform = LAB_PREPARE_STYLE.transform;
+};
+
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' &&
   typeof window.matchMedia === 'function' &&
@@ -89,6 +94,24 @@ export const startProjectTransition = (navigate: NavigateFunction) => {
   }, totalExitTime);
 };
 
+export const prepareLabElements = () => {
+  if (typeof document === 'undefined' || prefersReducedMotion()) {
+    return;
+  }
+
+  LAB_ELEMENTS.forEach(({ selector }) => {
+    const element = document.querySelector(selector) as HTMLElement | null;
+
+    if (!element || !isElementVisible(element)) {
+      return;
+    }
+
+    clearLabElementTimeouts(element);
+    element.classList.remove(LAB_CLASS);
+    applyLabPreparationState(element);
+  });
+};
+
 export const animateLabElementsIn = () => {
   if (typeof document === 'undefined' || prefersReducedMotion()) {
     return;
@@ -104,8 +127,7 @@ export const animateLabElementsIn = () => {
 
       clearLabElementTimeouts(element);
       element.classList.remove(LAB_CLASS);
-      element.style.opacity = LAB_PREPARE_STYLE.opacity;
-      element.style.transform = LAB_PREPARE_STYLE.transform;
+      applyLabPreparationState(element);
       element.style.willChange = 'opacity, transform';
 
       const ensureVisible = () => {

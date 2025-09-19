@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Play, Save, Share2, Undo2, AlertTriangle, List } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -15,7 +15,13 @@ import { REGISTRY_API, LAB_ACTIONS_API } from '@/lib/api';
 import { useLaboratoryStore } from './store/laboratoryStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { addNavigationItem, logSessionState } from '@/lib/session';
-import { animateLabElementsIn, cleanupProjectTransition } from '@/utils/projectTransition';
+import {
+  animateLabElementsIn,
+  cleanupProjectTransition,
+  prepareLabElements,
+} from '@/utils/projectTransition';
+
+const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
@@ -30,9 +36,15 @@ const LaboratoryMode = () => {
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
 
+  useIsomorphicLayoutEffect(() => {
+    cleanupProjectTransition('laboratory');
+    prepareLabElements();
+
+    return () => cleanupProjectTransition('laboratory');
+  }, []);
+
   useEffect(() => {
     animateLabElementsIn();
-    return () => cleanupProjectTransition('laboratory');
   }, []);
 
   useEffect(() => {
