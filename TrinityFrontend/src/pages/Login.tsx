@@ -1,5 +1,5 @@
 
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,30 +18,97 @@ const Login = () => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showAnimation, setShowAnimation] = useState(false);
+  const [loginSuccessful, setLoginSuccessful] = useState(false);
+  const [animationCompleted, setAnimationCompleted] = useState(false);
   const animationStartRef = useRef<number | null>(null);
+  const animationCompletionMetaRef = useRef<{
+    startedAt: number;
+    totalDuration: number;
+    completedAt: number;
+  } | null>(null);
   const navigate = useNavigate();
   const { login } = useAuth();
 
   const handleAnimationComplete = useCallback(() => {
     const startedAt = animationStartRef.current ?? Date.now();
-    sessionStorage.setItem(
-      'trinity-login-anim',
-      JSON.stringify({
-        startedAt,
+    const totalDuration = LOGIN_ANIMATION_TOTAL_DURATION;
+    const completedAt = Date.now();
+
+    animationCompletionMetaRef.current = {
+      startedAt,
+      totalDuration,
+      completedAt,
+    };
+    animationStartRef.current = null;
+    setAnimationCompleted(true);
+  }, []);
+
+  const finalizeNavigation = useCallback(() => {
+    let meta = animationCompletionMetaRef.current;
+
+    if (!meta && animationStartRef.current) {
+      meta = {
+        startedAt: animationStartRef.current,
         totalDuration: LOGIN_ANIMATION_TOTAL_DURATION,
         completedAt: Date.now(),
-      })
-    );
+      };
+    }
+
+    if (!meta) {
+      const stored = sessionStorage.getItem('trinity-login-anim');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored) as {
+            startedAt?: number;
+            totalDuration?: number;
+          };
+          if (typeof parsed.startedAt === 'number') {
+            meta = {
+              startedAt: parsed.startedAt,
+              totalDuration:
+                typeof parsed.totalDuration === 'number'
+                  ? parsed.totalDuration
+                  : LOGIN_ANIMATION_TOTAL_DURATION,
+              completedAt: Date.now(),
+            };
+          }
+        } catch {
+          meta = null;
+        }
+      }
+    }
+
+    if (meta) {
+      sessionStorage.setItem('trinity-login-anim', JSON.stringify(meta));
+    } else {
+      sessionStorage.removeItem('trinity-login-anim');
+    }
+
+    animationCompletionMetaRef.current = null;
     animationStartRef.current = null;
-    navigate('/apps');
+    setIsLoading(false);
+    navigate('/apps', { replace: true });
   }, [navigate]);
+
+  useEffect(() => {
+    if (loginSuccessful && animationCompleted) {
+      finalizeNavigation();
+    }
+  }, [animationCompleted, finalizeNavigation, loginSuccessful]);
+
+  useEffect(() => {
+    if (loginSuccessful && !showAnimation) {
+      finalizeNavigation();
+    }
+  }, [finalizeNavigation, loginSuccessful, showAnimation]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
-
-    console.log('Submitting login form for', username);
+    setLoginSuccessful(false);
+    setAnimationCompleted(false);
+    animationCompletionMetaRef.current = null;
 
     const success = await login(username, password, {
       onInitialSuccess: () => {
@@ -56,6 +123,7 @@ const Login = () => {
     });
 
     if (success) {
+      setLoginSuccessful(true);
       if (!animationStartRef.current) {
         const startedAt = Date.now();
         animationStartRef.current = startedAt;
@@ -67,10 +135,12 @@ const Login = () => {
       }
     } else {
       setError('Invalid credentials.');
-      console.log('Login failed for', username);
       setIsLoading(false);
       animationStartRef.current = null;
+      animationCompletionMetaRef.current = null;
       setShowAnimation(false);
+      setAnimationCompleted(false);
+      setLoginSuccessful(false);
       sessionStorage.removeItem('trinity-login-anim');
     }
   };
