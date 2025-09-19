@@ -5,7 +5,9 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Header from '@/components/Header';
+import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
 import { REGISTRY_API } from '@/lib/api';
+import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 import { clearProjectState, saveCurrentProject } from '@/utils/projectStorage';
 import {
   Plus,
@@ -14,6 +16,7 @@ import {
   BarChart3,
   Zap,
   Clock,
+  Loader2,
   BookmarkPlus,
   Copy,
   MoreHorizontal,
@@ -72,6 +75,9 @@ const Projects = () => {
   const [editingTemplateName, setEditingTemplateName] = useState('');
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [playIntro, setPlayIntro] = useState(false);
+  const [introBaseDelay, setIntroBaseDelay] = useState(0);
   const navigate = useNavigate();
   const currentApp = JSON.parse(localStorage.getItem('current-app') || '{}');
   const selectedApp = currentApp.slug;
@@ -131,8 +137,47 @@ const Projects = () => {
   const Icon = appDetails.icon;
 
   useEffect(() => {
+    if (typeof window === 'undefined') {
+      setPlayIntro(true);
+      return;
+    }
+
+    const stored = sessionStorage.getItem('trinity-login-anim');
+    if (stored) {
+      sessionStorage.removeItem('trinity-login-anim');
+      try {
+        const meta = JSON.parse(stored) as {
+          startedAt?: number;
+          totalDuration?: number;
+        };
+        if (meta && typeof meta.startedAt === 'number') {
+          const total =
+            typeof meta.totalDuration === 'number'
+              ? meta.totalDuration
+              : LOGIN_ANIMATION_TOTAL_DURATION;
+          const elapsed = Date.now() - meta.startedAt;
+          const remaining = Math.max(0, total - elapsed) / 1000;
+          setIntroBaseDelay(remaining);
+          setPlayIntro(true);
+          return;
+        }
+      } catch (err) {
+        console.log('Login intro metadata parse error', err);
+      }
+    }
+
+    setIntroBaseDelay(0);
+    setPlayIntro(true);
+  }, []);
+
+  useEffect(() => {
     const loadProjects = async () => {
-      if (!appId) return;
+      if (!appId) {
+        setProjects([]);
+        setProjectsLoading(false);
+        return;
+      }
+      setProjectsLoading(true);
       try {
         const res = await fetch(`${REGISTRY_API}/projects/?app=${appId}`, {
           credentials: 'include'
@@ -151,6 +196,8 @@ const Projects = () => {
         }
       } catch (err) {
         console.error('Projects load error', err);
+      } finally {
+        setProjectsLoading(false);
       }
     };
 
@@ -515,6 +562,12 @@ const Projects = () => {
     t.description?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const animationStyle = (offset: number) => ({
+    animationDelay: `${(introBaseDelay + offset).toFixed(1)}s`,
+    animationFillMode: 'both' as const,
+    ...(playIntro ? { opacity: 0 } : {}),
+  });
+
   return (
     <>
       <ConfirmationDialog
@@ -530,70 +583,98 @@ const Projects = () => {
         cancelLabel="Cancel"
         confirmButtonClass="bg-red-500 hover:bg-red-600"
       />
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-gray-50">
-        <Header projectCount={projects.length} />
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        <div className="mb-8">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-            <div className="flex-1">
-              <h2 className="text-3xl font-bold text-gray-900 mb-2">Workspace</h2>
-              <p className="text-gray-600 text-lg">Manage your {appDetails.title.toLowerCase()} projects and templates</p>
-            </div>
-            <div className="flex items-center space-x-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input
-                  placeholder="Search projects & templates..."
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  className="pl-10 w-64"
-                />
-              </div>
-              <div className="flex items-center border border-gray-200 rounded-lg p-1">
-                <Button
-                  variant={viewMode === 'grid' ? 'default' : 'ghost'}
-                  size="sm"
-                  onClick={() => setViewMode('grid')}
-                  className="h-8 w-8 p-0"
-                >
-                  <Grid3X3 className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant={viewMode === 'list' ? 'default' : 'ghost'}
-                  size="sm"
-                  onClick={() => setViewMode('list')}
-                  className="h-8 w-8 p-0"
-                >
-                  <List className="w-4 h-4" />
-                </Button>
-              </div>
-              <Button
-                onClick={createNewProject}
-                className="bg-black hover:bg-gray-900 text-white shadow-lg hover:shadow-xl transition-all duration-300 px-6 py-2.5"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                New Project
-              </Button>
-            </div>
-          </div>
+      <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-50 via-white to-gray-50">
+        <div
+          className="pointer-events-none absolute inset-0 z-0 animate-fade-in"
+          style={animationStyle(0)}
+        >
+          <GreenGlyphRain className="pointer-events-none opacity-90" />
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-8">
-          <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
-            <TabsTrigger value="templates" className="flex items-center space-x-2">
-              <Bookmark className="w-4 h-4" />
-              <span>Templates ({filteredTemplates.length})</span>
-            </TabsTrigger>
-            <TabsTrigger value="projects" className="flex items-center space-x-2">
-              <FolderOpen className="w-4 h-4" />
-              <span>Projects ({filteredProjects.length})</span>
-            </TabsTrigger>
-          </TabsList>
+        <div className="relative z-10 flex min-h-screen flex-col">
+          <div className="animate-slide-in-from-top" style={animationStyle(0.2)}>
+            <Header projectCount={projects.length} />
+          </div>
+          <main className="flex-1">
+            <div className="mx-auto max-w-7xl px-6 py-8">
+              <div className="mb-8 animate-fade-in" style={animationStyle(0.4)}>
+                <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex-1">
+                    <h2 className="mb-2 text-3xl font-bold text-gray-900">Workspace</h2>
+                    <p className="text-lg text-gray-600">
+                      Manage your {appDetails.title.toLowerCase()} projects and templates
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-4">
+                    <div className="relative w-full sm:w-64">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transform text-gray-400" />
+                      <Input
+                        placeholder="Search projects & templates..."
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        className="w-full pl-10"
+                      />
+                    </div>
+                    <div className="flex items-center rounded-lg border border-gray-200 p-1">
+                      <Button
+                        variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                        size="sm"
+                        onClick={() => setViewMode('grid')}
+                        className="h-8 w-8 p-0"
+                      >
+                        <Grid3X3 className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant={viewMode === 'list' ? 'default' : 'ghost'}
+                        size="sm"
+                        onClick={() => setViewMode('list')}
+                        className="h-8 w-8 p-0"
+                      >
+                        <List className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <Button
+                      onClick={createNewProject}
+                      className="px-6 py-2.5 text-white transition-all duration-300 bg-black shadow-lg hover:bg-gray-900 hover:shadow-xl"
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      New Project
+                    </Button>
+                  </div>
+                </div>
+              </div>
 
-          <TabsContent value="projects" className="mt-0">
-            <div className={viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6' : 'space-y-4'}>
+              <div className="animate-fade-in" style={animationStyle(0.6)}>
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="mb-8">
+                  <TabsList
+                    className="grid w-full max-w-md grid-cols-2 animate-slide-in-from-top mb-6"
+                    style={animationStyle(0.7)}
+                  >
+                    <TabsTrigger value="templates" className="flex items-center space-x-2">
+                      <Bookmark className="h-4 w-4" />
+                      <span>Templates ({filteredTemplates.length})</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="projects" className="flex items-center space-x-2">
+                      <FolderOpen className="h-4 w-4" />
+                      <span>Projects ({filteredProjects.length})</span>
+                    </TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent
+                    value="projects"
+                    className="mt-0 animate-fade-in"
+                    style={animationStyle(0.8)}
+                  >
+                    <div
+                      className={
+                        viewMode === 'grid'
+                          ? 'grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+                          : 'space-y-4'
+                      }
+                    >
               <Card
-                className="group cursor-pointer hover:shadow-xl transition-all duration-500 border-2 border-dashed border-gray-200 hover:border-gray-300 bg-gradient-to-br from-white to-gray-50/30 hover:from-white hover:to-gray-50/50 transform hover:-translate-y-1"
+                className="group cursor-pointer overflow-hidden border-2 border-dashed border-gray-200 bg-gradient-to-br from-white to-gray-50/30 transition-all duration-500 hover:-translate-y-1 hover:border-gray-300 hover:from-white hover:to-gray-50/50 hover:shadow-xl animate-slide-in-from-bottom"
+                style={animationStyle(0.9)}
                 onClick={createNewProject}
               >
                 <div className={viewMode === 'grid' ? 'p-8 flex flex-col items-center justify-center h-56 space-y-6' : 'p-6 flex items-center space-x-6'}>
@@ -607,10 +688,11 @@ const Projects = () => {
                 </div>
               </Card>
 
-              {filteredProjects.map(project => (
+              {filteredProjects.map((project, index) => (
                 <Card
                   key={project.id}
-                  className="group cursor-pointer hover:shadow-xl transition-all duration-500 border-0 bg-white hover:bg-gradient-to-br hover:from-white hover:to-gray-50/30 overflow-hidden transform hover:-translate-y-1"
+                  className="group cursor-pointer overflow-hidden border-0 bg-white transition-all duration-500 hover:-translate-y-1 hover:bg-gradient-to-br hover:from-white hover:to-gray-50/30 hover:shadow-xl animate-slide-in-from-bottom"
+                  style={animationStyle(1 + index * 0.08)}
                   onMouseEnter={() => setHoveredProject(project.id)}
                   onMouseLeave={() => {
                     if (openProjectMenuId !== project.id) {
@@ -784,7 +866,17 @@ const Projects = () => {
               ))}
             </div>
 
-            {filteredProjects.length === 0 && !searchQuery && (
+            {projectsLoading && (
+              <div className="text-center mt-20">
+                <div className="w-20 h-20 rounded-full bg-white/60 backdrop-blur-sm flex items-center justify-center mx-auto mb-6 shadow-inner">
+                  <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">Loading your projects</h3>
+                <p className="text-gray-500">Preparing your workspace…</p>
+              </div>
+            )}
+
+            {!projectsLoading && filteredProjects.length === 0 && !searchQuery && (
               <div className="text-center mt-20">
                 <div className={`w-32 h-32 rounded-3xl bg-gradient-to-br ${appDetails.lightBg} flex items-center justify-center mx-auto mb-8 shadow-inner`}>
                   <Icon className="w-16 h-16 text-gray-400" />
@@ -803,7 +895,7 @@ const Projects = () => {
               </div>
             )}
 
-            {filteredProjects.length === 0 && searchQuery && (
+            {!projectsLoading && filteredProjects.length === 0 && searchQuery && (
               <div className="text-center mt-20">
                 <div className="w-24 h-24 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-6">
                   <Search className="w-12 h-12 text-gray-400" />
@@ -814,12 +906,23 @@ const Projects = () => {
             )}
           </TabsContent>
 
-          <TabsContent value="templates" className="mt-0">
-            <div className={viewMode === 'grid' ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6' : 'space-y-4'}>
-              {filteredTemplates.map(template => (
+          <TabsContent
+            value="templates"
+            className="mt-0 animate-fade-in"
+            style={animationStyle(0.9)}
+          >
+            <div
+              className={
+                viewMode === 'grid'
+                  ? 'grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+                  : 'space-y-4'
+              }
+            >
+              {filteredTemplates.map((template, index) => (
                 <Card
                   key={template.id}
-                  className="group cursor-pointer hover:shadow-xl transition-all duration-500 border-0 bg-white hover:bg-gradient-to-br hover:from-white hover:to-gray-50/30 overflow-hidden transform hover:-translate-y-1"
+                  className="group cursor-pointer overflow-hidden border-0 bg-white transition-all duration-500 hover:-translate-y-1 hover:bg-gradient-to-br hover:from-white hover:to-gray-50/30 hover:shadow-xl animate-slide-in-from-bottom"
+                  style={animationStyle(1.1 + index * 0.08)}
                   onMouseEnter={() => setHoveredTemplate(template.id)}
                   onMouseLeave={() => {
                     if (openTemplateMenuId !== template.id) {
@@ -1098,10 +1201,13 @@ const Projects = () => {
                 <p className="text-gray-500">Try adjusting your search terms</p>
               </div>
             )}
-          </TabsContent>
-        </Tabs>
+                  </TabsContent>
+                </Tabs>
+              </div>
+            </div>
+          </main>
+        </div>
       </div>
-    </div>
     </>
   );
 };

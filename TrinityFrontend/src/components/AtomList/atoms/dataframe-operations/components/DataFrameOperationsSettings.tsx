@@ -11,6 +11,39 @@ import { Upload, Settings, Filter, Eye, Palette } from 'lucide-react';
 import { DataFrameData, DataFrameSettings } from '../DataFrameOperationsAtom';
 import { DATAFRAME_OPERATIONS_API } from '@/lib/api';
 
+type NormalizedColumnType = 'text' | 'number' | 'date';
+
+const inferColumnType = (value: unknown): NormalizedColumnType => {
+  if (typeof value === 'string') {
+    const normalized = value.toLowerCase();
+    if (['float', 'double', 'int', 'decimal', 'numeric', 'number'].some(token => normalized.includes(token))) {
+      return 'number';
+    }
+    if (['datetime', 'date', 'time', 'timestamp'].some(token => normalized.includes(token))) {
+      return 'date';
+    }
+    if (normalized === 'text' || normalized === 'string') {
+      return 'text';
+    }
+    if (normalized === 'number') {
+      return 'number';
+    }
+  }
+  return 'text';
+};
+
+const normalizeColumnTypes = (
+  headers: string[],
+  rawTypes?: Record<string, unknown>
+): Record<string, NormalizedColumnType> => {
+  const columnTypes: Record<string, NormalizedColumnType> = {};
+  headers.forEach(header => {
+    const rawType = rawTypes?.[header];
+    columnTypes[header] = inferColumnType(rawType);
+  });
+  return columnTypes;
+};
+
 interface DataFrameOperationsSettingsProps {
   settings: DataFrameSettings;
   onSettingsChange: (settings: Partial<DataFrameSettings>) => void;
@@ -46,7 +79,7 @@ const DataFrameOperationsSettings: React.FC<DataFrameOperationsSettingsProps> = 
         headers: result.headers,
         rows: result.rows,
         fileName: file.name,
-        columnTypes: result.column_types,
+        columnTypes: normalizeColumnTypes(result.headers, result.column_types),
         pinnedColumns: [],
         frozenColumns: 0,
         cellColors: {},

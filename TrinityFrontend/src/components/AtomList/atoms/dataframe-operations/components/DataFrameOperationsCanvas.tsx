@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { DataFrameData, DataFrameSettings } from '../DataFrameOperationsAtom';
 import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
-  import {
+import {
   loadDataframe,
   editCell as apiEditCell,
   insertRow as apiInsertRow,
@@ -73,6 +73,15 @@ function highlightMatch(text: string, search: string) {
   </>;
 }
 
+const areFormulaMapsEqual = (a: Record<string, string>, b: Record<string, string>) => {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) {
+    return false;
+  }
+  return aKeys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && b[key] === a[key]);
+};
+
 // Helper to generate a unique valid column key
 function getNextColKey(headers: string[]): string {
   let idx = 1;
@@ -118,7 +127,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: string } | null>(null);
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
   const [formulaInput, setFormulaInput] = useState('');
-  const [columnFormulas, setColumnFormulas] = useState<Record<string, string>>({});
+  const [columnFormulas, setColumnFormulas] = useState<Record<string, string>>(settings.columnFormulas || {});
+  const [formulaValidationError, setFormulaValidationError] = useState<string | null>(null);
   const headersKey = useMemo(() => (data?.headers || []).join('|'), [data?.headers]);
   const [isFormulaMode, setIsFormulaMode] = useState(true);
   const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter'>(null);
@@ -197,11 +207,20 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   }, [selectedColumn]);
 
   useEffect(() => {
-    if (!data?.headers?.length) {
-      setColumnFormulas(prev => (Object.keys(prev).length ? {} : prev));
-      return;
-    }
+    const incoming = settings.columnFormulas || {};
+    setColumnFormulas(prev => (areFormulaMapsEqual(prev, incoming) ? prev : incoming));
+  }, [settings.columnFormulas]);
+
+  useEffect(() => {
     setColumnFormulas(prev => {
+      if (!data?.headers?.length) {
+        if (Object.keys(prev).length) {
+          onSettingsChange({ columnFormulas: {} });
+          return {};
+        }
+        return prev;
+      }
+
       const allowed = new Set(data.headers);
       const next: Record<string, string> = {};
       let changed = false;
@@ -217,9 +236,11 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       if (!changed && Object.keys(next).length === Object.keys(prev).length) {
         return prev;
       }
+
+      onSettingsChange({ columnFormulas: next });
       return next;
     });
-  }, [headersKey]);
+  }, [headersKey, data?.headers, onSettingsChange]);
 
   useEffect(() => {
     const stored = selectedColumn ? columnFormulas[selectedColumn] : undefined;
@@ -232,6 +253,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         } else {
           setFormulaInput('');
         }
+        setFormulaValidationError(null);
       }
       return;
     }
@@ -243,10 +265,12 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       } else {
         setFormulaInput('');
       }
+      setFormulaValidationError(null);
     }
 
     if (!selectedColumn) {
       previousStoredFormulaRef.current = undefined;
+      setFormulaValidationError(null);
     }
   }, [selectedColumn, columnFormulas]);
   // 1. Add state for filter range
@@ -364,6 +388,96 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const resetSaveSuccess = () => { if (saveSuccess) setSaveSuccess(false); };
 
   const [rowContextMenu, setRowContextMenu] = useState<{ x: number; y: number; rowIdx: number } | null>(null);
+
+  const normalizeBackendColumnTypes = useCallback((
+    types: Record<string, string> | undefined,
+    headers: string[]
+  ): Record<string, 'text' | 'number' | 'date'> => {
+    const mapped: Record<string, 'text' | 'number' | 'date'> = {};
+    headers.forEach(header => {
+      const raw = types?.[header]?.toLowerCase() || '';
+      if (['float', 'double', 'int', 'decimal', 'numeric', 'number'].some(token => raw.includes(token))) {
+        mapped[header] = 'number';
+      } else if (['datetime', 'date', 'time', 'timestamp'].some(token => raw.includes(token))) {
+        mapped[header] = 'date';
+      } else {
+        mapped[header] = 'text';
+      }
+    });
+    return mapped;
+  }, []);
+
+  const buildFilterPayload = useCallback((value: any) => {
+    if (Array.isArray(value)) {
+      if (value.length === 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
+        return { min: value[0], max: value[1] };
+      }
+      return value;
+    }
+    if (value && typeof value === 'object') {
+      if ('value' in value) {
+        return value.value;
+      }
+      if ('min' in value && 'max' in value) {
+        return value;
+      }
+    }
+    return value;
+  }, []);
+
+  const rebuildDataWithFilters = useCallback(async (
+    filtersToApply: Record<string, any>
+  ): Promise<boolean> => {
+    if (!data || !settings.selectedFile) {
+      return false;
+    }
+
+    setOperationLoading(true);
+    try {
+      let resp = await loadDataframeByKey(settings.selectedFile);
+      let workingHeaders = resp.headers;
+      let workingRows = resp.rows;
+      let workingTypes = resp.types;
+      let workingFileId: string | null = resp.df_id;
+
+      for (const [filterCol, filterValue] of Object.entries(filtersToApply)) {
+        if (!workingFileId) {
+          break;
+        }
+        const payload = buildFilterPayload(filterValue);
+        const filteredResp = await apiFilter(workingFileId, filterCol, payload);
+        workingHeaders = filteredResp.headers;
+        workingRows = filteredResp.rows;
+        workingTypes = filteredResp.types;
+        workingFileId = filteredResp.df_id;
+      }
+
+      const columnTypes = normalizeBackendColumnTypes(workingTypes, workingHeaders);
+
+      onDataChange({
+        headers: workingHeaders,
+        rows: workingRows,
+        fileName: data.fileName,
+        columnTypes,
+        pinnedColumns: data.pinnedColumns,
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+      });
+
+      onSettingsChange({
+        filters: { ...filtersToApply },
+        fileId: workingFileId || settings.fileId,
+      });
+
+      setCurrentPage(1);
+      return true;
+    } catch (err) {
+      handleApiError('Filter rebuild failed', err);
+      return false;
+    } finally {
+      setOperationLoading(false);
+    }
+  }, [data, settings.selectedFile, settings.fileId, buildFilterPayload, normalizeBackendColumnTypes, onDataChange, onSettingsChange]);
 
   // Effect: when all filters cleared externally, reset local filter UI states
   useEffect(() => {
@@ -486,11 +600,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     if (!file) return;
     try {
       const resp = await loadDataframe(file);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       const newData: DataFrameData = {
         headers: resp.headers,
         rows: resp.rows,
@@ -506,7 +616,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     } catch {/* empty */
       setUploadError('Error parsing file');
     }
-  }, [onDataUpload]);
+  }, [onDataUpload, normalizeBackendColumnTypes]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -537,11 +647,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     try {
       console.log('[DataFrameOperations] sort', column, direction);
       const resp = await apiSort(fileId, column, direction);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -560,26 +666,39 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   };
 
   const handleColumnFilter = async (column: string, selectedValues: string[] | [number, number]) => {
-    if (!data || !fileId) return;
-    setOperationLoading(true);
-    let value: any = null;
-    if (Array.isArray(selectedValues)) {
-      if (typeof selectedValues[0] === 'number') {
-        value = { min: selectedValues[0], max: selectedValues[1] };
-      } else {
-        value = selectedValues;
-      }
-    } else {
-      value = selectedValues;
+    if (!data) return;
+
+    if (Array.isArray(selectedValues) && selectedValues.length === 0) {
+      await handleClearFilter(column);
+      return;
     }
+
+    const updatedFilters = {
+      ...(settings.filters || {}),
+      [column]: selectedValues,
+    } as Record<string, any>;
+
+    const rebuilt = await rebuildDataWithFilters(updatedFilters);
+    if (rebuilt) {
+      return;
+    }
+
+    if (!fileId) {
+      onSettingsChange({ filters: { ...updatedFilters } });
+      setCurrentPage(1);
+      return;
+    }
+
+    setOperationLoading(true);
+    let value: any = selectedValues;
+    if (Array.isArray(selectedValues) && typeof selectedValues[0] === 'number') {
+      value = { min: selectedValues[0], max: selectedValues[1] };
+    }
+
     try {
       console.log('[DataFrameOperations] filter', column, value);
       const resp = await apiFilter(fileId, column, value);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes: Record<string, 'text' | 'number' | 'date'> = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -589,7 +708,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
-      onSettingsChange({ filters: { ...settings.filters, [column]: selectedValues }, fileId: resp.df_id });
+      onSettingsChange({ filters: { ...updatedFilters }, fileId: resp.df_id });
       setCurrentPage(1);
     } catch (err) {
       handleApiError('Filter failed', err);
@@ -612,11 +731,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   if (newHeader === oldHeader) { setEditingHeader(null); return; }
   try {
     const resp = await apiRenameColumn(fileId, oldHeader, newHeader);
-    const columnTypes: any = {};
-    resp.headers.forEach(h => {
-      const t = resp.types[h];
-      columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-    });
+    const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
     onDataChange({
       headers: resp.headers,
       rows: resp.rows,
@@ -631,10 +746,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
         return prev;
       }
       const { [oldHeader]: stored, ...rest } = prev;
-      if (stored === undefined) {
-        return rest;
-      }
-      return { ...rest, [newHeader]: stored };
+      const next = stored === undefined ? rest : { ...rest, [newHeader]: stored };
+      onSettingsChange({ columnFormulas: next });
+      return next;
     });
   } catch (err) {
     handleApiError('Rename column failed', err);
@@ -649,11 +763,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const globalRowIndex = startIndex + rowIndex;
     try {
       const resp = await apiEditCell(fileId, globalRowIndex, column, newValue);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -675,11 +785,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const dir: 'above' | 'below' = data.rows.length > 0 ? 'below' : 'above';
     try {
       const resp = await apiInsertRow(fileId, idx, dir);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -700,11 +806,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const newColumnName = `Column_${data.headers.length + 1}`;
     try {
       const resp = await apiInsertColumn(fileId, data.headers.length, newColumnName, '');
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -755,11 +857,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       const toIndex = data.headers.indexOf(draggedCol);
       try {
         const resp = await apiMoveColumn(fileId, draggedCol, toIndex);
-        const columnTypes: any = {};
-        resp.headers.forEach(h => {
-          const t = resp.types[h];
-          columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-        });
+        const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
         onDataChange({
           headers: resp.headers,
           rows: resp.rows,
@@ -814,34 +912,26 @@ const handleClearSort = () => {
 
 // Update handleClearFilter to accept a column name (string)
 const handleClearFilter = async (col: string) => {
-  if (!data || !settings.selectedFile) return;
-  const newFilters = { ...settings.filters };
-  delete newFilters[col];
-  try {
-    setOperationLoading(true);
-    console.log('[DataFrameOperations] clear filter', col);
-    const resp = await loadDataframeByKey(settings.selectedFile);
-    const columnTypes: any = {};
-    resp.headers.forEach(h => {
-      const t = resp.types[h];
-      columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-    });
-    onDataChange({
-      headers: resp.headers,
-      rows: resp.rows,
-      fileName: data.fileName,
-      columnTypes,
-      pinnedColumns: data.pinnedColumns,
-      frozenColumns: data.frozenColumns,
-      cellColors: data.cellColors,
-    });
-    onSettingsChange({ filters: { ...newFilters }, fileId: resp.df_id });
-  } catch (err) {
-    handleApiError('Clear filter failed', err);
-  } finally {
-    setOperationLoading(false);
+  if (!data) return;
+  const existingFilters = settings.filters || {};
+  if (!Object.prototype.hasOwnProperty.call(existingFilters, col)) {
+    onSettingsChange({ filters: { ...existingFilters } });
+    setFilterRange(null);
+    setCurrentPage(1);
+    setFilterMinInput('');
+    setFilterMaxInput('');
+    return;
   }
-  setFilterRange(null); // Reset numeric filter range UI
+
+  const newFilters = { ...existingFilters } as Record<string, any>;
+  delete newFilters[col];
+
+  const rebuilt = await rebuildDataWithFilters(newFilters);
+  if (!rebuilt) {
+    onSettingsChange({ filters: { ...newFilters } });
+  }
+
+  setFilterRange(null);
   setCurrentPage(1);
   setFilterMinInput('');
   setFilterMaxInput('');
@@ -865,11 +955,7 @@ const handleFormulaSubmit = async () => {
   if (!trimmedFormula) return;
   try {
     const resp = await apiApplyFormula(fileId, selectedColumn, trimmedFormula);
-    const columnTypes: any = {};
-    resp.headers.forEach(h => {
-      const t = resp.types[h];
-      columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-    });
+    const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
     onDataChange({
       headers: resp.headers,
       rows: resp.rows,
@@ -879,7 +965,14 @@ const handleFormulaSubmit = async () => {
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
     });
-    setColumnFormulas(prev => ({ ...prev, [selectedColumn]: trimmedFormula }));
+    setColumnFormulas(prev => {
+      if (prev[selectedColumn] === trimmedFormula) {
+        return prev;
+      }
+      const next = { ...prev, [selectedColumn]: trimmedFormula };
+      onSettingsChange({ columnFormulas: next });
+      return next;
+    });
     setFormulaInput(trimmedFormula);
   } catch (err) {
     handleApiError('Apply formula failed', err);
@@ -902,11 +995,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     const newColKey = getNextColKey(data.headers);
     try {
       const resp = await apiInsertColumn(fileId, colIdx, newColKey, '');
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -928,11 +1017,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     const col = data.headers[colIdx];
     try {
       const resp = await apiDeleteColumn(fileId, col);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -957,11 +1042,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     }
     try {
       const resp = await apiDuplicateColumn(fileId, col, newName);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -983,11 +1064,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     try {
       const resp = await apiInsertRow(fileId, rowIdx, position);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -1006,11 +1083,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     try {
       const resp = await apiDuplicateRow(fileId, rowIdx);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -1029,11 +1102,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     try {
       const resp = await apiRetypeColumn(fileId, col, newType === 'text' ? 'string' : newType);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -1052,11 +1121,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     if (!data || !fileId) return;
     try {
       const resp = await apiDeleteRow(fileId, rowIdx);
-      const columnTypes: any = {};
-      resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
-      });
+      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -1120,10 +1185,24 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   className="pl-9 w-64"
                 />
               </div>
-              <Button variant="outline" size="sm" onClick={onClearAll}>
-                <RotateCcw className="w-4 h-4 mr-1" />
-                Reset
-              </Button>
+              <div className="flex items-center space-x-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setFormulaValidationError(null);
+                    onClearAll();
+                  }}
+                >
+                  <RotateCcw className="w-4 h-4 mr-1" />
+                  Reset
+                </Button>
+                {formulaValidationError && (
+                  <span className="text-xs font-medium text-destructive max-w-xs leading-snug">
+                    {formulaValidationError}
+                  </span>
+                )}
+              </div>
             </div>
             <div className="relative flex flex-col items-center" style={{ minWidth: 180 }}>
               <Button
@@ -1150,6 +1229,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 onFormulaInputChange={setFormulaInput}
                 onFormulaModeChange={setIsFormulaMode}
                 onFormulaSubmit={handleFormulaSubmit}
+                onValidationError={setFormulaValidationError}
               />
             )}
             <div className="flex-1 overflow-auto min-h-0">

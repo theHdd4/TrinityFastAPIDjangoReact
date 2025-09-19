@@ -30,6 +30,7 @@ interface FormularBarProps {
   onFormulaInputChange: (value: string) => void;
   onFormulaModeChange: (mode: boolean) => void;
   onFormulaSubmit: () => void;
+  onValidationError?: (message: string | null) => void;
 }
 
 function safeToString(val: unknown): string {
@@ -98,6 +99,22 @@ const countToken = (value: string, token: string) => {
 };
 
 const hasQuotes = (value: string) => /["']/.test(value);
+
+const formatExampleExpression = (formula: FormulaItem) =>
+  formula.example.startsWith('=') ? formula.example : `=${formula.example}`;
+
+const isFunctionStyleExample = (formula: FormulaItem) => {
+  const candidate = formatExampleExpression(formula).slice(1).toUpperCase();
+  return /^[A-Z_]+\s*\(/.test(candidate);
+};
+
+const isValidFormulaInput = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith('=')) {
+    return false;
+  }
+  return trimmed.length > 1;
+};
 
 const formulaLibrary: FormulaItem[] = [
   // Math & aggregations
@@ -281,6 +298,26 @@ const formulaLibrary: FormulaItem[] = [
     matcher: createFunctionMatcher('CORR'),
     priority: 10,
   },
+  {
+    key: 'zscore',
+    name: 'Z-Score (Normalize)',
+    syntax: 'ZSCORE(column)',
+    description: 'Standardizes a numeric column by subtracting the mean and dividing by the standard deviation.',
+    example: '=ZSCORE(colA)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('ZSCORE'),
+    priority: 12,
+  },
+  {
+    key: 'normalize',
+    name: 'Normalize (Alias)',
+    syntax: 'NORM(column)',
+    description: 'Alias of ZSCORE that produces the same standardized values for the selected column.',
+    example: '=NORM(colA)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('NORM'),
+    priority: 13,
+  },
   // Logical & binning
   {
     key: 'if-isnull',
@@ -296,7 +333,7 @@ const formulaLibrary: FormulaItem[] = [
     key: 'if-equal',
     name: 'Categorical to Numeric',
     syntax: 'IF(condition, true_value, false_value)',
-    description: 'Encodes categories into numbers.',
+    description: 'Encodes categories into numbers or text.',
     example: '=IF(colA == "M", 1, 0)',
     category: 'logical',
     matcher: createIfMatcher(({ uppercase }) => uppercase.includes('==')),
@@ -329,14 +366,14 @@ const formulaLibrary: FormulaItem[] = [
     key: 'if-basic',
     name: 'Conditional Value',
     syntax: 'IF(condition, true_value, false_value)',
-    description: 'Returns one value when the condition is true, otherwise another.',
-    example: '=IF(colA > 10, colB, colC)',
+    description: 'Returns custom text or numbers when the condition is met, otherwise another value.',
+    example: '=IF(colA > 10, "High", "Low")',
     category: 'logical',
-    matcher: createIfMatcher(({ uppercase, trimmed }) => {
-      if (uppercase.includes('ISNULL') || uppercase.includes('==') || countToken(uppercase, 'IF(') > 1 || hasQuotes(trimmed)) {
+    matcher: createIfMatcher(({ uppercase }) => {
+      if (uppercase.includes('ISNULL') || countToken(uppercase, 'IF(') > 1) {
         return false;
       }
-      return uppercase.includes('>') || uppercase.includes('<');
+      return true;
     }),
     priority: 100,
   },
@@ -534,6 +571,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
   onFormulaInputChange,
   onFormulaModeChange,
   onFormulaSubmit,
+  onValidationError,
 }) => {
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -594,15 +632,17 @@ const FormularBar: React.FC<FormularBarProps> = ({
     setIsLibraryOpen(false);
     setActiveTab('all');
     setIsUsageGuideOpen(false);
+    onValidationError?.(null);
   };
 
   const handleFormulaSelect = (formula: FormulaItem) => {
     setSelectedFormula(formula);
     setActiveTab(formula.category);
-    const expression = formula.example.startsWith('=') ? formula.example : `=${formula.example}`;
+    const expression = formatExampleExpression(formula);
     onFormulaInputChange(expression);
     onFormulaModeChange(true);
     setIsLibraryOpen(false);
+    onValidationError?.(null);
   };
 
   const handleLibraryOpenChange = (open: boolean) => {
@@ -628,6 +668,65 @@ const FormularBar: React.FC<FormularBarProps> = ({
   const handleInputChange = (value: string) => {
     onFormulaInputChange(value);
     onFormulaModeChange(true);
+    onValidationError?.(null);
+  };
+
+  const handleTabCompletion = () => {
+    const trimmed = formulaInput.trim();
+    if (!trimmed) {
+      return false;
+    }
+
+    if (!/^=?[A-Za-z_]+$/.test(trimmed) && !/^=?[A-Za-z_]+\($/.test(trimmed)) {
+      return false;
+    }
+
+    const normalized = trimmed.startsWith('=') ? trimmed.toUpperCase() : `=${trimmed.toUpperCase()}`;
+    const functionMatch = normalized.slice(1).match(/^[A-Z_]+/);
+    if (!functionMatch) {
+      return false;
+    }
+
+    const typedPrefix = `=${functionMatch[0]}`;
+    if (typedPrefix.length <= 1) {
+      return false;
+    }
+
+    const completion = formulaMatchers.find((formula) => {
+      if (!isFunctionStyleExample(formula)) {
+        return false;
+      }
+      const exampleExpression = formatExampleExpression(formula).toUpperCase();
+      return exampleExpression.startsWith(typedPrefix);
+    });
+
+    if (!completion) {
+      return false;
+    }
+
+    const expression = formatExampleExpression(completion);
+    if (expression === formulaInput) {
+      return false;
+    }
+
+    onFormulaInputChange(expression);
+    onFormulaModeChange(true);
+    onValidationError?.(null);
+    return true;
+  };
+
+  const handleSubmit = () => {
+    if (!selectedColumn) {
+      return;
+    }
+
+    if (!isValidFormulaInput(formulaInput)) {
+      onValidationError?.('Please enter a valid formula and then hit Apply');
+      return;
+    }
+
+    onValidationError?.(null);
+    onFormulaSubmit();
   };
 
   const renderFormulaCard = (formula: FormulaItem) => {
@@ -753,22 +852,32 @@ const FormularBar: React.FC<FormularBarProps> = ({
             </PopoverContent>
           </Popover>
 
-          <div className='relative flex-1'>
-            <Sigma className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary z-10' />
-            <Input
-              value={formulaInput}
-              onChange={(e) => handleInputChange(e.target.value)}
-              placeholder='=SUM(colA,colB), =IF(colA > 10, colB, colC), =DATE_DIFF(colEnd, colStart)'
-              className='h-8 shadow-sm pl-10 font-mono border-primary/50 bg-primary/5 transition-all duration-200'
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  onFormulaSubmit();
-                }
-                if (e.key === 'Escape') {
-                  handleCancel();
-                }
-              }}
-            />
+          <div className='flex flex-col flex-1'>
+            <div className='relative'>
+              <Sigma className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary z-10' />
+              <Input
+                value={formulaInput}
+                onChange={(e) => handleInputChange(e.target.value)}
+                placeholder='=SUM(colA,colB), =IF(colA > 10, colB, colC), =DATE_DIFF(colEnd, colStart)'
+                className='h-8 shadow-sm pl-10 font-mono border-primary/50 bg-primary/5 transition-all duration-200'
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    handleCancel();
+                  }
+                  if (e.key === 'Tab' && !e.shiftKey) {
+                    const completed = handleTabCompletion();
+                    if (completed) {
+                      e.preventDefault();
+                    }
+                  }
+                }}
+              />
+            </div>
           </div>
         </div>
 
@@ -819,8 +928,8 @@ const FormularBar: React.FC<FormularBarProps> = ({
             variant='outline'
             size='sm'
             className='h-8 px-3 shadow-sm'
-            onClick={onFormulaSubmit}
-            disabled={!selectedColumn || !formulaInput.trim()}
+            onClick={handleSubmit}
+            disabled={!selectedColumn}
           >
             <Check className='w-4 h-4 mr-1' />
             Apply

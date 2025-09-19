@@ -8,6 +8,7 @@ import DataFrameOperationsCharts from './DataFrameOperationsCharts';
 import { DataFrameData } from '../../DataFrameOperationsAtom';
 import { VALIDATE_API } from '@/lib/api';
 import { loadDataframeByKey } from '../../services/dataframeOperationsApi';
+import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
 
 // Define DataFrameOperationsSettings interface and default settings locally
 export interface DataFrameOperationsSettings {
@@ -54,13 +55,11 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
   const [error, setError] = React.useState<string | null>(null);
   const [selectedFrame, setSelectedFrame] = React.useState<any>(null);
 
-  // Fetch and load data when a file is selected
-  const handleFileSelect = async (fileId: string) => {
+  const applyFileSelect = async (fileId: string) => {
     setSelectedFile(fileId);
     setLoading(true);
     setError(null);
     try {
-      // Fetch the list of frames to resolve the display name
       const framesRes = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
       const framesData = await framesRes.json();
       const frames = Array.isArray(framesData.files)
@@ -70,10 +69,17 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
       setSelectedFrame(foundFrame || null);
       const resp = await loadDataframeByKey(fileId);
 
-      const columnTypes: Record<string, string> = {};
+      const columnTypes: Record<string, 'text' | 'number' | 'date'> = {};
       resp.headers.forEach(h => {
-        const t = resp.types[h];
-        columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+        const rawType = resp.types[h];
+        const normalized = (typeof rawType === 'string' ? rawType : String(rawType || '')).toLowerCase();
+        if (['float', 'double', 'int', 'decimal', 'numeric', 'number'].some(token => normalized.includes(token))) {
+          columnTypes[h] = 'number';
+        } else if (['datetime', 'date', 'time', 'timestamp'].some(token => normalized.includes(token))) {
+          columnTypes[h] = 'date';
+        } else {
+          columnTypes[h] = 'text';
+        }
       });
       const newData: DataFrameData = {
         headers: resp.headers,
@@ -100,6 +106,14 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
       setError('Failed to fetch or load dataframe.');
       setLoading(false);
     }
+  };
+
+  const { requestChange: confirmFileChange, dialog } = useDataSourceChangeWarning(applyFileSelect);
+
+  const handleFileSelect = (fileId: string) => {
+    const hasExistingUpdates = Boolean(settings.tableData && Array.isArray(settings.tableData.rows) && settings.tableData.rows.length > 0);
+    const isDifferentSource = fileId !== (settings.selectedFile || '');
+    confirmFileChange(fileId, hasExistingUpdates && isDifferentSource);
   };
 
   return (
@@ -136,6 +150,7 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
           <DataFrameOperationsExhibition data={(settings as any).tableData || data} />
         </TabsContent>
       </div>
+      {dialog}
     </Tabs>
   );
 };
