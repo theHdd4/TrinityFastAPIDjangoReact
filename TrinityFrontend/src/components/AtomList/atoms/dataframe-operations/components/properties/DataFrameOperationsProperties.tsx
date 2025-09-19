@@ -1,5 +1,5 @@
 import React from 'react';
-import { Database, Eye, BarChart3 } from 'lucide-react';
+import { Upload, Settings, Eye } from 'lucide-react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import DataFrameOperationsExhibition from '../DataFrameOperationsExhibition';
@@ -103,23 +103,23 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
   };
 
   return (
-    <Tabs value={tab} onValueChange={setTab} className="w-full">
-      <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-        <TabsTrigger value="inputs" className="text-xs">
-          <Database className="w-3 h-3 mr-1" />
-          Inputs
-        </TabsTrigger>
-        <TabsTrigger value="charts" className="text-xs">
-          <BarChart3 className="w-3 h-3 mr-1" />
-          Charts
-        </TabsTrigger>
-        <TabsTrigger value="exhibition" className="text-xs">
-          <Eye className="w-3 h-3 mr-1" />
-          Exhibition
-        </TabsTrigger>
-      </TabsList>
-      <div className="px-4">
-        <TabsContent value="inputs">
+    <div className="h-full flex flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="inputs" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Input
+          </TabsTrigger>
+          <TabsTrigger value="charts" className="text-xs font-medium">
+            <Settings className="w-3 h-3 mr-1" />
+            Settings
+          </TabsTrigger>
+          <TabsTrigger value="exhibition" className="text-xs font-medium">
+            <Eye className="w-3 h-3 mr-1" />
+            Exhibition
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="inputs" className="flex-1 mt-0">
           <DataFrameOperationsInputs
             data={data}
             settings={settings}
@@ -129,14 +129,14 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
           {loading && <div className="text-slate-700 text-xs p-2">Loading data...</div>}
           {error && <div className="text-red-600 text-xs p-2">{error}</div>}
         </TabsContent>
-        <TabsContent value="charts">
+        <TabsContent value="charts" className="flex-1 mt-0">
           <DataFrameOperationsCharts data={data} settings={settings} />
         </TabsContent>
-        <TabsContent value="exhibition">
+        <TabsContent value="exhibition" className="flex-1 mt-0">
           <DataFrameOperationsExhibition data={(settings as any).tableData || data} />
         </TabsContent>
-      </div>
-    </Tabs>
+      </Tabs>
+    </div>
   );
 };
 

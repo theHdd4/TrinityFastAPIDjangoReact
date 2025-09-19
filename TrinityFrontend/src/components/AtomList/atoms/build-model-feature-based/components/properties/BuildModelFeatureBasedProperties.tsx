@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Upload, Settings } from 'lucide-react';
 
-import BuildModelFeatureBasedSettings from '../BuildModelFeatureBasedSettings';
+import BuildModelFeatureBasedInput from '../BuildModelFeatureBasedInput';
+import BuildModelFeatureBasedSettingsTab from '../BuildModelFeatureBasedSettingsTab';
 import BuildModelFeatureBasedExhibition from '../BuildModelFeatureBasedExhibition';
 
 import { BuildModelFeatureBasedData, BuildModelFeatureBasedSettings as SettingsType } from '../../BuildModelFeatureBasedAtom';
@@ -24,29 +26,35 @@ const InternalBuildModelFeatureBasedProperties: React.FC<StandaloneProps> = ({
   onSettingsChange,
   onDataUpload
 }) => {
-  const [tab, setTab] = useState('settings');
+  const [tab, setTab] = useState('inputs');
 
   return (
-    <Tabs value={tab} onValueChange={setTab} className="w-full h-full flex flex-col">
-      <TabsList className="grid w-full grid-cols-2 bg-gray-50 mb-4 shrink-0 mx-4 mt-4">
-        <TabsTrigger value="settings" className="font-medium">Settings</TabsTrigger>
-        <TabsTrigger value="exhibition" className="font-medium">Exhibition</TabsTrigger>
-      </TabsList>
-      <div className="flex-1 overflow-auto px-4">
-        <TabsContent value="settings" className="mt-0 h-full" forceMount>
-          <BuildModelFeatureBasedSettings
+    <div className="h-full flex flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="inputs" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Input
+          </TabsTrigger>
+          <TabsTrigger value="exhibition" className="text-xs font-medium">
+            <Settings className="w-3 h-3 mr-1" />
+            Settings
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="inputs" className="flex-1 mt-0" forceMount>
+          <BuildModelFeatureBasedInput
             data={data}
-            settings={settings}
             onDataChange={onDataChange}
-            onSettingsChange={onSettingsChange}
-            onDataUpload={onDataUpload}
           />
         </TabsContent>
-        <TabsContent value="exhibition" className="mt-0 h-full" forceMount>
-          <BuildModelFeatureBasedExhibition data={data} />
+        <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
+          <BuildModelFeatureBasedSettingsTab
+            data={data}
+            onDataChange={onDataChange}
+          />
         </TabsContent>
-      </div>
-    </Tabs>
+      </Tabs>
+    </div>
   );
 };
 

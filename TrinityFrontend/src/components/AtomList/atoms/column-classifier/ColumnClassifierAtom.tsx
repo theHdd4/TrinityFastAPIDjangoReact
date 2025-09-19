@@ -1,6 +1,6 @@
 import React from 'react';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2 } from 'lucide-react';
+import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
 import ColumnClassifierDimensionMapping from './components/ColumnClassifierDimensionMapping';
@@ -88,12 +88,15 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
 
 
   const handleColumnMove = (
-    columnName: string,
+    columnName: string | string[],
     newCategory: string,
     fileIndex?: number
   ) => {
     const targetFileIndex =
       fileIndex !== undefined ? fileIndex : classifierData.activeFileIndex;
+
+    // Convert single column to array for consistent processing
+    const columnsToMove = Array.isArray(columnName) ? columnName : [columnName];
 
     const updated = {
       ...classifierData,
@@ -102,8 +105,10 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
 
         const updatedCustom = { ...file.customDimensions };
         // remove from all custom dimensions first
-        Object.keys(updatedCustom).forEach(key => {
-          updatedCustom[key] = updatedCustom[key].filter(col => col !== columnName);
+        columnsToMove.forEach(colName => {
+          Object.keys(updatedCustom).forEach(key => {
+            updatedCustom[key] = updatedCustom[key].filter(col => col !== colName);
+          });
         });
 
         let updatedColumns = file.columns;
@@ -113,18 +118,20 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
           newCategory === 'measures' ||
           newCategory === 'unclassified'
         ) {
-          // regular category change
+          // regular category change - update all specified columns
           updatedColumns = file.columns.map(col =>
-            col.name === columnName ? { ...col, category: newCategory } : col
+            columnsToMove.includes(col.name) ? { ...col, category: newCategory } : col
           );
         } else {
           // assigning to a dimension: keep identifier category
           if (!updatedCustom[newCategory]) {
             updatedCustom[newCategory] = [];
           }
-          if (!updatedCustom[newCategory].includes(columnName)) {
-            updatedCustom[newCategory].push(columnName);
-          }
+          columnsToMove.forEach(colName => {
+            if (!updatedCustom[newCategory].includes(colName)) {
+              updatedCustom[newCategory].push(colName);
+            }
+          });
         }
 
         return {
@@ -253,11 +260,9 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   return (
     <div className="w-full h-full bg-white flex flex-col">
         <div className="flex flex-1">
-          <div className="w-full p-4">
+          <div className="relative w-full h-full p-4 min-h-[450px]">
             {settings.isLoading ? (
-              <div className="w-full h-full flex items-center justify-center">
-                <Loader2 className="w-8 h-8 animate-spin text-gray-500" />
-              </div>
+              <LoadingAnimation status={settings.loadingStatus} />
             ) : (
               <ColumnClassifierCanvas
                 data={classifierData}

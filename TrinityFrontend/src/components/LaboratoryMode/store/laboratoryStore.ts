@@ -115,6 +115,8 @@ export interface FeatureOverviewSettings {
   dimensionMap?: Record<string, string[]>;
   filterUnique?: boolean;
   isLoading?: boolean;
+  loadingMessage?: string;
+  loadingStatus?: string;
 }
 
 export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
@@ -137,6 +139,8 @@ export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   dimensionMap: {},
   filterUnique: true,
   isLoading: false,
+  loadingMessage: '',
+  loadingStatus: '',
 };
 
 export interface ConcatSettings {
@@ -304,6 +308,8 @@ export interface ColumnClassifierSettings {
   enableColumnView?: boolean;
   filterColumnViewUnique?: boolean;
   isLoading?: boolean;
+  loadingMessage?: string;
+  loadingStatus?: string;
 }
 
 export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
@@ -319,6 +325,8 @@ export const DEFAULT_COLUMN_CLASSIFIER_SETTINGS: ColumnClassifierSettings = {
   enableColumnView: true,
   filterColumnViewUnique: false,
   isLoading: false,
+  loadingMessage: '',
+  loadingStatus: '',
 };
 
 export interface DataFrameOperationsSettings {

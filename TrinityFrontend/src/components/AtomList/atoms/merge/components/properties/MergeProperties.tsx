@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Database, Settings, Eye } from 'lucide-react';
+import { Upload, Settings, Eye } from 'lucide-react';
 import MergeInputFiles from '../MergeInputFiles';
 import MergeOptions from '../MergeOptions';
 import MergeExhibition from '../MergeExhibition';
@@ -159,45 +159,44 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
             </button>
           </div>
         )}
-        <Tabs value={tab} onValueChange={setTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-            <TabsTrigger value="inputs" className="text-xs">
-              <Database className="w-3 h-3 mr-1" />
-              Input Files
-            </TabsTrigger>
-            <TabsTrigger value="options" className="text-xs">
-              <Settings className="w-3 h-3 mr-1" />
-              Merge Options
-            </TabsTrigger>
-            <TabsTrigger value="exhibition" className="text-xs">
-              <Eye className="w-3 h-3 mr-1" />
-              Exhibition
-            </TabsTrigger>
-          </TabsList>
-
-          <div className="px-4">
-            <TabsContent value="inputs" className="space-y-4" forceMount>
+        <div className="h-full flex flex-col">
+          <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="inputs" className="text-xs font-medium">
+                <Upload className="w-3 h-3 mr-1" />
+                Input
+              </TabsTrigger>
+              <TabsTrigger value="options" className="text-xs font-medium">
+                <Settings className="w-3 h-3 mr-1" />
+                Settings
+              </TabsTrigger>
+              <TabsTrigger value="exhibition" className="text-xs font-medium">
+                <Eye className="w-3 h-3 mr-1" />
+                Exhibition
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="inputs" className="flex-1 mt-0" forceMount>
               <MergeInputFiles
                 settings={settings}
                 onSettingsChange={handleChange}
                 onPerformMerge={handlePerformMerge}
               />
             </TabsContent>
-            <TabsContent value="options" className="space-y-4" forceMount>
+            <TabsContent value="options" className="flex-1 mt-0" forceMount>
               <MergeOptions
                 settings={settings}
                 onSettingsChange={handleChange}
                 onPerformMerge={handlePerformMerge}
               />
             </TabsContent>
-            <TabsContent value="exhibition" className="space-y-4" forceMount>
+            <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
               <MergeExhibition 
                 settings={settings} 
                 onPerformMerge={handlePerformMerge}
               />
             </TabsContent>
-          </div>
-        </Tabs>
+          </Tabs>
+        </div>
       </div>
     );
   } catch (err) {

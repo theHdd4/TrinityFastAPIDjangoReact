@@ -35,11 +35,13 @@ import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
   duplicateColumn as apiDuplicateColumn,
   moveColumn as apiMoveColumn,
   retypeColumn as apiRetypeColumn,
+  applyFormula as apiApplyFormula,
   loadDataframeByKey,
 } from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
 import '@/templates/tables/table.css';
 import DataFrameCardinalityView from './DataFrameCardinalityView';
+import FormularBar from './FormularBar';
 
 interface DataFrameOperationsCanvasProps {
   data: DataFrameData | null;
@@ -118,6 +120,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // 1. Add state for selected cell and selected column
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: string } | null>(null);
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
+  const [formulaInput, setFormulaInput] = useState('');
+  const [isFormulaMode, setIsFormulaMode] = useState(false);
   const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter'>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; col: string; colIdx: number } | null>(null);
   const [insertMenuOpen, setInsertMenuOpen] = useState(false);
@@ -784,6 +788,33 @@ const handleHeaderClick = (header: string) => {
   setSelectedCell(null);
 };
 
+const handleFormulaSubmit = async () => {
+  resetSaveSuccess();
+  if (!data || !selectedColumn || !fileId) return;
+  try {
+    const resp = await apiApplyFormula(fileId, selectedColumn, formulaInput.trim());
+    const columnTypes: any = {};
+    resp.headers.forEach(h => {
+      const t = resp.types[h];
+      columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+    });
+    onDataChange({
+      headers: resp.headers,
+      rows: resp.rows,
+      fileName: data.fileName,
+      columnTypes,
+      pinnedColumns: data.pinnedColumns,
+      frozenColumns: data.frozenColumns,
+      cellColors: data.cellColors,
+    });
+  } catch (err) {
+    handleApiError('Apply formula failed', err);
+  } finally {
+    setFormulaInput('');
+    setIsFormulaMode(false);
+  }
+};
+
 const insertDisabled = !selectedCell && !selectedColumn;
 const deleteDisabled = !selectedCell && !selectedColumn;
 
@@ -1044,223 +1075,239 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   </div>
                 </div>
               ) : (
-                <div className="table-wrapper">
-                  <div className="table-edge-left" />
-                  <div className="table-edge-right" />
-                  <div className="table-overflow relative">
-                    {operationLoading && (
-                      <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10 text-sm text-slate-700">
-                        Operation Loading...
-                      </div>
-                    )}
-                    <Table className="table-base">
-              <TableHeader className="table-header">
-                <TableRow className="table-header-row">
-                  {settings.showRowNumbers && (
-                    <TableHead className="table-header-cell w-16 text-center">#</TableHead>
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  {data && (
+                    <FormularBar
+                      data={data}
+                      selectedColumn={selectedColumn}
+                      formulaInput={formulaInput}
+                      isFormulaMode={isFormulaMode}
+                      onSelectedColumnChange={setSelectedColumn}
+                      onFormulaInputChange={setFormulaInput}
+                      onFormulaModeChange={setIsFormulaMode}
+                      onFormulaSubmit={handleFormulaSubmit}
+                    />
                   )}
-                  {Array.isArray(data?.headers) && data.headers.map((header, colIdx) => (
-                    <TableHead
-                      key={header + '-' + colIdx}
-                      data-col={header}
-                      className={`table-header-cell text-center bg-white border-r border-gray-200 relative ${selectedColumn === header ? 'border-2 border-black' : ''}`}
-                      style={settings.columnWidths?.[header] ? { width: settings.columnWidths[header], minWidth: settings.columnWidths[header] } : undefined}
-                      draggable
-                      onDragStart={() => handleDragStart(header)}
-                      onDragOver={e => handleDragOver(e, header)}
-                      onDragEnd={handleDragEnd}
-                      onContextMenu={e => {
-                        e.preventDefault();
-                        let rect = undefined;
-                        if (headerRefs.current && headerRefs.current[header]) {
-                          rect = headerRefs.current[header].getBoundingClientRect?.();
-                        }
-                        setContextMenu({
-                          x: rect ? rect.right : e.clientX,
-                          y: rect ? rect.top : e.clientY,
-                          col: header,
-                          colIdx: colIdx
-                        });
-                        setRowContextMenu(null);
-                      }}
-                      onClick={() => handleHeaderClick(header)}
-                      onDoubleClick={() => {
-                        // Always allow header editing regardless of enableEditing setting
-                        setEditingHeader(colIdx);
-                        setEditingHeaderValue(header);
-                      }}
-                      ref={el => {
-                        if (headerRefs.current) {
-                          headerRefs.current[header] = el;
-                        }
-                      }}
-                    >
-                      {editingHeader === colIdx ? (
-                        <input
-                          type="text"
-                          className="h-7 text-xs outline-none border-none bg-white px-0 font-bold text-gray-800 truncate text-center w-full"
-                          style={{ width: '100%', boxSizing: 'border-box', background: 'inherit', textAlign: 'center', padding: 0, margin: 0 }}
-                          value={editingHeaderValue}
-                          autoFocus
-                          onChange={e => setEditingHeaderValue(e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') commitHeaderEdit(colIdx, (e.target as HTMLInputElement).value);
-                            if (e.key === 'Escape') setEditingHeader(null);
-                          }}
-                          onBlur={e => commitHeaderEdit(colIdx, (e.target as HTMLInputElement).value)}
-                        />
-                      ) : (
-                        <div
-                          className="flex items-center justify-center cursor-pointer w-full h-full"
-                          onDoubleClick={() => {
-                            // Always allow header editing regardless of enableEditing setting
-                            setEditingHeader(colIdx);
-                            setEditingHeaderValue(header);
-                          }}
-                          title="Double-click to edit column name"
-                          style={{ width: '100%', height: '100%' }}
-                        >
-                          {headerDisplayNames[header] ?? header}
-                        </div>
-                      )}
-                      <div
-                        className="absolute top-0 right-0 h-full w-1 cursor-col-resize"
-                        onMouseDown={e => startColResize(header, e)}
-                      />
-                    </TableHead>
-                  ))}
-                  <TableHead className="table-header-cell w-8" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {paginatedRows.map((row, rowIndex) => (
-                  <TableRow
-                    key={rowIndex}
-                    className="table-row relative"
-                    ref={el => { if (rowRefs.current) rowRefs.current[startIndex + rowIndex] = el; }}
-                    style={{ height: settings.rowHeights?.[startIndex + rowIndex] }}
-                  >
-                    {settings.showRowNumbers && (
-                      <TableCell
-                        className="table-cell w-16 text-center text-xs font-medium"
-                        onContextMenu={e => {
-                          e.preventDefault();
-                          setRowContextMenu({ x: e.clientX, y: e.clientY, rowIdx: startIndex + rowIndex });
-                          setContextMenu(null);
-                        }}
-                      >
-                        {startIndex + rowIndex + 1}
-                      </TableCell>
-                    )}
-                    {(data.headers || []).map((column, colIdx) => {
-                      const cellValue = row[column];
-                      const isEditing = editingCell?.row === rowIndex && editingCell?.col === column;
-                        return (
-                          <TableCell
-                            key={colIdx}
-                            data-col={column}
-                            className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : selectedColumn === column ? 'border border-black' : ''}`}
-                            style={settings.columnWidths?.[column] ? { width: settings.columnWidths[column], minWidth: settings.columnWidths[column] } : undefined}
-                            onClick={() => handleCellClick(rowIndex, column)}
-                            onDoubleClick={() => {
-                            // Always allow cell editing regardless of enableEditing setting
-                            setEditingCell({ row: rowIndex, col: column });
-                            setEditingCellValue(safeToString(row[column]));
-                          }}
-                        >
-                          {editingCell?.row === rowIndex && editingCell?.col === column ? (
-                            <input
-                              type="text"
-                              className="h-7 text-xs outline-none border-none bg-white px-1"
-                              style={{ width: '100%', boxSizing: 'border-box', background: 'inherit' }}
-                              value={editingCellValue}
-                              autoFocus
-                              onChange={e => setEditingCellValue(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') commitCellEdit(rowIndex, column);
-                                if (e.key === 'Escape') setEditingCell(null);
-                              }}
-                              onBlur={() => commitCellEdit(rowIndex, column)}
-                            />
-                          ) : (
-                            <div className="text-xs p-1 hover:bg-blue-50 rounded cursor-pointer min-h-[20px] flex items-center text-gray-800"
-                              onDoubleClick={() => {
-                                // Always allow cell editing regardless of enableEditing setting
-                                setEditingCell({ row: rowIndex, col: column });
-                                setEditingCellValue(safeToString(row[column]));
-                              }}
-                              title="Double-click to edit cell"
-                            >
-                              {safeToString(row[column]) !== '' ? highlightMatch(safeToString(row[column]), settings.searchTerm || '') : null}
-                            </div>
-                          )}
-                        </TableCell>
-                      );
-                    })}
-                    <TableCell className="table-cell w-8">
-                      <div
-                        className="absolute bottom-0 left-0 w-full h-1 cursor-row-resize"
-                        onMouseDown={e => startRowResize(startIndex + rowIndex, e)}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              )}
-              {totalPages > 1 && (
-                <div className="flex flex-col items-center py-4">
-                  <div className="text-sm text-muted-foreground mb-2">
-                    {`Showing ${startIndex + 1} to ${Math.min(startIndex + (settings.rowsPerPage || 15), processedData.totalRows)} of ${processedData.totalRows} entries`}
-                  </div>
-                  <Pagination>
-                    <PaginationContent>
-                      <PaginationItem>
-                        <PaginationPrevious
-                          onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                          className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                        />
-                      </PaginationItem>
-                      {Array.from({ length: totalPages }).map((_, i) => {
-                        const pageNum = i + 1;
-                        if (
-                          pageNum === 1 ||
-                          pageNum === totalPages ||
-                          Math.abs(pageNum - currentPage) <= 2
-                        ) {
-                          return (
-                            <PaginationItem key={pageNum}>
-                              <PaginationLink
-                                onClick={() => setCurrentPage(pageNum)}
-                                isActive={currentPage === pageNum}
-                                className="cursor-pointer"
+                  <div className="flex-1 overflow-auto">
+                    <div className="table-wrapper">
+                      <div className="table-edge-left" />
+                      <div className="table-edge-right" />
+                      <div className="table-overflow relative">
+                        {operationLoading && (
+                          <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10 text-sm text-slate-700">
+                            Operation Loading...
+                          </div>
+                        )}
+                        <Table className="table-base">
+                          <TableHeader className="table-header">
+                            <TableRow className="table-header-row">
+                              {settings.showRowNumbers && (
+                                <TableHead className="table-header-cell w-16 text-center">#</TableHead>
+                              )}
+                              {Array.isArray(data?.headers) && data.headers.map((header, colIdx) => (
+                                <TableHead
+                                  key={header + '-' + colIdx}
+                                  data-col={header}
+                                  className={`table-header-cell text-center bg-white border-r border-gray-200 relative ${selectedColumn === header ? 'border-2 border-black' : ''}`}
+                                  style={settings.columnWidths?.[header] ? { width: settings.columnWidths[header], minWidth: settings.columnWidths[header] } : undefined}
+                                  draggable
+                                  onDragStart={() => handleDragStart(header)}
+                                  onDragOver={e => handleDragOver(e, header)}
+                                  onDragEnd={handleDragEnd}
+                                  onContextMenu={e => {
+                                    e.preventDefault();
+                                    let rect = undefined;
+                                    if (headerRefs.current && headerRefs.current[header]) {
+                                      rect = headerRefs.current[header].getBoundingClientRect?.();
+                                    }
+                                    setContextMenu({
+                                      x: rect ? rect.right : e.clientX,
+                                      y: rect ? rect.top : e.clientY,
+                                      col: header,
+                                      colIdx: colIdx
+                                    });
+                                    setRowContextMenu(null);
+                                  }}
+                                  onClick={() => handleHeaderClick(header)}
+                                  onDoubleClick={() => {
+                                    // Always allow header editing regardless of enableEditing setting
+                                    setEditingHeader(colIdx);
+                                    setEditingHeaderValue(header);
+                                  }}
+                                  ref={el => {
+                                    if (headerRefs.current) {
+                                      headerRefs.current[header] = el;
+                                    }
+                                  }}
+                                >
+                                  {editingHeader === colIdx ? (
+                                    <input
+                                      type="text"
+                                      className="h-7 text-xs outline-none border-none bg-white px-0 font-bold text-gray-800 truncate text-center w-full"
+                                      style={{ width: '100%', boxSizing: 'border-box', background: 'inherit', textAlign: 'center', padding: 0, margin: 0 }}
+                                      value={editingHeaderValue}
+                                      autoFocus
+                                      onChange={e => setEditingHeaderValue(e.target.value)}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') commitHeaderEdit(colIdx, (e.target as HTMLInputElement).value);
+                                        if (e.key === 'Escape') setEditingHeader(null);
+                                      }}
+                                      onBlur={e => commitHeaderEdit(colIdx, (e.target as HTMLInputElement).value)}
+                                    />
+                                  ) : (
+                                    <div
+                                      className="flex items-center justify-center cursor-pointer w-full h-full"
+                                      onDoubleClick={() => {
+                                        // Always allow header editing regardless of enableEditing setting
+                                        setEditingHeader(colIdx);
+                                        setEditingHeaderValue(header);
+                                      }}
+                                      title="Double-click to edit column name"
+                                      style={{ width: '100%', height: '100%' }}
+                                    >
+                                      {headerDisplayNames[header] ?? header}
+                                    </div>
+                                  )}
+                                  <div
+                                    className="absolute top-0 right-0 h-full w-1 cursor-col-resize"
+                                    onMouseDown={e => startColResize(header, e)}
+                                  />
+                                </TableHead>
+                              ))}
+                              <TableHead className="table-header-cell w-8" />
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {paginatedRows.map((row, rowIndex) => (
+                              <TableRow
+                                key={rowIndex}
+                                className="table-row relative"
+                                ref={el => { if (rowRefs.current) rowRefs.current[startIndex + rowIndex] = el; }}
+                                style={{ height: settings.rowHeights?.[startIndex + rowIndex] }}
                               >
-                                {pageNum}
-                              </PaginationLink>
-                            </PaginationItem>
-                          );
-                        }
-                        if (
-                          (pageNum === currentPage - 3 && pageNum > 1) ||
-                          (pageNum === currentPage + 3 && pageNum < totalPages)
-                        ) {
-                          return <PaginationEllipsis key={pageNum} />;
-                        }
-                        return null;
-                      })}
-                      <PaginationItem>
-                        <PaginationNext
-                          onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                          className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
-                        />
-                      </PaginationItem>
-                    </PaginationContent>
-                  </Pagination>
+                                {settings.showRowNumbers && (
+                                  <TableCell
+                                    className="table-cell w-16 text-center text-xs font-medium"
+                                    onContextMenu={e => {
+                                      e.preventDefault();
+                                      setRowContextMenu({ x: e.clientX, y: e.clientY, rowIdx: startIndex + rowIndex });
+                                      setContextMenu(null);
+                                    }}
+                                  >
+                                    {startIndex + rowIndex + 1}
+                                  </TableCell>
+                                )}
+                                {(data.headers || []).map((column, colIdx) => {
+                                  const cellValue = row[column];
+                                  const isEditing = editingCell?.row === rowIndex && editingCell?.col === column;
+                                  return (
+                                    <TableCell
+                                      key={colIdx}
+                                      data-col={column}
+                                      className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : selectedColumn === column ? 'border border-black' : ''}`}
+                                      style={settings.columnWidths?.[column] ? { width: settings.columnWidths[column], minWidth: settings.columnWidths[column] } : undefined}
+                                      onClick={() => handleCellClick(rowIndex, column)}
+                                      onDoubleClick={() => {
+                                        // Always allow cell editing regardless of enableEditing setting
+                                        setEditingCell({ row: rowIndex, col: column });
+                                        setEditingCellValue(safeToString(row[column]));
+                                      }}
+                                    >
+                                      {editingCell?.row === rowIndex && editingCell?.col === column ? (
+                                        <input
+                                          type="text"
+                                          className="h-7 text-xs outline-none border-none bg-white px-1"
+                                          style={{ width: '100%', boxSizing: 'border-box', background: 'inherit' }}
+                                          value={editingCellValue}
+                                          autoFocus
+                                          onChange={e => setEditingCellValue(e.target.value)}
+                                          onKeyDown={e => {
+                                            if (e.key === 'Enter') commitCellEdit(rowIndex, column);
+                                            if (e.key === 'Escape') setEditingCell(null);
+                                          }}
+                                          onBlur={() => commitCellEdit(rowIndex, column)}
+                                        />
+                                      ) : (
+                                        <div className="text-xs p-1 hover:bg-blue-50 rounded cursor-pointer min-h-[20px] flex items-center text-gray-800"
+                                          onDoubleClick={() => {
+                                            // Always allow cell editing regardless of enableEditing setting
+                                            setEditingCell({ row: rowIndex, col: column });
+                                            setEditingCellValue(safeToString(row[column]));
+                                          }}
+                                          title="Double-click to edit cell"
+                                        >
+                                          {safeToString(row[column]) !== '' ? highlightMatch(safeToString(row[column]), settings.searchTerm || '') : null}
+                                        </div>
+                                      )}
+                                    </TableCell>
+                                  );
+                                })}
+                                <TableCell className="table-cell w-8">
+                                  <div
+                                    className="absolute bottom-0 left-0 w-full h-1 cursor-row-resize"
+                                    onMouseDown={e => startRowResize(startIndex + rowIndex, e)}
+                                  />
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
+            {totalPages > 1 && (
+            <div className="flex flex-col items-center py-4">
+              <div className="text-sm text-muted-foreground mb-2">
+                {`Showing ${startIndex + 1} to ${Math.min(startIndex + (settings.rowsPerPage || 15), processedData.totalRows)} of ${processedData.totalRows} entries`}
+              </div>
+              <Pagination>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                      className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                    />
+                  </PaginationItem>
+                  {Array.from({ length: totalPages }).map((_, i) => {
+                    const pageNum = i + 1;
+                    if (
+                      pageNum === 1 ||
+                      pageNum === totalPages ||
+                      Math.abs(pageNum - currentPage) <= 2
+                    ) {
+                      return (
+                        <PaginationItem key={pageNum}>
+                          <PaginationLink
+                            onClick={() => setCurrentPage(pageNum)}
+                            isActive={currentPage === pageNum}
+                            className="cursor-pointer"
+                          >
+                            {pageNum}
+                          </PaginationLink>
+                        </PaginationItem>
+                      );
+                    }
+                    if (
+                      (pageNum === currentPage - 3 && pageNum > 1) ||
+                      (pageNum === currentPage + 3 && pageNum < totalPages)
+                    ) {
+                      return <PaginationEllipsis key={pageNum} />;
+                    }
+                    return null;
+                  })}
+                  <PaginationItem>
+                    <PaginationNext
+                      onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                      className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            </div>
+          )}
         </div>
         {contextMenu && data && typeof contextMenu.col === 'string' && (
         <div
