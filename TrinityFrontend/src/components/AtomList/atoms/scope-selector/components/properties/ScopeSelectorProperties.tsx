@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Upload, Settings, Eye } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import ScopeSelectorInputFiles from '../ScopeSelectorInputFiles';
@@ -45,7 +46,7 @@ const ScopeSelectorProperties: React.FC<ScopeSelectorPropertiesProps> = ({ atomI
     selectedIdentifiers: [],
     ...(atom?.settings || {})
   };
-  const [tab, setTab] = useState('input');
+  const [tab, setTab] = useState('inputs');
 
   if (!atom) {
     return (
@@ -62,30 +63,37 @@ const ScopeSelectorProperties: React.FC<ScopeSelectorPropertiesProps> = ({ atomI
   }
 
   return (
-    <div className="w-full h-full flex flex-col">
-      <Tabs value={tab} onValueChange={setTab} className="w-full h-full flex flex-col">
-        <TabsList className="grid w-full grid-cols-3 bg-blue-50 mb-4 shrink-0 mx-4 mt-4">
-          <TabsTrigger value="input" className="font-medium">Input Files</TabsTrigger>
-          <TabsTrigger value="settings" className="font-medium">Settings</TabsTrigger>
-          <TabsTrigger value="exhibition" className="font-medium">Exhibition</TabsTrigger>
+    <div className="h-full flex flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="inputs" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Input
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="text-xs font-medium">
+            <Settings className="w-3 h-3 mr-1" />
+            Settings
+          </TabsTrigger>
+          <TabsTrigger value="exhibition" className="text-xs font-medium">
+            <Eye className="w-3 h-3 mr-1" />
+            Exhibition
+          </TabsTrigger>
         </TabsList>
 
-        <div className="flex-1 overflow-auto px-4">
-          <TabsContent value="input" className="mt-0 h-full" forceMount>
-            <ScopeSelectorInputFiles atomId={atomId} />
-          </TabsContent>
+        <TabsContent value="inputs" className="flex-1 mt-0" forceMount>
+          <ScopeSelectorInputFiles atomId={atomId} />
+        </TabsContent>
 
-          <TabsContent value="settings" className="mt-0 h-full" forceMount>
-            <ScopeSelectorSettings 
-              data={settings} 
-              onDataChange={(newData) => updateSettings(newData)} 
-            />
-          </TabsContent>
+        <TabsContent value="settings" className="flex-1 mt-0" forceMount>
+          <ScopeSelectorSettings 
+            data={settings} 
+            onDataChange={(newData) => updateSettings(newData)} 
+          />
+        </TabsContent>
 
-          <TabsContent value="exhibition" className="mt-0 h-full" forceMount>
-            <ScopeSelectorExhibition data={settings as any} />
-          </TabsContent>
-        </div>
+        <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
+          <ScopeSelectorExhibition data={settings as any} />
+        </TabsContent>
       </Tabs>
     </div>
   );

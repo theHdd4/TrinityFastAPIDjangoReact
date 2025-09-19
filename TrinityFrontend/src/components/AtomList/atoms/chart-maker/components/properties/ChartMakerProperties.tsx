@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, BarChart3 } from 'lucide-react';
+import { Upload, Settings, Eye } from 'lucide-react';
 import ChartMakerSettings from '../ChartMakerSettings';
 import ChartMakerVisualization from '../ChartMakerVisualization';
 import { useLaboratoryStore, DEFAULT_CHART_MAKER_SETTINGS, ChartMakerSettings as SettingsType, ChartData } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -305,24 +305,24 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
   // REMOVE notification useEffects
 
   return (
-    <Tabs
-      value={tab}
-      onValueChange={setTab}
-      className="flex flex-col h-full w-full"
-    >
-      <TabsList className="grid w-full grid-cols-2 mx-4 my-4">
-        <TabsTrigger value="settings" className="text-xs">
-          <Settings className="w-3 h-3 mr-1" />
-          Settings
-        </TabsTrigger>
-        <TabsTrigger value="visualization" className="text-xs">
-          <BarChart3 className="w-3 h-3 mr-1" />
-          Visualization
-        </TabsTrigger>
-      </TabsList>
+    <div className="h-full flex flex-col">
+      <Tabs
+        value={tab}
+        onValueChange={setTab}
+        className="flex-1 flex flex-col"
+      >
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="settings" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Input
+          </TabsTrigger>
+          <TabsTrigger value="visualization" className="text-xs font-medium">
+            <Settings className="w-3 h-3 mr-1" />
+            Settings
+          </TabsTrigger>
+        </TabsList>
 
-      <div className="px-4 flex-1 overflow-y-auto overflow-x-hidden">
-        <TabsContent value="settings" className="space-y-4" forceMount>
+        <TabsContent value="settings" className="flex-1 mt-0" forceMount>
           <ChartMakerSettings
             data={settings.uploadedData}
             onDataUpload={handleDataUpload}
@@ -333,15 +333,15 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
           />
         </TabsContent>
         
-        <TabsContent value="visualization" className="space-y-4" forceMount>
+        <TabsContent value="visualization" className="flex-1 mt-0" forceMount>
           <ChartMakerVisualization
             settings={settings}
             onSettingsChange={handleSettingsChange}
             onRenderCharts={handleRenderCharts}
           />
         </TabsContent>
-      </div>
-    </Tabs>
+      </Tabs>
+    </div>
   );
 };
 

@@ -187,49 +187,6 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
           </div>
         </Card>
       )}
-      {columns.length > 0 && (
-        <Card className="p-4 space-y-3 bg-gradient-to-br from-yellow-50 to-yellow-100">
-          <div className="overflow-x-auto rounded-lg border border-gray-100 bg-white">
-            <div className="overflow-auto max-h-96">
-              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gray-50 sticky top-0 z-10">
-                  <tr>
-                    <th className="px-4 py-2 text-left font-semibold text-gray-700 whitespace-nowrap">Column Name</th>
-                    <th className="px-4 py-2 text-left font-semibold text-gray-700 whitespace-nowrap">Unique Values</th>
-                    <th className="px-4 py-2 text-left font-semibold text-gray-700 whitespace-nowrap">Unique Count</th>
-                    <th className="px-4 py-2 text-left font-semibold text-gray-700 whitespace-nowrap">Type</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {columns.map(c => (
-                    <tr key={c.column} className="hover:bg-yellow-50 transition-colors">
-                      <td className="px-4 py-2 font-medium text-gray-900 whitespace-nowrap">{c.column}</td>
-                      <td className="px-4 py-2 text-gray-700 max-w-xs">
-                        <div className="max-h-20 overflow-y-auto pr-2 custom-scrollbar">
-                          <div className="text-sm text-gray-600">
-                            {c.unique_values?.join(', ') || 'N/A'}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-2 text-gray-600">{c.unique_count}</td>
-                      <td className="px-4 py-2">
-                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold 
-                          ${c.data_type.toLowerCase().includes('int') || c.data_type.toLowerCase().includes('float') || c.data_type.toLowerCase().includes('number') ? 'bg-blue-100 text-blue-700' :
-                            c.data_type.toLowerCase().includes('object') || c.data_type.toLowerCase().includes('string') || c.data_type.toLowerCase().includes('category') ? 'bg-yellow-100 text-yellow-700' :
-                            c.data_type.toLowerCase().includes('bool') ? 'bg-purple-100 text-purple-700' :
-                            'bg-gray-100 text-gray-700'}
-                        `}>
-                          {c.data_type}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </Card>
-      )}
     </div>
   );
 };

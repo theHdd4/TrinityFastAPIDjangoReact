@@ -235,40 +235,6 @@ const CreateColumnInputFiles: React.FC<Props> = ({ atomId, selectedIdentifiers, 
           </SelectContent>
         </Select>
       </Card>
-      {columns.length > 0 && (
-        <Card className="p-4 space-y-3 bg-gradient-to-br from-green-50 to-green-100">
-          {/* <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium text-gray-700">Columns in Data Source</span>
-          </div> */}
-          <div className="overflow-x-auto rounded-lg border border-gray-100 bg-white">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-2 text-left font-semibold text-gray-700">Column Name</th>
-                  <th className="px-4 py-2 text-left font-semibold text-gray-700">Type</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {columns.map(c => (
-                  <tr key={c.column} className="hover:bg-green-50 transition-colors">
-                    <td className="px-4 py-2 font-medium text-gray-900">{c.column}{selectedIdentifiers.includes(c.column) ? ' (identifier)' : ''}</td>
-                    <td className="px-4 py-2">
-                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold 
-                        ${c.data_type.toLowerCase().includes('int') || c.data_type.toLowerCase().includes('float') || c.data_type.toLowerCase().includes('number') ? 'bg-blue-100 text-blue-700' :
-                          c.data_type.toLowerCase().includes('object') || c.data_type.toLowerCase().includes('string') || c.data_type.toLowerCase().includes('category') ? 'bg-yellow-100 text-yellow-700' :
-                          c.data_type.toLowerCase().includes('bool') ? 'bg-purple-100 text-purple-700' :
-                          'bg-gray-100 text-gray-700'}
-                      `}>
-                        {c.data_type}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
     </div>
   );
 };
