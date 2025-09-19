@@ -82,8 +82,8 @@ def ensure_minio_bucket():
 ensure_minio_bucket()
 
 # MongoDB configuration
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin")
-MONGO_DB = os.getenv("MONGO_DB", "trinity_prod")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_db?authSource=admin")
+MONGO_DB = os.getenv("MONGO_DB", "trinity_db")
 COLLECTION_NAME = "validator_atoms"
 SELECT_CONFIGS_COLLECTION_NAME = "select_configs"
 

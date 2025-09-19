@@ -522,7 +522,7 @@ class StackModelTrainer:
                 
                 if missing_columns:
                     continue
-
+                
                 # Use original X variables for predictions with destandardized coefficients
                 # The original variables should always be available in the DataFrame
                 X = df[x_variables].values
@@ -530,13 +530,13 @@ class StackModelTrainer:
                 y_actual = df[y_variable].values
                 
                 combination_metrics = {}
-
+                
                 for model_name in betas_by_combination.get(combination, {}):
                     if model_name not in betas_by_combination[combination]:
                         continue
                     
                     betas = betas_by_combination[combination][model_name]
-                              
+                    
                     variable_means = {}
                     variable_stds = {}
                     variable_mins = {}

@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,6 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Eye, EyeOff, User, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
+import LoginAnimation from '@/components/LoginAnimation';
+import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 
 const Login = () => {
   const [username, setUsername] = useState('');
@@ -15,8 +17,24 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showAnimation, setShowAnimation] = useState(false);
+  const animationStartRef = useRef<number | null>(null);
   const navigate = useNavigate();
   const { login } = useAuth();
+
+  const handleAnimationComplete = useCallback(() => {
+    const startedAt = animationStartRef.current ?? Date.now();
+    sessionStorage.setItem(
+      'trinity-login-anim',
+      JSON.stringify({
+        startedAt,
+        totalDuration: LOGIN_ANIMATION_TOTAL_DURATION,
+        completedAt: Date.now(),
+      })
+    );
+    animationStartRef.current = null;
+    navigate('/apps');
+  }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,29 +43,57 @@ const Login = () => {
 
     console.log('Submitting login form for', username);
 
-    const success = await login(username, password);
+    const success = await login(username, password, {
+      onInitialSuccess: () => {
+        const startedAt = Date.now();
+        animationStartRef.current = startedAt;
+        sessionStorage.setItem(
+          'trinity-login-anim',
+          JSON.stringify({ startedAt, totalDuration: LOGIN_ANIMATION_TOTAL_DURATION })
+        );
+        setShowAnimation(true);
+      },
+    });
+
     if (success) {
-      navigate('/apps');
+      if (!animationStartRef.current) {
+        const startedAt = Date.now();
+        animationStartRef.current = startedAt;
+        sessionStorage.setItem(
+          'trinity-login-anim',
+          JSON.stringify({ startedAt, totalDuration: LOGIN_ANIMATION_TOTAL_DURATION })
+        );
+        setShowAnimation(true);
+      }
     } else {
       setError('Invalid credentials.');
       console.log('Login failed for', username);
+      setIsLoading(false);
+      animationStartRef.current = null;
+      setShowAnimation(false);
+      sessionStorage.removeItem('trinity-login-anim');
     }
-
-    setIsLoading(false);
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
+      <LoginAnimation active={showAnimation} onComplete={handleAnimationComplete} />
       <video
         autoPlay
         loop
         muted
         playsInline
-        className="absolute inset-0 w-full h-full object-cover"
+        className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${
+          showAnimation ? 'opacity-0' : 'opacity-100'
+        }`}
       >
         <source src="/background.mp4" type="video/mp4" />
       </video>
-      <div className="w-full max-w-md space-y-6 relative z-10">
+      <div
+        className={`relative z-10 w-full max-w-md space-y-6 transition-opacity duration-500 ${
+          showAnimation ? 'pointer-events-none opacity-0' : 'opacity-100'
+        }`}
+      >
         <Card className="bg-white/5 backdrop-blur-lg border border-white/10 text-white shadow-2xl">
           <CardHeader className="flex flex-col items-center space-y-2 text-center">
             <AnimatedLogo className="w-20 h-20 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />

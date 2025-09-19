@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Database, Settings, Eye, BarChart3 } from 'lucide-react';
+import { Upload, Settings, Eye } from 'lucide-react';
 import CorrelationSettings from '../CorrelationSettings';
 import CorrelationExhibition from '../CorrelationExhibition';
 import CorrelationVisualisation from '../CorrelationVisualisation';
@@ -21,34 +21,32 @@ const CorrelationProperties: React.FC<Props> = ({ atomId }) => {
   };
 
   return (
-    <div className="w-full">
-      <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-          <TabsTrigger value="settings" className="text-xs">
+    <div className="h-full flex flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="settings" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Input
+          </TabsTrigger>
+          <TabsTrigger value="visualisation" className="text-xs font-medium">
             <Settings className="w-3 h-3 mr-1" />
             Settings
           </TabsTrigger>
-          <TabsTrigger value="visualisation" className="text-xs">
-            <BarChart3 className="w-3 h-3 mr-1" />
-            Visualisation
-          </TabsTrigger>
-          <TabsTrigger value="exhibition" className="text-xs">
+          <TabsTrigger value="exhibition" className="text-xs font-medium">
             <Eye className="w-3 h-3 mr-1" />
             Exhibition
           </TabsTrigger>
         </TabsList>
 
-        <div className="px-4">
-          <TabsContent value="settings" className="space-y-4" forceMount>
-            <CorrelationSettings data={settings} onDataChange={handleChange} />
-          </TabsContent>
-          <TabsContent value="visualisation" className="space-y-4" forceMount>
-            <CorrelationVisualisation data={settings} onDataChange={handleChange} />
-          </TabsContent>
-          <TabsContent value="exhibition" className="space-y-4" forceMount>
-            <CorrelationExhibition data={settings} />
-          </TabsContent>
-        </div>
+        <TabsContent value="settings" className="flex-1 mt-0" forceMount>
+          <CorrelationSettings data={settings} onDataChange={handleChange} />
+        </TabsContent>
+        <TabsContent value="visualisation" className="flex-1 mt-0" forceMount>
+          <CorrelationVisualisation data={settings} onDataChange={handleChange} />
+        </TabsContent>
+        <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
+          <CorrelationExhibition data={settings} />
+        </TabsContent>
       </Tabs>
     </div>
   );

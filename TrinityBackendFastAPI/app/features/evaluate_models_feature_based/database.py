@@ -38,8 +38,8 @@ def get_minio() -> Minio:
 
 # MongoDB Connection with Authentication (same pattern as select atom)
 # Force the correct URI to match select atom
-MONGO_URI = "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin"
-MONGO_DB = "trinity_prod"
+MONGO_URI = "mongodb://root:rootpass@mongo:27017/trinity_db?authSource=admin"
+MONGO_DB = "trinity_db"
 COLLECTION_NAME = "build-model_featurebased_configs"
 
 # MongoDB Connection with Authentication
@@ -99,7 +99,7 @@ def get_authenticated_client():
 @lru_cache()
 def get_mongo() -> AsyncIOMotorClient:
     # Use the same MongoDB configuration as select atom
-    mongo_uri = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin")
+    mongo_uri = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_db?authSource=admin")
     return AsyncIOMotorClient(
         mongo_uri,
         serverSelectionTimeoutMS=5000,
@@ -154,7 +154,7 @@ async def get_build_config(client_name: str, app_name: str, project_name: str) -
         raise RuntimeError("Failed to establish MongoDB connection")
     
     logger.info("Using client to access database")
-    db = client["trinity_prod"]
+    db = client["trinity_db"]
     _id = f"{client_name}/{app_name}/{project_name}"
     logger.info(f"Looking for document with ID: {_id}")
     doc = await db["build-model_featurebased_configs"].find_one({"_id": _id})

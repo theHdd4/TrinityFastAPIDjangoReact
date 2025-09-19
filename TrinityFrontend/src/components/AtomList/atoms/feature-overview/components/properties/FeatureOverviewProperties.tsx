@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, BarChart3, Eye } from 'lucide-react';
+import { Upload, Settings, Eye } from 'lucide-react';
 import FeatureOverviewSettings from '../FeatureOverviewSettings';
 import FeatureOverviewVisualisation from '../FeatureOverviewVisualisation';
 import FeatureOverviewExhibition from '../FeatureOverviewExhibition';
@@ -36,27 +36,31 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
   };
 
   return (
-    <Tabs value={tab} onValueChange={setTab} className="w-full">
-      <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-        <TabsTrigger value="settings" className="text-xs">
-          <Settings className="w-3 h-3 mr-1" />
-          Settings
-        </TabsTrigger>
-        <TabsTrigger value="visual" className="text-xs">
-          <BarChart3 className="w-3 h-3 mr-1" />
-          Visualisation
-        </TabsTrigger>
-        <TabsTrigger value="exhibition" className="text-xs">
-          <Eye className="w-3 h-3 mr-1" />
-          Exhibition
-        </TabsTrigger>
-      </TabsList>
+    <div className="h-full flex flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="settings" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Input
+          </TabsTrigger>
+          <TabsTrigger value="visual" className="text-xs font-medium">
+            <Settings className="w-3 h-3 mr-1" />
+            Settings
+          </TabsTrigger>
+          <TabsTrigger value="exhibition" className="text-xs font-medium">
+            <Eye className="w-3 h-3 mr-1" />
+            Exhibition
+          </TabsTrigger>
+        </TabsList>
 
-      <div className="px-4">
-        <TabsContent value="settings" className="space-y-4" forceMount>
-          <FeatureOverviewSettings settings={settings} onSettingsChange={handleChange} />
+        <TabsContent value="settings" className="flex-1 mt-0" forceMount>
+          <FeatureOverviewSettings
+            atomId={atomId}
+            settings={settings}
+            onSettingsChange={handleChange}
+          />
         </TabsContent>
-        <TabsContent value="visual" className="space-y-4" forceMount>
+        <TabsContent value="visual" className="flex-1 mt-0" forceMount>
           <FeatureOverviewVisualisation
             numericColumns={
               Array.isArray(settings.numericColumns)
@@ -77,11 +81,11 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
             onApply={applyVisual}
           />
         </TabsContent>
-        <TabsContent value="exhibition" className="space-y-4" forceMount>
+        <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
           <FeatureOverviewExhibition />
         </TabsContent>
-      </div>
-    </Tabs>
+      </Tabs>
+    </div>
   );
 };
 

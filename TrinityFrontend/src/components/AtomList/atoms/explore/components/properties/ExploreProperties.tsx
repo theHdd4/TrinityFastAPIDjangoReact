@@ -53,41 +53,39 @@ const ExploreProperties: React.FC<Props> = ({ atomId }) => {
   return (
     <div className="w-80 h-full bg-background border-l border-border flex flex-col">
       <div className="flex-1 overflow-hidden">
-        <Tabs defaultValue="input" className="h-full">
-          <TabsList className="grid w-full grid-cols-3 m-2">
-            <TabsTrigger value="input" className="text-xs">
+        <Tabs defaultValue="input" className="flex-1 flex flex-col">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="input" className="text-xs font-medium">
               <Upload className="w-3 h-3 mr-1" /> Input
             </TabsTrigger>
-            <TabsTrigger value="settings" className="text-xs">
+            <TabsTrigger value="settings" className="text-xs font-medium">
               <Settings className="w-3 h-3 mr-1" /> Settings
             </TabsTrigger>
-            <TabsTrigger value="exhibition" className="text-xs">
+            <TabsTrigger value="exhibition" className="text-xs font-medium">
               <Eye className="w-3 h-3 mr-1" /> Exhibition
             </TabsTrigger>
           </TabsList>
-          <div className="h-[calc(100%-60px)] overflow-y-auto">
-            <TabsContent value="input" className="h-full m-0 p-2" forceMount>
-              <ExploreInput
+          <TabsContent value="input" className="flex-1 mt-0" forceMount>
+            <ExploreInput
+              data={data}
+              settings={settings}
+              onDataChange={handleDataChange}
+              onDataUpload={handleDataUpload}
+            />
+          </TabsContent>
+          <TabsContent value="settings" className="flex-1 mt-0" forceMount>
+            <ErrorBoundary>
+              <ExploreSettings
                 data={data}
                 settings={settings}
                 onDataChange={handleDataChange}
-                onDataUpload={handleDataUpload}
+                onApply={() => handleApply()}
               />
-            </TabsContent>
-            <TabsContent value="settings" className="h-full m-0 p-2" forceMount>
-              <ErrorBoundary>
-                <ExploreSettings
-                  data={data}
-                  settings={settings}
-                  onDataChange={handleDataChange}
-                  onApply={() => handleApply()}
-                />
-              </ErrorBoundary>
-            </TabsContent>
-            <TabsContent value="exhibition" className="h-full m-0 p-2" forceMount>
-              <ExploreExhibition data={data} chartData={chartData} />
-            </TabsContent>
-          </div>
+            </ErrorBoundary>
+          </TabsContent>
+          <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
+            <ExploreExhibition data={data} chartData={chartData} />
+          </TabsContent>
         </Tabs>
       </div>
       <div className="p-2 border-t">
@@ -112,4 +110,3 @@ const ExploreProperties: React.FC<Props> = ({ atomId }) => {
 };
 
 export default ExploreProperties;
-

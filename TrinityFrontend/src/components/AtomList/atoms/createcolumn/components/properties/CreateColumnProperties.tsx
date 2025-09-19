@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Upload, Settings, Eye } from 'lucide-react';
 import CreateColumnSettings from '../CreateColumnSettings';
 import CreateColumnExhibition from '../CreateColumnExhibition';
 import CreateColumnInputFiles from '../CreateColumnInputFiles';
@@ -32,27 +33,36 @@ const CreateColumnProperties: React.FC<CreateColumnPropertiesProps> = ({ atomId 
   };
 
   return (
-    <Tabs value={tab} onValueChange={setTab} className="w-full h-full flex flex-col">
-      <TabsList className="grid w-full grid-cols-3 bg-gray-50 mb-4 shrink-0 mx-4 mt-4">
-        <TabsTrigger value="input" className="font-medium">Input Files</TabsTrigger>
-        <TabsTrigger value="settings" className="font-medium">Settings</TabsTrigger>
-        <TabsTrigger value="exhibition" className="font-medium">Exhibition</TabsTrigger>
-      </TabsList>
-      <div className="flex-1 overflow-auto px-4">
-        <TabsContent value="input" className="mt-0 h-full" forceMount>
+    <div className="h-full flex flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="input" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Input
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="text-xs font-medium">
+            <Settings className="w-3 h-3 mr-1" />
+            Settings
+          </TabsTrigger>
+          <TabsTrigger value="exhibition" className="text-xs font-medium">
+            <Eye className="w-3 h-3 mr-1" />
+            Exhibition
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="input" className="flex-1 mt-0" forceMount>
           <CreateColumnInputFiles atomId={atomId} selectedIdentifiers={selectedIdentifiers} setSelectedIdentifiers={setSelectedIdentifiers} />
         </TabsContent>
-        <TabsContent value="settings" className="mt-0 h-full" forceMount>
+        <TabsContent value="settings" className="flex-1 mt-0" forceMount>
           <CreateColumnSettings 
             operations={operations}
             onOperationsChange={handleOperationsChange}
           />
         </TabsContent>
-        <TabsContent value="exhibition" className="mt-0 h-full" forceMount>
+        <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
           <CreateColumnExhibition settings={atom?.settings || {}} />
         </TabsContent>
-      </div>
-    </Tabs>
+      </Tabs>
+    </div>
   );
 };
 

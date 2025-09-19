@@ -23,6 +23,7 @@ from ..config import (
     select_models_collection,
     column_classifier_config,
     build_collection,
+    db
 )
 from ..utils.file_loader import FileLoader
 
@@ -131,6 +132,7 @@ class DataService:
         """Fetch model metadata from MongoDB using the model_id. Assumes _id stored as string."""
         try:
             cursor = select_models_collection.find({"_id": model_id})
+            logger.info("fetch_models_by_id: %s", cursor)
             docs = await cursor.to_list(length=None)
             return docs
         except Exception as e:

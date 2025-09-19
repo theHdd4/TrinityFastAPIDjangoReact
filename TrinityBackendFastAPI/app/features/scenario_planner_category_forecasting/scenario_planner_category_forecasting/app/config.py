@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------- #
 # MongoDB                                                                     #
 # --------------------------------------------------------------------------- #
-# Use the same database as the build atom (trinity_prod)
+# Use the same database as the build atom (trinity_db)
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_db?authSource=admin")
 
 # Debug: Log environment variables to see what's being set

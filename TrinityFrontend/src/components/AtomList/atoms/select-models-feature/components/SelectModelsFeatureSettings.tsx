@@ -4,6 +4,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card } from '@/components/ui/card';
 import { VALIDATE_API, SELECT_API } from '@/lib/api';
+import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
 
 interface SelectModelsFeatureSettingsProps {
   data: any;
@@ -101,18 +102,24 @@ const SelectModelsFeatureSettings: React.FC<SelectModelsFeatureSettingsProps> = 
   };
 
   // Handle dataset selection
-  const handleDatasetChange = (value: string) => {
+  const hasExistingUpdates = Boolean(
+    (Array.isArray(data.elasticityData) && data.elasticityData.length > 0) ||
+    (Array.isArray(data.weightedEnsembleData) && data.weightedEnsembleData.length > 0) ||
+    (Array.isArray(data.selectedModelPerformance) && data.selectedModelPerformance.length > 0) ||
+    (Array.isArray(data.performanceData) && data.performanceData.length > 0) ||
+    (Array.isArray(data.yoyData) && data.yoyData.length > 0)
+  );
+
+  const applyDatasetChange = async (value: string) => {
     onDataChange({ selectedDataset: value });
-    
+
     if (value) {
-      // Find the frame to get the file key
       const selectedFrame = frames.find(f => f.object_name === value);
       if (selectedFrame) {
-        fetchCombinationIds(selectedFrame.object_name);
+        await fetchCombinationIds(selectedFrame.object_name);
       }
     } else {
-      // Clear combination IDs when no dataset is selected
-      onDataChange({ 
+      onDataChange({
         availableCombinationIds: [],
         selectedCombinationId: ''
       });
@@ -120,11 +127,18 @@ const SelectModelsFeatureSettings: React.FC<SelectModelsFeatureSettingsProps> = 
     }
   };
 
+  const { requestChange: confirmDatasetChange, dialog } = useDataSourceChangeWarning(applyDatasetChange);
+
+  const handleDatasetChange = (value: string) => {
+    const isDifferentSource = value !== (data.selectedDataset || '');
+    confirmDatasetChange(value, hasExistingUpdates && isDifferentSource);
+  };
+
   return (
     <div className="w-full h-full p-6 space-y-6 bg-background overflow-y-auto">
       {/* Data Source Section */}
       <Card className="p-6">
-        
+
         <div className="space-y-4">
           <div>
             <Label htmlFor="data-source" className="text-sm font-medium text-foreground">
@@ -173,6 +187,8 @@ const SelectModelsFeatureSettings: React.FC<SelectModelsFeatureSettingsProps> = 
           )}
         </div>
       </Card>
+
+      {dialog}
 
       {/* Ensemble Method Section */}
       <Card className="p-6">
