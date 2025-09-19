@@ -22,11 +22,7 @@ const LoginAnimation: React.FC<LoginAnimationProps> = ({ active, onComplete }) =
   const [curtainVisible, setCurtainVisible] = useState(false);
   const [exiting, setExiting] = useState(false);
 
-  const chars = useMemo(
-    () =>
-      'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-    []
-  );
+  const chars = useMemo(() => ['0', '1'], []);
 
   useEffect(() => {
     if (!active || !canvasRef.current) {
