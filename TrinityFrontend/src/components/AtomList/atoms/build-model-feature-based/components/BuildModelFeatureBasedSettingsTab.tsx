@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Cpu, Database, ChevronDown } from 'lucide-react';
+import { Cpu, Database, ChevronDown, ChevronRight } from 'lucide-react';
 import { BuildModelFeatureBasedData, ModelConfig } from '../BuildModelFeatureBasedAtom';
 import { VALIDATE_API, BUILD_MODEL_API } from '@/lib/api';
 
@@ -34,6 +34,8 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
   const [isLoadingColumns, setIsLoadingColumns] = useState(false);
   const [poolIdentifiers, setPoolIdentifiers] = useState<string[]>([]);
   const [isLoadingIdentifiers, setIsLoadingIdentifiers] = useState(false);
+  const [isIndividualModelingCollapsed, setIsIndividualModelingCollapsed] = useState(false);
+  const [isPoolRegressionCollapsed, setIsPoolRegressionCollapsed] = useState(false);
 
   // Fetch numerical columns when scope and combinations are selected
   useEffect(() => {
@@ -214,15 +216,41 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
 
   return (
     <div className="space-y-6">
-      {/* Select Model */}
+      {/* Individual Modeling */}
       <Card>
         <div className="p-4 border-b bg-muted/30">
+          <div 
+            className="flex items-center justify-between cursor-pointer"
+            onClick={() => setIsIndividualModelingCollapsed(!isIndividualModelingCollapsed)}
+          >
           <h4 className="font-medium text-foreground flex items-center gap-2">
             <Cpu className="w-4 h-4 text-primary" />
-            Select Model
+              Individual Modeling
           </h4>
+            {isIndividualModelingCollapsed ? (
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            )}
+          </div>
         </div>
+        {!isIndividualModelingCollapsed && (
         <div className="p-4 space-y-4">
+          {/* Enable Individual Modeling Toggle */}
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="individual-modeling"
+              checked={data?.individualModeling ?? true}
+              onCheckedChange={(checked) => onDataChange({ individualModeling: !!checked })}
+            />
+            <Label htmlFor="individual-modeling" className="text-sm font-medium">
+              Enable Individual Modeling
+            </Label>
+          </div>
+
+          {/* Individual Modeling Configuration - Only show when enabled */}
+          {data?.individualModeling && (
+            <div className="space-y-4 pl-6 border-l-2 border-border">
           {/* Training Parameters */}
           <div className="space-y-4">
             <div>
@@ -231,8 +259,8 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                 type="number"
                 min="2"
                 max="10"
-                value={data?.kFolds || 5}
-                onChange={(e) => onDataChange({ kFolds: parseInt(e.target.value) || 5 })}
+                    value={data?.individualKFolds || 5}
+                    onChange={(e) => onDataChange({ individualKFolds: parseInt(e.target.value) || 5 })}
                 placeholder="5"
                 className="mt-1"
               />
@@ -245,8 +273,8 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                 min="0.1"
                 max="0.5"
                 step="0.1"
-                value={data?.testSize || 0.2}
-                onChange={(e) => onDataChange({ testSize: parseFloat(e.target.value) || 0.2 })}
+                    value={data?.individualTestSize || 0.2}
+                    onChange={(e) => onDataChange({ individualTestSize: parseFloat(e.target.value) || 0.2 })}
                 placeholder="0.2"
                 className="mt-1"
               />
@@ -257,15 +285,45 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
           <div className="border-t border-blue-200 my-4"></div>
           
           <div>
-            {/* Select All Models Checkbox */}
+                {/* Select All Individual Models Checkbox */}
             <div className="mb-3 p-2 border rounded bg-muted/20">
               <div className="flex items-center space-x-2">
                 <Checkbox
-                  id="select-all-models"
-                  checked={allModelsSelected}
-                  onCheckedChange={(checked) => handleSelectAllModels(checked as boolean)}
-                />
-                <Label htmlFor="select-all-models" className="text-sm font-medium">
+                      id="select-all-individual-models"
+                      checked={data?.individualSelectedModels?.length === availableModels.length}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          const allModelIds = availableModels.map(model => model.id);
+                          const allModelConfigs = availableModels.map(model => {
+                            const defaultParams: Record<string, any> = {};
+                            model.params.forEach(param => {
+                              if (param === 'Alpha') defaultParams[param] = '1.0';
+                              else if (param === 'L1 Ratio') defaultParams[param] = '0.5';
+                              else if (param === 'L2 Penalty') defaultParams[param] = '0.1';
+                              else if (param === 'Learning Rate') defaultParams[param] = '0.001';
+                              else if (param === 'Iterations') defaultParams[param] = '10000';
+                              else if (param === 'Adam') defaultParams[param] = 'false';
+                              else defaultParams[param] = '';
+                            });
+                            return {
+                              id: model.id,
+                              name: model.name,
+                              parameters: defaultParams
+                            };
+                          });
+                          onDataChange({
+                            individualSelectedModels: allModelIds,
+                            individualModelConfigs: allModelConfigs
+                          });
+                        } else {
+                          onDataChange({
+                            individualSelectedModels: [],
+                            individualModelConfigs: []
+                          });
+                        }
+                      }}
+                    />
+                    <Label htmlFor="select-all-individual-models" className="text-sm font-medium">
                   Select All Models
                 </Label>
               </div>
@@ -276,49 +334,110 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                 <div key={model.id} className="space-y-3">
                   <div className="flex items-center space-x-2">
                     <Checkbox
-                      id={model.id}
-                      checked={data?.selectedModels?.includes(model.id) || false}
-                      onCheckedChange={(checked) => handleModelSelection(model.id, checked as boolean)}
-                    />
-                    <Label htmlFor={model.id} className="text-sm">{model.name}</Label>
-                  </div>
-                  
-                  {data?.selectedModels?.includes(model.id) && (
-                    <div className="ml-6 space-y-2 border-l-2 border-border pl-4">
-                      {model.params.map(param => {
-                        const config = data?.modelConfigs?.find(c => c.id === model.id);
-                        const value = config?.parameters?.[param] || '';
-                        
-                        return (
-                          <div key={param}>
-                            <Label className="text-xs text-muted-foreground">{param}</Label>
-                            <Input
-                              value={value}
-                              onChange={(e) => handleParameterChange(model.id, param, e.target.value)}
-                              placeholder="Insert Value"
-                              className="mt-1"
-                            />
-                          </div>
-                        );
-                      })}
+                          id={`individual-${model.id}`}
+                          checked={data?.individualSelectedModels?.includes(model.id) || false}
+                          onCheckedChange={(checked) => {
+                            const current = data?.individualSelectedModels || [];
+                            const currentConfigs = data?.individualModelConfigs || [];
+                            
+                            if (checked) {
+                              const updatedModels = [...current, model.id];
+                              const defaultParams: Record<string, any> = {};
+                              model.params.forEach(param => {
+                                if (param === 'Alpha') defaultParams[param] = '1.0';
+                                else if (param === 'L1 Ratio') defaultParams[param] = '0.5';
+                                else if (param === 'L2 Penalty') defaultParams[param] = '0.1';
+                                else if (param === 'Learning Rate') defaultParams[param] = '0.001';
+                                else if (param === 'Iterations') defaultParams[param] = '10000';
+                                else if (param === 'Adam') defaultParams[param] = 'false';
+                                else defaultParams[param] = '';
+                              });
+                              const updatedConfigs = [...currentConfigs, {
+                                id: model.id,
+                                name: model.name,
+                                parameters: defaultParams
+                              }];
+                              onDataChange({
+                                individualSelectedModels: updatedModels,
+                                individualModelConfigs: updatedConfigs
+                              });
+                            } else {
+                              const updatedModels = current.filter(id => id !== model.id);
+                              const updatedConfigs = currentConfigs.filter(config => config.id !== model.id);
+                              onDataChange({
+                                individualSelectedModels: updatedModels,
+                                individualModelConfigs: updatedConfigs
+                              });
+                            }
+                          }}
+                        />
+                        <Label htmlFor={`individual-${model.id}`} className="text-sm">{model.name}</Label>
+                      </div>
+                      
+                      {data?.individualSelectedModels?.includes(model.id) && (
+                        <div className="ml-6 space-y-2 border-l-2 border-border pl-4">
+                          {model.params.map(param => {
+                            const config = data?.individualModelConfigs?.find(c => c.id === model.id);
+                            const value = config?.parameters?.[param] || '';
+                            
+                            return (
+                              <div key={param}>
+                                <Label className="text-xs text-muted-foreground">{param}</Label>
+                                <Input
+                                  value={value}
+                                  onChange={(e) => {
+                                    const updatedConfigs = (data?.individualModelConfigs || []).map(c => {
+                                      if (c.id === model.id) {
+                                        return {
+                                          ...c,
+                                          parameters: {
+                                            ...c.parameters,
+                                            [param]: e.target.value
+                                          }
+                                        };
+                                      }
+                                      return c;
+                                    });
+                                    onDataChange({ individualModelConfigs: updatedConfigs });
+                                  }}
+                                  placeholder="Insert Value"
+                                  className="mt-1"
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  )}
+                  ))}
                 </div>
-              ))}
+              </div>
             </div>
+          )}
           </div>
-        </div>
+        )}
       </Card>
 
       {/* Pool Regression */}
       <Card>
         <div className="p-4 border-b bg-muted/30">
-          <h4 className="font-medium text-foreground flex items-center gap-2">
-            <Cpu className="w-4 h-4 text-primary" />
-            Pool Regression
-          </h4>
+          <div 
+            className="flex items-center justify-between cursor-pointer"
+            onClick={() => setIsPoolRegressionCollapsed(!isPoolRegressionCollapsed)}
+          >
+            <h4 className="font-medium text-foreground flex items-center gap-2">
+              <Cpu className="w-4 h-4 text-primary" />
+              Pool Regression
+            </h4>
+            {isPoolRegressionCollapsed ? (
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            )}
+          </div>
         </div>
-        <div className="p-4 space-y-4">
+        {!isPoolRegressionCollapsed && (
+          <div className="p-4 space-y-4">
           {/* Enable Stack Modeling Toggle */}
           <div className="flex items-center space-x-2">
             <Checkbox
@@ -528,9 +647,177 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                   </Popover>
                 </div>
               )}
+              
+              {/* Separator Line */}
+              <div className="border-t border-blue-200 my-4"></div>
+              
+              {/* Stack Modeling Training Parameters */}
+              <div className="space-y-4">
+                <div>
+                  <Label>K-Fold Cross Validation</Label>
+                  <Input
+                    type="number"
+                    min="2"
+                    max="10"
+                    value={data?.stackKFolds || 5}
+                    onChange={(e) => onDataChange({ stackKFolds: parseInt(e.target.value) || 5 })}
+                    placeholder="5"
+                    className="mt-1"
+                  />
+                </div>
+                
+                <div>
+                  <Label>Test Size Ratio</Label>
+                  <Input
+                    type="number"
+                    min="0.1"
+                    max="0.5"
+                    step="0.1"
+                    value={data?.stackTestSize || 0.2}
+                    onChange={(e) => onDataChange({ stackTestSize: parseFloat(e.target.value) || 0.2 })}
+                    placeholder="0.2"
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+              
+              {/* Separator Line */}
+              <div className="border-t border-blue-200 my-4"></div>
+              
+              {/* Stack Modeling Models Selection */}
+              <div>
+                {/* Select All Stack Models Checkbox */}
+                <div className="mb-3 p-2 border rounded bg-muted/20">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="select-all-stack-models"
+                      checked={data?.stackSelectedModels?.length === availableModels.length}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          const allModelIds = availableModels.map(model => model.id);
+                          const allModelConfigs = availableModels.map(model => {
+                            const defaultParams: Record<string, any> = {};
+                            model.params.forEach(param => {
+                              if (param === 'Alpha') defaultParams[param] = '1.0';
+                              else if (param === 'L1 Ratio') defaultParams[param] = '0.5';
+                              else if (param === 'L2 Penalty') defaultParams[param] = '0.1';
+                              else if (param === 'Learning Rate') defaultParams[param] = '0.001';
+                              else if (param === 'Iterations') defaultParams[param] = '10000';
+                              else if (param === 'Adam') defaultParams[param] = 'false';
+                              else defaultParams[param] = '';
+                            });
+                            return {
+                              id: model.id,
+                              name: model.name,
+                              parameters: defaultParams
+                            };
+                          });
+                          onDataChange({
+                            stackSelectedModels: allModelIds,
+                            stackModelConfigs: allModelConfigs
+                          });
+                        } else {
+                          onDataChange({
+                            stackSelectedModels: [],
+                            stackModelConfigs: []
+                          });
+                        }
+                      }}
+                    />
+                    <Label htmlFor="select-all-stack-models" className="text-sm font-medium">
+                      Select All Stack Models
+                    </Label>
+                  </div>
+                </div>
+                
+                <Label className="text-sm font-medium mb-3 block">Select Stack Models</Label>
+                <div className="space-y-3">
+                  {availableModels.map(model => (
+                    <div key={model.id}>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id={`stack-${model.id}`}
+                          checked={data?.stackSelectedModels?.includes(model.id) || false}
+                          onCheckedChange={(checked) => {
+                            const current = data?.stackSelectedModels || [];
+                            const currentConfigs = data?.stackModelConfigs || [];
+                            
+                            if (checked) {
+                              const updatedModels = [...current, model.id];
+                              const defaultParams: Record<string, any> = {};
+                              model.params.forEach(param => {
+                                if (param === 'Alpha') defaultParams[param] = '1.0';
+                                else if (param === 'L1 Ratio') defaultParams[param] = '0.5';
+                                else if (param === 'L2 Penalty') defaultParams[param] = '0.1';
+                                else if (param === 'Learning Rate') defaultParams[param] = '0.001';
+                                else if (param === 'Iterations') defaultParams[param] = '10000';
+                                else if (param === 'Adam') defaultParams[param] = 'false';
+                                else defaultParams[param] = '';
+                              });
+                              const updatedConfigs = [...currentConfigs, {
+                                id: model.id,
+                                name: model.name,
+                                parameters: defaultParams
+                              }];
+                              onDataChange({
+                                stackSelectedModels: updatedModels,
+                                stackModelConfigs: updatedConfigs
+                              });
+                            } else {
+                              const updatedModels = current.filter(id => id !== model.id);
+                              const updatedConfigs = currentConfigs.filter(config => config.id !== model.id);
+                              onDataChange({
+                                stackSelectedModels: updatedModels,
+                                stackModelConfigs: updatedConfigs
+                              });
+                            }
+                          }}
+                        />
+                        <Label htmlFor={`stack-${model.id}`} className="text-sm">{model.name}</Label>
+                  </div>
+                  
+                      {data?.stackSelectedModels?.includes(model.id) && (
+                    <div className="ml-6 space-y-2 border-l-2 border-border pl-4">
+                      {model.params.map(param => {
+                            const config = data?.stackModelConfigs?.find(c => c.id === model.id);
+                        const value = config?.parameters?.[param] || '';
+                        
+                        return (
+                          <div key={param}>
+                            <Label className="text-xs text-muted-foreground">{param}</Label>
+                            <Input
+                              value={value}
+                                  onChange={(e) => {
+                                    const updatedConfigs = (data?.stackModelConfigs || []).map(c => {
+                                      if (c.id === model.id) {
+                                        return {
+                                          ...c,
+                                          parameters: {
+                                            ...c.parameters,
+                                            [param]: e.target.value
+                                          }
+                                        };
+                                      }
+                                      return c;
+                                    });
+                                    onDataChange({ stackModelConfigs: updatedConfigs });
+                                  }}
+                              placeholder="Insert Value"
+                              className="mt-1"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
-          )}
+          </div>
         </div>
+          )}
+          </div>
+        )}
       </Card>
     </div>
   );

@@ -186,17 +186,38 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
       x_variables: allXVariables,
       y_variable: finalData.yVariable,
       standardization: standardization,
-      k_folds: finalData.kFolds || 5, // Use value from settings or default
-      test_size: finalData.testSize || 0.2, // Use value from settings or default
-      models_to_run: finalData.selectedModels || null, // Use selected models from settings
       custom_model_configs: null, // Can be enhanced later
+      // Individual modeling fields
+      individual_modeling: finalData.individualModeling ?? false,
+      individual_k_folds: finalData.individualKFolds || 5,
+      individual_test_size: finalData.individualTestSize || 0.2,
+      individual_models_to_run: finalData.individualSelectedModels || [],
+      individual_custom_model_configs: finalData.individualModelConfigs || [],
       // Stack modeling fields
       stack_modeling: finalData.stackModeling || false,
+      stack_k_folds: finalData.stackKFolds || 5,
+      stack_test_size: finalData.stackTestSize || 0.2,
+      stack_models_to_run: finalData.stackSelectedModels || [],
+      stack_custom_model_configs: finalData.stackModelConfigs || [],
       pool_by_identifiers: (finalData.poolByIdentifiers || []).map(id => id.toLowerCase()),
       numerical_columns_for_clustering: (finalData.numericalColumnsForClustering || []).map(col => col.toLowerCase()),
       apply_interaction_terms: finalData.applyInteractionTerms || true,
       numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map(col => col.toLowerCase())
     };
+
+    // Debug logging
+    console.log('FinalData individual modeling fields:', {
+      individualModeling: finalData.individualModeling,
+      individualSelectedModels: finalData.individualSelectedModels,
+      individualModelConfigs: finalData.individualModelConfigs,
+      individualKFolds: finalData.individualKFolds
+    });
+    console.log('Request payload individual modeling fields:', {
+      individual_modeling: requestPayload.individual_modeling,
+      individual_models_to_run: requestPayload.individual_models_to_run,
+      individual_custom_model_configs: requestPayload.individual_custom_model_configs,
+      individual_k_folds: requestPayload.individual_k_folds
+    });
 
     // Model training started
 
