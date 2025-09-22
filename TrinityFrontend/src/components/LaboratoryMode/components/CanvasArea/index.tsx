@@ -236,42 +236,95 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
 
     try {
-      let query = '';
+      let env: any = {};
       const envStr = localStorage.getItem('env');
       if (envStr) {
         try {
-          const env = JSON.parse(envStr);
-          query =
-            '?' +
-            new URLSearchParams({
-              client_id: env.CLIENT_ID || '',
-              app_id: env.APP_ID || '',
-              project_id: env.PROJECT_ID || '',
-              client_name: env.CLIENT_NAME || '',
-              app_name: env.APP_NAME || '',
-              project_name: env.PROJECT_NAME || ''
-            }).toString();
+          env = JSON.parse(envStr);
         } catch {
-          /* ignore */
+          env = {};
         }
       }
+      const params = new URLSearchParams({
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
+      });
+      const query = params.toString() ? `?${params.toString()}` : '';
+
+      try {
+        const latestRes = await fetch(
+          `${VALIDATE_API}/latest_project_dataframe${query}`,
+          { credentials: 'include', signal }
+        );
+        if (latestRes.ok) {
+          const latestData = await latestRes.json();
+          const latestName = latestData?.object_name;
+          if (typeof latestName === 'string' && latestName.trim()) {
+            console.log(
+              '✔️ defaulting to latest flight dataframe',
+              latestName,
+              latestData?.source || 'unknown'
+            );
+            await prefetchDataframe(latestName, signal);
+            const cols = await fetchColumnSummary(latestName, signal);
+            return {
+              csv: latestName,
+              display: latestData?.csv_name || latestName,
+              ...(cols || {}),
+            };
+          }
+        } else {
+          console.warn('⚠️ latest_project_dataframe failed', latestRes.status);
+        }
+      } catch (err) {
+        if ((err as any)?.name !== 'AbortError') {
+          console.warn('⚠️ latest_project_dataframe request failed', err);
+        }
+      }
+
       const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`, {
         signal,
       });
       if (res.ok) {
         const data = await res.json();
-        const files = Array.isArray(data.files) ? data.files : [];
+        interface SavedFrameMeta {
+          object_name: string;
+          csv_name?: string;
+          last_modified?: string;
+        }
+        const files: SavedFrameMeta[] = Array.isArray(data.files)
+          ? data.files
+          : [];
         const validFiles = files.filter(
-          (f: any) =>
+          (f) =>
             typeof f.object_name === 'string' &&
             /\.[^/]+$/.test(f.object_name.trim())
         );
-        const file = validFiles[validFiles.length - 1];
-        if (file && file.object_name) {
-          console.log('✔️ defaulting to latest saved dataframe', file.object_name);
-          await prefetchDataframe(file.object_name, signal);
-          const cols = await fetchColumnSummary(file.object_name, signal);
-          return { csv: file.object_name, display: file.csv_name, ...(cols || {}) };
+        let fallback: SavedFrameMeta | null = null;
+        let latest: { file: SavedFrameMeta; ts: number } | null = null;
+        for (const item of validFiles) {
+          fallback = item;
+          const ts = item.last_modified ? Date.parse(item.last_modified) : NaN;
+          if (!Number.isNaN(ts)) {
+            if (!latest || ts > latest.ts) {
+              latest = { file: item, ts };
+            }
+          }
+        }
+        const chosen = latest?.file || fallback;
+        if (chosen && chosen.object_name) {
+          console.log('✔️ defaulting to latest saved dataframe', chosen.object_name);
+          await prefetchDataframe(chosen.object_name, signal);
+          const cols = await fetchColumnSummary(chosen.object_name, signal);
+          return {
+            csv: chosen.object_name,
+            display: chosen.csv_name || chosen.object_name,
+            ...(cols || {}),
+          };
         }
       }
     } catch {
