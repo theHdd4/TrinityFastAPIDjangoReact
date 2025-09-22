@@ -18,10 +18,16 @@ const LAB_ELEMENTS = [
   { selector: '[data-lab-toolbar]', delay: 200 },
   { selector: '[data-lab-sidebar]', delay: 400 },
   { selector: '[data-lab-canvas]', delay: 600 },
-  { selector: '[data-lab-settings]', delay: 800 }
+  { selector: '[data-lab-settings]', delay: 800 },
 ] as const;
 const LAB_PREP_DELAY_MS = 200;
 const LAB_ANIMATION_DURATION_MS = 600;
+const LAB_MAX_ELEMENT_DELAY_MS = Math.max(
+  ...LAB_ELEMENTS.map(element => element.delay),
+  0,
+);
+export const LAB_ENTRANCE_SEQUENCE_DURATION_MS =
+  LAB_PREP_DELAY_MS + LAB_MAX_ELEMENT_DELAY_MS + LAB_ANIMATION_DURATION_MS;
 
 const applyLabPreparationState = (element: HTMLElement) => {
   element.style.opacity = LAB_PREPARE_STYLE.opacity;
