@@ -36,10 +36,21 @@ def get_llm_config() -> Dict[str, str]:
 # ``DataStorageRetrieval`` package and ``app`` utilities can be
 # imported normally when running outside Docker.
 BACKEND_ROOT = Path(__file__).resolve().parent
-sys.path.append(str(BACKEND_ROOT))
-BACKEND_API = BACKEND_ROOT.parent / "TrinityBackendFastAPI" / "app"
-if BACKEND_API.exists():
-    sys.path.append(str(BACKEND_API))
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.append(str(BACKEND_ROOT))
+
+BACKEND_REPO = BACKEND_ROOT.parent / "TrinityBackendFastAPI"
+BACKEND_API = BACKEND_REPO / "app"
+
+# ``app`` is a top-level package inside ``TrinityBackendFastAPI`` while
+# helpers such as ``DataStorageRetrieval`` live inside the ``app`` folder.
+# Add both locations to ``sys.path`` so the imports work when running the
+# AI service outside the Docker compose environment.
+for path in (BACKEND_REPO, BACKEND_API):
+    if path.exists():
+        path_str = str(path)
+        if path_str not in sys.path:
+            sys.path.append(path_str)
 
 from app.core.mongo import build_host_mongo_uri
 
