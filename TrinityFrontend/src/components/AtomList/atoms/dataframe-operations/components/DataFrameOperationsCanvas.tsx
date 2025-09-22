@@ -103,6 +103,9 @@ function handleApiError(action: string, err: unknown) {
   });
 }
 
+const CONTEXT_MENU_OFFSET = 6;
+const CONTEXT_MENU_PADDING = 8;
+
 const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   data,
   settings,
@@ -148,6 +151,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const rowRefs = useRef<{ [key: number]: HTMLTableRowElement | null }>({});
   const [resizingCol, setResizingCol] = useState<{ key: string; startX: number; startWidth: number } | null>(null);
   const [resizingRow, setResizingRow] = useState<{ index: number; startY: number; startHeight: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const rowContextMenuRef = useRef<HTMLDivElement | null>(null);
 
   const startColResize = (key: string, e: React.MouseEvent) => {
     e.preventDefault();
@@ -519,6 +524,46 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     };
   }, [openDropdown, contextMenu, rowContextMenu]);
 
+  useLayoutEffect(() => {
+    if (!contextMenu || !contextMenuRef.current) return;
+    const rect = contextMenuRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    let nextX = contextMenu.x;
+    let nextY = contextMenu.y;
+
+    if (nextX + rect.width > viewportWidth - CONTEXT_MENU_PADDING) {
+      nextX = Math.max(viewportWidth - rect.width - CONTEXT_MENU_PADDING, CONTEXT_MENU_PADDING);
+    }
+    if (nextY + rect.height > viewportHeight - CONTEXT_MENU_PADDING) {
+      nextY = Math.max(viewportHeight - rect.height - CONTEXT_MENU_PADDING, CONTEXT_MENU_PADDING);
+    }
+
+    if (nextX !== contextMenu.x || nextY !== contextMenu.y) {
+      setContextMenu(prev => (prev ? { ...prev, x: nextX, y: nextY } : prev));
+    }
+  }, [contextMenu]);
+
+  useLayoutEffect(() => {
+    if (!rowContextMenu || !rowContextMenuRef.current) return;
+    const rect = rowContextMenuRef.current.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    let nextX = rowContextMenu.x;
+    let nextY = rowContextMenu.y;
+
+    if (nextX + rect.width > viewportWidth - CONTEXT_MENU_PADDING) {
+      nextX = Math.max(viewportWidth - rect.width - CONTEXT_MENU_PADDING, CONTEXT_MENU_PADDING);
+    }
+    if (nextY + rect.height > viewportHeight - CONTEXT_MENU_PADDING) {
+      nextY = Math.max(viewportHeight - rect.height - CONTEXT_MENU_PADDING, CONTEXT_MENU_PADDING);
+    }
+
+    if (nextX !== rowContextMenu.x || nextY !== rowContextMenu.y) {
+      setRowContextMenu(prev => (prev ? { ...prev, x: nextX, y: nextY } : prev));
+    }
+  }, [rowContextMenu]);
+
   // Process and filter data
   const processedData = useMemo(() => {
     if (!data || !Array.isArray(data.headers) || !Array.isArray(data.rows)) {
@@ -878,12 +923,6 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
 
 
 
-
-const handleContextMenu = (e: React.MouseEvent, col: string) => {
-  e.preventDefault();
-  const idx = data ? data.headers.indexOf(col) : -1;
-  setContextMenu({ x: e.clientX, y: e.clientY, col, colIdx: idx });
-};
 
 const handleSortAsc = (colIdx: number) => {
   if (!data) return;
@@ -1267,15 +1306,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       onDragEnd={handleDragEnd}
                       onContextMenu={e => {
                         e.preventDefault();
-                        let rect = undefined;
-                        if (headerRefs.current && headerRefs.current[header]) {
-                          rect = headerRefs.current[header].getBoundingClientRect?.();
-                        }
                         setContextMenu({
-                          x: rect ? rect.right : e.clientX,
-                          y: rect ? rect.top : e.clientY,
+                          x: e.clientX + CONTEXT_MENU_OFFSET,
+                          y: e.clientY + CONTEXT_MENU_OFFSET,
                           col: header,
-                          colIdx: colIdx
+                          colIdx
                         });
                         setRowContextMenu(null);
                       }}
@@ -1341,7 +1376,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         className="table-cell w-16 text-center text-xs font-medium"
                         onContextMenu={e => {
                           e.preventDefault();
-                          setRowContextMenu({ x: e.clientX, y: e.clientY, rowIdx: startIndex + rowIndex });
+                          setRowContextMenu({
+                            x: e.clientX + CONTEXT_MENU_OFFSET,
+                            y: e.clientY + CONTEXT_MENU_OFFSET,
+                            rowIdx: startIndex + rowIndex
+                          });
                           setContextMenu(null);
                         }}
                       >
@@ -1462,6 +1501,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       </div>
       {contextMenu && data && typeof contextMenu.col === 'string' && (
         <div
+          ref={contextMenuRef}
           id="df-ops-context-menu"
           style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 200 }}
         >
@@ -1691,6 +1731,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       )}
       {rowContextMenu && typeof rowContextMenu.rowIdx === 'number' && (
         <div
+          ref={rowContextMenuRef}
           id="df-ops-row-context-menu"
           style={{ position: 'fixed', top: rowContextMenu.y, left: rowContextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 140 }}
         >
