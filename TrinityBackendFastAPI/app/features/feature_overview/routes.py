@@ -11,7 +11,7 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import polars as pl
 from datetime import date, datetime
-from typing import List
+from typing import Any, List
 from fastapi import Depends
 from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorCollection
@@ -21,6 +21,7 @@ from .deps import (
     get_summary_results_collection,
     get_validator_atoms_collection,
     redis_client,
+    redis_binary_client,
 )
 
 from .mongodb_saver import (
@@ -102,6 +103,40 @@ ensure_minio_bucket()
 router = APIRouter()
 
 
+def _redis_get_bytes(key: str) -> bytes | None:
+    """Fetch binary content from Redis without triggering UTF-8 decoding."""
+
+    try:
+        value = redis_binary_client.get(key)
+    except Exception as exc:
+        print(f"⚠️ redis binary get error for {key}: {exc}")
+        return None
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    if isinstance(value, memoryview):
+        return value.tobytes()
+    return str(value).encode("utf-8")
+
+
+def _redis_set_bytes(key: str, value: bytes | bytearray | str, ttl: int = 3600) -> None:
+    """Store binary content in Redis with a TTL, tolerating failures."""
+
+    try:
+        if isinstance(value, (bytes, bytearray)):
+            data = bytes(value)
+        elif isinstance(value, memoryview):
+            data = value.tobytes()
+        elif isinstance(value, str):
+            data = value.encode("utf-8")
+        else:
+            data = str(value).encode("utf-8")
+        redis_binary_client.setex(key, ttl, data)
+    except Exception as exc:
+        print(f"⚠️ redis binary set error for {key}: {exc}")
+
+
 @router.get("/column_summary")
 async def column_summary(object_name: str):
     """Return column summary statistics for a saved dataframe."""
@@ -138,15 +173,36 @@ async def column_summary(object_name: str):
         if df is None:
             if not object_name.endswith(".arrow"):
                 raise ValueError("Unsupported file format")
-            content = redis_client.get(object_name)
+            content = _redis_get_bytes(object_name)
             if content is None:
                 response = minio_client.get_object(MINIO_BUCKET, object_name)
                 content = response.read()
-                redis_client.setex(object_name, 3600, content)
+                _redis_set_bytes(object_name, content)
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
 
-        df.columns = df.columns.str.lower()
+        def _safe_lower(name: Any) -> str:
+            """Return a lower-cased column name while tolerating bytes values.
+
+            Some legacy Arrow exports stored the column name metadata as raw
+            bytes.  Pandas' ``Index.str`` helpers always assume UTF-8 encoded
+            text and would therefore raise ``UnicodeDecodeError`` when
+            encountering these byte strings (for example ones beginning with
+            ``0xff``).  Converting eagerly to ``str`` with a best-effort decode
+            avoids the crash while preserving the original column label as
+            faithfully as possible.
+            """
+
+            if isinstance(name, bytes):
+                try:
+                    name = name.decode("utf-8")
+                except UnicodeDecodeError:
+                    name = name.decode("latin1", errors="replace")
+            else:
+                name = str(name)
+            return name.lower()
+
+        df.columns = [_safe_lower(col) for col in df.columns]
         summary = []
         for col in df.columns:
             column_series = df[col].dropna()
@@ -206,11 +262,11 @@ async def cached_dataframe(object_name: str):
         except Exception as exc:
             print(f"⚠️ flight dataframe error for {object_name}: {exc}")
 
-        content = redis_client.get(object_name)
+        content = _redis_get_bytes(object_name)
         if content is None:
             response = minio_client.get_object(MINIO_BUCKET, object_name)
             content = response.read()
-            redis_client.setex(object_name, 3600, content)
+            _redis_set_bytes(object_name, content)
 
         if object_name.endswith(".arrow"):
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
@@ -343,11 +399,11 @@ def _load_polars_frame(object_name: str, flight_path: str | None = None) -> pl.D
     if not object_name.endswith(".arrow"):
         raise ValueError("Unsupported file format")
 
-    content = redis_client.get(object_name)
+    content = _redis_get_bytes(object_name)
     if content is None:
         response = minio_client.get_object(MINIO_BUCKET, object_name)
         content = response.read()
-        redis_client.setex(object_name, 3600, content)
+        _redis_set_bytes(object_name, content)
 
     try:
         return pl.read_ipc(io.BytesIO(content))
