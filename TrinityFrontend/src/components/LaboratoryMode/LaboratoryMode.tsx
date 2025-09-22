@@ -34,20 +34,21 @@ const useIsomorphicInsertionEffect =
 const ENTRANCE_COMPLETION_BUFFER_MS = 200;
 
 const LaboratoryMode = () => {
+  const initialReduceMotion = useMemo(() => prefersReducedMotion(), []);
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
+  const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(initialReduceMotion);
   const [auxActive, setAuxActive] = useState<string | null>(null);
   const { toast } = useToast();
   const { cards, setCards: setLabCards } = useLaboratoryStore();
   const setExhibitionCards = useExhibitionStore(state => state.setCards);
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
-  const initialReduceMotion = useMemo(() => prefersReducedMotion(), []);
   const skipInitialLabCleanupRef = useRef(true);
   const reduceMotionRef = useRef(initialReduceMotion);
+  const hasAutoShownNavigationRef = useRef(initialReduceMotion);
   const [isPreparingAnimation, setIsPreparingAnimation] = useState(!initialReduceMotion);
   const [hasEntranceFinished, setHasEntranceFinished] = useState(initialReduceMotion);
 
@@ -151,6 +152,15 @@ const LaboratoryMode = () => {
       window.clearTimeout(completionFallback);
     };
   }, []);
+
+  useEffect(() => {
+    if (!hasEntranceFinished || hasAutoShownNavigationRef.current) {
+      return;
+    }
+
+    hasAutoShownNavigationRef.current = true;
+    setShowFloatingNavigationList(true);
+  }, [hasEntranceFinished]);
 
   useEffect(() => {
     if (localStorage.getItem('laboratory-config')) {

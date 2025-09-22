@@ -28,6 +28,7 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
   const widgetRef = useRef<HTMLDivElement>(null);
   const manualPositionRef = useRef(false);
   const { cards } = useExhibitionStore();
+  const cardsLength = cards.length;
 
   const clampPositionToViewport = useCallback((x: number, y: number) => {
     if (typeof window === 'undefined' || !widgetRef.current) {
@@ -64,13 +65,17 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
     }
 
     const viewportWidth = window.innerWidth;
-    const anchorCenteredX = Math.max(
-      anchorRect.right + VIEWPORT_PADDING,
-      (viewportWidth - widgetRect.width) / 2,
-    );
-    const anchorCenteredY = anchorRect.top + anchorRect.height / 2 - widgetRect.height / 2;
+    const viewportHeight = window.innerHeight;
 
-    const nextPosition = clampPositionToViewport(anchorCenteredX, anchorCenteredY);
+    const centeredX = Math.max((viewportWidth - widgetRect.width) / 2, VIEWPORT_PADDING);
+    const anchorOffsetX = anchorRect.right + VIEWPORT_PADDING;
+    const targetX = Math.max(anchorOffsetX, centeredX);
+
+    const centeredY = Math.max((viewportHeight - widgetRect.height) / 2, VIEWPORT_PADDING);
+    const anchorMidpointY = anchorRect.top + anchorRect.height / 2 - widgetRect.height / 2;
+    const targetY = Math.max(anchorMidpointY, centeredY);
+
+    const nextPosition = clampPositionToViewport(targetX, targetY);
 
     setPosition(previous => {
       if (previous.x === nextPosition.x && previous.y === nextPosition.y) {
@@ -90,6 +95,7 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
       cardId: card.id
     }))
   );
+  const atomsCount = allAtoms.length;
 
   useLayoutEffect(() => {
     if (!isVisible || !isReady || manualPositionRef.current || !anchorSelector) {
@@ -130,6 +136,24 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
       }
     };
   }, [alignToAnchor, anchorSelector, isReady, isVisible]);
+
+  useEffect(() => {
+    if (!isVisible || !isReady || manualPositionRef.current) {
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      alignToAnchor();
+    }, 50);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [alignToAnchor, atomsCount, cardsLength, isMinimized, isReady, isVisible]);
 
   useEffect(() => {
     if (!isVisible || !isReady || manualPositionRef.current || !anchorSelector) {
