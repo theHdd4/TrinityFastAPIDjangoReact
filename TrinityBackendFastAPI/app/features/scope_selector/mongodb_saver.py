@@ -12,7 +12,10 @@ logger = logging.getLogger(__name__)
 
 # Use the same MongoDB URI as column classifier for consistency
 DEFAULT_MONGO_URI = build_host_mongo_uri()
-MONGO_URI = os.getenv("MONGO_URI", DEFAULT_MONGO_URI)
+MONGO_URI = os.getenv(
+    "SCOPE_SELECTOR_MONGO_URI",
+    os.getenv("MONGO_URI", DEFAULT_MONGO_URI)
+)
 MONGO_DB = os.getenv("MONGO_DB", "trinity_db")  # Use trinity_db database like column classifier
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[MONGO_DB]

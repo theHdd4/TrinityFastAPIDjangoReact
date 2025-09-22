@@ -18,6 +18,23 @@ except ModuleNotFoundError:  # pragma: no cover - direct execution fallback
 
 DEFAULT_MONGO_URI = build_host_mongo_uri()
 
+
+def _get_mongo_uri() -> str:
+    return os.getenv(
+        "SELECT_MODELS_MONGO_URI",
+        os.getenv("MONGO_URI", DEFAULT_MONGO_URI)
+    )
+
+
+def _sanitize_mongo_uri(uri: str) -> str:
+    if "@" in uri:
+        try:
+            credentials = uri.split("@")[0].split("//")[1]
+        except IndexError:
+            return uri
+        return uri.replace(credentials, "***:***")
+    return uri
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     # Use the settings instance directly
@@ -84,7 +101,7 @@ async def get_app_info():
         "app_name": "Select Models Feature Based API",
         "version": "1.0.0",
         "database": {
-            "mongodb_endpoint": os.getenv("MONGO_URI", DEFAULT_MONGO_URI),
+            "mongodb_endpoint": _sanitize_mongo_uri(_get_mongo_uri()),
             "database": "validator_atoms_db",
             "collection": "validator_atoms"
         },

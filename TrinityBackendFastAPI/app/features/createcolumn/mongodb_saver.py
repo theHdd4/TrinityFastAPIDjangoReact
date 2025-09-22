@@ -7,7 +7,10 @@ from datetime import datetime
 from app.core.mongo import build_host_mongo_uri
 
 DEFAULT_MONGO_URI = build_host_mongo_uri()
-MONGO_URI = os.getenv("MONGO_URI", DEFAULT_MONGO_URI)
+MONGO_URI = os.getenv(
+    "CREATECOLUMN_MONGO_URI",
+    os.getenv("MONGO_URI", DEFAULT_MONGO_URI)
+)
 MONGO_DB = os.getenv("MONGO_DB", "trinity_db")
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[MONGO_DB]
