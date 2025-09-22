@@ -21,6 +21,7 @@ import {
   prepareLabElements,
   prefersReducedMotion,
   LAB_PREP_CLASS,
+  LAB_ENTRANCE_PREP_DELAY_MS,
   LAB_ENTRANCE_SEQUENCE_DURATION_MS,
 } from '@/utils/projectTransition';
 
@@ -81,27 +82,73 @@ const LaboratoryMode = () => {
 
   useIsomorphicLayoutEffect(() => {
     animateLabElementsIn();
-    if (!reduceMotionRef.current) {
+    if (reduceMotionRef.current) {
       setIsPreparingAnimation(false);
     }
   }, []);
 
   useEffect(() => {
+    if (typeof document === 'undefined' || typeof window === 'undefined') {
+      return;
+    }
+
     if (reduceMotionRef.current) {
+      setIsPreparingAnimation(false);
       setHasEntranceFinished(true);
       return;
     }
 
-    if (typeof window === 'undefined') {
-      return;
-    }
+    const headerElement = document.querySelector('[data-lab-header]') as HTMLElement | null;
+    const settingsElement = document.querySelector('[data-lab-settings]') as HTMLElement | null;
 
-    const completionTimeout = window.setTimeout(() => {
+    let hasMarkedStart = false;
+    let hasMarkedCompletion = false;
+
+    const markAnimationStarted = () => {
+      if (hasMarkedStart) {
+        return;
+      }
+      hasMarkedStart = true;
+      setIsPreparingAnimation(false);
+    };
+
+    const markAnimationCompleted = () => {
+      if (hasMarkedCompletion) {
+        return;
+      }
+      hasMarkedCompletion = true;
       setHasEntranceFinished(true);
-    }, LAB_ENTRANCE_SEQUENCE_DURATION_MS + ENTRANCE_COMPLETION_BUFFER_MS);
+    };
+
+    const handleHeaderAnimationStart = (event: AnimationEvent) => {
+      if (event.target !== headerElement) {
+        return;
+      }
+      markAnimationStarted();
+    };
+
+    const handleSettingsAnimationEnd = (event: AnimationEvent) => {
+      if (event.target !== settingsElement) {
+        return;
+      }
+      markAnimationCompleted();
+    };
+
+    headerElement?.addEventListener('animationstart', handleHeaderAnimationStart);
+    settingsElement?.addEventListener('animationend', handleSettingsAnimationEnd);
+
+    const startFallbackDelay = LAB_ENTRANCE_PREP_DELAY_MS + 100;
+    const startFallback = window.setTimeout(markAnimationStarted, startFallbackDelay);
+    const completionFallback = window.setTimeout(
+      markAnimationCompleted,
+      LAB_ENTRANCE_SEQUENCE_DURATION_MS + ENTRANCE_COMPLETION_BUFFER_MS,
+    );
 
     return () => {
-      window.clearTimeout(completionTimeout);
+      headerElement?.removeEventListener('animationstart', handleHeaderAnimationStart);
+      settingsElement?.removeEventListener('animationend', handleSettingsAnimationEnd);
+      window.clearTimeout(startFallback);
+      window.clearTimeout(completionFallback);
     };
   }, []);
 
