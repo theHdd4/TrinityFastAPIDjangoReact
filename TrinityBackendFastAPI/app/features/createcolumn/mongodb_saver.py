@@ -3,7 +3,14 @@
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin")
+
+from app.core.mongo import build_host_mongo_uri
+
+DEFAULT_MONGO_URI = build_host_mongo_uri()
+MONGO_URI = os.getenv(
+    "CREATECOLUMN_MONGO_URI",
+    os.getenv("MONGO_URI", DEFAULT_MONGO_URI)
+)
 MONGO_DB = os.getenv("MONGO_DB", "trinity_db")
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[MONGO_DB]

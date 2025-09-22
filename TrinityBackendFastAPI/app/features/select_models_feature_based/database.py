@@ -7,9 +7,23 @@ from io import BytesIO
 from motor.motor_asyncio import AsyncIOMotorClient
 import logging
 
+from app.core.mongo import build_host_mongo_uri
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_mongo_uri(uri: str) -> str:
+    """Mask credentials when logging MongoDB URIs."""
+
+    if "@" in uri:
+        try:
+            credentials = uri.split("@")[0].split("//")[1]
+        except IndexError:
+            return uri
+        return uri.replace(credentials, "***:***")
+    return uri
 
 # MinIO config
 # Default to the development MinIO service if not explicitly configured
@@ -82,7 +96,11 @@ def ensure_minio_bucket():
 ensure_minio_bucket()
 
 # MongoDB configuration
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_db?authSource=admin")
+DEFAULT_MONGO_URI = build_host_mongo_uri(database="trinity_db")
+MONGO_URI = os.getenv(
+    "SELECT_MODELS_MONGO_URI",
+    os.getenv("MONGO_URI", DEFAULT_MONGO_URI)
+)
 MONGO_DB = os.getenv("MONGO_DB", "trinity_db")
 COLLECTION_NAME = "validator_atoms"
 SELECT_CONFIGS_COLLECTION_NAME = "select_configs"
@@ -95,10 +113,7 @@ select_configs_collection = None
 
 try:
     # Create connection string without exposing credentials in logs
-    mongo_url_safe = MONGO_URI.replace(
-        MONGO_URI.split('@')[0].split('//')[1], 
-        "***:***"
-    )
+    mongo_url_safe = _sanitize_mongo_uri(MONGO_URI)
     logger.info(f"Connecting to MongoDB: {mongo_url_safe}")
     
     client = AsyncIOMotorClient(
@@ -144,10 +159,7 @@ def get_select_configs_collection():
         try:
             if client is None:
                 # Re-establish connection if needed
-                mongo_url_safe = MONGO_URI.replace(
-                    MONGO_URI.split('@')[0].split('//')[1], 
-                    "***:***"
-                )
+                mongo_url_safe = _sanitize_mongo_uri(MONGO_URI)
                 logger.info(f"Reconnecting to MongoDB: {mongo_url_safe}")
                 
                 client = AsyncIOMotorClient(
