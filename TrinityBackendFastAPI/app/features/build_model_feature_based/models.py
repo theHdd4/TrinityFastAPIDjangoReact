@@ -38,11 +38,16 @@ class CustomConstrainedRidge(BaseEstimator, RegressorMixin):
                 idx = feature_names.index(var_name)
                 self.negative_indices.append(idx)
             else:
-                # Try case-insensitive match
-                for i, name in enumerate(feature_names):
-                    if name.lower() == var_name.lower():
-                        self.negative_indices.append(i)
-                        break
+                    # Try case-insensitive match
+                    for i, name in enumerate(feature_names):
+                        if name.lower() == var_name.lower():
+                            self.negative_indices.append(i)
+                            break
+                        # Try standardized name match (standard_ or minmax_ prefix)
+                        elif (name.lower() == f"standard_{var_name.lower()}" or 
+                              name.lower() == f"minmax_{var_name.lower()}"):
+                            self.negative_indices.append(i)
+                            break
         
         # Add custom positive constraints (case-insensitive)
         for var_name in self.positive_constraints:
@@ -51,11 +56,16 @@ class CustomConstrainedRidge(BaseEstimator, RegressorMixin):
                 idx = feature_names.index(var_name)
                 self.positive_indices.append(idx)
             else:
-                # Try case-insensitive match
-                for i, name in enumerate(feature_names):
-                    if name.lower() == var_name.lower():
-                        self.positive_indices.append(i)
-                        break
+                    # Try case-insensitive match
+                    for i, name in enumerate(feature_names):
+                        if name.lower() == var_name.lower():
+                            self.positive_indices.append(i)
+                            break
+                        # Try standardized name match (standard_ or minmax_ prefix)
+                        elif (name.lower() == f"standard_{var_name.lower()}" or 
+                              name.lower() == f"minmax_{var_name.lower()}"):
+                            self.positive_indices.append(i)
+                            break
         
         # No hardcoded constraints - only use user-provided constraints
         
@@ -162,11 +172,16 @@ class ConstrainedLinearRegression(BaseEstimator, RegressorMixin):
                 idx = feature_names.index(var_name)
                 self.negative_indices.append(idx)
             else:
-                # Try case-insensitive match
-                for i, name in enumerate(feature_names):
-                    if name.lower() == var_name.lower():
-                        self.negative_indices.append(i)
-                        break
+                    # Try case-insensitive match
+                    for i, name in enumerate(feature_names):
+                        if name.lower() == var_name.lower():
+                            self.negative_indices.append(i)
+                            break
+                        # Try standardized name match (standard_ or minmax_ prefix)
+                        elif (name.lower() == f"standard_{var_name.lower()}" or 
+                              name.lower() == f"minmax_{var_name.lower()}"):
+                            self.negative_indices.append(i)
+                            break
         
         # Add custom positive constraints (case-insensitive)
         for var_name in self.positive_constraints:
@@ -175,11 +190,16 @@ class ConstrainedLinearRegression(BaseEstimator, RegressorMixin):
                 idx = feature_names.index(var_name)
                 self.positive_indices.append(idx)
             else:
-                # Try case-insensitive match
-                for i, name in enumerate(feature_names):
-                    if name.lower() == var_name.lower():
-                        self.positive_indices.append(i)
-                        break
+                    # Try case-insensitive match
+                    for i, name in enumerate(feature_names):
+                        if name.lower() == var_name.lower():
+                            self.positive_indices.append(i)
+                            break
+                        # Try standardized name match (standard_ or minmax_ prefix)
+                        elif (name.lower() == f"standard_{var_name.lower()}" or 
+                              name.lower() == f"minmax_{var_name.lower()}"):
+                            self.positive_indices.append(i)
+                            break
         
         # No hardcoded constraints - only use user-provided constraints
         
