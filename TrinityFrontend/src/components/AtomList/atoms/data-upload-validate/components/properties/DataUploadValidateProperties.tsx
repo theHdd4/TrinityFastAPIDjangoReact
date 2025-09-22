@@ -801,7 +801,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-gray-300">
         <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-          <span className="text-sm font-medium text-gray-700">Use Master File (Enable master file validation steps)</span>
+          <span className="text-sm font-medium text-gray-700">Enable validation steps</span>
           <Switch
             checked={bypassMasterUpload}
             onCheckedChange={handleBypassToggle}
@@ -1332,7 +1332,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
             <Table className="w-12 h-12 mx-auto mb-4 text-gray-300" />
             <p className="text-sm">
               {!bypassMasterUpload 
-                ? "Enable 'Use Master File' to configure data types and settings"
+                ? "Enable 'Validation' to configure data types and settings"
                 : "Select a master file to configure data types and settings"
               }
             </p>

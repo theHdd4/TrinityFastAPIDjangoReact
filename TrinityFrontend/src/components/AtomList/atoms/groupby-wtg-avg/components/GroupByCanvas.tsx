@@ -189,6 +189,13 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     )
   ).map((c: any) => c.column);
 
+  // Debug: Log numeric columns for Weight By dropdown
+  console.log('🔍 Debug - Weight By numericColumns:', {
+    allColumns: settings.allColumns?.length || 0,
+    numericColumns: numericColumns,
+    hasWeightedMean: hasWeightedMean
+  });
+
   // Fetch cardinality data on mount
   React.useEffect(() => {
     fetchCardinalityData();
@@ -1099,9 +1106,13 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                         <SelectValue placeholder="Select weight column" />
                       </SelectTrigger>
                       <SelectContent>
-                        {numericColumns.map((col: string) => (
-                          <SelectItem key={col} value={col}>{col}</SelectItem>
-                        ))}
+                        {numericColumns.length > 0 ? (
+                          numericColumns.map((col: string) => (
+                            <SelectItem key={col} value={col}>{col}</SelectItem>
+                          ))
+                        ) : (
+                          <div className="p-2 text-sm text-gray-500">No numeric columns available</div>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>

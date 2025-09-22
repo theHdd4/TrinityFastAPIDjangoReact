@@ -957,9 +957,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
            <div className="mt-1 ml-4">
              {dimensionError}
            </div>
-           <div className="mt-2 text-xs text-yellow-700">
+           {/* <div className="mt-2 text-xs text-yellow-700">
              Run Column Classifier on this dataset to enable hierarchical dimension analysis.
-           </div>
+           </div> */}
          </div>
        )}
 
