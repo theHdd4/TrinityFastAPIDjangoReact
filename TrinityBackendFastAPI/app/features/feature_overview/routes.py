@@ -11,7 +11,7 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import polars as pl
 from datetime import date, datetime
-from typing import List
+from typing import Any, List
 from fastapi import Depends
 from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorCollection
@@ -146,7 +146,28 @@ async def column_summary(object_name: str):
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
 
-        df.columns = df.columns.str.lower()
+        def _safe_lower(name: Any) -> str:
+            """Return a lower-cased column name while tolerating bytes values.
+
+            Some legacy Arrow exports stored the column name metadata as raw
+            bytes.  Pandas' ``Index.str`` helpers always assume UTF-8 encoded
+            text and would therefore raise ``UnicodeDecodeError`` when
+            encountering these byte strings (for example ones beginning with
+            ``0xff``).  Converting eagerly to ``str`` with a best-effort decode
+            avoids the crash while preserving the original column label as
+            faithfully as possible.
+            """
+
+            if isinstance(name, bytes):
+                try:
+                    name = name.decode("utf-8")
+                except UnicodeDecodeError:
+                    name = name.decode("latin1", errors="replace")
+            else:
+                name = str(name)
+            return name.lower()
+
+        df.columns = [_safe_lower(col) for col in df.columns]
         summary = []
         for col in df.columns:
             column_series = df[col].dropna()
