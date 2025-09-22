@@ -87,6 +87,31 @@ const LLM_MAP: Record<string, string> = {
   'explore': 'Agent Explore',
 };
 
+const hydrateDroppedAtom = (atom: any): DroppedAtom => {
+  const info = allAtoms.find(at => at.id === atom.atomId);
+  return {
+    ...atom,
+    llm: atom.llm || LLM_MAP[atom.atomId],
+    color: atom.color || info?.color || 'bg-gray-400',
+  };
+};
+
+const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
+  if (!Array.isArray(rawCards)) {
+    return null;
+  }
+
+  return rawCards.map((card: any) => ({
+    id: card.id,
+    atoms: Array.isArray(card.atoms)
+      ? card.atoms.map((atom: any) => hydrateDroppedAtom(atom))
+      : [],
+    isExhibited: !!card.isExhibited,
+    moleculeId: card.moleculeId,
+    moleculeTitle: card.moleculeTitle,
+  }));
+};
+
 const CanvasArea: React.FC<CanvasAreaProps> = ({
   onAtomSelect,
   onCardSelect,
@@ -536,6 +561,29 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   // Load saved layout and workflow rendering
   useEffect(() => {
     let initialCards: LayoutCard[] | null = null;
+    let initialWorkflow: WorkflowMolecule[] | undefined;
+    let isMounted = true;
+
+    const applyInitialCards = (cards: LayoutCard[] | null, workflowOverride?: WorkflowMolecule[]) => {
+      if (!isMounted || cards === null) {
+        return;
+      }
+
+      setLayoutCards(cards);
+      const workflow = workflowOverride ?? deriveWorkflowMolecules(cards);
+      setWorkflowMolecules(workflow);
+      setActiveTab(prevTab => {
+        if (workflow.length === 0) {
+          return '';
+        }
+
+        if (prevTab && workflow.some(molecule => molecule.moleculeId === prevTab)) {
+          return prevTab;
+        }
+
+        return workflow[0].moleculeId;
+      });
+    };
 
     const storedAtoms = localStorage.getItem('workflow-selected-atoms');
     let workflowAtoms: {
@@ -544,6 +592,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       moleculeTitle: string;
       order: number;
     }[] = [];
+
     if (storedAtoms) {
       try {
         workflowAtoms = JSON.parse(storedAtoms);
@@ -554,12 +603,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             moleculeMap.set(atom.moleculeId, {
               moleculeId: atom.moleculeId,
               moleculeTitle: atom.moleculeTitle,
-              atoms: []
+              atoms: [],
             });
           }
           moleculeMap.get(atom.moleculeId)!.atoms.push({
             atomName: atom.atomName,
-            order: atom.order
+            order: atom.order,
           });
         });
 
@@ -568,79 +617,50 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         });
 
         const molecules = Array.from(moleculeMap.values());
-        setWorkflowMolecules(molecules);
-
         if (molecules.length > 0) {
-          setActiveTab(molecules[0].moleculeId);
+          initialWorkflow = molecules;
         }
+
+        const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
+        initialCards = workflowAtoms.map(atom => {
+          const atomInfo =
+            allAtoms.find(
+              a =>
+                normalize(a.id) === normalize(atom.atomName) ||
+                normalize(a.title) === normalize(atom.atomName),
+            ) || ({} as any);
+          const atomId = atomInfo.id || atom.atomName;
+          const dropped: DroppedAtom = {
+            id: `${atom.atomName}-${Date.now()}-${Math.random()}`,
+            atomId,
+            title: atomInfo.title || atom.atomName,
+            category: atomInfo.category || 'Atom',
+            color: atomInfo.color || 'bg-gray-400',
+            source: 'manual',
+            llm: LLM_MAP[atomId],
+          };
+          return {
+            id: `card-${atom.atomName}-${Date.now()}-${Math.random()}`,
+            atoms: [dropped],
+            isExhibited: false,
+            moleculeId: atom.moleculeId,
+            moleculeTitle: atom.moleculeTitle,
+          } as LayoutCard;
+        });
+
         localStorage.removeItem('workflow-selected-atoms');
       } catch (e) {
         console.error('Failed to parse workflow atoms', e);
+        workflowAtoms = [];
       }
     }
 
-    if (workflowAtoms.length > 0) {
-      const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
-      initialCards = workflowAtoms.map(atom => {
-        const atomInfo =
-          allAtoms.find(
-            a =>
-              normalize(a.id) === normalize(atom.atomName) ||
-              normalize(a.title) === normalize(atom.atomName)
-          ) || ({} as any);
-        const atomId = atomInfo.id || atom.atomName;
-        const dropped: DroppedAtom = {
-          id: `${atom.atomName}-${Date.now()}-${Math.random()}`,
-          atomId,
-          title: atomInfo.title || atom.atomName,
-          category: atomInfo.category || 'Atom',
-          color: atomInfo.color || 'bg-gray-400',
-          source: 'manual',
-          llm: LLM_MAP[atomId],
-        };
-        return {
-          id: `card-${atom.atomName}-${Date.now()}-${Math.random()}`,
-          atoms: [dropped],
-          isExhibited: false,
-          moleculeId: atom.moleculeId,
-          moleculeTitle: atom.moleculeTitle
-        } as LayoutCard;
-      });
-      const wfInit = deriveWorkflowMolecules(initialCards);
-      setWorkflowMolecules(wfInit);
-      if (wfInit.length > 0) {
-        setActiveTab(wfInit[0].moleculeId);
-      }
-    } else {
+    if (!workflowAtoms.length) {
       const storedLayout = localStorage.getItem(STORAGE_KEY);
       if (storedLayout && storedLayout !== 'undefined') {
         try {
           const raw = JSON.parse(storedLayout);
-          initialCards = Array.isArray(raw)
-            ? raw.map((c: any) => ({
-                id: c.id,
-                atoms: Array.isArray(c.atoms)
-                  ? c.atoms.map((a: any) => {
-                      const info = allAtoms.find(at => at.id === a.atomId);
-                      return {
-                        ...a,
-                        llm: a.llm || LLM_MAP[a.atomId],
-                        color: a.color || info?.color || 'bg-gray-400',
-                      };
-                    })
-                  : [],
-                isExhibited: !!c.isExhibited,
-                moleculeId: c.moleculeId,
-                moleculeTitle: c.moleculeTitle,
-              }))
-            : null;
-          if (initialCards) {
-            const wf = deriveWorkflowMolecules(initialCards);
-            if (wf.length > 0) {
-              setWorkflowMolecules(wf);
-              setActiveTab(wf[0].moleculeId);
-            }
-          }
+          initialCards = hydrateLayoutCards(raw);
         } catch (e) {
           console.error('Failed to parse stored laboratory layout', e);
           localStorage.removeItem(STORAGE_KEY);
@@ -648,10 +668,21 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       } else {
         const current = localStorage.getItem('current-project');
         if (current) {
-          fetch(`${REGISTRY_API}/projects/${JSON.parse(current).id}/`, { credentials: 'include' })
-            .then(res => res.ok ? res.json() : null)
-            .then(async data => {
-              if (data) {
+          let projectId: string | undefined;
+          try {
+            projectId = JSON.parse(current).id;
+          } catch {
+            projectId = undefined;
+          }
+
+          if (projectId) {
+            fetch(`${REGISTRY_API}/projects/${projectId}/`, { credentials: 'include' })
+              .then(res => (res.ok ? res.json() : null))
+              .then(async data => {
+                if (!data || !isMounted) {
+                  return;
+                }
+
                 if (data.environment) {
                   try {
                     const env = data.environment || {};
@@ -661,25 +692,35 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
                     localStorage.removeItem('column-classifier-config');
                   }
                 }
+
                 if (data.state && data.state.laboratory_config) {
                   const cfg = sanitizeLabConfig(data.state.laboratory_config);
                   localStorage.setItem(STORAGE_KEY, safeStringify(cfg.cards));
                   localStorage.setItem('laboratory-config', safeStringify(cfg));
                   if (!storedAtoms && data.state.workflow_selected_atoms) {
-                    localStorage.setItem('workflow-selected-atoms', safeStringify(data.state.workflow_selected_atoms));
+                    localStorage.setItem(
+                      'workflow-selected-atoms',
+                      safeStringify(data.state.workflow_selected_atoms),
+                    );
                   }
-                  window.location.reload();
+
+                  const cardsFromConfig = hydrateLayoutCards(cfg.cards);
+                  applyInitialCards(cardsFromConfig);
                 }
-              }
-            })
-            .catch(() => {});
+              })
+              .catch(() => {});
+          }
         }
       }
     }
 
     if (initialCards) {
-      setLayoutCards(initialCards);
+      applyInitialCards(initialCards, initialWorkflow);
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Persist layout to localStorage safely and store undo snapshot
