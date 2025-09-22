@@ -21,6 +21,7 @@ const LAB_ELEMENTS = [
   { selector: '[data-lab-settings]', delay: 800 },
 ] as const;
 const LAB_PREP_DELAY_MS = 200;
+export const LAB_ENTRANCE_PREP_DELAY_MS = LAB_PREP_DELAY_MS;
 const LAB_ANIMATION_DURATION_MS = 600;
 const LAB_MAX_ELEMENT_DELAY_MS = Math.max(
   ...LAB_ELEMENTS.map(element => element.delay),
