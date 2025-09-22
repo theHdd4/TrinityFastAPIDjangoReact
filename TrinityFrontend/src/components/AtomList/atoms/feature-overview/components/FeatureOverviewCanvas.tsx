@@ -147,14 +147,39 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         });
         if (!active) return;
         const mapping = filterUnattributed(rawMapping);
-        setDimensionMap(mapping);
-        onUpdateSettings({ dimensionMap: mapping });
-        
+        const summaryColumns = new Set(
+          (
+            Array.isArray(settings.allColumns) && settings.allColumns.length > 0
+              ? settings.allColumns
+              : Array.isArray(settings.columnSummary)
+              ? settings.columnSummary
+              : []
+          )
+            .map((c: ColumnInfo) => c?.column)
+            .filter(Boolean),
+        );
+        const trimmedMapping = summaryColumns.size
+          ? Object.fromEntries(
+              Object.entries(mapping)
+                .map(([dimension, values]) => {
+                  const cols = Array.isArray(values)
+                    ? Array.from(
+                        new Set(values.filter((val) => summaryColumns.has(val))),
+                      )
+                    : [];
+                  return [dimension, cols];
+                })
+                .filter(([, cols]) => cols.length > 0),
+            )
+          : mapping;
+        setDimensionMap(trimmedMapping);
+        onUpdateSettings({ dimensionMap: trimmedMapping });
+
         // Check if mapping has any valid entries
-        const hasValidMapping = Object.values(mapping).some(
+        const hasValidMapping = Object.values(trimmedMapping).some(
           (ids) => Array.isArray(ids) && ids.length > 0,
         );
-        
+
         if (hasValidMapping) {
           setDimensionError(null);
         } else {
