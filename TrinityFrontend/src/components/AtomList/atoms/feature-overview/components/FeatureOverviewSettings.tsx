@@ -143,9 +143,12 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
       }
       const filtered = summary.filter(c => c.unique_count > 1);
       const selected = filtered.map(c => c.column);
-      const rawMap = await fetchDimensionMapping();
+      const { mapping: rawMapping } = await fetchDimensionMapping({ objectName: normalized });
       const mapping = Object.fromEntries(
-        Object.entries(rawMap).filter(([k]) => k.toLowerCase() !== 'unattributed')
+        Object.entries(rawMapping || {}).filter(([k]) => {
+          const key = k.toLowerCase();
+          return key !== 'unattributed' && key !== 'unattributed_dimensions';
+        })
       );
       const activeMetric = '';
       onSettingsChange({
