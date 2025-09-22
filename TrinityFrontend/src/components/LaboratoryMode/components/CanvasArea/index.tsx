@@ -496,34 +496,49 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         objectName: prev.csv,
         signal: controller.signal,
       });
-      const mapping = Object.fromEntries(
-        Object.entries(rawMapping).filter(
-          ([key]) => key.toLowerCase() !== 'unattributed',
-        ),
-      );
-      console.log('✅ pre-filling feature overview with', prev.csv);
       const summary = Array.isArray(summaryDetails.summary)
         ? summaryDetails.summary.filter(Boolean)
         : [];
+      const summaryColumnSet = new Set(
+        summary.map(col => col.column).filter(column => !!column),
+      );
       const numericColumns = Array.isArray(summaryDetails.numeric)
-        ? summaryDetails.numeric.filter(Boolean)
+        ? Array.from(
+            new Set(summaryDetails.numeric.filter(col => summaryColumnSet.has(col))),
+          )
         : [];
-      const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
-      const filtered =
-        identifiers.length > 0
-          ? summary.filter(s => identifiers.includes(s.column))
-          : summary;
+      const identifiers = Array.isArray(prev.identifiers)
+        ? prev.identifiers.filter(Boolean)
+        : [];
+      const validIdentifiers = identifiers.filter(id => summaryColumnSet.has(id));
+      const identifierSummary =
+        validIdentifiers.length > 0
+          ? summary.filter(s => validIdentifiers.includes(s.column))
+          : [];
+      const columnSummary = identifierSummary.length > 0 ? identifierSummary : summary;
       const selected =
-        identifiers.length > 0
-          ? identifiers
-          : (Array.isArray(summary) ? summary : []).map(cc => cc.column);
+        validIdentifiers.length > 0
+          ? Array.from(new Set(validIdentifiers))
+          : Array.from(new Set(columnSummary.map(cc => cc.column)));
+      const mapping = Object.fromEntries(
+        Object.entries(rawMapping)
+          .filter(([key]) => key.toLowerCase() !== 'unattributed')
+          .map(([dimension, cols]) => {
+            const values = Array.isArray(cols)
+              ? Array.from(new Set(cols.filter(col => summaryColumnSet.has(col))))
+              : [];
+            return [dimension, values];
+          })
+          .filter(([, cols]) => cols.length > 0),
+      );
+      console.log('✅ pre-filling feature overview with', prev.csv);
 
       updateAtomSettings(atomId, { loadingStatus: 'Preparing feature overview' });
       updateAtomSettings(atomId, {
         dataSource: prev.csv,
         csvDisplay: prev.display || prev.csv,
         allColumns: summary,
-        columnSummary: filtered,
+        columnSummary,
         selectedColumns: selected,
         numericColumns,
         dimensionMap: mapping,
