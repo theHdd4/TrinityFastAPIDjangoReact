@@ -21,6 +21,7 @@ import {
   prepareLabElements,
   prefersReducedMotion,
   LAB_PREP_CLASS,
+  LAB_ENTRANCE_SEQUENCE_DURATION_MS,
 } from '@/utils/projectTransition';
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
@@ -28,6 +29,8 @@ const useIsomorphicInsertionEffect =
   typeof window !== 'undefined' && typeof useInsertionEffect === 'function'
     ? useInsertionEffect
     : useIsomorphicLayoutEffect;
+
+const ENTRANCE_COMPLETION_BUFFER_MS = 200;
 
 const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
@@ -45,6 +48,7 @@ const LaboratoryMode = () => {
   const skipInitialLabCleanupRef = useRef(true);
   const reduceMotionRef = useRef(initialReduceMotion);
   const [isPreparingAnimation, setIsPreparingAnimation] = useState(!initialReduceMotion);
+  const [hasEntranceFinished, setHasEntranceFinished] = useState(initialReduceMotion);
 
   useIsomorphicInsertionEffect(() => {
     const reduceMotion = prefersReducedMotion();
@@ -80,6 +84,25 @@ const LaboratoryMode = () => {
     if (!reduceMotionRef.current) {
       setIsPreparingAnimation(false);
     }
+  }, []);
+
+  useEffect(() => {
+    if (reduceMotionRef.current) {
+      setHasEntranceFinished(true);
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const completionTimeout = window.setTimeout(() => {
+      setHasEntranceFinished(true);
+    }, LAB_ENTRANCE_SEQUENCE_DURATION_MS + ENTRANCE_COMPLETION_BUFFER_MS);
+
+    return () => {
+      window.clearTimeout(completionTimeout);
+    };
   }, []);
 
   useEffect(() => {
@@ -273,7 +296,7 @@ const LaboratoryMode = () => {
         className="bg-white/80 backdrop-blur-sm border-b border-gray-200/60 px-6 py-6 flex-shrink-0 shadow-sm"
       >
         <div className="flex items-center justify-between">
-          <div>
+          <div data-lab-header-text="true">
             <h2 className="text-3xl font-light text-gray-900 mb-2">Laboratory Mode</h2>
             <p className="text-gray-600 font-light">Build sophisticated applications with modular atoms</p>
           </div>
@@ -369,6 +392,8 @@ const LaboratoryMode = () => {
             <FloatingNavigationList
               isVisible={showFloatingNavigationList}
               onClose={() => setShowFloatingNavigationList(false)}
+              isReady={hasEntranceFinished}
+              anchorSelector="[data-lab-header-text]"
             />
           </div>
         </div>
