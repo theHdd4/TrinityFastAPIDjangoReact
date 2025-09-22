@@ -522,48 +522,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     );
   };
 
-  // Show appropriate error message based on the state
-  if (summaryList.length === 0) {
-    // If we have a data source but no column summary, show column classifier error
-    if (settings.dataSource && dimensionError) {
-      return (
-        <div className="w-full h-full flex items-center justify-center text-gray-500">
-          <div className="text-center">
-            <div className="text-lg font-medium text-yellow-700 mb-2">
-              {dimensionError}
-            </div>
-            <div className="text-sm text-gray-600">
-              Please run Column Classifier on this dataset first
-            </div>
-          </div>
-        </div>
-      );
-    }
-    
-    // If no data source selected, show configuration message
-    if (!settings.dataSource) {
-      return (
-        <div className="w-full h-full flex items-center justify-center text-gray-500">
-          <div className="text-center">
-            <div className="text-lg font-medium text-blue-700 mb-2">
-              Please configure Feature Overview Settings
-            </div>
-            <div className="text-sm text-gray-600">
-              Select a data source from the properties panel to get started
-            </div>
-          </div>
-        </div>
-      );
-    }
-    
-    // If data source exists but no summary (loading or error)
-    return (
-      <div className="w-full h-full flex items-center justify-center text-gray-500">
-        {error || "Loading data..."}
-      </div>
-    );
-  }
-
   const getDataTypeColor = (type: string) => {
     switch (type.toLowerCase()) {
       case "string":
@@ -707,34 +665,57 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     }
   };
 
-  // Show placeholder when no data is loaded
+  // Show placeholder or error messaging when data isn't available yet
   if (summaryList.length === 0) {
-    return (
-      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-green-50/30 to-green-50/50 overflow-y-auto relative">
-        <div className="absolute inset-0 opacity-20">
-          <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
-            <defs>
-              <pattern id="emptyGrid" width="80" height="80" patternUnits="userSpaceOnUse">
-                <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(148 163 184 / 0.15)" strokeWidth="1"/>
-              </pattern>
-            </defs>
-            <rect width="100%" height="100%" fill="url(#emptyGrid)" />
-          </svg>
-        </div>
-
-        <div className="relative z-10 flex items-center justify-center h-full">
-          <div className="text-center max-w-md">
-            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
-              <BarChart3 className="w-12 h-12 text-white drop-shadow-lg" />
+    if (settings.dataSource && dimensionError) {
+      return (
+        <div className="w-full h-full flex items-center justify-center text-gray-500">
+          <div className="text-center">
+            <div className="text-lg font-medium text-yellow-700 mb-2">
+              {dimensionError}
             </div>
-            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-green-500 to-green-600 bg-clip-text text-transparent">
-              Feature Overview Operation
-            </h3>
-            <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
-              Select a data source from the properties panel to get started
-            </p>
+            <div className="text-sm text-gray-600">
+              Please run Column Classifier on this dataset first
+            </div>
           </div>
         </div>
+      );
+    }
+
+    if (!settings.dataSource) {
+      return (
+        <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-green-50/30 to-green-50/50 overflow-y-auto relative">
+          <div className="absolute inset-0 opacity-20">
+            <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
+              <defs>
+                <pattern id="emptyGrid" width="80" height="80" patternUnits="userSpaceOnUse">
+                  <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(148 163 184 / 0.15)" strokeWidth="1"/>
+                </pattern>
+              </defs>
+              <rect width="100%" height="100%" fill="url(#emptyGrid)" />
+            </svg>
+          </div>
+
+          <div className="relative z-10 flex items-center justify-center h-full">
+            <div className="text-center max-w-md">
+              <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+                <BarChart3 className="w-12 h-12 text-white drop-shadow-lg" />
+              </div>
+              <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-green-500 to-green-600 bg-clip-text text-transparent">
+                Feature Overview Operation
+              </h3>
+              <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
+                Select a data source from the properties panel to get started
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="w-full h-full flex items-center justify-center text-gray-500">
+        {error || "Loading data..."}
       </div>
     );
   }
