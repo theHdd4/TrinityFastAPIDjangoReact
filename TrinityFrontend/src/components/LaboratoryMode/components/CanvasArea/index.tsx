@@ -114,31 +114,79 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     unique_values: string[];
   }
 
-  const fetchColumnSummary = async (csv: string, signal?: AbortSignal) => {
-    try {
-      console.log('🔎 fetching column summary for', csv);
-      const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(csv)}`,
-        { signal }
-      );
-      if (!res.ok) {
-        console.warn('⚠️ column summary request failed', res.status);
-        return { summary: [], numeric: [], xField: '' };
-      }
-      const data = await res.json();
-      const summary: ColumnInfo[] = (data.summary || []).filter(Boolean);
-      console.log('ℹ️ fetched column summary rows', summary.length);
-      const numeric = summary
-        .filter(c => !['object', 'string'].includes(c.data_type.toLowerCase()))
-        .map(c => c.column);
-      const xField =
-        summary.find(c => c.column.toLowerCase().includes('date'))?.column ||
-        (summary[0]?.column || '');
-      return { summary, numeric, xField };
-    } catch (err) {
-      console.error('⚠️ failed to fetch column summary', err);
+  interface ColumnSummaryOptions {
+    signal?: AbortSignal;
+    statusCb?: (status: string) => void;
+    retries?: number;
+    retryDelayMs?: number;
+  }
+
+  const sleep = (ms: number) =>
+    new Promise(resolve => {
+      setTimeout(resolve, ms);
+    });
+
+  const fetchColumnSummary = async (
+    csv: string,
+    { signal, statusCb, retries = 0, retryDelayMs = 800 }: ColumnSummaryOptions = {},
+  ) => {
+    if (!csv || !/\.[^/]+$/.test(csv.trim())) {
       return { summary: [], numeric: [], xField: '' };
     }
+
+    let attempt = 0;
+    let lastResult = { summary: [] as ColumnInfo[], numeric: [] as string[], xField: '' };
+
+    while (attempt <= retries) {
+      if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
+
+      const label =
+        attempt === 0 ? 'Fetching column summary' : `Retrying column summary (${attempt + 1})`;
+      statusCb?.(label);
+      console.log(
+        `${attempt === 0 ? '🔎' : '🔄'} ${label.toLowerCase()} for`,
+        csv,
+      );
+
+      try {
+        const res = await fetch(
+          `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(csv)}`,
+          { signal },
+        );
+        if (!res.ok) {
+          console.warn('⚠️ column summary request failed', res.status);
+        } else {
+          const data = await res.json();
+          const summary: ColumnInfo[] = (data.summary || []).filter(Boolean);
+          console.log('ℹ️ fetched column summary rows', summary.length);
+          const numeric = summary
+            .filter(c => !['object', 'string'].includes(c.data_type.toLowerCase()))
+            .map(c => c.column);
+          const xField =
+            summary.find(c => c.column.toLowerCase().includes('date'))?.column ||
+            (summary[0]?.column || '');
+          lastResult = { summary, numeric, xField };
+          if (summary.length > 0) {
+            return lastResult;
+          }
+        }
+      } catch (err) {
+        if ((err as any)?.name === 'AbortError') {
+          console.warn('ℹ️ column summary fetch aborted');
+          throw err;
+        }
+        console.error('⚠️ failed to fetch column summary', err);
+      }
+
+      attempt += 1;
+      if (attempt <= retries && retryDelayMs > 0) {
+        await sleep(retryDelayMs);
+      }
+    }
+
+    return lastResult;
   };
 
   const prefetchDataframe = async (
@@ -187,8 +235,22 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         const a = card.atoms[j];
         if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
           console.log('✔️ found feature overview data source', a.settings.dataSource);
-          await prefetchDataframe(a.settings.dataSource, signal);
-          const cols = await fetchColumnSummary(a.settings.dataSource, signal);
+          const existingColumns: ColumnInfo[] = Array.isArray(a.settings?.allColumns)
+            ? (a.settings.allColumns as ColumnInfo[]).filter(Boolean)
+            : [];
+          const cols =
+            existingColumns.length > 0
+              ? {
+                  summary: existingColumns,
+                  numeric: Array.isArray(a.settings?.numericColumns)
+                    ? (a.settings.numericColumns as string[])
+                    : [],
+                  xField: a.settings?.xAxis || '',
+                }
+              : await fetchColumnSummary(a.settings.dataSource, {
+                  signal,
+                  retries: 2,
+                });
           return {
             csv: a.settings.dataSource,
             display: a.settings.csvDisplay || a.settings.dataSource,
@@ -211,8 +273,10 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
                 const ticket = await ticketRes.json();
                 if (ticket.arrow_name) {
                   console.log('✔️ using validated data source', ticket.arrow_name);
-                  await prefetchDataframe(ticket.arrow_name, signal);
-                  const cols = await fetchColumnSummary(ticket.arrow_name, signal);
+                  const cols = await fetchColumnSummary(ticket.arrow_name, {
+                    signal,
+                    retries: 2,
+                  });
                   let ids: string[] = [];
                   if (confRes && confRes.ok) {
                     const cfg = await confRes.json();
@@ -236,42 +300,99 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
 
     try {
-      let query = '';
+      let env: any = {};
       const envStr = localStorage.getItem('env');
       if (envStr) {
         try {
-          const env = JSON.parse(envStr);
-          query =
-            '?' +
-            new URLSearchParams({
-              client_id: env.CLIENT_ID || '',
-              app_id: env.APP_ID || '',
-              project_id: env.PROJECT_ID || '',
-              client_name: env.CLIENT_NAME || '',
-              app_name: env.APP_NAME || '',
-              project_name: env.PROJECT_NAME || ''
-            }).toString();
+          env = JSON.parse(envStr);
         } catch {
-          /* ignore */
+          env = {};
         }
       }
+      const params = new URLSearchParams({
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
+      });
+          const query = params.toString() ? `?${params.toString()}` : '';
+
+          try {
+            const latestRes = await fetch(
+              `${VALIDATE_API}/latest_project_dataframe${query}`,
+              { credentials: 'include', signal }
+            );
+            if (latestRes.ok) {
+              const latestData = await latestRes.json();
+              const latestName = latestData?.object_name;
+              if (typeof latestName === 'string' && latestName.trim()) {
+                console.log(
+                  '✔️ defaulting to latest flight dataframe',
+                  latestName,
+                  latestData?.source || 'unknown'
+                );
+                const cols = await fetchColumnSummary(latestName, {
+                  signal,
+                  retries: 2,
+                });
+                return {
+                  csv: latestName,
+                  display: latestData?.csv_name || latestName,
+                  ...(cols || {}),
+                };
+          }
+        } else {
+          console.warn('⚠️ latest_project_dataframe failed', latestRes.status);
+        }
+      } catch (err) {
+        if ((err as any)?.name !== 'AbortError') {
+          console.warn('⚠️ latest_project_dataframe request failed', err);
+        }
+      }
+
       const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`, {
         signal,
       });
       if (res.ok) {
         const data = await res.json();
-        const files = Array.isArray(data.files) ? data.files : [];
+        interface SavedFrameMeta {
+          object_name: string;
+          csv_name?: string;
+          last_modified?: string;
+        }
+        const files: SavedFrameMeta[] = Array.isArray(data.files)
+          ? data.files
+          : [];
         const validFiles = files.filter(
-          (f: any) =>
+          (f) =>
             typeof f.object_name === 'string' &&
             /\.[^/]+$/.test(f.object_name.trim())
         );
-        const file = validFiles[validFiles.length - 1];
-        if (file && file.object_name) {
-          console.log('✔️ defaulting to latest saved dataframe', file.object_name);
-          await prefetchDataframe(file.object_name, signal);
-          const cols = await fetchColumnSummary(file.object_name, signal);
-          return { csv: file.object_name, display: file.csv_name, ...(cols || {}) };
+        let fallback: SavedFrameMeta | null = null;
+        let latest: { file: SavedFrameMeta; ts: number } | null = null;
+        for (const item of validFiles) {
+          fallback = item;
+          const ts = item.last_modified ? Date.parse(item.last_modified) : NaN;
+          if (!Number.isNaN(ts)) {
+            if (!latest || ts > latest.ts) {
+              latest = { file: item, ts };
+            }
+          }
+        }
+        const chosen = latest?.file || fallback;
+        if (chosen && chosen.object_name) {
+          console.log('✔️ defaulting to latest saved dataframe', chosen.object_name);
+          const cols = await fetchColumnSummary(chosen.object_name, {
+            signal,
+            retries: 2,
+          });
+          return {
+            csv: chosen.object_name,
+            display: chosen.csv_name || chosen.object_name,
+            ...(cols || {}),
+          };
         }
       }
     } catch {
@@ -300,6 +421,22 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       await prefetchDataframe(prev.csv, controller.signal, status =>
         updateAtomSettings(atomId, { loadingStatus: status }),
       );
+
+      let summaryDetails = {
+        summary: Array.isArray(prev.summary) ? prev.summary.filter(Boolean) : [],
+        numeric: Array.isArray(prev.numeric) ? prev.numeric : [],
+        xField: typeof prev.xField === 'string' ? prev.xField : '',
+      };
+
+      if (summaryDetails.summary.length === 0) {
+        summaryDetails = await fetchColumnSummary(prev.csv, {
+          signal: controller.signal,
+          statusCb: status => updateAtomSettings(atomId, { loadingStatus: status }),
+          retries: 2,
+        });
+      }
+
+      updateAtomSettings(atomId, { loadingStatus: 'Fetching dimension mapping' });
       const { mapping: rawMapping } = await fetchDimensionMapping({
         objectName: prev.csv,
         signal: controller.signal,
@@ -310,7 +447,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         ),
       );
       console.log('✅ pre-filling feature overview with', prev.csv);
-      const summary = Array.isArray(prev.summary) ? prev.summary : [];
+      const summary = Array.isArray(summaryDetails.summary)
+        ? summaryDetails.summary.filter(Boolean)
+        : [];
+      const numericColumns = Array.isArray(summaryDetails.numeric)
+        ? summaryDetails.numeric.filter(Boolean)
+        : [];
       const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
       const filtered =
         identifiers.length > 0
@@ -321,15 +463,16 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           ? identifiers
           : (Array.isArray(summary) ? summary : []).map(cc => cc.column);
 
+      updateAtomSettings(atomId, { loadingStatus: 'Preparing feature overview' });
       updateAtomSettings(atomId, {
         dataSource: prev.csv,
         csvDisplay: prev.display || prev.csv,
         allColumns: summary,
         columnSummary: filtered,
         selectedColumns: selected,
-        numericColumns: Array.isArray(prev.numeric) ? prev.numeric : [],
+        numericColumns,
         dimensionMap: mapping,
-        xAxis: prev.xField || 'date',
+        xAxis: summaryDetails.xField || prev.xField || 'date',
         isLoading: false,
         loadingStatus: '',
         loadingMessage: '',
@@ -463,7 +606,11 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       )
       .flatMap(([, v]) => v)
       .filter(Boolean);
-    const allColumns = Array.isArray(prev.summary) ? prev.summary.filter(Boolean) : [];
+    let allColumns = Array.isArray(prev.summary) ? prev.summary.filter(Boolean) : [];
+    if (allColumns.length === 0) {
+      const fetched = await fetchColumnSummary(prev.csv, { retries: 1 });
+      allColumns = Array.isArray(fetched.summary) ? fetched.summary.filter(Boolean) : [];
+    }
     const allCats = allColumns
       .filter(col => {
         const dataType = col.data_type?.toLowerCase() || '';

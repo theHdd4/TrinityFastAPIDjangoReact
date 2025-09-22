@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, Iterable, Mapping
 import numpy as np
 from pymongo import MongoClient
 from fastapi.encoders import jsonable_encoder
@@ -36,12 +36,83 @@ def get_llm_config() -> Dict[str, str]:
 # ``DataStorageRetrieval`` package and ``app`` utilities can be
 # imported normally when running outside Docker.
 BACKEND_ROOT = Path(__file__).resolve().parent
-sys.path.append(str(BACKEND_ROOT))
-BACKEND_API = BACKEND_ROOT.parent / "TrinityBackendFastAPI" / "app"
-if BACKEND_API.exists():
-    sys.path.append(str(BACKEND_API))
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.append(str(BACKEND_ROOT))
 
-from app.core.mongo import build_host_mongo_uri
+BACKEND_REPO = BACKEND_ROOT.parent / "TrinityBackendFastAPI"
+BACKEND_API = BACKEND_REPO / "app"
+
+# ``app`` is a top-level package inside ``TrinityBackendFastAPI`` while
+# helpers such as ``DataStorageRetrieval`` live inside the ``app`` folder.
+# Add both locations to ``sys.path`` so the imports work when running the
+# AI service outside the Docker compose environment.
+for path in (BACKEND_REPO, BACKEND_API):
+    if path.exists():
+        path_str = str(path)
+        if path_str not in sys.path:
+            sys.path.append(path_str)
+
+try:
+    from app.core.mongo import build_host_mongo_uri
+except ModuleNotFoundError:
+    logger.warning(
+        "FastAPI backend package unavailable; falling back to local Mongo URI builder"
+    )
+
+    def _first_non_empty(vars_: Iterable[str], default: str) -> str:
+        """Return the first non-empty environment variable value."""
+
+        for name in vars_:
+            value = os.getenv(name)
+            if value is None:
+                continue
+            stripped = value.strip()
+            if stripped:
+                return stripped
+        return default
+
+    def build_host_mongo_uri(
+        *,
+        username: str = "admin_dev",
+        password: str = "pass_dev",
+        auth_source: str = "admin",
+        default_host: str = "localhost",
+        default_port: str = "9005",
+        host_env_vars: Tuple[str, ...] = ("HOST_IP", "MONGO_HOST"),
+        port_env_vars: Tuple[str, ...] = ("MONGO_PORT",),
+        auth_source_env_vars: Tuple[str, ...] = ("MONGO_AUTH_SOURCE", "MONGO_AUTH_DB"),
+        database: str | None = None,
+        options: Mapping[str, str] | None = None,
+    ) -> str:
+        """Construct a MongoDB URI using host information from the environment."""
+
+        host = _first_non_empty(host_env_vars, default_host)
+        port = _first_non_empty(port_env_vars, default_port)
+        auth_db = _first_non_empty(auth_source_env_vars, auth_source)
+
+        credentials = ""
+        if username and password:
+            credentials = f"{username}:{password}@"
+        elif username:
+            credentials = f"{username}@"
+
+        path = f"/{database}" if database else "/"
+
+        query_params: Dict[str, str] = {}
+        if auth_db:
+            query_params["authSource"] = auth_db
+        if options:
+            for key, value in options.items():
+                if value is None:
+                    continue
+                query_params[key] = value
+
+        query = ""
+        if query_params:
+            joined = "&".join(f"{key}={value}" for key, value in query_params.items())
+            query = f"?{joined}"
+
+        return f"mongodb://{credentials}{host}:{port}{path}{query}"
 
 # Load environment variables from Redis so subsequent configuration
 # functions see CLIENT_NAME, APP_NAME and PROJECT_NAME
