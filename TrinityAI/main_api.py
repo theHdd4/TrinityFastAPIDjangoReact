@@ -41,6 +41,8 @@ BACKEND_API = BACKEND_ROOT.parent / "TrinityBackendFastAPI" / "app"
 if BACKEND_API.exists():
     sys.path.append(str(BACKEND_API))
 
+from app.core.mongo import build_host_mongo_uri
+
 # Load environment variables from Redis so subsequent configuration
 # functions see CLIENT_NAME, APP_NAME and PROJECT_NAME
 from DataStorageRetrieval.arrow_client import load_env_from_redis
@@ -53,10 +55,11 @@ load_env_from_redis()
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
 
+DEFAULT_MONGO_URI = build_host_mongo_uri()
 MONGO_URI = (
     os.getenv("CLASSIFY_MONGO_URI")
     or os.getenv("MONGO_URI")
-    or "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin"
+    or DEFAULT_MONGO_URI
 )
 # Column classifier configurations are stored in the shared "trinity_db"
 # database under the "column_classifier_config" collection.

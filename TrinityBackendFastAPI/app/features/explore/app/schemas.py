@@ -1,13 +1,17 @@
 # schema.py - Schema Operations for Explore Atom (CORRECTED)
+import os
 from pymongo import MongoClient
 from datetime import datetime
 from typing import Dict, Any, Optional, List
+
+from app.core.mongo import build_host_mongo_uri
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
-MONGO_URI = "mongodb://10.2.1.65:9005/"
+DEFAULT_MONGO_URI = build_host_mongo_uri()
+MONGO_URI = os.getenv("EXPLORE_MONGO_URI", os.getenv("MONGO_URI", DEFAULT_MONGO_URI))
 SOURCE_DATABASE = "validator_atoms_db"
 
 def get_mongo_client():
