@@ -76,10 +76,60 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
     const normalized = value.endsWith('.arrow') ? value : `${value}.arrow`;
     const frameList = Array.isArray(frames) ? frames : [];
 
+    let activeSource = normalized;
+    let displayName =
+      frameList.find(f => f.object_name === normalized)?.csv_name ||
+      frameList.find(f => f.arrow_name === normalized)?.csv_name ||
+      '';
+
+    const lookupKey = normalized.split('/').pop() || normalized;
+    try {
+      const ticketRes = await fetch(
+        `${VALIDATE_API}/latest_ticket/${encodeURIComponent(lookupKey)}`,
+        {
+          cache: 'no-store',
+          credentials: 'include',
+        }
+      );
+      if (ticketRes.ok) {
+        const ticket = await ticketRes.json();
+        if (ticket?.arrow_name) {
+          activeSource = ticket.arrow_name;
+        }
+        if (ticket?.csv_name) {
+          displayName = ticket.csv_name;
+        }
+        if (ticket?.arrow_name) {
+          setFrames(prev => {
+            const existing = Array.isArray(prev) ? prev : [];
+            if (existing.some(f => f.object_name === ticket.arrow_name)) {
+              return existing;
+            }
+            const baseName = ticket.arrow_name.split('/').pop() || ticket.arrow_name;
+            return [
+              ...existing,
+              {
+                object_name: ticket.arrow_name,
+                arrow_name: baseName,
+                csv_name: ticket.csv_name || baseName,
+              },
+            ];
+          });
+        }
+      }
+    } catch {
+      /* ignore ticket errors so we can fall back to the selected object */
+    }
+
+    const csvDisplay =
+      displayName ||
+      frameList.find(f => f.object_name === activeSource)?.csv_name ||
+      frameList.find(f => f.object_name === normalized)?.csv_name ||
+      activeSource;
+
     onSettingsChange({
-      dataSource: normalized,
-      csvDisplay:
-        frameList.find(f => f.object_name === normalized)?.csv_name || '',
+      dataSource: activeSource,
+      csvDisplay,
       selectedColumns: [],
       columnSummary: [],
       allColumns: [],
@@ -98,14 +148,22 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
 
     try {
       const ft = await fetch(
-        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(normalized)}`
+        `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(activeSource)}`,
+        {
+          cache: 'no-store',
+          credentials: 'include',
+        }
       );
       if (ft.ok) {
         await ft.arrayBuffer();
       }
       onSettingsChange({ loadingStatus: 'Prefetching Dataframe' });
       const cache = await fetch(
-        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(normalized)}`
+        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(activeSource)}`,
+        {
+          cache: 'no-store',
+          credentials: 'include',
+        }
       );
       if (cache.ok) {
         await cache.text();
@@ -115,10 +173,10 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
       // Use create column cardinality endpoint instead of column_summary
       const formData = new FormData();
       formData.append('validator_atom_id', atomId);
-      formData.append('file_key', normalized);
+      formData.append('file_key', activeSource);
       formData.append('bucket_name', 'trinity');
-      formData.append('object_names', normalized);
-      
+      formData.append('object_names', activeSource);
+
       const res = await fetch(`${GROUPBY_API}/cardinality`, {
         method: 'POST',
         body: formData,
@@ -143,7 +201,7 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
       }
       const filtered = summary.filter(c => c.unique_count > 1);
       const selected = filtered.map(c => c.column);
-      const { mapping: rawMapping } = await fetchDimensionMapping({ objectName: normalized });
+      const { mapping: rawMapping } = await fetchDimensionMapping({ objectName: activeSource });
       const mapping = Object.fromEntries(
         Object.entries(rawMapping || {}).filter(([k]) => {
           const key = k.toLowerCase();
@@ -152,9 +210,8 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
       );
       const activeMetric = '';
       onSettingsChange({
-        dataSource: normalized,
-        csvDisplay:
-          frameList.find(f => f.object_name === normalized)?.csv_name || normalized,
+        dataSource: activeSource,
+        csvDisplay,
         selectedColumns: selected,
         columnSummary: filtered,
         allColumns: summary,
