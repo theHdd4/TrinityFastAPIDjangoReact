@@ -229,19 +229,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
       numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map(col => col.toLowerCase())
     };
 
-    // Debug logging
-    console.log('FinalData individual modeling fields:', {
-      individualModeling: finalData.individualModeling,
-      individualSelectedModels: finalData.individualSelectedModels,
-      individualModelConfigs: finalData.individualModelConfigs,
-      individualKFolds: finalData.individualKFolds
-    });
-    console.log('Request payload individual modeling fields:', {
-      individual_modeling: requestPayload.individual_modeling,
-      individual_models_to_run: requestPayload.individual_models_to_run,
-      individual_custom_model_configs: requestPayload.individual_custom_model_configs,
-      individual_k_folds: requestPayload.individual_k_folds
-    });
+ 
 
     // Model training started
 

@@ -787,8 +787,6 @@ class DataPooler:
             Dictionary of enhanced DataFrames with interaction terms
         """
         enhanced_pools = {}
-        
-        
         for pool_key, df in pooled_data.items():
             # Make a copy to avoid modifying original data
             enhanced_df = df.copy()
@@ -832,7 +830,7 @@ class DataPooler:
                     # Check if the column (scaled or original) exists
                     if scaled_col in enhanced_df.columns:
                         # Create interaction term: encoded_combination_col * numerical_col (scaled if available)
-                        interaction_col_name = f"{encoded_combination_col}_x_{numerical_col}"
+                        interaction_col_name = f"{encoded_combination_col}_x_{scaled_col}"
                         enhanced_df[interaction_col_name] = enhanced_df[encoded_combination_col] * enhanced_df[scaled_col]
                         interaction_columns_created.append(interaction_col_name)
                     elif numerical_col in enhanced_df.columns:
@@ -874,9 +872,71 @@ class DataPooler:
         else:
             models_dict = all_models
         
+        # Apply custom configurations (including constraints)
+        if custom_configs:
+            for model_name, config in custom_configs.items():
+                if model_name in models_dict:
+                    if model_name == "Custom Constrained Ridge":
+                        # Extract constraints from parameters object
+                        parameters = config.get('parameters', {})
+                        negative_constraints = parameters.get('negative_constraints', [])
+                        positive_constraints = parameters.get('positive_constraints', [])
+                        from .models import CustomConstrainedRidge
+                        models_dict[model_name] = CustomConstrainedRidge(
+                            l2_penalty=parameters.get('l2_penalty', 0.1),
+                            learning_rate=parameters.get('learning_rate', 0.001),
+                            iterations=parameters.get('iterations', 10000),
+                            adam=parameters.get('adam', False),
+                            negative_constraints=negative_constraints,
+                            positive_constraints=positive_constraints
+                        )
+                    elif model_name == "Constrained Linear Regression":
+                        # Extract constraints from parameters object
+                        parameters = config.get('parameters', {})
+                        negative_constraints = parameters.get('negative_constraints', [])
+                        positive_constraints = parameters.get('positive_constraints', [])
+                        from .models import ConstrainedLinearRegression
+                        models_dict[model_name] = ConstrainedLinearRegression(
+                            learning_rate=parameters.get('learning_rate', 0.001),
+                            iterations=parameters.get('iterations', 10000),
+                            adam=parameters.get('adam', False),
+                            negative_constraints=negative_constraints,
+                            positive_constraints=positive_constraints
+                        )
+        
         # Prepare data
         X = df[x_variables].values
         y = df[y_variable].values
+        
+        # Convert boolean values to numerical (0/1) for constraint models
+        # This is needed because encoded variables contain True/False values
+        if X.dtype == object:
+            print(f"🔍 Converting object dtype to numerical (boolean True/False -> 1/0)")
+            try:
+                # First try direct conversion
+                X = X.astype(float)
+                print(f"🔍 After conversion - X dtype: {X.dtype}, shape: {X.shape}")
+            except (ValueError, TypeError):
+                # If direct conversion fails, handle mixed types
+                print(f"🔍 Direct conversion failed, handling mixed types...")
+                X_converted = np.zeros_like(X, dtype=float)
+                for i in range(X.shape[1]):
+                    for j in range(X.shape[0]):
+                        val = X[j, i]
+                        if isinstance(val, bool):
+                            X_converted[j, i] = 1.0 if val else 0.0
+                        elif isinstance(val, (int, float)):
+                            X_converted[j, i] = float(val)
+                        else:
+                            X_converted[j, i] = 0.0
+                X = X_converted
+                print(f"🔍 After mixed type conversion - X dtype: {X.dtype}, shape: {X.shape}")
+        
+        # Ensure X is numerical
+        if not np.issubdtype(X.dtype, np.number):
+            print(f"🔍 Final conversion to numerical type")
+            X = X.astype(float)
+ 
         
         # Standardization is already applied earlier in the pipelin     # No need to apply it again during modeling
         
@@ -896,13 +956,19 @@ class DataPooler:
         
         # Check if we have combination column for stratified splitting
         has_combination_column = 'combination' in df.columns
-        if has_combination_column:
-            print(f"🔍 Using combination-aware splitting for {df['combination'].nunique()} unique combinations")
-            print(f"  Combinations: {df['combination'].unique().tolist()}")
-        else:
-            print(f"⚠️ No 'combination' column found, using standard K-fold splitting")
-
         for model_name, model_class in models_dict.items():
+            print(f"🔍 Processing model: {model_name}")
+            
+            # Check if this is a constraint model
+            if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression"]:
+                print(f"🔍 This is a constraint model: {model_name}")
+                print(f"  - X shape: {X.shape}, y shape: {y.shape}")
+                print(f"  - Feature names: {x_variables}")
+                print(f"  - Data types: X={X.dtype}, y={y.dtype}")
+                print(f"  - X contains NaN: {np.isnan(X).any()}")
+                print(f"  - y contains NaN: {np.isnan(y).any()}")
+                print(f"  - X contains Inf: {np.isinf(X).any()}")
+                print(f"  - y contains Inf: {np.isinf(y).any()}")
             
             fold_results = []
             fold_elasticities = []
@@ -910,51 +976,116 @@ class DataPooler:
             if has_combination_column:
                 # Use combination-aware splitting
                 fold_splits = self._create_combination_aware_splits(df, k_folds, random_state=42)
+                print(f"🔍 Using combination-aware splitting: {len(fold_splits)} folds")
+                print(f"🔍 K_folds parameter: {k_folds}")
             else:
                 # Use standard K-fold splitting
                 fold_splits = list(kf.split(X))
+                print(f"🔍 Using standard K-fold splitting: {len(fold_splits)} folds")
+                print(f"🔍 K_folds parameter: {k_folds}")
             
+            print(f"🔍 Starting cross-validation for {model_name} with {len(fold_splits)} folds")
+            print(f"🔍 Expected to process {k_folds} folds, actual fold_splits length: {len(fold_splits)}")
+            
+            fold_counter = 0
             for fold_idx, (train_idx, val_idx) in enumerate(fold_splits):
-                X_train, X_val = X[train_idx], X[val_idx]
-                y_train, y_val = y[train_idx], y[val_idx]
+                try:
+                    fold_counter += 1
+                    print(f"🔍 LOOP ITERATION {fold_counter}: Processing fold {fold_idx + 1}/{len(fold_splits)} for {model_name}")
+                    print(f"🔍 Processing fold {fold_idx + 1}/{len(fold_splits)} for {model_name}")
+                    
+                    print(f"🔍 About to split data - train_idx length: {len(train_idx)}, val_idx length: {len(val_idx)}")
+                    X_train, X_val = X[train_idx], X[val_idx]
+                    y_train, y_val = y[train_idx], y[val_idx]
+                    print(f"🔍 Data split successful - X_train shape: {X_train.shape}, X_val shape: {X_val.shape}")
+                except Exception as e:
+                    print(f"❌ Error in fold {fold_idx + 1} data splitting: {e}")
+                    import traceback
+                    print(f"❌ Full error traceback: {traceback.format_exc()}")
+                    continue
                 
-                # Debug: Check combination distribution in train/val sets
-                if has_combination_column:
-                    train_combinations = df.iloc[train_idx]['combination'].unique()
-                    val_combinations = df.iloc[val_idx]['combination'].unique()
-                
-                model = clone(model_class)
-                if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression"]:
-                    model.fit(X_train, y_train, x_variables)
-                else:
-                    model.fit(X_train, y_train)
+                try:
+                    # Debug: Check combination distribution in train/val sets
+                    if has_combination_column:
+                        train_combinations = df.iloc[train_idx]['combination'].unique()
+                        val_combinations = df.iloc[val_idx]['combination'].unique()
+                    
+                    print(f"🔍 About to clone model class for fold {fold_idx + 1}")
+                    model = clone(model_class)
+                    print(f"🔍 Model cloned successfully for fold {fold_idx + 1}")
+                    logger.info(f"🔍 Training constraint model: {model_name}")
+                    
+                    if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression"]:
+                        print(f"  🔍 Training constraint model fold {fold_idx + 1}/{k_folds}")
+                        print(f"    - X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
+                        print(f"    - X_train dtype: {X_train.dtype}, y_train dtype: {y_train.dtype}")
+                        print(f"    - Feature names: {x_variables}")
+                        try:
+                            model.fit(X_train, y_train, x_variables)
+                            print(f"  ✅ Constraint model fold {fold_idx + 1} completed")
+                        except Exception as e:
+                            print(f"  ❌ Error in constraint model fold {fold_idx + 1}: {e}")
+                            import traceback
+                            print(f"  ❌ Full error traceback: {traceback.format_exc()}")
+                            continue
+                    else:
+                        print(f"🔍 Training standard model for fold {fold_idx + 1}")
+                        model.fit(X_train, y_train)
+                        print(f"✅ Standard model trained for fold {fold_idx + 1}")
 
-                y_pred = model.predict(X_val)
-                
-                from .models import safe_mape
-                mape = safe_mape(y_val, y_pred)
-                r2 = r2_score(y_val, y_pred)
-                
-                fold_results.append({
-                    'fold': fold_idx + 1,
-                    'mape': mape,
-                    'r2': r2,
-                    'predictions': y_pred.tolist(),
-                    'actual': y_val.tolist()
-                })
-                
-                # Skip elasticity calculations for now
+                    print(f"🔍 About to predict for fold {fold_idx + 1}")
+                    y_pred = model.predict(X_val)
+                    print(f"🔍 Prediction completed for fold {fold_idx + 1} - shape: {y_pred.shape}")
+                    
+                    from .models import safe_mape
+                    mape = safe_mape(y_val, y_pred)
+                    r2 = r2_score(y_val, y_pred)
+                    
+                    fold_results.append({
+                        'fold': fold_idx + 1,
+                        'mape': mape,
+                        'r2': r2,
+                        'predictions': y_pred.tolist(),
+                        'actual': y_val.tolist()
+                    })
+                    print(f"  ✅ Fold {fold_idx + 1} completed - MAPE: {mape:.4f}, R²: {r2:.4f}")
+                    
+                    # Skip elasticity calculations for now
+                except Exception as e:
+                    print(f"❌ Error in fold {fold_idx + 1} processing: {e}")
+                    import traceback
+                    print(f"❌ Full error traceback: {traceback.format_exc()}")
+                    continue
+            
+            print(f"🔍 LOOP COMPLETED: Processed {fold_counter} folds for {model_name}")
             
             # Calculate average metrics
             avg_mape = np.mean([fold['mape'] for fold in fold_results])
             avg_r2 = np.mean([fold['r2'] for fold in fold_results])
             
-            # Calculate AIC and BIC (simplified)
-            # Train on full dataset for final model
+            print(f"🔍 Model {model_name} completed {len(fold_results)}/{k_folds} folds successfully")
+            
+            # Check if we have any successful folds
+            if len(fold_results) == 0:
+                print(f"❌ Model {model_name} failed all folds, skipping final training")
+                continue
+            
+            print(f"🔍 Model {model_name} proceeding to final training with {len(fold_results)} successful folds")
+
             final_model = clone(model_class)
             if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression"]:
-                final_model.fit(X, y, x_variables)
+                print(f"🔍 Training constraint model: {model_name}")
+                try:
+                    final_model.fit(X, y, x_variables)
+                    print(f"✅ Constraint model {model_name} trained successfully")
+                    if hasattr(final_model, 'W') and final_model.W is not None:
+                        print(f"  - Coefficients: {final_model.W}")
+                        print(f"  - Feature names: {x_variables}")
+                except Exception as e:
+                    print(f"❌ Error training constraint model {model_name}: {e}")
+                    continue
             else:
+                print(f"🔍 Training standard model: {model_name}")
                 final_model.fit(X, y)
             y_pred_full = final_model.predict(X)
             
@@ -1004,6 +1135,9 @@ class DataPooler:
                 'intercept': float(final_model.intercept_) if hasattr(final_model, 'intercept_') else 0.0,
 
             }
+            
+            print(f"✅ Model {model_name} completed - MAPE: {mape_test:.4f}, R²: {r2_test:.4f}")
+            print(f"  - Coefficients: {coefficients}")
             
             model_results.append(model_result)
         
@@ -1123,9 +1257,11 @@ class DataPooler:
             models_dict = all_models
         
         for split_key, df in split_clustered_data.items():
+            print(f"🔍 Processing split: {split_key} with {len(df)} records")
             
             # Determine feature set based on available columns
             feature_columns = []
+            
             
             # 1. Add x_variables (prioritize scaled versions if standardization was applied)
             for var in x_variables:
@@ -1138,7 +1274,7 @@ class DataPooler:
 
                 
                 # Use scaled variable if it exists, otherwise use original
-                if scaled_var and scaled_var in df.columns:
+                if scaled_var in df.columns:
                     feature_columns.append(scaled_var)
                 elif var in df.columns:
                     feature_columns.append(var)
@@ -1181,6 +1317,10 @@ class DataPooler:
                 )
                 
                 # Store results
+                print(f"✅ Split {split_key} completed with {len(model_results)} models")
+                for result in model_results:
+                    print(f"  - {result['model_name']}: MAPE={result['mape_test']:.4f}, R²={result['r2_test']:.4f}")
+                
                 results[split_key] = {
                     'model_results': model_results,
                     'variable_data': variable_data,

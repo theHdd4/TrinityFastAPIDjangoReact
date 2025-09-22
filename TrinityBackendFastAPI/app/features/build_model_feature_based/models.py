@@ -114,6 +114,20 @@ class CustomConstrainedRidge(BaseEstimator, RegressorMixin):
 
     def predict(self, X):
         return X.dot(self.W) + self.b
+    
+    def __sklearn_clone__(self):
+        """Custom clone method for sklearn compatibility"""
+        return CustomConstrainedRidge(
+            l2_penalty=self.l2_penalty,
+            learning_rate=self.learning_rate,
+            iterations=self.iterations,
+            adam=self.adam,
+            beta1=self.beta1,
+            beta2=self.beta2,
+            epsilon=self.epsilon,
+            negative_constraints=self.negative_constraints.copy() if self.negative_constraints else [],
+            positive_constraints=self.positive_constraints.copy() if self.positive_constraints else []
+        )
 
 
 class ConstrainedLinearRegression(BaseEstimator, RegressorMixin):
@@ -221,6 +235,19 @@ class ConstrainedLinearRegression(BaseEstimator, RegressorMixin):
 
     def predict(self, X):
         return X.dot(self.W) + self.b
+    
+    def __sklearn_clone__(self):
+        """Custom clone method for sklearn compatibility"""
+        return ConstrainedLinearRegression(
+            learning_rate=self.learning_rate,
+            iterations=self.iterations,
+            adam=self.adam,
+            beta1=self.beta1,
+            beta2=self.beta2,
+            epsilon=self.epsilon,
+            negative_constraints=self.negative_constraints.copy() if self.negative_constraints else [],
+            positive_constraints=self.positive_constraints.copy() if self.positive_constraints else []
+        )
 
 
 # Models Dictionary

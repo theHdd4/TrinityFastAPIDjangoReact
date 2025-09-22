@@ -130,7 +130,8 @@ class StackModelTrainer:
                             pooled_data=split_clustered_data,
                             identifiers=None,  # Will auto-detect identifiers with >1 unique value
                             numerical_columns_for_interaction=numerical_columns_for_interaction,
-                            column_classifier_identifiers=all_identifiers
+                            column_classifier_identifiers=all_identifiers,
+                            standardization=standardization
                         )
                 else:
                     raise Exception(f"Clustering failed: {clustering_result.get('error', 'Unknown error')}")
