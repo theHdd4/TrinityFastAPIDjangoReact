@@ -6,8 +6,9 @@ from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet, Bay
 # CUSTOM CLASSES
 # -----------------------
 class CustomConstrainedRidge(BaseEstimator, RegressorMixin):
-    def __init__(self, l2_penalty=0.1, learning_rate=0.001, iterations=100000,
-                 adam=False, beta1=0.9, beta2=0.999, epsilon=1e-8):
+    def __init__(self, l2_penalty=0.1, learning_rate=0.001, iterations=10000,
+                 adam=False, beta1=0.9, beta2=0.999, epsilon=1e-8, 
+                 negative_constraints=None, positive_constraints=None):
         self.learning_rate = learning_rate
         self.iterations = iterations
         self.l2_penalty = l2_penalty
@@ -15,6 +16,8 @@ class CustomConstrainedRidge(BaseEstimator, RegressorMixin):
         self.beta1 = beta1
         self.beta2 = beta2
         self.epsilon = epsilon
+        self.negative_constraints = negative_constraints or []
+        self.positive_constraints = positive_constraints or []
 
     def fit(self, X, Y, feature_names):
         self.m, self.n = X.shape
@@ -23,11 +26,42 @@ class CustomConstrainedRidge(BaseEstimator, RegressorMixin):
         self.X = X
         self.Y = Y
         self.feature_names = feature_names
-        self.rpi_ppu_indices = [
-            i for i, name in enumerate(feature_names)
-            if name.endswith("_RPI") or name == "PPU"
-        ]
-        self.d1_index = next((i for i, name in enumerate(feature_names) if name == "D1"), None)
+        
+        # Build constraint indices from custom constraints and hardcoded rules
+        self.negative_indices = []
+        self.positive_indices = []
+        
+        # Add custom negative constraints (case-insensitive)
+        for var_name in self.negative_constraints:
+            # Try exact match first
+            if var_name in feature_names:
+                idx = feature_names.index(var_name)
+                self.negative_indices.append(idx)
+            else:
+                # Try case-insensitive match
+                for i, name in enumerate(feature_names):
+                    if name.lower() == var_name.lower():
+                        self.negative_indices.append(i)
+                        break
+        
+        # Add custom positive constraints (case-insensitive)
+        for var_name in self.positive_constraints:
+            # Try exact match first
+            if var_name in feature_names:
+                idx = feature_names.index(var_name)
+                self.positive_indices.append(idx)
+            else:
+                # Try case-insensitive match
+                for i, name in enumerate(feature_names):
+                    if name.lower() == var_name.lower():
+                        self.positive_indices.append(i)
+                        break
+        
+        # No hardcoded constraints - only use user-provided constraints
+        
+        # Debug logging (reduced for performance)
+        if self.negative_constraints or self.positive_constraints:
+            print(f"🔍 Constraints applied - Negative: {len(self.negative_indices)}, Positive: {len(self.positive_indices)}")
 
         if self.adam:
             self.m_W = np.zeros(self.n)
@@ -69,11 +103,13 @@ class CustomConstrainedRidge(BaseEstimator, RegressorMixin):
             self.W -= self.learning_rate * grad_w
             self.b -= self.learning_rate * grad_b
 
-        # Constraints
+        # Apply constraints
         for i in range(self.n):
-            if i in self.rpi_ppu_indices and self.W[i] > 0:
+            # Negative constraints: force coefficient ≤ 0
+            if i in self.negative_indices and self.W[i] > 0:
                 self.W[i] = 0
-            if i == self.d1_index and self.W[i] < 0:
+            # Positive constraints: force coefficient ≥ 0  
+            if i in self.positive_indices and self.W[i] < 0:
                 self.W[i] = 0
 
     def predict(self, X):
@@ -82,13 +118,16 @@ class CustomConstrainedRidge(BaseEstimator, RegressorMixin):
 
 class ConstrainedLinearRegression(BaseEstimator, RegressorMixin):
     def __init__(self, learning_rate=0.001, iterations=10000,
-                 adam=False, beta1=0.9, beta2=0.999, epsilon=1e-8):
+                 adam=False, beta1=0.9, beta2=0.999, epsilon=1e-8,
+                 negative_constraints=None, positive_constraints=None):
         self.learning_rate = learning_rate
         self.iterations = iterations
         self.adam = adam
         self.beta1 = beta1
         self.beta2 = beta2
         self.epsilon = epsilon
+        self.negative_constraints = negative_constraints or []
+        self.positive_constraints = positive_constraints or []
 
     def fit(self, X, Y, feature_names):
         self.m, self.n = X.shape
@@ -97,11 +136,42 @@ class ConstrainedLinearRegression(BaseEstimator, RegressorMixin):
         self.X = X
         self.Y = Y
         self.feature_names = feature_names
-        self.rpi_ppu_indices = [
-            i for i, name in enumerate(feature_names)
-            if name.endswith('_RPI') or name == 'PPU'
-        ]
-        self.d1_index = next((i for i, name in enumerate(feature_names) if name == 'D1'), None)
+        
+        # Build constraint indices from custom constraints and hardcoded rules
+        self.negative_indices = []
+        self.positive_indices = []
+        
+        # Add custom negative constraints (case-insensitive)
+        for var_name in self.negative_constraints:
+            # Try exact match first
+            if var_name in feature_names:
+                idx = feature_names.index(var_name)
+                self.negative_indices.append(idx)
+            else:
+                # Try case-insensitive match
+                for i, name in enumerate(feature_names):
+                    if name.lower() == var_name.lower():
+                        self.negative_indices.append(i)
+                        break
+        
+        # Add custom positive constraints (case-insensitive)
+        for var_name in self.positive_constraints:
+            # Try exact match first
+            if var_name in feature_names:
+                idx = feature_names.index(var_name)
+                self.positive_indices.append(idx)
+            else:
+                # Try case-insensitive match
+                for i, name in enumerate(feature_names):
+                    if name.lower() == var_name.lower():
+                        self.positive_indices.append(i)
+                        break
+        
+        # No hardcoded constraints - only use user-provided constraints
+        
+        # Debug logging (reduced for performance)
+        if self.negative_constraints or self.positive_constraints:
+            print(f"🔍 ConstrainedLinearRegression - Constraints applied - Negative: {len(self.negative_indices)}, Positive: {len(self.positive_indices)}")
 
         if self.adam:
             self.m_W = np.zeros(self.n)
@@ -140,9 +210,14 @@ class ConstrainedLinearRegression(BaseEstimator, RegressorMixin):
             self.W -= self.learning_rate * dW
             self.b -= self.learning_rate * db
 
-        self.W[self.rpi_ppu_indices] = np.minimum(self.W[self.rpi_ppu_indices], 0)
-        if self.d1_index is not None:
-            self.W[self.d1_index] = max(self.W[self.d1_index], 0)
+        # Apply constraints
+        for i in range(self.n):
+            # Negative constraints: force coefficient ≤ 0
+            if i in self.negative_indices and self.W[i] > 0:
+                self.W[i] = 0
+            # Positive constraints: force coefficient ≥ 0  
+            if i in self.positive_indices and self.W[i] < 0:
+                self.W[i] = 0
 
     def predict(self, X):
         return X.dot(self.W) + self.b

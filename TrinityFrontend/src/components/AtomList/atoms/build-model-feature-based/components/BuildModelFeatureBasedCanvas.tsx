@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { Plus, Play, X, Settings2, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon } from 'lucide-react';
 import { BuildModelFeatureBasedData, VariableTransformation, ModelConfig } from '../BuildModelFeatureBasedAtom';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -42,6 +43,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
   const [scopeSectionExpanded, setScopeSectionExpanded] = useState(true);
   const [modelingSectionExpanded, setModelingSectionExpanded] = useState(true);
   const [minimizedCombinations, setMinimizedCombinations] = useState<Set<number>>(new Set());
+  const [constraintSettingsOpen, setConstraintSettingsOpen] = useState(false);
   
   // Model Performance Metrics sorting and filtering state - per combination
   const [performanceSortColumn, setPerformanceSortColumn] = useState<{ [comboIndex: number]: string }>({});
@@ -178,6 +180,28 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     // Generate run_id for progress tracking
     const tempRunId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+    // Helper function to add constraints to model configs
+    const addConstraintsToModelConfigs = (modelConfigs: ModelConfig[]) => {
+      return modelConfigs.map(config => {
+        if (config.id === 'Custom Constrained Ridge' || config.id === 'Constrained Linear Regression') {
+          const updatedConfig = {
+            ...config,
+            parameters: {
+              ...config.parameters,
+              negative_constraints: finalData.negativeConstraints || [],
+              positive_constraints: finalData.positiveConstraints || []
+            }
+          };
+          console.log(`🔍 Frontend - ${config.id} constraints:`, {
+            negative: updatedConfig.parameters.negative_constraints,
+            positive: updatedConfig.parameters.positive_constraints
+          });
+          return updatedConfig;
+        }
+        return config;
+      });
+    };
+
     // Construct the request payload for the direct endpoint
     const requestPayload = {
       run_id: tempRunId, // Send the run_id for progress tracking
@@ -192,13 +216,13 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
       individual_k_folds: finalData.individualKFolds || 5,
       individual_test_size: finalData.individualTestSize || 0.2,
       individual_models_to_run: finalData.individualSelectedModels || [],
-      individual_custom_model_configs: finalData.individualModelConfigs || [],
+      individual_custom_model_configs: addConstraintsToModelConfigs(finalData.individualModelConfigs || []),
       // Stack modeling fields
       stack_modeling: finalData.stackModeling || false,
       stack_k_folds: finalData.stackKFolds || 5,
       stack_test_size: finalData.stackTestSize || 0.2,
       stack_models_to_run: finalData.stackSelectedModels || [],
-      stack_custom_model_configs: finalData.stackModelConfigs || [],
+      stack_custom_model_configs: addConstraintsToModelConfigs(finalData.stackModelConfigs || []),
       pool_by_identifiers: (finalData.poolByIdentifiers || []).map(id => id.toLowerCase()),
       numerical_columns_for_clustering: (finalData.numericalColumnsForClustering || []).map(col => col.toLowerCase()),
       apply_interaction_terms: finalData.applyInteractionTerms || true,
@@ -850,26 +874,38 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
               <Target className="w-4 h-4 text-primary" />
               Modeling
             </h3>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setModelingSectionExpanded(!modelingSectionExpanded)}
-              className="h-6 w-6 p-0"
-            >
-              {modelingSectionExpanded ? (
-                <ChevronDown className="w-4 h-4" />
-              ) : (
-                <ChevronRight className="w-4 h-4" />
-              )}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setModelingSectionExpanded(!modelingSectionExpanded)}
+                className="h-6 w-6 p-0"
+              >
+                {modelingSectionExpanded ? (
+                  <ChevronDown className="w-4 h-4" />
+                ) : (
+                  <ChevronRight className="w-4 h-4" />
+                )}
+              </Button>
+              {/* Constraint Settings Toggle */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConstraintSettingsOpen(!constraintSettingsOpen)}
+                className="flex items-center gap-2"
+              >
+                <Settings2 className="w-4 h-4" />
+                Constraints
+              </Button>
+            </div>
           </div>
         </div>
         {modelingSectionExpanded && (
           <div className="p-6 space-y-6">
             {/* Header row for Y & X variable controls */}
           <div className="flex items-center mb-2">
-            <label className="text-sm font-medium text-muted-foreground w-3/12">Select Y-Variable</label>
-            <label className="text-sm font-medium text-muted-foreground w-3/12 pl-4">Select X-Variable</label>
+            <label className="text-sm font-medium text-muted-foreground w-3/16">Select Y-Variable</label>
+            <label className="text-sm font-medium text-muted-foreground w-3/16 pl-4">Select X-Variable</label>
             <div className="flex-1" />
             <Button size="sm" className="bg-orange-300 text-white hover:bg-orange-400" onClick={addXVariable}>
               <Plus className="w-4 h-4 mr-2" />
@@ -982,6 +1018,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                   </Select>
                 </div>
 
+
                 {/* Remove button */}
                 <div className="col-span-1">
                   <Button size="sm" variant="ghost" onClick={() => removeXVariable(index)}>
@@ -991,9 +1028,212 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
               </div>
             ))}
           </div>
+
+          {/* Interaction Terms Controls - Only show when stack modeling is enabled */}
+          {finalData?.stackModeling && (
+            <div className="mt-4 flex items-center gap-4">
+              {/* Apply Interaction Terms Toggle */}
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="apply-interaction-terms"
+                  checked={finalData?.applyInteractionTerms || false}
+                  onCheckedChange={(checked) => handleDataChange({ applyInteractionTerms: !!checked })}
+                />
+                <Label htmlFor="apply-interaction-terms" className="text-sm font-medium">
+                  Apply Interaction Terms
+                </Label>
+              </div>
+
+              {/* Interaction Terms Dropdown - Only show when interaction terms are enabled */}
+              {finalData?.applyInteractionTerms && (
+                <div className="w-64">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button 
+                        variant="outline" 
+                        className="w-full justify-between"
+                        disabled={isLoadingColumns}
+                      >
+                        <span>
+                          {isLoadingColumns 
+                            ? "Loading..." 
+                            : finalData?.numericalColumnsForInteraction?.length > 0 
+                              ? `${finalData.numericalColumnsForInteraction.length} column${finalData.numericalColumnsForInteraction.length > 1 ? 's' : ''} selected`
+                              : "Select Interaction Columns"
+                            }
+                        </span>
+                        <ChevronDown className="w-4 h-4" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
+                      {isLoadingColumns ? (
+                        <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading numerical columns...</div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2 py-1 border-b mb-2">
+                            <Checkbox
+                              checked={finalData?.numericalColumnsForInteraction?.length === numericalColumns.filter(col => col !== finalData?.yVariable).length}
+                              onCheckedChange={(checked) => {
+                                const availableColumns = numericalColumns.filter(col => col !== finalData?.yVariable);
+                                handleDataChange({ 
+                                  numericalColumnsForInteraction: checked ? availableColumns : [] 
+                                });
+                              }}
+                            />
+                            <span className="text-sm font-medium">Select All</span>
+                          </div>
+                          {numericalColumns
+                            .filter(col => col !== finalData?.yVariable)
+                            .map(col => {
+                              const isChecked = finalData?.numericalColumnsForInteraction?.includes(col) || false;
+                              return (
+                                <div key={col} className="flex items-center gap-2 py-1">
+                                  <Checkbox
+                                    checked={isChecked}
+                                    onCheckedChange={(checked) => {
+                                      const current = finalData?.numericalColumnsForInteraction || [];
+                                      const updated = checked 
+                                        ? [...current, col]
+                                        : current.filter(c => c !== col);
+                                      handleDataChange({ numericalColumnsForInteraction: updated });
+                                    }}
+                                  />
+                                  <span className="text-sm">{col}</span>
+                                </div>
+                              );
+                            })}
+                        </>
+                      )}
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         )}
       </Card>
+
+      {/* Constraint Settings Box */}
+      {constraintSettingsOpen && (
+        <Card className="mb-6">
+          <div className="py-2 px-4 border-b bg-muted/30">
+            <h3 className="font-semibold text-foreground flex items-center gap-2">
+              <Settings2 className="w-4 h-4 text-primary" />
+              Constraint Configuration
+            </h3>
+          </div>
+          <div className="p-6 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Negative Constraints */}
+              <div className="space-y-3">
+                <Label className="text-sm font-medium text-red-700">Negative Constraints</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      className="w-full justify-between"
+                    >
+                      <span>
+                        {data?.negativeConstraints?.length > 0 
+                          ? `${data.negativeConstraints.length} variable${data.negativeConstraints.length > 1 ? 's' : ''} selected`
+                          : "Select Variables"
+                        }
+                      </span>
+                      <ChevronDown className="w-4 h-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
+                    <div className="flex items-center gap-2 py-1 border-b mb-2">
+                      <Checkbox
+                        checked={data?.negativeConstraints?.length === (data?.xVariables?.[0]?.length || 0)}
+                        onCheckedChange={(checked) => {
+                          const allVariables = data?.xVariables?.[0] || [];
+                          handleDataChange({ 
+                            negativeConstraints: checked ? allVariables : [] 
+                          });
+                        }}
+                      />
+                      <span className="text-sm font-medium">Select All</span>
+                    </div>
+                    {(data?.xVariables?.[0] || []).map(variable => {
+                      const isChecked = data?.negativeConstraints?.includes(variable) || false;
+                      return (
+                        <div key={variable} className="flex items-center gap-2 py-1">
+                          <Checkbox
+                            checked={isChecked}
+                            onCheckedChange={(checked) => {
+                              const current = data?.negativeConstraints || [];
+                              const updated = checked 
+                                ? [...current, variable]
+                                : current.filter(v => v !== variable);
+                              handleDataChange({ negativeConstraints: updated });
+                            }}
+                          />
+                          <span className="text-sm">{variable}</span>
+                        </div>
+                      );
+                    })}
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {/* Positive Constraints */}
+              <div className="space-y-3">
+                <Label className="text-sm font-medium text-green-700">Positive Constraints</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      className="w-full justify-between"
+                    >
+                      <span>
+                        {data?.positiveConstraints?.length > 0 
+                          ? `${data.positiveConstraints.length} variable${data.positiveConstraints.length > 1 ? 's' : ''} selected`
+                          : "Select Variables"
+                        }
+                      </span>
+                      <ChevronDown className="w-4 h-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
+                    <div className="flex items-center gap-2 py-1 border-b mb-2">
+                      <Checkbox
+                        checked={data?.positiveConstraints?.length === (data?.xVariables?.[0]?.length || 0)}
+                        onCheckedChange={(checked) => {
+                          const allVariables = data?.xVariables?.[0] || [];
+                          handleDataChange({ 
+                            positiveConstraints: checked ? allVariables : [] 
+                          });
+                        }}
+                      />
+                      <span className="text-sm font-medium">Select All</span>
+                    </div>
+                    {(data?.xVariables?.[0] || []).map(variable => {
+                      const isChecked = data?.positiveConstraints?.includes(variable) || false;
+                      return (
+                        <div key={variable} className="flex items-center gap-2 py-1">
+                          <Checkbox
+                            checked={isChecked}
+                            onCheckedChange={(checked) => {
+                              const current = data?.positiveConstraints || [];
+                              const updated = checked 
+                                ? [...current, variable]
+                                : current.filter(v => v !== variable);
+                              handleDataChange({ positiveConstraints: updated });
+                            }}
+                          />
+                          <span className="text-sm">{variable}</span>
+                        </div>
+                      );
+                    })}
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Run Model Button */}
       <div className="mb-6">

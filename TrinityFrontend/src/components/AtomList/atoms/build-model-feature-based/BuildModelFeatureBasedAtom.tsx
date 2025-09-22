@@ -47,6 +47,9 @@ export interface BuildModelFeatureBasedData {
   numericalColumnsForClustering: string[];
   applyInteractionTerms: boolean;
   numericalColumnsForInteraction: string[];
+  // Constraint configuration
+  negativeConstraints: string[];
+  positiveConstraints: string[];
 }
 
 export interface BuildModelFeatureBasedSettings {
@@ -112,7 +115,10 @@ const BuildModelFeatureBasedAtom: React.FC<Props> = ({ atomId }) => {
       poolByIdentifiers: [],
       numericalColumnsForClustering: [],
       applyInteractionTerms: false,
-      numericalColumnsForInteraction: []
+      numericalColumnsForInteraction: [],
+      // Constraint configuration
+      negativeConstraints: [],
+      positiveConstraints: []
     };
 
     const defaultSettings = {

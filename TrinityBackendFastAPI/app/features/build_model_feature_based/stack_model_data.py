@@ -1212,11 +1212,10 @@ class StackModelDataProcessor:
         pass
     
     async def get_column_classifier_config(self) -> Dict[str, Any]:
-
+        """Get column classifier configuration using the same pattern as routes."""
         try:
-            from .mongodb_saver import client
+            from .mongodb_saver import get_column_classifier_config_from_mongo
             from ..data_upload_validate.app.routes import get_object_prefix
-            import os
             
             # Get the current prefix
             prefix = await get_object_prefix()
@@ -1228,17 +1227,14 @@ class StackModelDataProcessor:
                 app_name = prefix_parts[1]
                 project_name = prefix_parts[2] if len(prefix_parts) > 2 else "default_project"
                 
-                # Create the document ID
-                doc_id = f"Quant_Matrix_AI_Schema/forecasting/New Forecasting Analysis Project"
-                
-                # Fetch from column_classifier_config collection
-                collection = client["trinity_db"]["column_classifier_config"]
-                config = await collection.find_one({"_id": doc_id})
+                # Use the same function as routes
+                config = await get_column_classifier_config_from_mongo(client_name, app_name, project_name)
                 
                 if config:
+                    logger.info(f"✅ Retrieved column classifier config for {client_name}/{app_name}/{project_name}")
                     return config
                 else:
-                    logger.warning(f"No column classifier config found for {doc_id}")
+                    logger.warning(f"No column classifier config found for {client_name}/{app_name}/{project_name}")
                     return {}
             else:
                 logger.error(f"Invalid prefix format: {prefix}")

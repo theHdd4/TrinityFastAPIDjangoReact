@@ -571,17 +571,33 @@ async def train_models_for_combination_enhanced(
             for model_name, config in custom_configs.items():
                 if model_name in models_dict:
                     if model_name == "Custom Constrained Ridge":
+                        # Extract constraints from parameters object
+                        parameters = config.get('parameters', {})
+                        negative_constraints = parameters.get('negative_constraints', [])
+                        positive_constraints = parameters.get('positive_constraints', [])
+                        print(f"🔍 Custom Constrained Ridge - Negative constraints: {negative_constraints}")
+                        print(f"🔍 Custom Constrained Ridge - Positive constraints: {positive_constraints}")
                         models_dict[model_name] = CustomConstrainedRidge(
-                            l2_penalty=config.get('l2_penalty', 0.1),
-                            learning_rate=config.get('learning_rate', 0.001),
-                            iterations=config.get('iterations', 10000),
-                            adam=config.get('adam', False)
+                            l2_penalty=parameters.get('l2_penalty', 0.1),
+                            learning_rate=parameters.get('learning_rate', 0.001),
+                            iterations=parameters.get('iterations', 10000),
+                            adam=parameters.get('adam', False),
+                            negative_constraints=negative_constraints,
+                            positive_constraints=positive_constraints
                         )
                     elif model_name == "Constrained Linear Regression":
+                        # Extract constraints from parameters object
+                        parameters = config.get('parameters', {})
+                        negative_constraints = parameters.get('negative_constraints', [])
+                        positive_constraints = parameters.get('positive_constraints', [])
+                        print(f"🔍 Constrained Linear Regression - Negative constraints: {negative_constraints}")
+                        print(f"🔍 Constrained Linear Regression - Positive constraints: {positive_constraints}")
                         models_dict[model_name] = ConstrainedLinearRegression(
-                            learning_rate=config.get('learning_rate', 0.001),
-                            iterations=config.get('iterations', 10000),
-                            adam=config.get('adam', False)
+                            learning_rate=parameters.get('learning_rate', 0.001),
+                            iterations=parameters.get('iterations', 10000),
+                            adam=parameters.get('adam', False),
+                            negative_constraints=negative_constraints,
+                            positive_constraints=positive_constraints
                         )
         
         # K-fold cross validation with fold tracking
