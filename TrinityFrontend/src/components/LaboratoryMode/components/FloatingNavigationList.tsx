@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { GripVertical, X, Minimize2, Maximize2 } from 'lucide-react';
@@ -236,7 +237,7 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
 
   if (!isVisible) return null;
 
-  return (
+  const content = (
     <div
       ref={widgetRef}
       className="fixed z-50 select-none transition-all duration-500 ease-out"
@@ -251,7 +252,7 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
     >
       <Card className="bg-white/95 backdrop-blur-sm shadow-lg border border-gray-200 min-w-[250px] max-w-[300px]">
         {/* Header */}
-        <div 
+        <div
           className="flex items-center justify-between p-3 border-b border-gray-200 cursor-grab active:cursor-grabbing bg-gray-50"
           onMouseDown={handleMouseDown}
         >
@@ -289,7 +290,7 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
               </div>
             ) : (
               <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                {allAtoms.map((atom) => (
+                {allAtoms.map(atom => (
                   <div
                     key={atom.id}
                     className="flex items-center space-x-2 p-2 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors cursor-pointer"
@@ -304,7 +305,7 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
                 ))}
               </div>
             )}
-            
+
             {allAtoms.length > 0 && (
               <div className="mt-3 pt-2 border-t border-gray-200">
                 <p className="text-xs text-gray-500 text-center">
@@ -317,6 +318,12 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
       </Card>
     </div>
   );
+
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  return createPortal(content, document.body);
 };
 
 export default FloatingNavigationList;
