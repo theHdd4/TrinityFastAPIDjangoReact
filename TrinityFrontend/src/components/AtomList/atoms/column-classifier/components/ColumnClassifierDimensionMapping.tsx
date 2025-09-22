@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tag, X, GripVertical } from 'lucide-react';
@@ -28,6 +29,7 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
 }) => {
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<{ visible: boolean; x: number; y: number }>({ visible: false, x: 0, y: 0 });
+  const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
   // const sensors = useSensors(
@@ -84,6 +86,34 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
     setContextMenu({ visible: false, x: 0, y: 0 });
   };
 
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      setPortalContainer(document.body);
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!contextMenu.visible || !contextMenuRef.current) {
+      return;
+    }
+    const menu = contextMenuRef.current.getBoundingClientRect();
+    const { innerWidth, innerHeight } = window;
+    const padding = 12;
+    let nextX = contextMenu.x;
+    let nextY = contextMenu.y;
+
+    if (menu.right > innerWidth) {
+      nextX = Math.max(padding, innerWidth - menu.width - padding);
+    }
+    if (menu.bottom > innerHeight) {
+      nextY = Math.max(padding, innerHeight - menu.height - padding);
+    }
+
+    if (nextX !== contextMenu.x || nextY !== contextMenu.y) {
+      setContextMenu(prev => (prev.visible ? { ...prev, x: nextX, y: nextY } : prev));
+    }
+  }, [contextMenu.visible, contextMenu.x, contextMenu.y]);
+
   // Close context menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -95,6 +125,19 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
     if (contextMenu.visible) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [contextMenu.visible]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setContextMenu({ visible: false, x: 0, y: 0 });
+      }
+    };
+
+    if (contextMenu.visible) {
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
     }
   }, [contextMenu.visible]);
 
@@ -281,39 +324,42 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
         </div>
         
         {/* Context Menu */}
-        {contextMenu.visible && (
-          <div
-            ref={contextMenuRef}
-            className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[200px]"
-            style={{
-              left: contextMenu.x,
-              top: contextMenu.y,
-            }}
-          >
-            <div className="px-3 py-2 text-sm font-medium text-gray-500 border-b border-gray-100">
-              Assign to dimension:
-            </div>
-            <button
-              onClick={() => handleDimensionChange('unattributed')}
-              className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-            >
-              <div className="w-2 h-2 rounded-full bg-gray-500" />
-              Unattributed
-            </button>
-            {Object.keys(customDimensions)
-              .filter(name => name !== 'unattributed')
-              .map((dimensionName, index) => (
+        {contextMenu.visible && portalContainer
+          ? createPortal(
+              <div
+                ref={contextMenuRef}
+                className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[200px]"
+                style={{
+                  left: contextMenu.x,
+                  top: contextMenu.y,
+                }}
+              >
+                <div className="px-3 py-2 text-sm font-medium text-gray-500 border-b border-gray-100">
+                  Assign to dimension:
+                </div>
                 <button
-                  key={dimensionName}
-                  onClick={() => handleDimensionChange(dimensionName)}
+                  onClick={() => handleDimensionChange('unattributed')}
                   className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
                 >
-                  <div className={`w-2 h-2 rounded-full ${getDimensionColor(dimensionName, index).bg}`} />
-                  {dimensionName}
+                  <div className="w-2 h-2 rounded-full bg-gray-500" />
+                  Unattributed
                 </button>
-              ))}
-          </div>
-        )}
+                {Object.keys(customDimensions)
+                  .filter(name => name !== 'unattributed')
+                  .map((dimensionName, index) => (
+                    <button
+                      key={dimensionName}
+                      onClick={() => handleDimensionChange(dimensionName)}
+                      className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <div className={`w-2 h-2 rounded-full ${getDimensionColor(dimensionName, index).bg}`} />
+                      {dimensionName}
+                    </button>
+                  ))}
+              </div>,
+              portalContainer
+            )
+          : null}
       </div>
     // </DndContext>
   );

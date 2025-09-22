@@ -253,130 +253,160 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
 
   const findLatestDataSource = async (signal?: AbortSignal) => {
     console.log('🔎 searching for latest data source');
-    if (!Array.isArray(layoutCards)) return null;
-    for (let i = layoutCards.length - 1; i >= 0; i--) {
-      const card = layoutCards[i];
-      for (let j = card.atoms.length - 1; j >= 0; j--) {
-        const a = card.atoms[j];
-        if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
-          console.log('✔️ found feature overview data source', a.settings.dataSource);
-          const existingColumns: ColumnInfo[] = Array.isArray(a.settings?.allColumns)
-            ? (a.settings.allColumns as ColumnInfo[]).filter(Boolean)
-            : [];
-          const cols =
-            existingColumns.length > 0
-              ? {
-                  summary: existingColumns,
-                  numeric: Array.isArray(a.settings?.numericColumns)
-                    ? (a.settings.numericColumns as string[])
-                    : [],
-                  xField: a.settings?.xAxis || '',
-                }
-              : await fetchColumnSummary(a.settings.dataSource, {
-                  signal,
-                  retries: 2,
-                });
-          return {
-            csv: a.settings.dataSource,
-            display: a.settings.csvDisplay || a.settings.dataSource,
-            identifiers: a.settings.selectedColumns || [],
-            ...(cols || {}),
-          };
-        }
-        if (a.atomId === 'data-upload-validate') {
-          const req = a.settings?.requiredFiles?.[0];
-          const validatorId = a.settings?.validatorId;
-          if (req) {
-            try {
-              const [ticketRes, confRes] = await Promise.all([
-                fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`, { signal }),
-                validatorId
-                  ? fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`, { signal })
-                  : Promise.resolve(null as any),
-              ]);
-              if (ticketRes.ok) {
-                const ticket = await ticketRes.json();
-                if (ticket.arrow_name) {
-                  console.log('✔️ using validated data source', ticket.arrow_name);
-                  const cols = await fetchColumnSummary(ticket.arrow_name, {
+
+    type Candidate = {
+      csv: string;
+      display?: string;
+      identifiers?: string[];
+      summary?: ColumnInfo[];
+      numeric?: string[];
+      xField?: string;
+    } | null;
+
+    let layoutCandidate: Candidate = null;
+
+    if (Array.isArray(layoutCards)) {
+      outer: for (let i = layoutCards.length - 1; i >= 0; i--) {
+        const card = layoutCards[i];
+        for (let j = card.atoms.length - 1; j >= 0; j--) {
+          const a = card.atoms[j];
+          if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
+            console.log('✔️ found feature overview data source', a.settings.dataSource);
+            const existingColumns: ColumnInfo[] = Array.isArray(a.settings?.allColumns)
+              ? (a.settings.allColumns as ColumnInfo[]).filter(Boolean)
+              : [];
+            const cols =
+              existingColumns.length > 0
+                ? {
+                    summary: existingColumns,
+                    numeric: Array.isArray(a.settings?.numericColumns)
+                      ? (a.settings.numericColumns as string[])
+                      : [],
+                    xField: a.settings?.xAxis || '',
+                  }
+                : await fetchColumnSummary(a.settings.dataSource, {
                     signal,
                     retries: 2,
                   });
-                  let ids: string[] = [];
-                  if (confRes && confRes.ok) {
-                    const cfg = await confRes.json();
-                    ids =
-                      cfg.classification?.[req]?.final_classification?.identifiers || [];
+            layoutCandidate = {
+              csv: a.settings.dataSource,
+              display: a.settings.csvDisplay || a.settings.dataSource,
+              identifiers: a.settings.selectedColumns || [],
+              ...(cols || {}),
+            };
+            break outer;
+          }
+          if (a.atomId === 'data-upload-validate') {
+            const req = a.settings?.requiredFiles?.[0];
+            const validatorId = a.settings?.validatorId;
+            if (req) {
+              try {
+                const [ticketRes, confRes] = await Promise.all([
+                  fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`, { signal }),
+                  validatorId
+                    ? fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`, { signal })
+                    : Promise.resolve(null as any),
+                ]);
+                if (ticketRes.ok) {
+                  const ticket = await ticketRes.json();
+                  if (ticket.arrow_name) {
+                    console.log('✔️ using validated data source', ticket.arrow_name);
+                    const cols = await fetchColumnSummary(ticket.arrow_name, {
+                      signal,
+                      retries: 2,
+                    });
+                    let ids: string[] = [];
+                    if (confRes && confRes.ok) {
+                      const cfg = await confRes.json();
+                      ids =
+                        cfg.classification?.[req]?.final_classification?.identifiers || [];
+                    }
+                    layoutCandidate = {
+                      csv: ticket.arrow_name,
+                      display: ticket.csv_name,
+                      identifiers: ids,
+                      ...(cols || {}),
+                    };
+                    break outer;
                   }
-                  return {
-                    csv: ticket.arrow_name,
-                    display: ticket.csv_name,
-                    identifiers: ids,
-                    ...(cols || {}),
-                  };
+                }
+              } catch (err) {
+                if ((err as any)?.name === 'AbortError') {
+                  throw err;
                 }
               }
-            } catch {
-              /* ignore */
             }
           }
         }
       }
     }
 
+    let env: any = {};
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        env = JSON.parse(envStr);
+      } catch {
+        env = {};
+      }
+    }
+
+    const params = new URLSearchParams({
+      client_id: env.CLIENT_ID || '',
+      app_id: env.APP_ID || '',
+      project_id: env.PROJECT_ID || '',
+      client_name: env.CLIENT_NAME || '',
+      app_name: env.APP_NAME || '',
+      project_name: env.PROJECT_NAME || '',
+    });
+    const query = params.toString() ? `?${params.toString()}` : '';
+
     try {
-      let env: any = {};
-      const envStr = localStorage.getItem('env');
-      if (envStr) {
-        try {
-          env = JSON.parse(envStr);
-        } catch {
-          env = {};
-        }
-      }
-      const params = new URLSearchParams({
-        client_id: env.CLIENT_ID || '',
-        app_id: env.APP_ID || '',
-        project_id: env.PROJECT_ID || '',
-        client_name: env.CLIENT_NAME || '',
-        app_name: env.APP_NAME || '',
-        project_name: env.PROJECT_NAME || ''
-      });
-          const query = params.toString() ? `?${params.toString()}` : '';
-
-          try {
-            const latestRes = await fetch(
-              `${VALIDATE_API}/latest_project_dataframe${query}`,
-              { credentials: 'include', signal }
-            );
-            if (latestRes.ok) {
-              const latestData = await latestRes.json();
-              const latestName = latestData?.object_name;
-              if (typeof latestName === 'string' && latestName.trim()) {
-                console.log(
-                  '✔️ defaulting to latest flight dataframe',
-                  latestName,
-                  latestData?.source || 'unknown'
-                );
-                const cols = await fetchColumnSummary(latestName, {
-                  signal,
-                  retries: 2,
-                });
-                return {
-                  csv: latestName,
-                  display: latestData?.csv_name || latestName,
-                  ...(cols || {}),
-                };
+      const latestRes = await fetch(
+        `${VALIDATE_API}/latest_project_dataframe${query}`,
+        { credentials: 'include', signal }
+      );
+      if (latestRes.ok) {
+        const latestData = await latestRes.json();
+        const latestName = latestData?.object_name;
+        if (typeof latestName === 'string' && latestName.trim()) {
+          console.log(
+            '✔️ defaulting to latest flight dataframe',
+            latestName,
+            latestData?.source || 'unknown'
+          );
+          if (layoutCandidate && layoutCandidate.csv === latestName) {
+            return {
+              ...layoutCandidate,
+              display:
+                latestData?.csv_name || layoutCandidate.display || layoutCandidate.csv,
+            };
           }
-        } else {
-          console.warn('⚠️ latest_project_dataframe failed', latestRes.status);
+          const cols = await fetchColumnSummary(latestName, {
+            signal,
+            retries: 2,
+          });
+          return {
+            csv: latestName,
+            display: latestData?.csv_name || latestName,
+            ...(cols || {}),
+          };
         }
-      } catch (err) {
-        if ((err as any)?.name !== 'AbortError') {
-          console.warn('⚠️ latest_project_dataframe request failed', err);
-        }
+      } else {
+        console.warn('⚠️ latest_project_dataframe failed', latestRes.status);
       }
+    } catch (err) {
+      if ((err as any)?.name === 'AbortError') {
+        throw err;
+      }
+      console.warn('⚠️ latest_project_dataframe request failed', err);
+    }
 
+    if (layoutCandidate) {
+      return layoutCandidate;
+    }
+
+    try {
       const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`, {
         signal,
       });
@@ -391,9 +421,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           ? data.files
           : [];
         const validFiles = files.filter(
-          (f) =>
-            typeof f.object_name === 'string' &&
-            /\.[^/]+$/.test(f.object_name.trim())
+          f => typeof f.object_name === 'string' && /\.[^/]+$/.test(f.object_name.trim())
         );
         let fallback: SavedFrameMeta | null = null;
         let latest: { file: SavedFrameMeta; ts: number } | null = null;
@@ -420,8 +448,10 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           };
         }
       }
-    } catch {
-      /* ignore */
+    } catch (err) {
+      if ((err as any)?.name === 'AbortError') {
+        throw err;
+      }
     }
 
     return null;
