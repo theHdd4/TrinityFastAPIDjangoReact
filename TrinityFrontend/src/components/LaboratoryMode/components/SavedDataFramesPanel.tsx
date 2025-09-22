@@ -12,7 +12,13 @@ interface Props {
 }
 
 const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
-  interface Frame { object_name: string; csv_name: string; arrow_name?: string }
+  interface Frame {
+    object_name: string;
+    csv_name: string;
+    arrow_name?: string;
+    last_modified?: string;
+    size?: number;
+  }
   interface TreeNode {
     name: string;
     path: string;

@@ -3060,16 +3060,31 @@ async def list_saved_dataframes(
             )
         )
         tmp_prefix = prefix + "tmp/"
-        files = [
-            {
+        files = []
+        for obj in sorted(objects, key=lambda o: o.object_name):
+            if not obj.object_name.endswith(".arrow"):
+                continue
+            if obj.object_name.startswith(tmp_prefix):
+                continue
+            last_modified = getattr(obj, "last_modified", None)
+            if last_modified is not None:
+                try:
+                    modified_iso = last_modified.isoformat()
+                except Exception:
+                    modified_iso = None
+            else:
+                modified_iso = None
+            entry = {
                 "object_name": obj.object_name,
                 "arrow_name": Path(obj.object_name).name,
                 "csv_name": Path(obj.object_name).name,
             }
-            for obj in sorted(objects, key=lambda o: o.object_name)
-            if obj.object_name.endswith(".arrow")
-            and not obj.object_name.startswith(tmp_prefix)
-        ]
+            if modified_iso:
+                entry["last_modified"] = modified_iso
+            size = getattr(obj, "size", None)
+            if isinstance(size, int):
+                entry["size"] = size
+            files.append(entry)
         return {
             "bucket": MINIO_BUCKET,
             "prefix": prefix,
