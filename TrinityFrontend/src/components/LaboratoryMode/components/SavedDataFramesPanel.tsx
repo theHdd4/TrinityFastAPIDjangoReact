@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Database, ChevronRight, ChevronDown, Trash2, Pencil } from 'lucide-react';
+import { Database, ChevronRight, ChevronDown, Trash2, Pencil, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { VALIDATE_API, SESSION_API } from '@/lib/api';
@@ -34,12 +34,16 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     target: string;
     frame: Frame;
   } | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const { user } = useAuth();
 
   useEffect(() => {
     if (!isOpen) return;
+    let cancelled = false;
+
     const load = async () => {
+      setLoading(true);
       try {
         let env: any = {};
         const envStr = localStorage.getItem('env');
@@ -91,6 +95,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
         });
 
         try {
+          let currentPrefix = '';
           const buildQuery = () =>
             new URLSearchParams({
               client_name: env.CLIENT_NAME || '',
@@ -104,7 +109,10 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
           );
           if (prefRes.ok) {
             const prefData = await prefRes.json();
-            setPrefix(prefData.prefix || '');
+            currentPrefix = prefData.prefix || '';
+            if (!cancelled) {
+              setPrefix(currentPrefix);
+            }
             if (prefData.environment) {
               env = { ...env, ...prefData.environment };
               localStorage.setItem('env', JSON.stringify(env));
@@ -129,7 +137,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             console.warn('list_saved_dataframes failed', listRes.status);
           }
           if (data) {
-            setPrefix(data.prefix || '');
+            currentPrefix = data.prefix || currentPrefix;
+            const effectivePrefix = currentPrefix || '';
+            if (!cancelled) {
+              setPrefix(effectivePrefix);
+            }
             if (data.environment) {
               env = { ...env, ...data.environment };
               localStorage.setItem('env', JSON.stringify(env));
@@ -137,24 +149,46 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             console.log(
               `📁 SavedDataFramesPanel looking in MinIO bucket "${data.bucket}" folder "${data.prefix}" via ${data.env_source} (CLIENT_NAME=${data.environment?.CLIENT_NAME} APP_NAME=${data.environment?.APP_NAME} PROJECT_NAME=${data.environment?.PROJECT_NAME})`
             );
-            setFiles(
-              Array.isArray(data.files)
-                ? data.files.filter((f: Frame) => !!f.arrow_name)
-                : []
-            );
+            const filtered = Array.isArray(data.files)
+              ? data.files.filter((f: Frame) => {
+                  if (!f?.arrow_name) return false;
+                  if (!effectivePrefix) return true;
+                  return f.object_name?.startsWith(effectivePrefix);
+                })
+              : [];
+            if (!cancelled) {
+              setFiles(filtered);
+              setOpenDirs({});
+              setContextMenu(null);
+              setRenameTarget(null);
+            }
           } else {
-            setFiles([]);
+            if (!cancelled) {
+              setFiles([]);
+            }
           }
         } catch (err) {
           console.warn('get_object_prefix or list_saved_dataframes failed', err);
-          setFiles([]);
+          if (!cancelled) {
+            setFiles([]);
+          }
         }
       } catch (err) {
         console.error('Failed to load saved dataframes', err);
-        setFiles([]);
+        if (!cancelled) {
+          setFiles([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
     load();
+
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen, user]);
 
   const handleOpen = (obj: string) => {
@@ -367,8 +401,20 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto p-4">
-        {tree.length === 0 && <p className="text-sm text-gray-600">No saved dataframes</p>}
-        {tree.map(node => renderNode(node))}
+        {loading ? (
+          <div className="flex flex-col items-center justify-center h-full text-center text-gray-700">
+            <div className="w-20 h-20 rounded-full bg-white/60 backdrop-blur-sm flex items-center justify-center mx-auto mb-4 shadow-inner">
+              <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-1">Loading your dataframes</h3>
+            <p className="text-sm text-gray-500">Fetching the latest saved files…</p>
+          </div>
+        ) : (
+          <>
+            {tree.length === 0 && <p className="text-sm text-gray-600">No saved dataframes</p>}
+            {tree.map(node => renderNode(node))}
+          </>
+        )}
       </div>
       <ConfirmationDialog
         open={!!confirmDelete}
