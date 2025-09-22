@@ -192,11 +192,18 @@ export const animateLabElementsIn = () => {
 
 type TransitionCleanupScope = 'project' | 'laboratory' | 'all';
 
+type TransitionCleanupOptions = {
+  preserveLabPrepClass?: boolean;
+};
+
 const PROJECT_CLEANUP_SELECTOR = '[data-project-transition], [data-project-card]';
 const LAB_CLEANUP_SELECTOR =
   '[data-lab-header], [data-lab-toolbar], [data-lab-sidebar], [data-lab-canvas], [data-lab-settings]';
 
-export const cleanupProjectTransition = (scope: TransitionCleanupScope = 'all') => {
+export const cleanupProjectTransition = (
+  scope: TransitionCleanupScope = 'all',
+  options: TransitionCleanupOptions = {}
+) => {
   if (typeof document === 'undefined') {
     return;
   }
@@ -207,9 +214,10 @@ export const cleanupProjectTransition = (scope: TransitionCleanupScope = 'all') 
     selectors.push(PROJECT_CLEANUP_SELECTOR);
   }
 
-  const shouldClearLabPrepClass = scope === 'laboratory' || scope === 'all';
+  const shouldCleanupLabElements = scope === 'laboratory' || scope === 'all';
+  const shouldClearLabPrepClass = shouldCleanupLabElements && !options.preserveLabPrepClass;
 
-  if (shouldClearLabPrepClass) {
+  if (shouldCleanupLabElements) {
     selectors.push(LAB_CLEANUP_SELECTOR);
   }
 

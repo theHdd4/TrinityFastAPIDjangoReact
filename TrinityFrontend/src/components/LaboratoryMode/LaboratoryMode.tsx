@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Play, Save, Share2, Undo2, AlertTriangle, List } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -24,6 +24,10 @@ import {
 } from '@/utils/projectTransition';
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+const useIsomorphicInsertionEffect =
+  typeof window !== 'undefined' && typeof useInsertionEffect === 'function'
+    ? useInsertionEffect
+    : useIsomorphicLayoutEffect;
 
 const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
@@ -38,11 +42,13 @@ const LaboratoryMode = () => {
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
   const skipInitialLabCleanupRef = useRef(true);
+  const reduceMotionRef = useRef(false);
 
-  useIsomorphicLayoutEffect(() => {
+  useIsomorphicInsertionEffect(() => {
     const reduceMotion = prefersReducedMotion();
+    reduceMotionRef.current = reduceMotion;
 
-    cleanupProjectTransition('laboratory');
+    cleanupProjectTransition('laboratory', { preserveLabPrepClass: true });
 
     if (!reduceMotion && typeof document !== 'undefined') {
       document.body.classList.add(LAB_PREP_CLASS);
@@ -58,7 +64,7 @@ const LaboratoryMode = () => {
 
       cleanupProjectTransition('laboratory');
 
-      if (!reduceMotion && typeof document !== 'undefined') {
+      if (!reduceMotionRef.current && typeof document !== 'undefined') {
         document.body.classList.remove(LAB_PREP_CLASS);
       }
     };
