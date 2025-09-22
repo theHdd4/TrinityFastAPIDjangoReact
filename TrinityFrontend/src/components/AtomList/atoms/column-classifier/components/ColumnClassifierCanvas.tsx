@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Card } from '@/components/ui/card';
 import { Database, FileText, GripVertical } from 'lucide-react';
 import { ClassifierData } from '../ColumnClassifierAtom';
@@ -41,7 +42,14 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
 }) => {
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<{ visible: boolean; x: number; y: number }>({ visible: false, x: 0, y: 0 });
+  const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      setPortalContainer(document.body);
+    }
+  }, []);
 
   // const sensors = useSensors(
   //   useSensor(PointerSensor, {
@@ -162,7 +170,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
 
   // const DroppableZone: React.FC<{ id: string }> = ({ id }) => {
   //   const { setNodeRef, isOver } = useDroppable({ id });
-  //   
+  //
   //   return (
   //     <div
   //       ref={setNodeRef}
@@ -172,6 +180,28 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   //     />
   //   );
   // };
+
+  useLayoutEffect(() => {
+    if (!contextMenu.visible || !contextMenuRef.current) {
+      return;
+    }
+    const menu = contextMenuRef.current.getBoundingClientRect();
+    const { innerWidth, innerHeight } = window;
+    const padding = 12;
+    let nextX = contextMenu.x;
+    let nextY = contextMenu.y;
+
+    if (menu.right > innerWidth) {
+      nextX = Math.max(padding, innerWidth - menu.width - padding);
+    }
+    if (menu.bottom > innerHeight) {
+      nextY = Math.max(padding, innerHeight - menu.height - padding);
+    }
+
+    if (nextX !== contextMenu.x || nextY !== contextMenu.y) {
+      setContextMenu(prev => (prev.visible ? { ...prev, x: nextX, y: nextY } : prev));
+    }
+  }, [contextMenu.visible, contextMenu.x, contextMenu.y]);
 
   const handleClassificationChange = (newCategory: string) => {
     // Create a copy of selected columns to avoid state issues
@@ -202,6 +232,19 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     if (contextMenu.visible) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [contextMenu.visible]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setContextMenu({ visible: false, x: 0, y: 0 });
+      }
+    };
+
+    if (contextMenu.visible) {
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
     }
   }, [contextMenu.visible]);
 
@@ -535,41 +578,44 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
         </DragOverlay> */}
         
         {/* Context Menu */}
-        {contextMenu.visible && (
-          <div
-            ref={contextMenuRef}
-            className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[200px]"
-            style={{
-              left: contextMenu.x,
-              top: contextMenu.y,
-            }}
-          >
-            <div className="px-3 py-2 text-sm font-medium text-gray-500 border-b border-gray-100">
-              Classify to:
-            </div>
-            <button
-              onClick={() => handleClassificationChange('unclassified')}
-              className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-            >
-              <div className="w-2 h-2 rounded-full bg-gradient-to-r from-gray-400 to-gray-500" />
-              Unclassified
-            </button>
-            <button
-              onClick={() => handleClassificationChange('identifiers')}
-              className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-            >
-              <div className="w-2 h-2 rounded-full bg-gradient-to-r from-blue-500 to-blue-600" />
-              Identifiers
-            </button>
-            <button
-              onClick={() => handleClassificationChange('measures')}
-              className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-            >
-              <div className="w-2 h-2 rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600" />
-              Measures
-            </button>
-          </div>
-        )}
+        {contextMenu.visible && portalContainer
+          ? createPortal(
+              <div
+                ref={contextMenuRef}
+                className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[200px]"
+                style={{
+                  left: contextMenu.x,
+                  top: contextMenu.y,
+                }}
+              >
+                <div className="px-3 py-2 text-sm font-medium text-gray-500 border-b border-gray-100">
+                  Classify to:
+                </div>
+                <button
+                  onClick={() => handleClassificationChange('unclassified')}
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                >
+                  <div className="w-2 h-2 rounded-full bg-gradient-to-r from-gray-400 to-gray-500" />
+                  Unclassified
+                </button>
+                <button
+                  onClick={() => handleClassificationChange('identifiers')}
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                >
+                  <div className="w-2 h-2 rounded-full bg-gradient-to-r from-blue-500 to-blue-600" />
+                  Identifiers
+                </button>
+                <button
+                  onClick={() => handleClassificationChange('measures')}
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                >
+                  <div className="w-2 h-2 rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600" />
+                  Measures
+                </button>
+              </div>,
+              portalContainer
+            )
+          : null}
       </div>
     // </DndContext>
   );
