@@ -653,13 +653,24 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     // Unique values for filter UI (support hierarchical filtering and duplicated columns)
     const uniqueValues: { [key: string]: string[] } = {};
     const appliedFilters = settings.filters || {};
+    const originalHeaders = new Set(originalData?.headers || []);
+    const currentRows = data.rows || [];
+
     data.headers.forEach(header => {
       const sourceCol = duplicateMap[header] || header;
-      // Start from the original unfiltered rows if available
-      let rowsForHeader = originalData?.rows ? [...originalData.rows] : [...data.rows];
-      // Apply all filters except the one for this header
-      Object.entries(appliedFilters).forEach(([col, val]) => {
-        if (col === header) return;
+      const filtersToApply = Object.entries(appliedFilters).filter(([col]) => col !== header);
+      const needsCurrentRows =
+        !originalHeaders.has(sourceCol) ||
+        filtersToApply.some(([col]) => {
+          const filterCol = duplicateMap[col] || col;
+          return !originalHeaders.has(filterCol);
+        });
+
+      let rowsForHeader = needsCurrentRows
+        ? [...currentRows]
+        : [...(originalData?.rows || currentRows)];
+
+      filtersToApply.forEach(([col, val]) => {
         const filterCol = duplicateMap[col] || col;
         rowsForHeader = rowsForHeader.filter(row => {
           const cell = row[filterCol];
@@ -673,11 +684,17 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
           return safeToString(cell) === safeToString(val);
         });
       });
-      const values = Array.from(
-        new Set(rowsForHeader.map(row => safeToString(row[sourceCol])))
-      )
+
+      let values = Array.from(new Set(rowsForHeader.map(row => safeToString(row[sourceCol]))))
         .filter(v => v !== '')
         .sort();
+
+      if (values.length === 0 && !needsCurrentRows) {
+        values = Array.from(new Set(currentRows.map(row => safeToString(row[sourceCol]))))
+          .filter(v => v !== '')
+          .sort();
+      }
+
       uniqueValues[header] = values.slice(0, 50);
     });
 
