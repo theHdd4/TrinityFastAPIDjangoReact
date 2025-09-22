@@ -141,3 +141,12 @@
   animation-delay: var(--lab-enter-delay, 0s);
   will-change: opacity, transform;
 }
+
+body.lab-transition-prep [data-lab-header],
+body.lab-transition-prep [data-lab-toolbar],
+body.lab-transition-prep [data-lab-sidebar],
+body.lab-transition-prep [data-lab-canvas],
+body.lab-transition-prep [data-lab-settings] {
+  opacity: 0;
+  transform: translateY(30px) scale(0.95);
+}

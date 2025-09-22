@@ -1,5 +1,7 @@
 import { NavigateFunction } from 'react-router-dom';
 
+export const LAB_PREP_CLASS = 'lab-transition-prep';
+
 const EXIT_SELECTOR = '[data-project-transition], [data-project-card]';
 const EXIT_CLASS = 'animate-project-exit';
 const EXIT_STAGGER_MS = 120;
@@ -26,7 +28,7 @@ const applyLabPreparationState = (element: HTMLElement) => {
   element.style.transform = LAB_PREPARE_STYLE.transform;
 };
 
-const prefersReducedMotion = () =>
+export const prefersReducedMotion = () =>
   typeof window !== 'undefined' &&
   typeof window.matchMedia === 'function' &&
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -54,6 +56,8 @@ export const startProjectTransition = (navigate: NavigateFunction) => {
     navigate('/laboratory');
     return;
   }
+
+  document.body?.classList.add(LAB_PREP_CLASS);
 
   const exitTargets = Array.from(document.querySelectorAll(EXIT_SELECTOR)) as HTMLElement[];
 
@@ -114,6 +118,7 @@ export const prepareLabElements = () => {
 
 export const animateLabElementsIn = () => {
   if (typeof document === 'undefined' || prefersReducedMotion()) {
+    document.body?.classList.remove(LAB_PREP_CLASS);
     return;
   }
 
@@ -135,10 +140,12 @@ export const animateLabElementsIn = () => {
     .filter((value): value is { element: HTMLElement; delay: number } => value !== null);
 
   if (!elementsToAnimate.length) {
+    document.body?.classList.remove(LAB_PREP_CLASS);
     return;
   }
 
   const runAnimations = () => {
+    document.body?.classList.remove(LAB_PREP_CLASS);
     elementsToAnimate.forEach(({ element, delay }) => {
       clearLabElementTimeouts(element);
 
@@ -200,11 +207,16 @@ export const cleanupProjectTransition = (scope: TransitionCleanupScope = 'all') 
     selectors.push(PROJECT_CLEANUP_SELECTOR);
   }
 
-  if (scope === 'laboratory' || scope === 'all') {
+  const shouldClearLabPrepClass = scope === 'laboratory' || scope === 'all';
+
+  if (shouldClearLabPrepClass) {
     selectors.push(LAB_CLEANUP_SELECTOR);
   }
 
   if (!selectors.length) {
+    if (shouldClearLabPrepClass) {
+      document.body?.classList.remove(LAB_PREP_CLASS);
+    }
     return;
   }
 
@@ -220,4 +232,8 @@ export const cleanupProjectTransition = (scope: TransitionCleanupScope = 'all') 
     target.style.willChange = '';
     clearLabElementTimeouts(target);
   });
+
+  if (shouldClearLabPrepClass) {
+    document.body?.classList.remove(LAB_PREP_CLASS);
+  }
 };

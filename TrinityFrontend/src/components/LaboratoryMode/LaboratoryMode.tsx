@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Play, Save, Share2, Undo2, AlertTriangle, List } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -19,6 +19,8 @@ import {
   animateLabElementsIn,
   cleanupProjectTransition,
   prepareLabElements,
+  prefersReducedMotion,
+  LAB_PREP_CLASS,
 } from '@/utils/projectTransition';
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
@@ -35,12 +37,31 @@ const LaboratoryMode = () => {
   const setExhibitionCards = useExhibitionStore(state => state.setCards);
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
+  const skipInitialLabCleanupRef = useRef(true);
 
   useIsomorphicLayoutEffect(() => {
+    const reduceMotion = prefersReducedMotion();
+
     cleanupProjectTransition('laboratory');
+
+    if (!reduceMotion && typeof document !== 'undefined') {
+      document.body.classList.add(LAB_PREP_CLASS);
+    }
+
     prepareLabElements();
 
-    return () => cleanupProjectTransition('laboratory');
+    return () => {
+      if (skipInitialLabCleanupRef.current) {
+        skipInitialLabCleanupRef.current = false;
+        return;
+      }
+
+      cleanupProjectTransition('laboratory');
+
+      if (!reduceMotion && typeof document !== 'undefined') {
+        document.body.classList.remove(LAB_PREP_CLASS);
+      }
+    };
   }, []);
 
   useIsomorphicLayoutEffect(() => {
