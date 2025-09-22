@@ -150,3 +150,12 @@ body.lab-transition-prep [data-lab-settings] {
   opacity: 0;
   transform: translateY(30px) scale(0.95);
 }
+
+[data-lab-preparing='true'] [data-lab-header],
+[data-lab-preparing='true'] [data-lab-toolbar],
+[data-lab-preparing='true'] [data-lab-sidebar],
+[data-lab-preparing='true'] [data-lab-canvas],
+[data-lab-preparing='true'] [data-lab-settings] {
+  opacity: 0;
+  transform: translateY(30px) scale(0.95);
+}
