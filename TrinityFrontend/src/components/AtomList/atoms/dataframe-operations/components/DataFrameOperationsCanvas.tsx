@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -103,7 +104,6 @@ function handleApiError(action: string, err: unknown) {
   });
 }
 
-const CONTEXT_MENU_OFFSET = 6;
 const CONTEXT_MENU_PADDING = 8;
 
 const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
@@ -135,7 +135,14 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const headersKey = useMemo(() => (data?.headers || []).join('|'), [data?.headers]);
   const [isFormulaMode, setIsFormulaMode] = useState(true);
   const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter'>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; col: string; colIdx: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    pointerX: number;
+    pointerY: number;
+    x: number;
+    y: number;
+    col: string;
+    colIdx: number;
+  } | null>(null);
   const [insertMenuOpen, setInsertMenuOpen] = useState(false);
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
   // 1. Add a ref to track the currently editing cell/header
@@ -153,6 +160,45 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [resizingRow, setResizingRow] = useState<{ index: number; startY: number; startHeight: number } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const rowContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const portalTarget = typeof document !== 'undefined' ? document.body : null;
+
+  const clampMenuPosition = useCallback((pointerX: number, pointerY: number, width: number, height: number) => {
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const maxX = Math.max(viewportWidth - width - CONTEXT_MENU_PADDING, CONTEXT_MENU_PADDING);
+    const maxY = Math.max(viewportHeight - height - CONTEXT_MENU_PADDING, CONTEXT_MENU_PADDING);
+    const x = Math.min(Math.max(pointerX, CONTEXT_MENU_PADDING), maxX);
+    const y = Math.min(Math.max(pointerY, CONTEXT_MENU_PADDING), maxY);
+    return { x, y };
+  }, []);
+
+  const repositionColumnContextMenu = useCallback(() => {
+    setContextMenu(prev => {
+      if (!prev || !contextMenuRef.current) {
+        return prev;
+      }
+      const rect = contextMenuRef.current.getBoundingClientRect();
+      const { x, y } = clampMenuPosition(prev.pointerX, prev.pointerY, rect.width, rect.height);
+      if (x === prev.x && y === prev.y) {
+        return prev;
+      }
+      return { ...prev, x, y };
+    });
+  }, [clampMenuPosition]);
+
+  const repositionRowContextMenu = useCallback(() => {
+    setRowContextMenu(prev => {
+      if (!prev || !rowContextMenuRef.current) {
+        return prev;
+      }
+      const rect = rowContextMenuRef.current.getBoundingClientRect();
+      const { x, y } = clampMenuPosition(prev.pointerX, prev.pointerY, rect.width, rect.height);
+      if (x === prev.x && y === prev.y) {
+        return prev;
+      }
+      return { ...prev, x, y };
+    });
+  }, [clampMenuPosition]);
 
   const startColResize = (key: string, e: React.MouseEvent) => {
     e.preventDefault();
@@ -392,7 +438,13 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   const resetSaveSuccess = () => { if (saveSuccess) setSaveSuccess(false); };
 
-  const [rowContextMenu, setRowContextMenu] = useState<{ x: number; y: number; rowIdx: number } | null>(null);
+  const [rowContextMenu, setRowContextMenu] = useState<{
+    pointerX: number;
+    pointerY: number;
+    x: number;
+    y: number;
+    rowIdx: number;
+  } | null>(null);
 
   const normalizeBackendColumnTypes = useCallback((
     types: Record<string, string> | undefined,
@@ -525,44 +577,48 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   }, [openDropdown, contextMenu, rowContextMenu]);
 
   useLayoutEffect(() => {
-    if (!contextMenu || !contextMenuRef.current) return;
-    const rect = contextMenuRef.current.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    let nextX = contextMenu.x;
-    let nextY = contextMenu.y;
-
-    if (nextX + rect.width > viewportWidth - CONTEXT_MENU_PADDING) {
-      nextX = Math.max(viewportWidth - rect.width - CONTEXT_MENU_PADDING, CONTEXT_MENU_PADDING);
+    if (!contextMenu) {
+      return;
     }
-    if (nextY + rect.height > viewportHeight - CONTEXT_MENU_PADDING) {
-      nextY = Math.max(viewportHeight - rect.height - CONTEXT_MENU_PADDING, CONTEXT_MENU_PADDING);
-    }
-
-    if (nextX !== contextMenu.x || nextY !== contextMenu.y) {
-      setContextMenu(prev => (prev ? { ...prev, x: nextX, y: nextY } : prev));
-    }
-  }, [contextMenu]);
+    repositionColumnContextMenu();
+  }, [contextMenu, repositionColumnContextMenu]);
 
   useLayoutEffect(() => {
-    if (!rowContextMenu || !rowContextMenuRef.current) return;
-    const rect = rowContextMenuRef.current.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    let nextX = rowContextMenu.x;
-    let nextY = rowContextMenu.y;
+    if (!rowContextMenu) {
+      return;
+    }
+    repositionRowContextMenu();
+  }, [rowContextMenu, repositionRowContextMenu]);
 
-    if (nextX + rect.width > viewportWidth - CONTEXT_MENU_PADDING) {
-      nextX = Math.max(viewportWidth - rect.width - CONTEXT_MENU_PADDING, CONTEXT_MENU_PADDING);
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
     }
-    if (nextY + rect.height > viewportHeight - CONTEXT_MENU_PADDING) {
-      nextY = Math.max(viewportHeight - rect.height - CONTEXT_MENU_PADDING, CONTEXT_MENU_PADDING);
-    }
+    const handleWindowUpdate = () => {
+      repositionColumnContextMenu();
+    };
+    window.addEventListener('resize', handleWindowUpdate);
+    window.addEventListener('scroll', handleWindowUpdate, true);
+    return () => {
+      window.removeEventListener('resize', handleWindowUpdate);
+      window.removeEventListener('scroll', handleWindowUpdate, true);
+    };
+  }, [contextMenu, repositionColumnContextMenu]);
 
-    if (nextX !== rowContextMenu.x || nextY !== rowContextMenu.y) {
-      setRowContextMenu(prev => (prev ? { ...prev, x: nextX, y: nextY } : prev));
+  useEffect(() => {
+    if (!rowContextMenu) {
+      return;
     }
-  }, [rowContextMenu]);
+    const handleWindowUpdate = () => {
+      repositionRowContextMenu();
+    };
+    window.addEventListener('resize', handleWindowUpdate);
+    window.addEventListener('scroll', handleWindowUpdate, true);
+    return () => {
+      window.removeEventListener('resize', handleWindowUpdate);
+      window.removeEventListener('scroll', handleWindowUpdate, true);
+    };
+  }, [rowContextMenu, repositionRowContextMenu]);
 
   // Process and filter data
   const processedData = useMemo(() => {
@@ -1306,9 +1362,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       onDragEnd={handleDragEnd}
                       onContextMenu={e => {
                         e.preventDefault();
+                        const { clientX, clientY } = e;
                         setContextMenu({
-                          x: e.clientX + CONTEXT_MENU_OFFSET,
-                          y: e.clientY + CONTEXT_MENU_OFFSET,
+                          pointerX: clientX,
+                          pointerY: clientY,
+                          x: clientX,
+                          y: clientY,
                           col: header,
                           colIdx
                         });
@@ -1374,15 +1433,18 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     {settings.showRowNumbers && (
                       <TableCell
                         className="table-cell w-16 text-center text-xs font-medium"
-                        onContextMenu={e => {
-                          e.preventDefault();
-                          setRowContextMenu({
-                            x: e.clientX + CONTEXT_MENU_OFFSET,
-                            y: e.clientY + CONTEXT_MENU_OFFSET,
-                            rowIdx: startIndex + rowIndex
-                          });
-                          setContextMenu(null);
-                        }}
+                      onContextMenu={e => {
+                        e.preventDefault();
+                        const { clientX, clientY } = e;
+                        setRowContextMenu({
+                          pointerX: clientX,
+                          pointerY: clientY,
+                          x: clientX,
+                          y: clientY,
+                          rowIdx: startIndex + rowIndex
+                        });
+                        setContextMenu(null);
+                      }}
                       >
                         {startIndex + rowIndex + 1}
                       </TableCell>
@@ -1499,12 +1561,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         </div>
         </div>
       </div>
-      {contextMenu && data && typeof contextMenu.col === 'string' && (
-        <div
-          ref={contextMenuRef}
-          id="df-ops-context-menu"
-          style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 200 }}
-        >
+      {portalTarget && contextMenu && data && typeof contextMenu.col === 'string' &&
+        createPortal(
+          <div
+            ref={contextMenuRef}
+            id="df-ops-context-menu"
+            style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 200 }}
+          >
           <div className="px-3 py-2 text-xs font-semibold border-b border-gray-200" style={{color:'#222'}}>Column: {contextMenu.col}</div>
           {/* Sort */}
           <div className="relative group">
@@ -1727,21 +1790,24 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); }}>Convert to Text</button>
           )}
           <div className="px-3 py-2 text-xs text-gray-400">Right-click to close</div>
-        </div>
-      )}
-      {rowContextMenu && typeof rowContextMenu.rowIdx === 'number' && (
-        <div
-          ref={rowContextMenuRef}
-          id="df-ops-row-context-menu"
-          style={{ position: 'fixed', top: rowContextMenu.y, left: rowContextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 140 }}
-        >
+          </div>,
+          portalTarget
+        )}
+      {portalTarget && rowContextMenu && typeof rowContextMenu.rowIdx === 'number' &&
+        createPortal(
+          <div
+            ref={rowContextMenuRef}
+            id="df-ops-row-context-menu"
+            style={{ position: 'fixed', top: rowContextMenu.y, left: rowContextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 140 }}
+          >
           <div className="px-3 py-2 text-xs font-semibold border-b border-gray-200" style={{color:'#222'}}>Row: {rowContextMenu.rowIdx + 1}</div>
           <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.preventDefault(); e.stopPropagation(); handleInsertRow('above', rowContextMenu.rowIdx); setRowContextMenu(null); }}>Insert</button>
           <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.preventDefault(); e.stopPropagation(); handleDuplicateRow(rowContextMenu.rowIdx); setRowContextMenu(null); }}>Duplicate</button>
           <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.preventDefault(); e.stopPropagation(); handleDeleteRow(rowContextMenu.rowIdx); setRowContextMenu(null); }}>Delete</button>
           <div className="px-3 py-2 text-xs text-gray-400">Right-click to close</div>
-        </div>
-      )}
+          </div>,
+          portalTarget
+        )}
     </>
   );
 };
