@@ -241,12 +241,13 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
   return (
     <div
       ref={widgetRef}
-      className="fixed z-50 select-none transition-opacity duration-500 ease-out"
+      className="fixed z-50 select-none transition-all duration-500 ease-out"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
         cursor: isDragging ? 'grabbing' : 'default',
         opacity: isFadingIn ? 1 : 0,
+        transform: isFadingIn ? 'translateY(0)' : 'translateY(12px)',
         pointerEvents: isFadingIn ? 'auto' : 'none',
       }}
     >

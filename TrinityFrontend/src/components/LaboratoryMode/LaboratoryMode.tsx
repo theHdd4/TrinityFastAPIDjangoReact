@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect, useMemo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Play, Save, Share2, Undo2, AlertTriangle, List } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -49,6 +49,14 @@ const LaboratoryMode = () => {
   const skipInitialLabCleanupRef = useRef(true);
   const reduceMotionRef = useRef(initialReduceMotion);
   const hasAutoShownNavigationRef = useRef(initialReduceMotion);
+  const autoRevealNavigationList = useCallback(() => {
+    if (hasAutoShownNavigationRef.current) {
+      return;
+    }
+
+    hasAutoShownNavigationRef.current = true;
+    setShowFloatingNavigationList(true);
+  }, [setShowFloatingNavigationList]);
   const [isPreparingAnimation, setIsPreparingAnimation] = useState(!initialReduceMotion);
   const [hasEntranceFinished, setHasEntranceFinished] = useState(initialReduceMotion);
 
@@ -96,6 +104,7 @@ const LaboratoryMode = () => {
     if (reduceMotionRef.current) {
       setIsPreparingAnimation(false);
       setHasEntranceFinished(true);
+      autoRevealNavigationList();
       return;
     }
 
@@ -119,6 +128,7 @@ const LaboratoryMode = () => {
       }
       hasMarkedCompletion = true;
       setHasEntranceFinished(true);
+      autoRevealNavigationList();
     };
 
     const handleHeaderAnimationStart = (event: AnimationEvent) => {
@@ -151,16 +161,15 @@ const LaboratoryMode = () => {
       window.clearTimeout(startFallback);
       window.clearTimeout(completionFallback);
     };
-  }, []);
+  }, [autoRevealNavigationList]);
 
   useEffect(() => {
-    if (!hasEntranceFinished || hasAutoShownNavigationRef.current) {
+    if (!hasEntranceFinished) {
       return;
     }
 
-    hasAutoShownNavigationRef.current = true;
-    setShowFloatingNavigationList(true);
-  }, [hasEntranceFinished]);
+    autoRevealNavigationList();
+  }, [autoRevealNavigationList, hasEntranceFinished]);
 
   useEffect(() => {
     if (localStorage.getItem('laboratory-config')) {
