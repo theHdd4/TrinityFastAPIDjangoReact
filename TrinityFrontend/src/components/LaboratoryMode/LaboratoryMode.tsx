@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Play, Save, Share2, Undo2, AlertTriangle, List } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -41,12 +41,17 @@ const LaboratoryMode = () => {
   const setExhibitionCards = useExhibitionStore(state => state.setCards);
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
+  const initialReduceMotion = useMemo(() => prefersReducedMotion(), []);
   const skipInitialLabCleanupRef = useRef(true);
-  const reduceMotionRef = useRef(false);
+  const reduceMotionRef = useRef(initialReduceMotion);
+  const [isPreparingAnimation, setIsPreparingAnimation] = useState(!initialReduceMotion);
 
   useIsomorphicInsertionEffect(() => {
     const reduceMotion = prefersReducedMotion();
     reduceMotionRef.current = reduceMotion;
+    if (reduceMotion) {
+      setIsPreparingAnimation(false);
+    }
 
     cleanupProjectTransition('laboratory', { preserveLabPrepClass: true });
 
@@ -72,6 +77,9 @@ const LaboratoryMode = () => {
 
   useIsomorphicLayoutEffect(() => {
     animateLabElementsIn();
+    if (!reduceMotionRef.current) {
+      setIsPreparingAnimation(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -223,7 +231,10 @@ const LaboratoryMode = () => {
   };
 
   return (
-    <div className="h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
+    <div
+      data-lab-preparing={isPreparingAnimation ? 'true' : undefined}
+      className="h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col"
+    >
       <Header />
       
       {/* Error Banner */}
