@@ -21,6 +21,7 @@ from .deps import (
     get_summary_results_collection,
     get_validator_atoms_collection,
     redis_client,
+    redis_binary_client,
 )
 
 from .mongodb_saver import (
@@ -102,6 +103,40 @@ ensure_minio_bucket()
 router = APIRouter()
 
 
+def _redis_get_bytes(key: str) -> bytes | None:
+    """Fetch binary content from Redis without triggering UTF-8 decoding."""
+
+    try:
+        value = redis_binary_client.get(key)
+    except Exception as exc:
+        print(f"⚠️ redis binary get error for {key}: {exc}")
+        return None
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    if isinstance(value, memoryview):
+        return value.tobytes()
+    return str(value).encode("utf-8")
+
+
+def _redis_set_bytes(key: str, value: bytes | bytearray | str, ttl: int = 3600) -> None:
+    """Store binary content in Redis with a TTL, tolerating failures."""
+
+    try:
+        if isinstance(value, (bytes, bytearray)):
+            data = bytes(value)
+        elif isinstance(value, memoryview):
+            data = value.tobytes()
+        elif isinstance(value, str):
+            data = value.encode("utf-8")
+        else:
+            data = str(value).encode("utf-8")
+        redis_binary_client.setex(key, ttl, data)
+    except Exception as exc:
+        print(f"⚠️ redis binary set error for {key}: {exc}")
+
+
 @router.get("/column_summary")
 async def column_summary(object_name: str):
     """Return column summary statistics for a saved dataframe."""
@@ -138,11 +173,11 @@ async def column_summary(object_name: str):
         if df is None:
             if not object_name.endswith(".arrow"):
                 raise ValueError("Unsupported file format")
-            content = redis_client.get(object_name)
+            content = _redis_get_bytes(object_name)
             if content is None:
                 response = minio_client.get_object(MINIO_BUCKET, object_name)
                 content = response.read()
-                redis_client.setex(object_name, 3600, content)
+                _redis_set_bytes(object_name, content)
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
 
@@ -227,11 +262,11 @@ async def cached_dataframe(object_name: str):
         except Exception as exc:
             print(f"⚠️ flight dataframe error for {object_name}: {exc}")
 
-        content = redis_client.get(object_name)
+        content = _redis_get_bytes(object_name)
         if content is None:
             response = minio_client.get_object(MINIO_BUCKET, object_name)
             content = response.read()
-            redis_client.setex(object_name, 3600, content)
+            _redis_set_bytes(object_name, content)
 
         if object_name.endswith(".arrow"):
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
@@ -364,11 +399,11 @@ def _load_polars_frame(object_name: str, flight_path: str | None = None) -> pl.D
     if not object_name.endswith(".arrow"):
         raise ValueError("Unsupported file format")
 
-    content = redis_client.get(object_name)
+    content = _redis_get_bytes(object_name)
     if content is None:
         response = minio_client.get_object(MINIO_BUCKET, object_name)
         content = response.read()
-        redis_client.setex(object_name, 3600, content)
+        _redis_set_bytes(object_name, content)
 
     try:
         return pl.read_ipc(io.BytesIO(content))
