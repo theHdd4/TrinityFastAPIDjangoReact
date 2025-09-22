@@ -236,25 +236,56 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
 
     try {
-      let query = '';
+      let env: any = {};
       const envStr = localStorage.getItem('env');
       if (envStr) {
         try {
-          const env = JSON.parse(envStr);
-          query =
-            '?' +
-            new URLSearchParams({
-              client_id: env.CLIENT_ID || '',
-              app_id: env.APP_ID || '',
-              project_id: env.PROJECT_ID || '',
-              client_name: env.CLIENT_NAME || '',
-              app_name: env.APP_NAME || '',
-              project_name: env.PROJECT_NAME || ''
-            }).toString();
+          env = JSON.parse(envStr);
         } catch {
-          /* ignore */
+          env = {};
         }
       }
+      const params = new URLSearchParams({
+        client_id: env.CLIENT_ID || '',
+        app_id: env.APP_ID || '',
+        project_id: env.PROJECT_ID || '',
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
+      });
+      const query = params.toString() ? `?${params.toString()}` : '';
+
+      try {
+        const latestRes = await fetch(
+          `${VALIDATE_API}/latest_project_dataframe${query}`,
+          { credentials: 'include', signal }
+        );
+        if (latestRes.ok) {
+          const latestData = await latestRes.json();
+          const latestName = latestData?.object_name;
+          if (typeof latestName === 'string' && latestName.trim()) {
+            console.log(
+              '✔️ defaulting to latest flight dataframe',
+              latestName,
+              latestData?.source || 'unknown'
+            );
+            await prefetchDataframe(latestName, signal);
+            const cols = await fetchColumnSummary(latestName, signal);
+            return {
+              csv: latestName,
+              display: latestData?.csv_name || latestName,
+              ...(cols || {}),
+            };
+          }
+        } else {
+          console.warn('⚠️ latest_project_dataframe failed', latestRes.status);
+        }
+      } catch (err) {
+        if ((err as any)?.name !== 'AbortError') {
+          console.warn('⚠️ latest_project_dataframe request failed', err);
+        }
+      }
+
       const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`, {
         signal,
       });
