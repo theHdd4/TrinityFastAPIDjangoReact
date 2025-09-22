@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Play, Save, Share2, Undo2, AlertTriangle, List } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -22,7 +22,6 @@ import {
   prefersReducedMotion,
   LAB_PREP_CLASS,
   LAB_ENTRANCE_PREP_DELAY_MS,
-  LAB_ENTRANCE_SEQUENCE_DURATION_MS,
 } from '@/utils/projectTransition';
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
@@ -31,15 +30,13 @@ const useIsomorphicInsertionEffect =
     ? useInsertionEffect
     : useIsomorphicLayoutEffect;
 
-const ENTRANCE_COMPLETION_BUFFER_MS = 200;
-
 const LaboratoryMode = () => {
   const initialReduceMotion = useMemo(() => prefersReducedMotion(), []);
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(initialReduceMotion);
+  const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
   const [auxActive, setAuxActive] = useState<string | null>(null);
   const { toast } = useToast();
   const { cards, setCards: setLabCards } = useLaboratoryStore();
@@ -48,17 +45,7 @@ const LaboratoryMode = () => {
   const canEdit = hasPermission('laboratory:edit');
   const skipInitialLabCleanupRef = useRef(true);
   const reduceMotionRef = useRef(initialReduceMotion);
-  const hasAutoShownNavigationRef = useRef(initialReduceMotion);
-  const autoRevealNavigationList = useCallback(() => {
-    if (hasAutoShownNavigationRef.current) {
-      return;
-    }
-
-    hasAutoShownNavigationRef.current = true;
-    setShowFloatingNavigationList(true);
-  }, [setShowFloatingNavigationList]);
   const [isPreparingAnimation, setIsPreparingAnimation] = useState(!initialReduceMotion);
-  const [hasEntranceFinished, setHasEntranceFinished] = useState(initialReduceMotion);
 
   useIsomorphicInsertionEffect(() => {
     const reduceMotion = prefersReducedMotion();
@@ -103,16 +90,12 @@ const LaboratoryMode = () => {
 
     if (reduceMotionRef.current) {
       setIsPreparingAnimation(false);
-      setHasEntranceFinished(true);
-      autoRevealNavigationList();
       return;
     }
 
     const headerElement = document.querySelector('[data-lab-header]') as HTMLElement | null;
-    const settingsElement = document.querySelector('[data-lab-settings]') as HTMLElement | null;
 
     let hasMarkedStart = false;
-    let hasMarkedCompletion = false;
 
     const markAnimationStarted = () => {
       if (hasMarkedStart) {
@@ -122,15 +105,6 @@ const LaboratoryMode = () => {
       setIsPreparingAnimation(false);
     };
 
-    const markAnimationCompleted = () => {
-      if (hasMarkedCompletion) {
-        return;
-      }
-      hasMarkedCompletion = true;
-      setHasEntranceFinished(true);
-      autoRevealNavigationList();
-    };
-
     const handleHeaderAnimationStart = (event: AnimationEvent) => {
       if (event.target !== headerElement) {
         return;
@@ -138,38 +112,16 @@ const LaboratoryMode = () => {
       markAnimationStarted();
     };
 
-    const handleSettingsAnimationEnd = (event: AnimationEvent) => {
-      if (event.target !== settingsElement) {
-        return;
-      }
-      markAnimationCompleted();
-    };
-
     headerElement?.addEventListener('animationstart', handleHeaderAnimationStart);
-    settingsElement?.addEventListener('animationend', handleSettingsAnimationEnd);
 
     const startFallbackDelay = LAB_ENTRANCE_PREP_DELAY_MS + 100;
     const startFallback = window.setTimeout(markAnimationStarted, startFallbackDelay);
-    const completionFallback = window.setTimeout(
-      markAnimationCompleted,
-      LAB_ENTRANCE_SEQUENCE_DURATION_MS + ENTRANCE_COMPLETION_BUFFER_MS,
-    );
 
     return () => {
       headerElement?.removeEventListener('animationstart', handleHeaderAnimationStart);
-      settingsElement?.removeEventListener('animationend', handleSettingsAnimationEnd);
       window.clearTimeout(startFallback);
-      window.clearTimeout(completionFallback);
     };
-  }, [autoRevealNavigationList]);
-
-  useEffect(() => {
-    if (!hasEntranceFinished) {
-      return;
-    }
-
-    autoRevealNavigationList();
-  }, [autoRevealNavigationList, hasEntranceFinished]);
+  }, []);
 
   useEffect(() => {
     if (localStorage.getItem('laboratory-config')) {
@@ -458,7 +410,6 @@ const LaboratoryMode = () => {
             <FloatingNavigationList
               isVisible={showFloatingNavigationList}
               onClose={() => setShowFloatingNavigationList(false)}
-              isReady={hasEntranceFinished}
               anchorSelector="[data-lab-header-text]"
             />
           </div>

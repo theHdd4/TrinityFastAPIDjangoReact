@@ -8,7 +8,6 @@ interface FloatingNavigationListProps {
   isVisible: boolean;
   onClose: () => void;
   anchorSelector?: string;
-  isReady?: boolean;
 }
 
 const VIEWPORT_PADDING = 24;
@@ -18,7 +17,6 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
   isVisible,
   onClose,
   anchorSelector,
-  isReady = true,
 }) => {
   const [position, setPosition] = useState(DEFAULT_POSITION);
   const [isDragging, setIsDragging] = useState(false);
@@ -98,7 +96,7 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
   const atomsCount = allAtoms.length;
 
   useLayoutEffect(() => {
-    if (!isVisible || !isReady || manualPositionRef.current || !anchorSelector) {
+    if (!isVisible || manualPositionRef.current || !anchorSelector) {
       return;
     }
 
@@ -135,10 +133,10 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
         window.cancelAnimationFrame(frameId);
       }
     };
-  }, [alignToAnchor, anchorSelector, isReady, isVisible]);
+  }, [alignToAnchor, anchorSelector, isVisible]);
 
   useEffect(() => {
-    if (!isVisible || !isReady || manualPositionRef.current) {
+    if (!isVisible || manualPositionRef.current) {
       return;
     }
 
@@ -153,10 +151,10 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [alignToAnchor, atomsCount, cardsLength, isMinimized, isReady, isVisible]);
+  }, [alignToAnchor, atomsCount, cardsLength, isMinimized, isVisible]);
 
   useEffect(() => {
-    if (!isVisible || !isReady || manualPositionRef.current || !anchorSelector) {
+    if (!isVisible || manualPositionRef.current || !anchorSelector) {
       return;
     }
 
@@ -172,15 +170,15 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
     return () => {
       window.removeEventListener('resize', handleResize);
     };
-  }, [alignToAnchor, anchorSelector, isReady, isVisible]);
+  }, [alignToAnchor, anchorSelector, isVisible]);
 
   useEffect(() => {
-    if (isVisible && isReady) {
+    if (isVisible) {
       setIsFadingIn(true);
     } else {
       setIsFadingIn(false);
     }
-  }, [isVisible, isReady]);
+  }, [isVisible]);
 
   const scrollToCard = (cardId: string) => {
     const cardElement = document.querySelector(`[data-card-id="${cardId}"]`);
@@ -236,7 +234,7 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
     };
   }, [clampPositionToViewport, isDragging, dragOffset]);
 
-  if (!isVisible || !isReady) return null;
+  if (!isVisible) return null;
 
   return (
     <div
