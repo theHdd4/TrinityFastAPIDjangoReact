@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { Checkbox } from '@/components/ui/checkbox';
 import Table from '@/templates/tables/table';
+import { safeStringify } from '@/utils/safeStringify';
 
 // Chart color palette using specified base colors and lighter shades
 const CHART_COLORS = [
@@ -29,6 +30,16 @@ const CHART_COLORS = [
 ];
 
 const CHART_FONT = `'Inter', 'Segoe UI', sans-serif`;
+
+const toComparableString = (value: unknown): string => {
+  const serialized = safeStringify(value);
+  if (typeof serialized === 'string') {
+    return serialized;
+  }
+  return String(serialized);
+};
+
+const deepEqual = (a: unknown, b: unknown): boolean => toComparableString(a) === toComparableString(b);
 
 // FilterMenu component moved outside to prevent recreation on every render
 const FilterMenu = ({ 
@@ -303,6 +314,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Debouncing mechanism to prevent multiple chart generations
   const chartGenerationTimeouts = useRef<{ [chartIndex: number]: NodeJS.Timeout | null }>({});
+  const persistedStateRef = useRef<string>();
 
   // Add error handling and default values
   const safeData = {
@@ -338,14 +350,56 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   };
 
   useEffect(() => {
-    if (safeData.chartFilters) setChartFilters(safeData.chartFilters);
-    if (safeData.chartThemes) setChartThemes(safeData.chartThemes);
-    if (safeData.chartOptions) setChartOptions(safeData.chartOptions);
-    if (safeData.appliedFilters) setAppliedFilters(safeData.appliedFilters);
-    if (safeData.chartDataSets) setChartDataSets(safeData.chartDataSets);
-    if (safeData.chartGenerated) setChartGenerated(safeData.chartGenerated);
-    if (safeData.chartNotes) setChartNotes(safeData.chartNotes);
-  }, []);
+    const nextChartFilters = safeData.chartFilters ?? {};
+    if (!deepEqual(chartFilters, nextChartFilters)) {
+      setChartFilters(nextChartFilters);
+    }
+
+    const nextChartThemes = safeData.chartThemes ?? {};
+    if (!deepEqual(chartThemes, nextChartThemes)) {
+      setChartThemes(nextChartThemes);
+    }
+
+    const nextChartOptions = safeData.chartOptions ?? {};
+    if (!deepEqual(chartOptions, nextChartOptions)) {
+      setChartOptions(nextChartOptions);
+    }
+
+    const nextAppliedFilters = safeData.appliedFilters ?? {};
+    if (!deepEqual(appliedFilters, nextAppliedFilters)) {
+      setAppliedFilters(nextAppliedFilters);
+    }
+
+    const nextChartDataSets = safeData.chartDataSets ?? {};
+    if (!deepEqual(chartDataSets, nextChartDataSets)) {
+      setChartDataSets(nextChartDataSets);
+    }
+
+    const nextChartGenerated = safeData.chartGenerated ?? {};
+    if (!deepEqual(chartGenerated, nextChartGenerated)) {
+      setChartGenerated(nextChartGenerated);
+    }
+
+    const nextChartNotes = safeData.chartNotes ?? {};
+    if (!deepEqual(chartNotes, nextChartNotes)) {
+      setChartNotes(nextChartNotes);
+    }
+  }, [
+    safeData.chartFilters,
+    safeData.chartThemes,
+    safeData.chartOptions,
+    safeData.appliedFilters,
+    safeData.chartDataSets,
+    safeData.chartGenerated,
+    safeData.chartNotes,
+    chartFilters,
+    chartThemes,
+    chartOptions,
+    appliedFilters,
+    chartDataSets,
+    chartGenerated,
+    chartNotes,
+  ]);
 
   // Update chartConfigs when AI-generated data arrives
   useEffect(() => {
@@ -586,40 +640,81 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   });
   const [chatBubbleShouldRender, setChatBubbleShouldRender] = useState(false);
 
+  useEffect(() => {
+    const fallbackConfig = {
+      xAxis: safeData.xAxis || '',
+      yAxes: [safeData.yAxis || ''],
+      xAxisLabel: safeData.xAxisLabel || '',
+      yAxisLabels: [safeData.yAxisLabel || ''],
+      chartType: safeData.chartType || 'line_chart',
+      aggregation: safeData.aggregation || 'no_aggregation',
+      weightColumn: safeData.weightColumn || '',
+      title: safeData.title || '',
+      legendField: safeData.legendField || '',
+      sortOrder: null as string | null,
+    };
+
+    const nextConfigs =
+      safeData.chartConfigs && Array.isArray(safeData.chartConfigs) && safeData.chartConfigs.length > 0
+        ? safeData.chartConfigs
+        : [fallbackConfig];
+
+    if (!deepEqual(chartConfigs, nextConfigs)) {
+      setChartConfigs(nextConfigs);
+    }
+  }, [
+    safeData.chartConfigs,
+    safeData.xAxis,
+    safeData.yAxis,
+    safeData.xAxisLabel,
+    safeData.yAxisLabel,
+    safeData.chartType,
+    safeData.aggregation,
+    safeData.weightColumn,
+    safeData.legendField,
+    safeData.title,
+    chartConfigs,
+  ]);
+
   // Persist chart state changes to parent atom settings for saving/loading
-  // COMMENTED OUT - causing infinite loop of updateAtomSettings calls
-  // useEffect(() => {
-  //   const primaryConfig = chartConfigs[0] || {};
-  //   onDataChange({
-  //     chartConfigs,
-  //     chartFilters,
-  //     chartThemes,
-  //     chartOptions,
-  //     chartDataSets,
-  //     chartGenerated,
-  //     appliedFilters,
-  //     chartNotes,
-  //     xAxis: primaryConfig.xAxis || '',
-  //     yAxis: primaryConfig.yAxes?.[0] || '',
-  //     xAxisLabel: primaryConfig.xAxisLabel || '',
-  //     yAxisLabel: primaryConfig.yAxisLabels?.[0] || '',
-  //     chartType: primaryConfig.chartType || 'line_chart',
-  //     legendField: primaryConfig.legendField || '',
-  //     aggregation: primaryConfig.aggregation || 'no_aggregation',
-  //     weightColumn: primaryConfig.weightColumn || '',
-  //     title: primaryConfig.title || '',
-  //   });
-  //   // eslint-disable-next-line react-hooks/exhaustive-deps
-  // }, [
-  //   chartConfigs,
-  //   chartFilters,
-  //   chartThemes,
-  //   chartOptions,
-  //   chartDataSets,
-  //   chartGenerated,
-  //   appliedFilters,
-  //   chartNotes,
-  // ]);
+  useEffect(() => {
+    const primaryConfig = chartConfigs[0] || {};
+    const payload: Partial<ExploreData> = {
+      chartConfigs,
+      chartFilters,
+      chartThemes,
+      chartOptions,
+      chartDataSets,
+      chartGenerated,
+      appliedFilters,
+      chartNotes,
+      xAxis: primaryConfig.xAxis || '',
+      yAxis: primaryConfig.yAxes?.[0] || '',
+      xAxisLabel: primaryConfig.xAxisLabel || '',
+      yAxisLabel: primaryConfig.yAxisLabels?.[0] || '',
+      chartType: primaryConfig.chartType || 'line_chart',
+      legendField: primaryConfig.legendField || '',
+      aggregation: primaryConfig.aggregation || 'no_aggregation',
+      weightColumn: primaryConfig.weightColumn || '',
+      title: primaryConfig.title || '',
+    };
+
+    const serialized = toComparableString(payload);
+    if (persistedStateRef.current !== serialized) {
+      persistedStateRef.current = serialized;
+      onDataChange(payload);
+    }
+  }, [
+    chartConfigs,
+    chartFilters,
+    chartThemes,
+    chartOptions,
+    chartDataSets,
+    chartGenerated,
+    appliedFilters,
+    chartNotes,
+    onDataChange,
+  ]);
 
   // Auto-generate charts on mount if data and configs exist
   useEffect(() => {
