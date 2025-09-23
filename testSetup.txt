@@ -1,0 +1,33 @@
+Project Rename Regression Tests
+===============================
+
+The regression tests for the project rename workflow live in
+``TrinityBackendDjango/tests/test_project_rename_mongo.py``. They exercise the
+MongoDB document rewrite helper that keeps column classifier and other cached
+project resources in sync when a project name changes.
+
+Prerequisites
+-------------
+* Python 3.10+ with the Django and pytest dependencies installed. The quickest
+  way is to reuse the existing backend virtual environment or install the
+  backend requirements with::
+
+      pip install -r TrinityBackendDjango/requirements.txt
+
+* No external services are required—the test fakes MongoDB and Redis clients, so
+  it can be run entirely offline.
+
+Running the focused regression test
+-----------------------------------
+From the repository root run::
+
+    pytest TrinityBackendDjango/tests/test_project_rename_mongo.py
+
+Running the full backend test suite
+-----------------------------------
+To run every Django backend test (including the rename regression), execute::
+
+    pytest TrinityBackendDjango/tests
+
+Both commands must be executed from the repository root so pytest can discover
+and configure the Django settings module automatically.
