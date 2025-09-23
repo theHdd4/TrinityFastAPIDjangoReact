@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
-import { Play, Save, Share2, Undo2, AlertTriangle, List } from 'lucide-react';
+import { Play, Save, Share2, Undo2, List } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import {
@@ -38,7 +38,6 @@ const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
   const [auxActive, setAuxActive] = useState<string | null>(null);
   const { toast } = useToast();
@@ -162,11 +161,12 @@ const LaboratoryMode = () => {
           const storageSuccess = persistLaboratoryConfig(sanitized);
           if (!storageSuccess) {
             console.warn('Storage quota exceeded while caching undo state.');
-            setError(
-              'Storage quota exceeded. The configuration was updated, but local caching failed. Please clear your browser storage.',
-            );
-          } else {
-            setError(null);
+            toast({
+              title: 'Storage Limit Reached',
+              description:
+                'We updated your configuration, but local caching failed due to storage limits. Clear your browser storage to continue working offline.',
+              variant: 'destructive',
+            });
           }
 
           await fetch(`${LAB_ACTIONS_API}/${last.id}/`, { method: 'DELETE', credentials: 'include' }).catch(() => {});
@@ -175,7 +175,11 @@ const LaboratoryMode = () => {
       }
     } catch (error) {
       console.error('Undo error:', error);
-      setError('Failed to undo. Please try again.');
+      toast({
+        title: 'Undo Failed',
+        description: 'Failed to undo. Please try again.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -240,15 +244,11 @@ const LaboratoryMode = () => {
 
       const storageSuccess = persistLaboratoryConfig(sanitized);
       if (storageSuccess) {
-        setError(null);
         toast({
           title: 'Configuration Saved',
           description: `Laboratory configuration saved successfully. ${exhibitedCards.length} card(s) marked for exhibition.`,
         });
       } else {
-        const message =
-          'Storage quota exceeded. The configuration was saved, but it could not be cached locally. Please clear your browser storage.';
-        setError(message);
         toast({
           title: 'Storage Limit Reached',
           description:
@@ -269,23 +269,11 @@ const LaboratoryMode = () => {
       logSessionState(user?.id);
     } catch (error) {
       console.error('Save error:', error);
-      setError('Failed to save configuration. Please try again.');
       toast({
         title: "Save Error",
         description: "Failed to save configuration. Please try again.",
         variant: "destructive",
       });
-    }
-  };
-
-  const clearStorageAndReload = () => {
-    try {
-      localStorage.clear();
-      sessionStorage.clear();
-      window.location.reload();
-    } catch (e) {
-      console.error('Failed to clear storage:', e);
-      window.location.reload();
     }
   };
 
@@ -295,36 +283,6 @@ const LaboratoryMode = () => {
       className="h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col"
     >
       <Header />
-      
-      {/* Error Banner */}
-      {error && (
-        <div className="bg-red-50 border-b border-red-200 px-6 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center">
-              <AlertTriangle className="w-5 h-5 text-red-600 mr-3" />
-              <span className="text-red-800 text-sm">{error}</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setError(null)}
-                className="text-red-600 border-red-300 hover:bg-red-50"
-              >
-                Dismiss
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={clearStorageAndReload}
-                className="text-red-600 border-red-300 hover:bg-red-50"
-              >
-                Clear Storage & Reload
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
       
       {/* Laboratory Header */}
       <div
