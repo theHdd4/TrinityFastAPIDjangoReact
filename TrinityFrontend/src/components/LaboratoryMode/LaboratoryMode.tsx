@@ -4,8 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Play, Save, Share2, Undo2, AlertTriangle, List } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
-import { safeStringify } from '@/utils/safeStringify';
-import { sanitizeLabConfig, saveCurrentProject } from '@/utils/projectStorage';
+import {
+  sanitizeLabConfig,
+  saveCurrentProject,
+  persistLaboratoryConfig,
+} from '@/utils/projectStorage';
 import CanvasArea from './components/CanvasArea';
 import AuxiliaryMenu from './components/AuxiliaryMenu';
 import AuxiliaryMenuLeft from './components/AuxiliaryMenuLeft';
@@ -143,27 +146,31 @@ const LaboratoryMode = () => {
         if (last && last.state) {
           setLabCards(last.state);
           setExhibitionCards(last.state);
-          try {
-            const labConfig = {
-              cards: last.state,
-              exhibitedCards: (last.state || []).filter((c: any) => c.isExhibited),
-              timestamp: new Date().toISOString(),
-            };
-            const sanitized = sanitizeLabConfig(labConfig);
-            await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
-              method: 'PATCH',
-              credentials: 'include',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ state: { laboratory_config: sanitized } }),
-            }).catch(() => {});
-            localStorage.setItem('laboratory-layout-cards', safeStringify(sanitized.cards));
-            localStorage.setItem('laboratory-config', safeStringify(sanitized));
-            await fetch(`${LAB_ACTIONS_API}/${last.id}/`, { method: 'DELETE', credentials: 'include' }).catch(() => {});
-            toast({ title: 'Undo', description: 'Last change reverted' });
-          } catch (storageError) {
-            console.error('Storage error during undo:', storageError);
-            setError('Storage quota exceeded. Please clear browser data and try again.');
+          const labConfig = {
+            cards: last.state,
+            exhibitedCards: (last.state || []).filter((c: any) => c.isExhibited),
+            timestamp: new Date().toISOString(),
+          };
+          const sanitized = sanitizeLabConfig(labConfig);
+          await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
+            method: 'PATCH',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ state: { laboratory_config: sanitized } }),
+          }).catch(() => {});
+
+          const storageSuccess = persistLaboratoryConfig(sanitized);
+          if (!storageSuccess) {
+            console.warn('Storage quota exceeded while caching undo state.');
+            setError(
+              'Storage quota exceeded. The configuration was updated, but local caching failed. Please clear your browser storage.',
+            );
+          } else {
+            setError(null);
           }
+
+          await fetch(`${LAB_ACTIONS_API}/${last.id}/`, { method: 'DELETE', credentials: 'include' }).catch(() => {});
+          toast({ title: 'Undo', description: 'Last change reverted' });
         }
       }
     } catch (error) {
@@ -225,19 +232,30 @@ const LaboratoryMode = () => {
           });
           proj.state = { ...(proj.state || {}), laboratory_config: sanitized };
           saveCurrentProject(proj);
-          localStorage.setItem('laboratory-layout-cards', safeStringify(sanitized.cards));
-          localStorage.setItem('laboratory-config', safeStringify(sanitized));
         } catch (apiError) {
           console.error('API error during save:', apiError);
           // Don't show error for API failures, just log them
         }
       }
 
-      toast({
-        title: "Configuration Saved",
-        description: `Laboratory configuration saved successfully. ${exhibitedCards.length} card(s) marked for exhibition.`,
-      });
-      setError(null);
+      const storageSuccess = persistLaboratoryConfig(sanitized);
+      if (storageSuccess) {
+        setError(null);
+        toast({
+          title: 'Configuration Saved',
+          description: `Laboratory configuration saved successfully. ${exhibitedCards.length} card(s) marked for exhibition.`,
+        });
+      } else {
+        const message =
+          'Storage quota exceeded. The configuration was saved, but it could not be cached locally. Please clear your browser storage.';
+        setError(message);
+        toast({
+          title: 'Storage Limit Reached',
+          description:
+            'We saved your configuration, but local caching failed due to storage limits. Clear your browser storage to continue working offline.',
+          variant: 'destructive',
+        });
+      }
       const allAtoms = cards.flatMap(card =>
         card.atoms.map(atom => ({
           id: atom.id,

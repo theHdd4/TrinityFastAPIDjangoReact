@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
-import { sanitizeLabConfig } from '@/utils/projectStorage';
+import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -834,8 +834,10 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
 
                 if (data.state && data.state.laboratory_config) {
                   const cfg = sanitizeLabConfig(data.state.laboratory_config);
-                  localStorage.setItem(STORAGE_KEY, safeStringify(cfg.cards));
-                  localStorage.setItem('laboratory-config', safeStringify(cfg));
+                  const cached = persistLaboratoryConfig(cfg);
+                  if (!cached) {
+                    console.warn('Storage quota exceeded while caching laboratory config from registry.');
+                  }
                   if (!storedAtoms && data.state.workflow_selected_atoms) {
                     localStorage.setItem(
                       'workflow-selected-atoms',
