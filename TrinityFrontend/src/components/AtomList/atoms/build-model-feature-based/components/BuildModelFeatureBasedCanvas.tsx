@@ -183,6 +183,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     // Helper function to add constraints to model configs
     const addConstraintsToModelConfigs = (modelConfigs: ModelConfig[]) => {
       return modelConfigs.map(config => {
+        // Regular constrained models (for individual modeling)
         if (config.id === 'Custom Constrained Ridge' || config.id === 'Constrained Linear Regression') {
           const updatedConfig = {
             ...config,
@@ -193,6 +194,22 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             }
           };
           console.log(`🔍 Frontend - ${config.id} constraints:`, {
+            negative: updatedConfig.parameters.negative_constraints,
+            positive: updatedConfig.parameters.positive_constraints
+          });
+          return updatedConfig;
+        }
+        // Stack constrained models (for stack modeling)
+        else if (config.id === 'Stack Constrained Ridge' || config.id === 'Stack Constrained Linear Regression') {
+          const updatedConfig = {
+            ...config,
+            parameters: {
+              ...config.parameters,
+              negative_constraints: finalData.negativeConstraints || [],
+              positive_constraints: finalData.positiveConstraints || []
+            }
+          };
+          console.log(`🔍 Frontend - ${config.id} stack constraints:`, {
             negative: updatedConfig.parameters.negative_constraints,
             positive: updatedConfig.parameters.positive_constraints
           });
@@ -1134,34 +1151,58 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                   <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
                     <div className="flex items-center gap-2 py-1 border-b mb-2">
                       <Checkbox
-                        checked={data?.negativeConstraints?.length === (data?.xVariables?.[0]?.length || 0)}
+                        checked={(() => {
+                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.positiveConstraints?.includes(variable));
+                          return data?.negativeConstraints?.length === availableVariables.length && availableVariables.length > 0;
+                        })()}
                         onCheckedChange={(checked) => {
-                          const allVariables = data?.xVariables?.[0] || [];
-                          handleDataChange({ 
-                            negativeConstraints: checked ? allVariables : [] 
-                          });
+                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.positiveConstraints?.includes(variable));
+                          if (checked) {
+                            // When selecting all negative constraints, clear positive constraints
+                            handleDataChange({ 
+                              negativeConstraints: availableVariables,
+                              positiveConstraints: []
+                            });
+                          } else {
+                            handleDataChange({ 
+                              negativeConstraints: [] 
+                            });
+                          }
                         }}
                       />
                       <span className="text-sm font-medium">Select All</span>
                     </div>
-                    {(data?.xVariables?.[0] || []).map(variable => {
-                      const isChecked = data?.negativeConstraints?.includes(variable) || false;
-                      return (
-                        <div key={variable} className="flex items-center gap-2 py-1">
-                          <Checkbox
-                            checked={isChecked}
+                    {(data?.xVariables?.[0] || [])
+                      .filter(variable => !data?.positiveConstraints?.includes(variable)) // Exclude variables already selected in positive constraints
+                      .map(variable => {
+                        const isChecked = data?.negativeConstraints?.includes(variable) || false;
+                        return (
+                          <div key={variable} className="flex items-center gap-2 py-1">
+                            <Checkbox
+                              checked={isChecked}
                             onCheckedChange={(checked) => {
                               const current = data?.negativeConstraints || [];
                               const updated = checked 
                                 ? [...current, variable]
                                 : current.filter(v => v !== variable);
-                              handleDataChange({ negativeConstraints: updated });
+                              
+                              // If adding to negative constraints, remove from positive constraints
+                              if (checked) {
+                                const currentPositive = data?.positiveConstraints || [];
+                                const updatedPositive = currentPositive.filter(v => v !== variable);
+                                handleDataChange({ 
+                                  negativeConstraints: updated,
+                                  positiveConstraints: updatedPositive
+                                });
+                              } else {
+                                handleDataChange({ negativeConstraints: updated });
+                              }
                             }}
-                          />
-                          <span className="text-sm">{variable}</span>
-                        </div>
-                      );
-                    })}
+                            />
+                            <span className="text-sm">{variable}</span>
+                          </div>
+                        );
+                      })}
                   </PopoverContent>
                 </Popover>
               </div>
@@ -1187,34 +1228,58 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                   <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
                     <div className="flex items-center gap-2 py-1 border-b mb-2">
                       <Checkbox
-                        checked={data?.positiveConstraints?.length === (data?.xVariables?.[0]?.length || 0)}
+                        checked={(() => {
+                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.negativeConstraints?.includes(variable));
+                          return data?.positiveConstraints?.length === availableVariables.length && availableVariables.length > 0;
+                        })()}
                         onCheckedChange={(checked) => {
-                          const allVariables = data?.xVariables?.[0] || [];
-                          handleDataChange({ 
-                            positiveConstraints: checked ? allVariables : [] 
-                          });
+                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.negativeConstraints?.includes(variable));
+                          if (checked) {
+                            // When selecting all positive constraints, clear negative constraints
+                            handleDataChange({ 
+                              positiveConstraints: availableVariables,
+                              negativeConstraints: []
+                            });
+                          } else {
+                            handleDataChange({ 
+                              positiveConstraints: [] 
+                            });
+                          }
                         }}
                       />
                       <span className="text-sm font-medium">Select All</span>
                     </div>
-                    {(data?.xVariables?.[0] || []).map(variable => {
-                      const isChecked = data?.positiveConstraints?.includes(variable) || false;
-                      return (
-                        <div key={variable} className="flex items-center gap-2 py-1">
-                          <Checkbox
-                            checked={isChecked}
+                    {(data?.xVariables?.[0] || [])
+                      .filter(variable => !data?.negativeConstraints?.includes(variable)) // Exclude variables already selected in negative constraints
+                      .map(variable => {
+                        const isChecked = data?.positiveConstraints?.includes(variable) || false;
+                        return (
+                          <div key={variable} className="flex items-center gap-2 py-1">
+                            <Checkbox
+                              checked={isChecked}
                             onCheckedChange={(checked) => {
                               const current = data?.positiveConstraints || [];
                               const updated = checked 
                                 ? [...current, variable]
                                 : current.filter(v => v !== variable);
-                              handleDataChange({ positiveConstraints: updated });
+                              
+                              // If adding to positive constraints, remove from negative constraints
+                              if (checked) {
+                                const currentNegative = data?.negativeConstraints || [];
+                                const updatedNegative = currentNegative.filter(v => v !== variable);
+                                handleDataChange({ 
+                                  positiveConstraints: updated,
+                                  negativeConstraints: updatedNegative
+                                });
+                              } else {
+                                handleDataChange({ positiveConstraints: updated });
+                              }
                             }}
-                          />
-                          <span className="text-sm">{variable}</span>
-                        </div>
-                      );
-                    })}
+                            />
+                            <span className="text-sm">{variable}</span>
+                          </div>
+                        );
+                      })}
                   </PopoverContent>
                 </Popover>
               </div>

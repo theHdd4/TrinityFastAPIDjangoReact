@@ -15,7 +15,7 @@ interface BuildModelFeatureBasedSettingsTabProps {
   onDataChange: (data: Partial<BuildModelFeatureBasedData>) => void;
 }
 
-const availableModels = [
+const individualModels = [
   { id: 'Linear Regression', name: 'Linear Regression', params: [] },
   { id: 'Ridge Regression', name: 'Ridge Regression', params: ['Alpha'] },
   { id: 'Lasso Regression', name: 'Lasso Regression', params: ['Alpha'] },
@@ -23,6 +23,16 @@ const availableModels = [
   { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', params: [] },
   { id: 'Custom Constrained Ridge', name: 'Custom Constrained Ridge', params: ['L2 Penalty', 'Learning Rate', 'Iterations', 'Adam'] },
   { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', params: ['Learning Rate', 'Iterations', 'Adam'] }
+];
+
+const stackModels = [
+  { id: 'Linear Regression', name: 'Linear Regression', params: [] },
+  { id: 'Ridge Regression', name: 'Ridge Regression', params: ['Alpha'] },
+  { id: 'Lasso Regression', name: 'Lasso Regression', params: ['Alpha'] },
+  { id: 'ElasticNet Regression', name: 'ElasticNet Regression', params: ['Alpha', 'L1 Ratio'] },
+  { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', params: [] },
+  { id: 'Stack Constrained Ridge', name: 'Stack Constrained Ridge', params: ['L2 Penalty', 'Learning Rate', 'Iterations', 'Adam'] },
+  { id: 'Stack Constrained Linear Regression', name: 'Stack Constrained Linear Regression', params: ['Learning Rate', 'Iterations', 'Adam'] }
 ];
 
 const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettingsTabProps> = ({
@@ -117,7 +127,7 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
 
     if (checked) {
       updatedModels.push(modelId);
-      const model = availableModels.find(m => m.id === modelId);
+      const model = individualModels.find(m => m.id === modelId);
       if (model) {
         // Get default parameters from the default data structure
         const defaultModelConfigs = [
@@ -178,8 +188,8 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
   const handleSelectAllModels = (checked: boolean) => {
     if (checked) {
       // Select all models
-      const allModelIds = availableModels.map(model => model.id);
-      const allModelConfigs = availableModels.map(model => {
+      const allModelIds = individualModels.map(model => model.id);
+      const allModelConfigs = individualModels.map(model => {
         const defaultParams: Record<string, any> = {};
         model.params.forEach(param => {
           // Set default values based on model type
@@ -211,8 +221,8 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
   };
 
   // Check if all models are selected
-  const allModelsSelected = availableModels.length > 0 && 
-    availableModels.every(model => data?.selectedModels?.includes(model.id));
+  const allModelsSelected = individualModels.length > 0 && 
+    individualModels.every(model => data?.selectedModels?.includes(model.id));
 
   return (
     <div className="space-y-6">
@@ -290,11 +300,11 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
               <div className="flex items-center space-x-2">
                 <Checkbox
                       id="select-all-individual-models"
-                      checked={data?.individualSelectedModels?.length === availableModels.length}
+                      checked={data?.individualSelectedModels?.length === individualModels.length}
                       onCheckedChange={(checked) => {
                         if (checked) {
-                          const allModelIds = availableModels.map(model => model.id);
-                          const allModelConfigs = availableModels.map(model => {
+                          const allModelIds = individualModels.map(model => model.id);
+                          const allModelConfigs = individualModels.map(model => {
                             const defaultParams: Record<string, any> = {};
                             model.params.forEach(param => {
                               if (param === 'Alpha') defaultParams[param] = '1.0';
@@ -330,7 +340,7 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
             </div>
             
             <div className="space-y-3 mt-2">
-              {availableModels.map(model => (
+              {individualModels.map(model => (
                 <div key={model.id} className="space-y-3">
                   <div className="flex items-center space-x-2">
                     <Checkbox
@@ -617,11 +627,11 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                   <div className="flex items-center space-x-2">
                     <Checkbox
                       id="select-all-stack-models"
-                      checked={data?.stackSelectedModels?.length === availableModels.length}
+                      checked={data?.stackSelectedModels?.length === stackModels.length}
                       onCheckedChange={(checked) => {
                         if (checked) {
-                          const allModelIds = availableModels.map(model => model.id);
-                          const allModelConfigs = availableModels.map(model => {
+                          const allModelIds = stackModels.map(model => model.id);
+                          const allModelConfigs = stackModels.map(model => {
                             const defaultParams: Record<string, any> = {};
                             model.params.forEach(param => {
                               if (param === 'Alpha') defaultParams[param] = '1.0';
@@ -658,7 +668,7 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                 
                 <Label className="text-sm font-medium mb-3 block">Select Stack Models</Label>
                 <div className="space-y-3">
-                  {availableModels.map(model => (
+                  {stackModels.map(model => (
                     <div key={model.id}>
                       <div className="flex items-center space-x-2">
                         <Checkbox

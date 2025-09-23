@@ -876,13 +876,15 @@ class DataPooler:
         if custom_configs:
             for model_name, config in custom_configs.items():
                 if model_name in models_dict:
-                    if model_name == "Custom Constrained Ridge":
+                    if model_name == "Stack Constrained Ridge":
                         # Extract constraints from parameters object
                         parameters = config.get('parameters', {})
                         negative_constraints = parameters.get('negative_constraints', [])
                         positive_constraints = parameters.get('positive_constraints', [])
-                        from .models import CustomConstrainedRidge
-                        models_dict[model_name] = CustomConstrainedRidge(
+                        print(f"🔍 Stack Constrained Ridge - Negative constraints: {negative_constraints}")
+                        print(f"🔍 Stack Constrained Ridge - Positive constraints: {positive_constraints}")
+                        from .models import StackConstrainedRidge
+                        models_dict[model_name] = StackConstrainedRidge(
                             l2_penalty=parameters.get('l2_penalty', 0.1),
                             learning_rate=parameters.get('learning_rate', 0.001),
                             iterations=parameters.get('iterations', 10000),
@@ -890,13 +892,15 @@ class DataPooler:
                             negative_constraints=negative_constraints,
                             positive_constraints=positive_constraints
                         )
-                    elif model_name == "Constrained Linear Regression":
+                    elif model_name == "Stack Constrained Linear Regression":
                         # Extract constraints from parameters object
                         parameters = config.get('parameters', {})
                         negative_constraints = parameters.get('negative_constraints', [])
                         positive_constraints = parameters.get('positive_constraints', [])
-                        from .models import ConstrainedLinearRegression
-                        models_dict[model_name] = ConstrainedLinearRegression(
+                        print(f"🔍 Stack Constrained Linear Regression - Negative constraints: {negative_constraints}")
+                        print(f"🔍 Stack Constrained Linear Regression - Positive constraints: {positive_constraints}")
+                        from .models import StackConstrainedLinearRegression
+                        models_dict[model_name] = StackConstrainedLinearRegression(
                             learning_rate=parameters.get('learning_rate', 0.001),
                             iterations=parameters.get('iterations', 10000),
                             adam=parameters.get('adam', False),
@@ -960,7 +964,7 @@ class DataPooler:
             print(f"🔍 Processing model: {model_name}")
             
             # Check if this is a constraint model
-            if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression"]:
+            if model_name in ["Stack Constrained Ridge", "Stack Constrained Linear Regression"]:
                 print(f"🔍 This is a constraint model: {model_name}")
                 print(f"  - X shape: {X.shape}, y shape: {y.shape}")
                 print(f"  - Feature names: {x_variables}")
@@ -1015,7 +1019,7 @@ class DataPooler:
                     print(f"🔍 Model cloned successfully for fold {fold_idx + 1}")
                     logger.info(f"🔍 Training constraint model: {model_name}")
                     
-                    if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression"]:
+                    if model_name in ["Stack Constrained Ridge", "Stack Constrained Linear Regression"]:
                         print(f"  🔍 Training constraint model fold {fold_idx + 1}/{k_folds}")
                         print(f"    - X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
                         print(f"    - X_train dtype: {X_train.dtype}, y_train dtype: {y_train.dtype}")
@@ -1073,7 +1077,7 @@ class DataPooler:
             print(f"🔍 Model {model_name} proceeding to final training with {len(fold_results)} successful folds")
 
             final_model = clone(model_class)
-            if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression"]:
+            if model_name in ["Stack Constrained Ridge", "Stack Constrained Linear Regression"]:
                 print(f"🔍 Training constraint model: {model_name}")
                 try:
                     final_model.fit(X, y, x_variables)
