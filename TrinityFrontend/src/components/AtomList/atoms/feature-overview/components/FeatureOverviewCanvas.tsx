@@ -48,6 +48,42 @@ const filterUnattributed = (mapping: Record<string, string[]>) =>
     ),
   );
 
+const parseNumericValue = (raw: string): number | null => {
+  if (raw == null) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const hasParens = trimmed.startsWith("(") && trimmed.endsWith(")");
+  let normalized = hasParens ? trimmed.slice(1, -1) : trimmed;
+
+  normalized = normalized.replace(/\s+/g, "");
+  normalized = normalized.replace(/[^0-9.,eE+-]/g, "");
+
+  const hasComma = normalized.includes(",");
+  const hasDot = normalized.includes(".");
+  if (hasComma) {
+    const commaParts = normalized.split(",");
+    if (hasDot) {
+      normalized = normalized.replace(/,/g, "");
+    } else if (commaParts.length === 2 && commaParts[1].length > 0 && commaParts[1].length !== 3) {
+      normalized = `${commaParts[0].replace(/,/g, "")}.${commaParts[1]}`;
+    } else {
+      normalized = normalized.replace(/,/g, "");
+    }
+  }
+
+  if (hasParens && normalized && !normalized.startsWith("-")) {
+    normalized = `-${normalized}`;
+  }
+
+  if (!normalized || normalized === "-" || normalized === "+") {
+    return null;
+  }
+
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : null;
+};
+
 const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   settings,
   onUpdateSettings,
@@ -101,6 +137,39 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   // State for managing expanded views
   const [showStatsSummary, setShowStatsSummary] = useState<boolean>(false);
   const [expandedMetrics, setExpandedMetrics] = useState<Set<string>>(new Set());
+
+  const numericColumnSet = React.useMemo(() => {
+    const set = new Set<string>();
+    if (Array.isArray(settings.numericColumns)) {
+      settings.numericColumns.forEach((col) => {
+        if (typeof col === "string" && col.trim()) {
+          set.add(col.toLowerCase());
+        }
+      });
+    }
+    if (Array.isArray(settings.columnSummary)) {
+      settings.columnSummary.forEach((info: any) => {
+        const columnName = info?.column;
+        const dataType = info?.data_type;
+        if (
+          typeof columnName === "string" &&
+          columnName.trim() &&
+          typeof dataType === "string" &&
+          /int|float|double|decimal|numeric|number|currency|money/i.test(dataType)
+        ) {
+          set.add(columnName.toLowerCase());
+        }
+      });
+    }
+    Object.values(dimensionMap || {})
+      .flat()
+      .forEach((col) => {
+        if (typeof col === "string") {
+          set.delete(col.toLowerCase());
+        }
+      });
+    return set;
+  }, [settings.numericColumns, settings.columnSummary, dimensionMap]);
 
   // Get atom settings to access the input file name
   const atom = useLaboratoryStore(state => atomId ? state.getAtom(atomId) : undefined);
@@ -222,8 +291,51 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
    }, [settings.dataSource, hasMappedIdentifiers, skuRows.length, dimensionMap]);
 
   useEffect(() => {
-    setSkuRows(Array.isArray(settings.skuTable) ? settings.skuTable : []);
-  }, [settings.skuTable]);
+    if (!Array.isArray(settings.skuTable)) {
+      setSkuRows([]);
+      return;
+    }
+
+    if (settings.skuTable.length === 0 || numericColumnSet.size === 0) {
+      setSkuRows(settings.skuTable);
+      return;
+    }
+
+    let changed = false;
+    const normalized = settings.skuTable.map((row: any) => {
+      if (!row || typeof row !== "object") {
+        return row;
+      }
+
+      let updated: Record<string, any> | null = null;
+      numericColumnSet.forEach((col) => {
+        const rawValue = row[col];
+        if (typeof rawValue === "string") {
+          const parsedValue = parseNumericValue(rawValue);
+          if (parsedValue != null) {
+            if (!updated) {
+              updated = { ...row };
+            }
+            updated[col] = parsedValue;
+          }
+        }
+      });
+
+      if (updated) {
+        changed = true;
+        return updated;
+      }
+
+      return row;
+    });
+
+    if (changed) {
+      setSkuRows(normalized);
+      onUpdateSettings({ skuTable: normalized });
+    } else {
+      setSkuRows(settings.skuTable);
+    }
+  }, [settings.skuTable, numericColumnSet, onUpdateSettings]);
 
   useEffect(() => {
     setStatDataMap(settings.statDataMap || {});
@@ -585,19 +697,30 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         (col) => typeof col === "string" && col.trim().length > 0,
       );
       const data = parsed.map((row) => {
-        const obj: Record<string, string> = {};
+        const obj: Record<string, string | number> = {};
         const sourceColumns = columns.length > 0 ? columns : Object.keys(row);
         sourceColumns.forEach((col) => {
           const key = col.toLowerCase();
           const value = row[col as keyof typeof row] as string | undefined;
-          obj[key] = value == null ? "" : String(value);
+          if (numericColumnSet.has(key)) {
+            const parsedValue = parseNumericValue(value ?? "");
+            if (parsedValue != null) {
+              obj[key] = parsedValue;
+            } else {
+              obj[key] = value == null ? "" : String(value);
+            }
+          } else {
+            obj[key] = value == null ? "" : String(value);
+          }
         });
         return obj;
       });
       const idCols = Object.values(dimensionMap).flat();
       const combos = new Map<string, any>();
       data.forEach((row) => {
-        const key = idCols.map((k) => row[k.toLowerCase()] || "").join("||");
+        const key = idCols
+          .map((k) => row[k.toLowerCase()] ?? "")
+          .join("||");
         if (!combos.has(key)) combos.set(key, row);
       });
       const table = Array.from(combos.values()).map((row, i) => ({
