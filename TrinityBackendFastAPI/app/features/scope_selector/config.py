@@ -4,6 +4,10 @@ from functools import lru_cache
 from typing import Optional
 import os
 
+from app.core.mongo import build_host_mongo_uri
+
+DEFAULT_SCOPE_SELECTOR_MONGO_URI = build_host_mongo_uri()
+
 class Settings(BaseSettings):
     """
     Application settings loaded from environment variables.
@@ -23,7 +27,7 @@ class Settings(BaseSettings):
     # =============================================================================
     mongo_uri: str = os.getenv(
         "SCOPE_SELECTOR_MONGO_URI",
-        os.getenv("MONGO_URI", "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin")
+        os.getenv("MONGO_URI", DEFAULT_SCOPE_SELECTOR_MONGO_URI)
     )
     mongo_source_database: str = "validator_atoms_db"
     mongo_scope_database: str = "Scope_selection"

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
-import { sanitizeLabConfig } from '@/utils/projectStorage';
+import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -18,6 +18,7 @@ import {
   CLASSIFIER_API,
 } from '@/lib/api';
 import { AIChatBot, AtomAIChatBot } from '@/components/TrinityAI';
+import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
 import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/FeatureOverviewAtom';
@@ -87,6 +88,31 @@ const LLM_MAP: Record<string, string> = {
   'explore': 'Agent Explore',
 };
 
+const hydrateDroppedAtom = (atom: any): DroppedAtom => {
+  const info = allAtoms.find(at => at.id === atom.atomId);
+  return {
+    ...atom,
+    llm: atom.llm || LLM_MAP[atom.atomId],
+    color: atom.color || info?.color || 'bg-gray-400',
+  };
+};
+
+const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
+  if (!Array.isArray(rawCards)) {
+    return null;
+  }
+
+  return rawCards.map((card: any) => ({
+    id: card.id,
+    atoms: Array.isArray(card.atoms)
+      ? card.atoms.map((atom: any) => hydrateDroppedAtom(atom))
+      : [],
+    isExhibited: !!card.isExhibited,
+    moleculeId: card.moleculeId,
+    moleculeTitle: card.moleculeTitle,
+  }));
+};
+
 const CanvasArea: React.FC<CanvasAreaProps> = ({
   onAtomSelect,
   onCardSelect,
@@ -101,6 +127,18 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
   const [addDragTarget, setAddDragTarget] = useState<string | null>(null);
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [isCanvasLoading, setIsCanvasLoading] = useState(true);
+  const loadingMessages = useMemo(
+    () => [
+      'Loading project canvas',
+      'Fetching atom details',
+      'Preparing interactive workspace',
+    ],
+    [],
+  );
+  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
+  const currentLoadingMessage =
+    loadingMessages[loadingMessageIndex] ?? loadingMessages[0] ?? 'Loading';
   const prevLayout = React.useRef<LayoutCard[] | null>(null);
   const initialLoad = React.useRef(true);
 
@@ -114,31 +152,79 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     unique_values: string[];
   }
 
-  const fetchColumnSummary = async (csv: string, signal?: AbortSignal) => {
-    try {
-      console.log('🔎 fetching column summary for', csv);
-      const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(csv)}`,
-        { signal }
-      );
-      if (!res.ok) {
-        console.warn('⚠️ column summary request failed', res.status);
-        return { summary: [], numeric: [], xField: '' };
-      }
-      const data = await res.json();
-      const summary: ColumnInfo[] = (data.summary || []).filter(Boolean);
-      console.log('ℹ️ fetched column summary rows', summary.length);
-      const numeric = summary
-        .filter(c => !['object', 'string'].includes(c.data_type.toLowerCase()))
-        .map(c => c.column);
-      const xField =
-        summary.find(c => c.column.toLowerCase().includes('date'))?.column ||
-        (summary[0]?.column || '');
-      return { summary, numeric, xField };
-    } catch (err) {
-      console.error('⚠️ failed to fetch column summary', err);
+  interface ColumnSummaryOptions {
+    signal?: AbortSignal;
+    statusCb?: (status: string) => void;
+    retries?: number;
+    retryDelayMs?: number;
+  }
+
+  const sleep = (ms: number) =>
+    new Promise(resolve => {
+      setTimeout(resolve, ms);
+    });
+
+  const fetchColumnSummary = async (
+    csv: string,
+    { signal, statusCb, retries = 0, retryDelayMs = 800 }: ColumnSummaryOptions = {},
+  ) => {
+    if (!csv || !/\.[^/]+$/.test(csv.trim())) {
       return { summary: [], numeric: [], xField: '' };
     }
+
+    let attempt = 0;
+    let lastResult = { summary: [] as ColumnInfo[], numeric: [] as string[], xField: '' };
+
+    while (attempt <= retries) {
+      if (signal?.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+      }
+
+      const label =
+        attempt === 0 ? 'Fetching column summary' : `Retrying column summary (${attempt + 1})`;
+      statusCb?.(label);
+      console.log(
+        `${attempt === 0 ? '🔎' : '🔄'} ${label.toLowerCase()} for`,
+        csv,
+      );
+
+      try {
+        const res = await fetch(
+          `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(csv)}`,
+          { signal },
+        );
+        if (!res.ok) {
+          console.warn('⚠️ column summary request failed', res.status);
+        } else {
+          const data = await res.json();
+          const summary: ColumnInfo[] = (data.summary || []).filter(Boolean);
+          console.log('ℹ️ fetched column summary rows', summary.length);
+          const numeric = summary
+            .filter(c => !['object', 'string'].includes(c.data_type.toLowerCase()))
+            .map(c => c.column);
+          const xField =
+            summary.find(c => c.column.toLowerCase().includes('date'))?.column ||
+            (summary[0]?.column || '');
+          lastResult = { summary, numeric, xField };
+          if (summary.length > 0) {
+            return lastResult;
+          }
+        }
+      } catch (err) {
+        if ((err as any)?.name === 'AbortError') {
+          console.warn('ℹ️ column summary fetch aborted');
+          throw err;
+        }
+        console.error('⚠️ failed to fetch column summary', err);
+      }
+
+      attempt += 1;
+      if (attempt <= retries && retryDelayMs > 0) {
+        await sleep(retryDelayMs);
+      }
+    }
+
+    return lastResult;
   };
 
   const prefetchDataframe = async (
@@ -180,102 +266,205 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
 
   const findLatestDataSource = async (signal?: AbortSignal) => {
     console.log('🔎 searching for latest data source');
-    if (!Array.isArray(layoutCards)) return null;
-    for (let i = layoutCards.length - 1; i >= 0; i--) {
-      const card = layoutCards[i];
-      for (let j = card.atoms.length - 1; j >= 0; j--) {
-        const a = card.atoms[j];
-        if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
-          console.log('✔️ found feature overview data source', a.settings.dataSource);
-          await prefetchDataframe(a.settings.dataSource, signal);
-          const cols = await fetchColumnSummary(a.settings.dataSource, signal);
-          return {
-            csv: a.settings.dataSource,
-            display: a.settings.csvDisplay || a.settings.dataSource,
-            identifiers: a.settings.selectedColumns || [],
-            ...(cols || {}),
-          };
-        }
-        if (a.atomId === 'data-upload-validate') {
-          const req = a.settings?.requiredFiles?.[0];
-          const validatorId = a.settings?.validatorId;
-          if (req) {
-            try {
-              const [ticketRes, confRes] = await Promise.all([
-                fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`, { signal }),
-                validatorId
-                  ? fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`, { signal })
-                  : Promise.resolve(null as any),
-              ]);
-              if (ticketRes.ok) {
-                const ticket = await ticketRes.json();
-                if (ticket.arrow_name) {
-                  console.log('✔️ using validated data source', ticket.arrow_name);
-                  await prefetchDataframe(ticket.arrow_name, signal);
-                  const cols = await fetchColumnSummary(ticket.arrow_name, signal);
-                  let ids: string[] = [];
-                  if (confRes && confRes.ok) {
-                    const cfg = await confRes.json();
-                    ids =
-                      cfg.classification?.[req]?.final_classification?.identifiers || [];
+
+    type Candidate = {
+      csv: string;
+      display?: string;
+      identifiers?: string[];
+      summary?: ColumnInfo[];
+      numeric?: string[];
+      xField?: string;
+    } | null;
+
+    let layoutCandidate: Candidate = null;
+
+    if (Array.isArray(layoutCards)) {
+      outer: for (let i = layoutCards.length - 1; i >= 0; i--) {
+        const card = layoutCards[i];
+        for (let j = card.atoms.length - 1; j >= 0; j--) {
+          const a = card.atoms[j];
+          if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
+            console.log('✔️ found feature overview data source', a.settings.dataSource);
+            const existingColumns: ColumnInfo[] = Array.isArray(a.settings?.allColumns)
+              ? (a.settings.allColumns as ColumnInfo[]).filter(Boolean)
+              : [];
+            const cols =
+              existingColumns.length > 0
+                ? {
+                    summary: existingColumns,
+                    numeric: Array.isArray(a.settings?.numericColumns)
+                      ? (a.settings.numericColumns as string[])
+                      : [],
+                    xField: a.settings?.xAxis || '',
                   }
-                  return {
-                    csv: ticket.arrow_name,
-                    display: ticket.csv_name,
-                    identifiers: ids,
-                    ...(cols || {}),
-                  };
+                : await fetchColumnSummary(a.settings.dataSource, {
+                    signal,
+                    retries: 2,
+                  });
+            layoutCandidate = {
+              csv: a.settings.dataSource,
+              display: a.settings.csvDisplay || a.settings.dataSource,
+              identifiers: a.settings.selectedColumns || [],
+              ...(cols || {}),
+            };
+            break outer;
+          }
+          if (a.atomId === 'data-upload-validate') {
+            const req = a.settings?.requiredFiles?.[0];
+            const validatorId = a.settings?.validatorId;
+            if (req) {
+              try {
+                const [ticketRes, confRes] = await Promise.all([
+                  fetch(`${VALIDATE_API}/latest_ticket/${encodeURIComponent(req)}`, { signal }),
+                  validatorId
+                    ? fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`, { signal })
+                    : Promise.resolve(null as any),
+                ]);
+                if (ticketRes.ok) {
+                  const ticket = await ticketRes.json();
+                  if (ticket.arrow_name) {
+                    console.log('✔️ using validated data source', ticket.arrow_name);
+                    const cols = await fetchColumnSummary(ticket.arrow_name, {
+                      signal,
+                      retries: 2,
+                    });
+                    let ids: string[] = [];
+                    if (confRes && confRes.ok) {
+                      const cfg = await confRes.json();
+                      ids =
+                        cfg.classification?.[req]?.final_classification?.identifiers || [];
+                    }
+                    layoutCandidate = {
+                      csv: ticket.arrow_name,
+                      display: ticket.csv_name,
+                      identifiers: ids,
+                      ...(cols || {}),
+                    };
+                    break outer;
+                  }
+                }
+              } catch (err) {
+                if ((err as any)?.name === 'AbortError') {
+                  throw err;
                 }
               }
-            } catch {
-              /* ignore */
             }
           }
         }
       }
     }
 
-    try {
-      let query = '';
-      const envStr = localStorage.getItem('env');
-      if (envStr) {
-        try {
-          const env = JSON.parse(envStr);
-          query =
-            '?' +
-            new URLSearchParams({
-              client_id: env.CLIENT_ID || '',
-              app_id: env.APP_ID || '',
-              project_id: env.PROJECT_ID || '',
-              client_name: env.CLIENT_NAME || '',
-              app_name: env.APP_NAME || '',
-              project_name: env.PROJECT_NAME || ''
-            }).toString();
-        } catch {
-          /* ignore */
-        }
+    let env: any = {};
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        env = JSON.parse(envStr);
+      } catch {
+        env = {};
       }
+    }
+
+    const params = new URLSearchParams({
+      client_id: env.CLIENT_ID || '',
+      app_id: env.APP_ID || '',
+      project_id: env.PROJECT_ID || '',
+      client_name: env.CLIENT_NAME || '',
+      app_name: env.APP_NAME || '',
+      project_name: env.PROJECT_NAME || '',
+    });
+    const query = params.toString() ? `?${params.toString()}` : '';
+
+    try {
+      const latestRes = await fetch(
+        `${VALIDATE_API}/latest_project_dataframe${query}`,
+        { credentials: 'include', signal }
+      );
+      if (latestRes.ok) {
+        const latestData = await latestRes.json();
+        const latestName = latestData?.object_name;
+        if (typeof latestName === 'string' && latestName.trim()) {
+          console.log(
+            '✔️ defaulting to latest flight dataframe',
+            latestName,
+            latestData?.source || 'unknown'
+          );
+          if (layoutCandidate && layoutCandidate.csv === latestName) {
+            return {
+              ...layoutCandidate,
+              display:
+                latestData?.csv_name || layoutCandidate.display || layoutCandidate.csv,
+            };
+          }
+          const cols = await fetchColumnSummary(latestName, {
+            signal,
+            retries: 2,
+          });
+          return {
+            csv: latestName,
+            display: latestData?.csv_name || latestName,
+            ...(cols || {}),
+          };
+        }
+      } else {
+        console.warn('⚠️ latest_project_dataframe failed', latestRes.status);
+      }
+    } catch (err) {
+      if ((err as any)?.name === 'AbortError') {
+        throw err;
+      }
+      console.warn('⚠️ latest_project_dataframe request failed', err);
+    }
+
+    if (layoutCandidate) {
+      return layoutCandidate;
+    }
+
+    try {
       const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`, {
         signal,
       });
       if (res.ok) {
         const data = await res.json();
-        const files = Array.isArray(data.files) ? data.files : [];
+        interface SavedFrameMeta {
+          object_name: string;
+          csv_name?: string;
+          last_modified?: string;
+        }
+        const files: SavedFrameMeta[] = Array.isArray(data.files)
+          ? data.files
+          : [];
         const validFiles = files.filter(
-          (f: any) =>
-            typeof f.object_name === 'string' &&
-            /\.[^/]+$/.test(f.object_name.trim())
+          f => typeof f.object_name === 'string' && /\.[^/]+$/.test(f.object_name.trim())
         );
-        const file = validFiles[validFiles.length - 1];
-        if (file && file.object_name) {
-          console.log('✔️ defaulting to latest saved dataframe', file.object_name);
-          await prefetchDataframe(file.object_name, signal);
-          const cols = await fetchColumnSummary(file.object_name, signal);
-          return { csv: file.object_name, display: file.csv_name, ...(cols || {}) };
+        let fallback: SavedFrameMeta | null = null;
+        let latest: { file: SavedFrameMeta; ts: number } | null = null;
+        for (const item of validFiles) {
+          fallback = item;
+          const ts = item.last_modified ? Date.parse(item.last_modified) : NaN;
+          if (!Number.isNaN(ts)) {
+            if (!latest || ts > latest.ts) {
+              latest = { file: item, ts };
+            }
+          }
+        }
+        const chosen = latest?.file || fallback;
+        if (chosen && chosen.object_name) {
+          console.log('✔️ defaulting to latest saved dataframe', chosen.object_name);
+          const cols = await fetchColumnSummary(chosen.object_name, {
+            signal,
+            retries: 2,
+          });
+          return {
+            csv: chosen.object_name,
+            display: chosen.csv_name || chosen.object_name,
+            ...(cols || {}),
+          };
         }
       }
-    } catch {
-      /* ignore */
+    } catch (err) {
+      if ((err as any)?.name === 'AbortError') {
+        throw err;
+      }
     }
 
     return null;
@@ -300,36 +489,73 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       await prefetchDataframe(prev.csv, controller.signal, status =>
         updateAtomSettings(atomId, { loadingStatus: status }),
       );
+
+      let summaryDetails = {
+        summary: Array.isArray(prev.summary) ? prev.summary.filter(Boolean) : [],
+        numeric: Array.isArray(prev.numeric) ? prev.numeric : [],
+        xField: typeof prev.xField === 'string' ? prev.xField : '',
+      };
+
+      if (summaryDetails.summary.length === 0) {
+        summaryDetails = await fetchColumnSummary(prev.csv, {
+          signal: controller.signal,
+          statusCb: status => updateAtomSettings(atomId, { loadingStatus: status }),
+          retries: 2,
+        });
+      }
+
+      updateAtomSettings(atomId, { loadingStatus: 'Fetching dimension mapping' });
       const { mapping: rawMapping } = await fetchDimensionMapping({
         objectName: prev.csv,
         signal: controller.signal,
       });
+      const summary = Array.isArray(summaryDetails.summary)
+        ? summaryDetails.summary.filter(Boolean)
+        : [];
+      const summaryColumnSet = new Set(
+        summary.map(col => col.column).filter(column => !!column),
+      );
+      const numericColumns = Array.isArray(summaryDetails.numeric)
+        ? Array.from(
+            new Set(summaryDetails.numeric.filter(col => summaryColumnSet.has(col))),
+          )
+        : [];
+      const identifiers = Array.isArray(prev.identifiers)
+        ? prev.identifiers.filter(Boolean)
+        : [];
+      const validIdentifiers = identifiers.filter(id => summaryColumnSet.has(id));
+      const identifierSummary =
+        validIdentifiers.length > 0
+          ? summary.filter(s => validIdentifiers.includes(s.column))
+          : [];
+      const columnSummary = identifierSummary.length > 0 ? identifierSummary : summary;
+      const selected =
+        validIdentifiers.length > 0
+          ? Array.from(new Set(validIdentifiers))
+          : Array.from(new Set(columnSummary.map(cc => cc.column)));
       const mapping = Object.fromEntries(
-        Object.entries(rawMapping).filter(
-          ([key]) => key.toLowerCase() !== 'unattributed',
-        ),
+        Object.entries(rawMapping)
+          .filter(([key]) => key.toLowerCase() !== 'unattributed')
+          .map(([dimension, cols]) => {
+            const values = Array.isArray(cols)
+              ? Array.from(new Set(cols.filter(col => summaryColumnSet.has(col))))
+              : [];
+            return [dimension, values];
+          })
+          .filter(([, cols]) => cols.length > 0),
       );
       console.log('✅ pre-filling feature overview with', prev.csv);
-      const summary = Array.isArray(prev.summary) ? prev.summary : [];
-      const identifiers = Array.isArray(prev.identifiers) ? prev.identifiers : [];
-      const filtered =
-        identifiers.length > 0
-          ? summary.filter(s => identifiers.includes(s.column))
-          : summary;
-      const selected =
-        identifiers.length > 0
-          ? identifiers
-          : (Array.isArray(summary) ? summary : []).map(cc => cc.column);
 
+      updateAtomSettings(atomId, { loadingStatus: 'Preparing feature overview' });
       updateAtomSettings(atomId, {
         dataSource: prev.csv,
         csvDisplay: prev.display || prev.csv,
         allColumns: summary,
-        columnSummary: filtered,
+        columnSummary,
         selectedColumns: selected,
-        numericColumns: Array.isArray(prev.numeric) ? prev.numeric : [],
+        numericColumns,
         dimensionMap: mapping,
-        xAxis: prev.xField || 'date',
+        xAxis: summaryDetails.xField || prev.xField || 'date',
         isLoading: false,
         loadingStatus: '',
         loadingMessage: '',
@@ -463,7 +689,11 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       )
       .flatMap(([, v]) => v)
       .filter(Boolean);
-    const allColumns = Array.isArray(prev.summary) ? prev.summary.filter(Boolean) : [];
+    let allColumns = Array.isArray(prev.summary) ? prev.summary.filter(Boolean) : [];
+    if (allColumns.length === 0) {
+      const fetched = await fetchColumnSummary(prev.csv, { retries: 1 });
+      allColumns = Array.isArray(fetched.summary) ? fetched.summary.filter(Boolean) : [];
+    }
     const allCats = allColumns
       .filter(col => {
         const dataType = col.data_type?.toLowerCase() || '';
@@ -483,6 +713,45 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   // Load saved layout and workflow rendering
   useEffect(() => {
     let initialCards: LayoutCard[] | null = null;
+    let initialWorkflow: WorkflowMolecule[] | undefined;
+    let isMounted = true;
+    let hasAppliedInitialCards = false;
+    let hasPendingAsyncLoad = false;
+
+    const markLoadingComplete = () => {
+      if (!isMounted) {
+        return;
+      }
+      setIsCanvasLoading(false);
+    };
+
+    const applyInitialCards = (
+      cards: LayoutCard[] | null | undefined,
+      workflowOverride?: WorkflowMolecule[],
+    ) => {
+      if (!isMounted) {
+        return;
+      }
+
+      const normalizedCards = Array.isArray(cards) ? cards : [];
+      setLayoutCards(normalizedCards);
+      const workflow = workflowOverride ?? deriveWorkflowMolecules(normalizedCards);
+      setWorkflowMolecules(workflow);
+      setActiveTab(prevTab => {
+        if (workflow.length === 0) {
+          return '';
+        }
+
+        if (prevTab && workflow.some(molecule => molecule.moleculeId === prevTab)) {
+          return prevTab;
+        }
+
+        return workflow[0].moleculeId;
+      });
+
+      hasAppliedInitialCards = true;
+      markLoadingComplete();
+    };
 
     const storedAtoms = localStorage.getItem('workflow-selected-atoms');
     let workflowAtoms: {
@@ -491,6 +760,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       moleculeTitle: string;
       order: number;
     }[] = [];
+
     if (storedAtoms) {
       try {
         workflowAtoms = JSON.parse(storedAtoms);
@@ -501,12 +771,12 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             moleculeMap.set(atom.moleculeId, {
               moleculeId: atom.moleculeId,
               moleculeTitle: atom.moleculeTitle,
-              atoms: []
+              atoms: [],
             });
           }
           moleculeMap.get(atom.moleculeId)!.atoms.push({
             atomName: atom.atomName,
-            order: atom.order
+            order: atom.order,
           });
         });
 
@@ -515,79 +785,50 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         });
 
         const molecules = Array.from(moleculeMap.values());
-        setWorkflowMolecules(molecules);
-
         if (molecules.length > 0) {
-          setActiveTab(molecules[0].moleculeId);
+          initialWorkflow = molecules;
         }
+
+        const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
+        initialCards = workflowAtoms.map(atom => {
+          const atomInfo =
+            allAtoms.find(
+              a =>
+                normalize(a.id) === normalize(atom.atomName) ||
+                normalize(a.title) === normalize(atom.atomName),
+            ) || ({} as any);
+          const atomId = atomInfo.id || atom.atomName;
+          const dropped: DroppedAtom = {
+            id: `${atom.atomName}-${Date.now()}-${Math.random()}`,
+            atomId,
+            title: atomInfo.title || atom.atomName,
+            category: atomInfo.category || 'Atom',
+            color: atomInfo.color || 'bg-gray-400',
+            source: 'manual',
+            llm: LLM_MAP[atomId],
+          };
+          return {
+            id: `card-${atom.atomName}-${Date.now()}-${Math.random()}`,
+            atoms: [dropped],
+            isExhibited: false,
+            moleculeId: atom.moleculeId,
+            moleculeTitle: atom.moleculeTitle,
+          } as LayoutCard;
+        });
+
         localStorage.removeItem('workflow-selected-atoms');
       } catch (e) {
         console.error('Failed to parse workflow atoms', e);
+        workflowAtoms = [];
       }
     }
 
-    if (workflowAtoms.length > 0) {
-      const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
-      initialCards = workflowAtoms.map(atom => {
-        const atomInfo =
-          allAtoms.find(
-            a =>
-              normalize(a.id) === normalize(atom.atomName) ||
-              normalize(a.title) === normalize(atom.atomName)
-          ) || ({} as any);
-        const atomId = atomInfo.id || atom.atomName;
-        const dropped: DroppedAtom = {
-          id: `${atom.atomName}-${Date.now()}-${Math.random()}`,
-          atomId,
-          title: atomInfo.title || atom.atomName,
-          category: atomInfo.category || 'Atom',
-          color: atomInfo.color || 'bg-gray-400',
-          source: 'manual',
-          llm: LLM_MAP[atomId],
-        };
-        return {
-          id: `card-${atom.atomName}-${Date.now()}-${Math.random()}`,
-          atoms: [dropped],
-          isExhibited: false,
-          moleculeId: atom.moleculeId,
-          moleculeTitle: atom.moleculeTitle
-        } as LayoutCard;
-      });
-      const wfInit = deriveWorkflowMolecules(initialCards);
-      setWorkflowMolecules(wfInit);
-      if (wfInit.length > 0) {
-        setActiveTab(wfInit[0].moleculeId);
-      }
-    } else {
+    if (!workflowAtoms.length) {
       const storedLayout = localStorage.getItem(STORAGE_KEY);
       if (storedLayout && storedLayout !== 'undefined') {
         try {
           const raw = JSON.parse(storedLayout);
-          initialCards = Array.isArray(raw)
-            ? raw.map((c: any) => ({
-                id: c.id,
-                atoms: Array.isArray(c.atoms)
-                  ? c.atoms.map((a: any) => {
-                      const info = allAtoms.find(at => at.id === a.atomId);
-                      return {
-                        ...a,
-                        llm: a.llm || LLM_MAP[a.atomId],
-                        color: a.color || info?.color || 'bg-gray-400',
-                      };
-                    })
-                  : [],
-                isExhibited: !!c.isExhibited,
-                moleculeId: c.moleculeId,
-                moleculeTitle: c.moleculeTitle,
-              }))
-            : null;
-          if (initialCards) {
-            const wf = deriveWorkflowMolecules(initialCards);
-            if (wf.length > 0) {
-              setWorkflowMolecules(wf);
-              setActiveTab(wf[0].moleculeId);
-            }
-          }
+          initialCards = hydrateLayoutCards(raw);
         } catch (e) {
           console.error('Failed to parse stored laboratory layout', e);
           localStorage.removeItem(STORAGE_KEY);
@@ -595,10 +836,22 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       } else {
         const current = localStorage.getItem('current-project');
         if (current) {
-          fetch(`${REGISTRY_API}/projects/${JSON.parse(current).id}/`, { credentials: 'include' })
-            .then(res => res.ok ? res.json() : null)
-            .then(async data => {
-              if (data) {
+          let projectId: string | undefined;
+          try {
+            projectId = JSON.parse(current).id;
+          } catch {
+            projectId = undefined;
+          }
+
+          if (projectId) {
+            hasPendingAsyncLoad = true;
+            fetch(`${REGISTRY_API}/projects/${projectId}/`, { credentials: 'include' })
+              .then(res => (res.ok ? res.json() : null))
+              .then(async data => {
+                if (!data || !isMounted) {
+                  return;
+                }
+
                 if (data.environment) {
                   try {
                     const env = data.environment || {};
@@ -608,26 +861,71 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
                     localStorage.removeItem('column-classifier-config');
                   }
                 }
+
                 if (data.state && data.state.laboratory_config) {
                   const cfg = sanitizeLabConfig(data.state.laboratory_config);
-                  localStorage.setItem(STORAGE_KEY, safeStringify(cfg.cards));
-                  localStorage.setItem('laboratory-config', safeStringify(cfg));
-                  if (!storedAtoms && data.state.workflow_selected_atoms) {
-                    localStorage.setItem('workflow-selected-atoms', safeStringify(data.state.workflow_selected_atoms));
+                  const cached = persistLaboratoryConfig(cfg);
+                  if (!cached) {
+                    console.warn('Storage quota exceeded while caching laboratory config from registry.');
                   }
-                  window.location.reload();
+                  if (!storedAtoms && data.state.workflow_selected_atoms) {
+                    localStorage.setItem(
+                      'workflow-selected-atoms',
+                      safeStringify(data.state.workflow_selected_atoms),
+                    );
+                  }
+
+                  const cardsFromConfig = hydrateLayoutCards(cfg.cards);
+                  applyInitialCards(cardsFromConfig);
                 }
-              }
-            })
-            .catch(() => {});
+              })
+              .catch(() => {
+                /* ignore load failures */
+              })
+              .finally(() => {
+                if (!hasAppliedInitialCards) {
+                  markLoadingComplete();
+                }
+              });
+          }
         }
       }
     }
 
     if (initialCards) {
-      setLayoutCards(initialCards);
+      applyInitialCards(initialCards, initialWorkflow);
+    } else if (!hasPendingAsyncLoad && !hasAppliedInitialCards) {
+      markLoadingComplete();
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!isCanvasLoading) {
+      return;
+    }
+
+    if (typeof window === 'undefined' || loadingMessages.length <= 1) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setLoadingMessageIndex(prev => (prev + 1) % loadingMessages.length);
+    }, 2200);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [isCanvasLoading, loadingMessages]);
+
+  useEffect(() => {
+    if (!isCanvasLoading) {
+      setLoadingMessageIndex(0);
+    }
+  }, [isCanvasLoading]);
 
   // Persist layout to localStorage safely and store undo snapshot
   useEffect(() => {
@@ -1022,6 +1320,14 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       }
     }
   };
+
+  if (isCanvasLoading) {
+    return (
+      <div className="relative h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <LoadingAnimation status={currentLoadingMessage} className="rounded-xl" />
+      </div>
+    );
+  }
 
   if (workflowMolecules.length > 0) {
     return (

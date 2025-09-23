@@ -150,6 +150,7 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
           <DataFrameOperationsExhibition data={(settings as any).tableData || data} />
         </TabsContent>
       </Tabs>
+      {dialog}
     </div>
   );
 };

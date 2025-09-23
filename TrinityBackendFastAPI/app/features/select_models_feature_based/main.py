@@ -1,10 +1,39 @@
 # app/main.py
 
+import os
+import sys
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from routes import router
 from config import settings, Settings
+
+try:
+    from app.core.mongo import build_host_mongo_uri
+except ModuleNotFoundError:  # pragma: no cover - direct execution fallback
+    from pathlib import Path
+
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
+    from app.core.mongo import build_host_mongo_uri
+
+DEFAULT_MONGO_URI = build_host_mongo_uri()
+
+
+def _get_mongo_uri() -> str:
+    return os.getenv(
+        "SELECT_MODELS_MONGO_URI",
+        os.getenv("MONGO_URI", DEFAULT_MONGO_URI)
+    )
+
+
+def _sanitize_mongo_uri(uri: str) -> str:
+    if "@" in uri:
+        try:
+            credentials = uri.split("@")[0].split("//")[1]
+        except IndexError:
+            return uri
+        return uri.replace(credentials, "***:***")
+    return uri
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
@@ -72,7 +101,7 @@ async def get_app_info():
         "app_name": "Select Models Feature Based API",
         "version": "1.0.0",
         "database": {
-            "mongodb_endpoint": "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin",
+            "mongodb_endpoint": _sanitize_mongo_uri(_get_mongo_uri()),
             "database": "validator_atoms_db",
             "collection": "validator_atoms"
         },

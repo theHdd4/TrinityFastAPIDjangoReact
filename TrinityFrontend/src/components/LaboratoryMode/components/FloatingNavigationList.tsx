@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { GripVertical, X, Minimize2, Maximize2 } from 'lucide-react';
@@ -7,18 +8,92 @@ import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
 interface FloatingNavigationListProps {
   isVisible: boolean;
   onClose: () => void;
+  anchorSelector?: string;
 }
 
-const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({ isVisible, onClose }) => {
-  const [position, setPosition] = useState({ x: 20, y: 100 });
+const VIEWPORT_PADDING = 24;
+const DEFAULT_POSITION = { x: VIEWPORT_PADDING, y: 120 };
+
+const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
+  isVisible,
+  onClose,
+  anchorSelector,
+}) => {
+  const [position, setPosition] = useState(DEFAULT_POSITION);
   const [isDragging, setIsDragging] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [isFadingIn, setIsFadingIn] = useState(false);
   const widgetRef = useRef<HTMLDivElement>(null);
+  const manualPositionRef = useRef(false);
   const { cards } = useExhibitionStore();
+  const cardsLength = cards.length;
+
+  const clampPositionToViewport = useCallback((x: number, y: number) => {
+    if (typeof window === 'undefined' || !widgetRef.current) {
+      return { x, y };
+    }
+
+    const widgetRect = widgetRef.current.getBoundingClientRect();
+    const maxX = window.innerWidth - widgetRect.width - VIEWPORT_PADDING;
+    const maxY = window.innerHeight - widgetRect.height - VIEWPORT_PADDING;
+
+    return {
+      x: Math.min(Math.max(x, VIEWPORT_PADDING), Math.max(VIEWPORT_PADDING, maxX)),
+      y: Math.min(Math.max(y, VIEWPORT_PADDING), Math.max(VIEWPORT_PADDING, maxY)),
+    };
+  }, []);
+
+  const alignToAnchor = useCallback(() => {
+    if (!anchorSelector || typeof window === 'undefined' || manualPositionRef.current) {
+      return;
+    }
+
+    const widgetElement = widgetRef.current;
+
+    if (!widgetElement) {
+      return;
+    }
+
+    const widgetRect = widgetElement.getBoundingClientRect();
+
+    if (widgetRect.width === 0 && widgetRect.height === 0) {
+      return;
+    }
+
+    const anchorElement = document.querySelector(anchorSelector) as HTMLElement | null;
+    const anchorRect = anchorElement?.getBoundingClientRect();
+    const headerElement = document.querySelector('[data-primary-menu]') as HTMLElement | null;
+    const headerRect = headerElement?.getBoundingClientRect();
+
+    const viewportWidth = window.innerWidth;
+    const centeredX = Math.max((viewportWidth - widgetRect.width) / 2, VIEWPORT_PADDING);
+    const anchorOffsetX = anchorRect ? anchorRect.right + VIEWPORT_PADDING : centeredX;
+    const targetX = Math.max(anchorOffsetX, centeredX);
+
+    const viewportHeight = window.innerHeight;
+    const centeredY = Math.max((viewportHeight - widgetRect.height) / 2, VIEWPORT_PADDING);
+    const anchorMidpointY = anchorRect
+      ? anchorRect.top + anchorRect.height / 2 - widgetRect.height / 2
+      : centeredY;
+    const headerOffsetY = headerRect ? headerRect.bottom + VIEWPORT_PADDING : null;
+    const targetY =
+      headerOffsetY !== null
+        ? Math.max(headerOffsetY, VIEWPORT_PADDING)
+        : Math.max(anchorMidpointY, centeredY);
+
+    const nextPosition = clampPositionToViewport(targetX, targetY);
+
+    setPosition(previous => {
+      if (previous.x === nextPosition.x && previous.y === nextPosition.y) {
+        return previous;
+      }
+      return nextPosition;
+    });
+  }, [anchorSelector, clampPositionToViewport]);
 
   // Get all atoms from cards
-  const allAtoms = cards.flatMap(card => 
+  const allAtoms = cards.flatMap(card =>
     card.atoms.map(atom => ({
       id: atom.id,
       title: atom.title,
@@ -27,6 +102,93 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({ isVisib
       cardId: card.id
     }))
   );
+  const atomsCount = allAtoms.length;
+
+  useLayoutEffect(() => {
+    if (!isVisible || manualPositionRef.current || !anchorSelector) {
+      return;
+    }
+
+    let frameId = 0;
+
+    const attemptAlignment = () => {
+      if (typeof window === 'undefined') {
+        return;
+      }
+
+      const anchorElement = anchorSelector
+        ? (document.querySelector(anchorSelector) as HTMLElement | null)
+        : null;
+      const headerElement = document.querySelector('[data-primary-menu]') as HTMLElement | null;
+      const widgetElement = widgetRef.current;
+
+      if ((!anchorElement && !headerElement) || !widgetElement) {
+        frameId = window.requestAnimationFrame(attemptAlignment);
+        return;
+      }
+
+      const widgetRect = widgetElement.getBoundingClientRect();
+      if (widgetRect.width === 0 && widgetRect.height === 0) {
+        frameId = window.requestAnimationFrame(attemptAlignment);
+        return;
+      }
+
+      alignToAnchor();
+    };
+
+    attemptAlignment();
+
+    return () => {
+      if (typeof window !== 'undefined' && frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [alignToAnchor, anchorSelector, isVisible]);
+
+  useEffect(() => {
+    if (!isVisible || manualPositionRef.current) {
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      alignToAnchor();
+    }, 50);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [alignToAnchor, atomsCount, cardsLength, isMinimized, isVisible]);
+
+  useEffect(() => {
+    if (!isVisible || manualPositionRef.current || !anchorSelector) {
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const handleResize = () => {
+      alignToAnchor();
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [alignToAnchor, anchorSelector, isVisible]);
+
+  useEffect(() => {
+    if (isVisible) {
+      setIsFadingIn(true);
+    } else {
+      setIsFadingIn(false);
+    }
+  }, [isVisible]);
 
   const scrollToCard = (cardId: string) => {
     const cardElement = document.querySelector(`[data-card-id="${cardId}"]`);
@@ -40,22 +202,30 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({ isVisib
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!widgetRef.current) return;
-    
+
     const rect = widgetRef.current.getBoundingClientRect();
     setDragOffset({
       x: e.clientX - rect.left,
       y: e.clientY - rect.top
     });
+    manualPositionRef.current = true;
     setIsDragging(true);
   };
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDragging) return;
-      
-      setPosition({
-        x: e.clientX - dragOffset.x,
-        y: e.clientY - dragOffset.y
+
+      const nextPosition = clampPositionToViewport(
+        e.clientX - dragOffset.x,
+        e.clientY - dragOffset.y,
+      );
+
+      setPosition(previous => {
+        if (previous.x === nextPosition.x && previous.y === nextPosition.y) {
+          return previous;
+        }
+        return nextPosition;
       });
     };
 
@@ -72,23 +242,26 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({ isVisib
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, dragOffset]);
+  }, [clampPositionToViewport, isDragging, dragOffset]);
 
   if (!isVisible) return null;
 
-  return (
+  const content = (
     <div
       ref={widgetRef}
-      className="fixed z-50 select-none"
+      className="fixed z-50 select-none transition-all duration-500 ease-out"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`,
-        cursor: isDragging ? 'grabbing' : 'default'
+        cursor: isDragging ? 'grabbing' : 'default',
+        opacity: isFadingIn ? 1 : 0,
+        transform: isFadingIn ? 'translateY(0)' : 'translateY(12px)',
+        pointerEvents: isFadingIn ? 'auto' : 'none',
       }}
     >
       <Card className="bg-white/95 backdrop-blur-sm shadow-lg border border-gray-200 min-w-[250px] max-w-[300px]">
         {/* Header */}
-        <div 
+        <div
           className="flex items-center justify-between p-3 border-b border-gray-200 cursor-grab active:cursor-grabbing bg-gray-50"
           onMouseDown={handleMouseDown}
         >
@@ -126,7 +299,7 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({ isVisib
               </div>
             ) : (
               <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                {allAtoms.map((atom) => (
+                {allAtoms.map(atom => (
                   <div
                     key={atom.id}
                     className="flex items-center space-x-2 p-2 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors cursor-pointer"
@@ -141,7 +314,7 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({ isVisib
                 ))}
               </div>
             )}
-            
+
             {allAtoms.length > 0 && (
               <div className="mt-3 pt-2 border-t border-gray-200">
                 <p className="text-xs text-gray-500 text-center">
@@ -154,6 +327,12 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({ isVisib
       </Card>
     </div>
   );
+
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  return createPortal(content, document.body);
 };
 
 export default FloatingNavigationList;
