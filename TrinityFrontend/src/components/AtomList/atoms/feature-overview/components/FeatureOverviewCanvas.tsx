@@ -26,6 +26,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { logSessionState, addNavigationItem } from "@/lib/session";
 import { useLaboratoryStore } from "@/components/LaboratoryMode/store/laboratoryStore";
 import { useToast } from "@/hooks/use-toast";
+import { csvParse } from "d3-dsv";
 
 interface ColumnInfo {
   column: string;
@@ -579,14 +580,17 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         throw new Error("Failed to load data");
       }
       const text = await res.text();
-      const [headerLine, ...rows] = text.trim().split(/\r?\n/);
-      const headers = headerLine.split(",");
-      const rowLines = Array.isArray(rows) ? rows : [];
-      const data = rowLines.map((r) => {
-        const vals = r.split(",");
+      const parsed = csvParse(text);
+      const columns = (parsed.columns ?? []).filter(
+        (col) => typeof col === "string" && col.trim().length > 0,
+      );
+      const data = parsed.map((row) => {
         const obj: Record<string, string> = {};
-        headers.forEach((h, i) => {
-          obj[h.toLowerCase()] = vals[i];
+        const sourceColumns = columns.length > 0 ? columns : Object.keys(row);
+        sourceColumns.forEach((col) => {
+          const key = col.toLowerCase();
+          const value = row[col as keyof typeof row] as string | undefined;
+          obj[key] = value == null ? "" : String(value);
         });
         return obj;
       });
@@ -600,19 +604,19 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         id: i + 1,
         ...row,
       }));
-    setSkuRows(table);
-    const newSettings: any = { skuTable: table };
-       if (!Array.isArray(settings.yAxes) || settings.yAxes.length === 0) {
-         const lower = Array.isArray(settings.numericColumns)
-           ? settings.numericColumns.map((c) => c.toLowerCase())
-           : [];
-         const defaults = ["salesvalue", "volume"].filter((d) =>
-           lower.includes(d),
-         );
-       if (defaults.length > 0) {
-         newSettings.yAxes = defaults;
-       }
-       }
+      setSkuRows(table);
+      const newSettings: any = { skuTable: table };
+      if (!Array.isArray(settings.yAxes) || settings.yAxes.length === 0) {
+        const lower = Array.isArray(settings.numericColumns)
+          ? settings.numericColumns.map((c) => c.toLowerCase())
+          : [];
+        const defaults = ["salesvalue", "volume"].filter((d) =>
+          lower.includes(d),
+        );
+        if (defaults.length > 0) {
+          newSettings.yAxes = defaults;
+        }
+      }
       onUpdateSettings(newSettings);
       addNavigationItem(user?.id, {
         atom: 'feature-overview',
