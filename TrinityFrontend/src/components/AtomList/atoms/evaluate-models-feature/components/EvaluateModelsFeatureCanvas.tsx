@@ -2004,7 +2004,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
                           <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2" onPointerDownOutside={(e) => e.preventDefault()}>
                             {info.unique_values && info.unique_values.length > 0 ? (
                               <>
-                                <div className="flex items-center gap-2 py-1 border-b mb-2">
+                                <div className="flex items-center gap-2 py-1">
                                   <Checkbox
                                     checked={selectedValues.length === info.unique_values.length}
                                     onCheckedChange={(checked) => {

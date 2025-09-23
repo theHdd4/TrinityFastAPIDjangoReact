@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { Upload, Eye } from 'lucide-react';
 
 import EvaluateModelsFeatureSettings from '../EvaluateModelsFeatureSettings';
@@ -50,7 +53,36 @@ const InternalEvaluateModelsFeatureProperties: React.FC<StandaloneProps> = ({
           />
         </TabsContent>
         <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
-          {/* Exhibition tab content - empty for now */}
+          <div className="space-y-4 p-2">
+            {/* Graph Types */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm font-medium">Graph Types</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {data.graphs?.map((graph) => (
+                  <div key={graph.id} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`graph-${graph.id}`}
+                      checked={graph.selected}
+                      onCheckedChange={(checked) => {
+                        const updatedGraphs = data.graphs?.map(g =>
+                          g.id === graph.id ? { ...g, selected: checked as boolean } : g
+                        );
+                        onDataChange({ graphs: updatedGraphs });
+                      }}
+                    />
+                    <Label 
+                      htmlFor={`graph-${graph.id}`} 
+                      className="text-xs font-normal cursor-pointer"
+                    >
+                      {graph.name}
+                    </Label>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

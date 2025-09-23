@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
 import { Tag, X, GripVertical } from 'lucide-react';
 // import {
 //   DndContext,
@@ -198,16 +199,17 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
           </Badge>
         </div>
 
-        {/* Unified Dimension Mapping Box */}
-        <div className="w-full">
-          <div className="bg-white/80 backdrop-blur-sm overflow-hidden border-2 border-gray-200 rounded-xl">
+        <div className="p-4 space-y-6">
+          {/* Unified Dimension Mapping Box */}
+          <div className="p-4 w-full">
+          <Card className="bg-white/80 backdrop-blur-sm overflow-hidden border-2 border-gray-200 rounded-xl">
             <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-3">
               <div className="w-2 h-4 rounded-full bg-gradient-to-r from-blue-500/60 to-blue-600/80" />
               <h4 className="text-base font-semibold text-gray-900">Apply Dimension Mapping</h4>
             </div>
             <div className="p-5">
-              <div className="rounded-lg bg-white/50 p-4">
-                <div className="space-y-4">
+              <div className="relative rounded-lg bg-white/50 p-4">
+                <div className="space-y-6">
                   {/* Unattributed Section */}
                   {customDimensions['unattributed'] && customDimensions['unattributed'].length > 0 && (
                     <>
@@ -216,7 +218,7 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
                           <div className="w-2 h-2 rounded-full bg-gradient-to-r from-gray-400 to-gray-500" />
                           <span className="text-sm font-medium text-gray-600">Unattributed</span>
                         </div>
-                        <div className="flex flex-wrap gap-3">
+                        <div className="flex flex-wrap gap-3 ">
                           {customDimensions['unattributed'].map((column, index) => (
                             <SelectableColumnPill
                               key={`unattributed-${column}-${index}`}
@@ -246,7 +248,7 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
                             <div className={`w-2 h-2 rounded-full ${getDimensionColor(dimensionName, index).bg}`} />
                             <span className="text-sm font-medium text-gray-600">{dimensionName}</span>
                           </div>
-                          <div className="flex flex-wrap gap-3">
+                          <div className="flex flex-wrap gap-3 ">
                             {assignedColumns.map((column, colIndex) => (
                               <SelectableColumnPill
                                 key={`${dimensionName}-${column}-${colIndex}`}
@@ -277,6 +279,7 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
                 )}
               </div>
             </div>
+          </Card>
           </div>
         </div>
         

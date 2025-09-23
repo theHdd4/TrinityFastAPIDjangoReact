@@ -37,6 +37,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SingleSelectDropdown } from '@/templates/dropdown';
 
 interface ConcatCanvasProps {
   atomId: string;
@@ -455,17 +456,6 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
       .catch(() => setFrames([]));
   }, []);
 
-  const handleFile1Change: React.ChangeEventHandler<HTMLSelectElement> = (e) => {
-    updateSettings(atomId, { file1: e.target.value });
-  };
-
-  const handleFile2Change: React.ChangeEventHandler<HTMLSelectElement> = (e) => {
-    updateSettings(atomId, { file2: e.target.value });
-  };
-
-  const handleDirectionChange: React.ChangeEventHandler<HTMLSelectElement> = (e) => {
-    updateSettings(atomId, { direction: e.target.value });
-  };
 
   const parseCSV = (csvText: string): { headers: string[]; rows: Record<string, any>[] } => {
     const lines = csvText.split(/\r?\n/).filter(line => line.trim());
@@ -954,22 +944,17 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
                     <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
                     <span className="font-medium text-gray-700">Primary Source</span>
                   </div>
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                    <div className="flex items-center space-x-2 w-full">
-                      <select
-                        value={file1 || ''}
-                        onChange={handleFile1Change}
-                        className="w-full bg-transparent text-sm font-medium text-gray-800 focus:outline-none cursor-pointer"
-                      >
-                        <option value="">Select file</option>
-                        {frames.map(f => (
-                          <option key={f.object_name} value={f.object_name}>
-                            {f.csv_name.split('/').pop()}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
+                  <SingleSelectDropdown
+                    label=""
+                    placeholder="Select file"
+                    value={file1 || ""}
+                    onValueChange={(value) => updateSettings(atomId, { file1: value })}
+                    options={frames.map(f => ({ 
+                      value: f.object_name, 
+                      label: f.csv_name.split('/').pop() || f.csv_name
+                    }))}
+                    className="w-full"
+                  />
                 </div>
                 {/* Secondary Source */}
                 <div>
@@ -977,22 +962,17 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
                     <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
                     <span className="font-medium text-gray-700">Secondary Source</span>
                   </div>
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                    <div className="flex items-center space-x-2 w-full">
-                      <select
-                        value={file2 || ''}
-                        onChange={handleFile2Change}
-                        className="w-full bg-transparent text-sm font-medium text-gray-800 focus:outline-none cursor-pointer"
-                      >
-                        <option value="">Select file</option>
-                        {frames.map(f => (
-                          <option key={f.object_name} value={f.object_name}>
-                            {f.csv_name.split('/').pop()}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
+                  <SingleSelectDropdown
+                    label=""
+                    placeholder="Select file"
+                    value={file2 || ""}
+                    onValueChange={(value) => updateSettings(atomId, { file2: value })}
+                    options={frames.map(f => ({ 
+                      value: f.object_name, 
+                      label: f.csv_name.split('/').pop() || f.csv_name
+                    }))}
+                    className="w-full"
+                  />
                 </div>
                 {/* Strategy */}
                 <div>
@@ -1000,20 +980,17 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
                     <div className="w-2 h-2 bg-purple-500 rounded-full mr-2"></div>
                     <span className="font-medium text-gray-700">Strategy</span>
                   </div>
-                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-                    <div className="flex items-center space-x-2 w-full">
-                      <ArrowDown className="w-4 h-4 text-purple-600 flex-shrink-0" />
-                      <select
-                        value={direction || ''}
-                        onChange={handleDirectionChange}
-                        className="w-full bg-transparent text-sm font-medium text-gray-800 capitalize focus:outline-none cursor-pointer"
-                      >
-                        <option value="">Select</option>
-                        <option value="vertical">Vertical</option>
-                        <option value="horizontal">Horizontal</option>
-                      </select>
-                    </div>
-                  </div>
+                  <SingleSelectDropdown
+                    label=""
+                    placeholder="Select direction"
+                    value={direction || ""}
+                    onValueChange={(value) => updateSettings(atomId, { direction: value })}
+                    options={[
+                      { value: "vertical", label: "Vertical" },
+                      { value: "horizontal", label: "Horizontal" }
+                    ]}
+                    className="w-full"
+                  />
                 </div>
               </div>
             </div>

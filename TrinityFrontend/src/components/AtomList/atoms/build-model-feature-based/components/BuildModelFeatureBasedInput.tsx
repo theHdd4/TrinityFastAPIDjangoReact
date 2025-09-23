@@ -3,6 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Database } from 'lucide-react';
 import { VALIDATE_API } from '@/lib/api';
 import { BuildModelFeatureBasedData } from '../BuildModelFeatureBasedAtom';
@@ -137,10 +138,13 @@ const BuildModelFeatureBasedInput: React.FC<BuildModelFeatureBasedInputProps> = 
             </Select>
           </div>
           
+          {/* Separator line between scope and combination sections */}
+          <div className="border-t border-gray-200 my-4"></div>
+          
           <div>
             {/* Select All Checkbox */}
             {uniqueCombinations.length > 0 && (
-              <div className="mb-3 p-2 border rounded bg-muted/20">
+              <div className="mb-3">
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="select-all-combinations"
@@ -154,17 +158,29 @@ const BuildModelFeatureBasedInput: React.FC<BuildModelFeatureBasedInputProps> = 
               </div>
             )}
             
-            <div className="max-h-60 overflow-y-auto overflow-x-auto mt-2 border rounded p-2">
-              <div className="grid grid-cols-1 gap-2 min-w-max">
+            {/* Separator line */}
+            {uniqueCombinations.length > 0 && (
+              <div className="border-t border-gray-200 mb-3"></div>
+            )}
+            
+            <div className="max-h-60 overflow-y-auto overflow-x-auto mt-2">
+              <div className="space-y-1 min-w-max">
                 {uniqueCombinations.map(option => (
-                  <div key={option.value} className="flex items-center space-x-2 p-2 border rounded hover:bg-muted/30">
+                  <div key={option.value} className="flex items-center space-x-2 py-1">
                     <Checkbox
                       id={option.value}
                       checked={data?.selectedCombinations?.includes(option.value) || false}
                       onCheckedChange={(checked) => handleCombinationToggle(option.value, checked as boolean)}
                       onClick={(e) => e.stopPropagation()}
                     />
-                    <Label htmlFor={option.value} className="text-sm truncate">{option.label}</Label>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Label htmlFor={option.value} className="text-sm truncate">{option.label}</Label>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>{option.label}</p>
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
                 ))}
               </div>

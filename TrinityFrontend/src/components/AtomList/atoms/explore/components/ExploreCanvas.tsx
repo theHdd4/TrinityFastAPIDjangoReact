@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { Checkbox } from '@/components/ui/checkbox';
 import Table from '@/templates/tables/table';
+import { SingleSelectDropdown, MultiSelectDropdown } from '@/templates/dropdown';
 
 // Chart color palette using specified base colors and lighter shades
 const CHART_COLORS = [
@@ -2112,7 +2113,15 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 style={{ position: 'relative', zIndex: 40 }}
               >
                 <div className="flex items-center space-x-2">
-                  <Select
+                  <SingleSelectDropdown
+                    label=""
+                    placeholder={
+                      isLoadingColumns
+                        ? "Loading..."
+                        : allAvailableColumns.length === 0
+                        ? "No column classifier config"
+                        : "x-axis"
+                    }
                     value={config.xAxis}
                     onValueChange={(value) => {
                       const newConfigs = [...chartConfigs];
@@ -2131,39 +2140,27 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                         }
                       }
                     }}
-                  >
-                    <SelectTrigger className="w-24 h-8 text-xs leading-none" disabled={isLoadingColumns}>
-                      <SelectValue
-                        className="truncate"
-                        placeholder={
-                          isLoadingColumns
-                            ? "Loading..."
-                            : allAvailableColumns.length === 0
-                            ? "No column classifier config"
-                            : "x-axis"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Array.isArray(allAvailableColumns) ? (
-                        allAvailableColumns.map((column, idx) => (
-                          <SelectItem key={idx} value={column}>
-                            {column}
-                          </SelectItem>
-                        ))
-                      ) : (
-                        <div className="text-xs text-gray-500 p-2">
-                          No column classifier config
-                        </div>
-                      )}
-                    </SelectContent>
-                  </Select>
+                    options={Array.isArray(allAvailableColumns) ? 
+                      allAvailableColumns.map((column, idx) => ({ value: column, label: column })) : 
+                      []
+                    }
+                    disabled={isLoadingColumns}
+                    className="w-24"
+                  />
 
                   <div className="flex items-center gap-1">
                     {Array.isArray(config.yAxes)
                       ? config.yAxes.map((yAxis, yAxisIndex) => (
                           <div key={yAxisIndex} className="flex items-center gap-1">
-                            <Select
+                            <SingleSelectDropdown
+                              label=""
+                              placeholder={
+                                isLoadingColumns
+                                  ? "Loading..."
+                                  : allAvailableColumns.length === 0
+                                  ? "No column classifier config"
+                                  : "y-axis"
+                              }
                               value={yAxis}
                               onValueChange={(value) => {
                                 const newConfigs = [...chartConfigs];
@@ -2195,33 +2192,13 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                   }
                                 }
                               }}
-                            >
-                              <SelectTrigger className="w-24 h-8 text-xs leading-none" disabled={isLoadingColumns}>
-                                <SelectValue
-                                  className="truncate"
-                                  placeholder={
-                                    isLoadingColumns
-                                      ? "Loading..."
-                                      : allAvailableColumns.length === 0
-                                      ? "No column classifier config"
-                                      : "y-axis"
-                                  }
-                                />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {Array.isArray(allAvailableColumns) ? (
-                                  allAvailableColumns.map((column, idx) => (
-                                    <SelectItem key={idx} value={column}>
-                                      {column}
-                                    </SelectItem>
-                                  ))
-                                ) : (
-                                  <div className="text-xs text-gray-500 p-2">
-                                    No column classifier config
-                                  </div>
-                                )}
-                              </SelectContent>
-                            </Select>
+                              options={Array.isArray(allAvailableColumns) ? 
+                                allAvailableColumns.map((column, idx) => ({ value: column, label: column })) : 
+                                []
+                              }
+                              disabled={isLoadingColumns}
+                              className="w-24"
+                            />
                             {/* Remove button for additional Y-axes (not the first one) */}
                             {yAxisIndex > 0 && (
                               <Button
@@ -2279,7 +2256,9 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 </div>
 
                 <div className="ml-auto">
-                  <Select
+                  <SingleSelectDropdown
+                    label=""
+                    placeholder="Segregate Field Values"
                     value={config.legendField || ''}
                     onValueChange={(value) => {
                       const newConfigs = [...chartConfigs];
@@ -2307,26 +2286,16 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                         safeTriggerChartGeneration(index, newConfigs[index], 100);
                       }
                     }}
-                  >
-                    <SelectTrigger
-                      className="w-48 h-8 ml-2 pr-2 text-xs leading-none whitespace-nowrap [&>span:last-child>svg]:w-3 [&>span:last-child>svg]:h-3"
+                    options={[
+                      { value: "aggregate", label: "Show Aggregate" },
+                      ...(Array.isArray(availableIdentifiers) && availableIdentifiers.length > 0 ? 
+                        availableIdentifiers.map((column, idx) => ({ value: column, label: column })) : 
+                        []
+                      )
+                    ]}
                       disabled={isLoadingColumns}
-                    >
-                      <SelectValue placeholder="Segregate Field Values" className="whitespace-nowrap" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="aggregate">Show Aggregate</SelectItem>
-                      {Array.isArray(availableIdentifiers) && availableIdentifiers.length > 0 ? (
-                        availableIdentifiers.map((column, idx) => (
-                          <SelectItem key={idx} value={column}>
-                            {column}
-                          </SelectItem>
-                        ))
-                      ) : (
-                        <div className="text-xs text-gray-500 p-2">No categorical columns</div>
-                      )}
-                    </SelectContent>
-                  </Select>
+                    className="w-48 ml-2"
+                  />
                 </div>
               </div>
               
@@ -2413,7 +2382,9 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                   {hasValidYAxes(config.yAxes) && (
                     <div>
                       <Label className="text-xs text-gray-600">Aggregation</Label>
-                      <Select 
+                      <SingleSelectDropdown
+                        label=""
+                        placeholder="Select aggregation"
                         value={config.aggregation || 'no_aggregation'}
                         onValueChange={(value) => {
                           const newConfigs = [...chartConfigs];
@@ -2426,20 +2397,17 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                             safeTriggerChartGeneration(index, newConfig, 100);
                           }
                         }}
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="no_aggregation">No Aggregation</SelectItem>
-                          <SelectItem value="sum">Sum</SelectItem>
-                          <SelectItem value="avg">Average</SelectItem>
-                          <SelectItem value="count">Count</SelectItem>
-                          <SelectItem value="min">Min</SelectItem>
-                          <SelectItem value="max">Max</SelectItem>
-                          <SelectItem value="weighted_avg">Weighted Average</SelectItem>
-                        </SelectContent>
-                      </Select>
+                        options={[
+                          { value: "no_aggregation", label: "No Aggregation" },
+                          { value: "sum", label: "Sum" },
+                          { value: "avg", label: "Average" },
+                          { value: "count", label: "Count" },
+                          { value: "min", label: "Min" },
+                          { value: "max", label: "Max" },
+                          { value: "weighted_avg", label: "Weighted Average" }
+                        ]}
+                        className="h-8"
+                      />
                     </div>
                   )}
                 </div>
@@ -2566,7 +2534,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                 {/* Multi-select dropdown content */}
                                                                  {openDropdowns[`${index}-${identifier}`] && dropdownPosition && (
                                     <div 
-                                      className="fixed w-48 bg-white border border-gray-300 rounded-md shadow-lg z-50 max-h-32 overflow-y-auto"
+                                    className="fixed w-48 bg-white border border-gray-300 rounded-md shadow-lg z-50"
                                       style={{
                                         top: `${dropdownPosition.top}px`,
                                         left: `${dropdownPosition.left}px`,
@@ -2575,91 +2543,20 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                       }}
                                       onClick={(e) => e.stopPropagation()}
                                     >
-                                  <div className="p-0.5">
-                                    <label className="flex items-center space-x-2 py-0.5 px-1 hover:bg-gray-50 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={chartFilters[index]?.[identifier] !== null && (chartFilters[index]?.[identifier]?.length || 0) === 0}
-                                        onChange={() => {
-                                          const currentValues = chartFilters[index]?.[identifier] || [];
-                                          const allValues = identifierUniqueValues[identifier] || [];
-                                          
-                                          if (currentValues.length === 0) {
-                                            // "All" is currently selected, deselect it by deselecting all individual options
-                                            // Set to null to represent "no options selected"
-                                            handleMultiSelectFilterChange(index, identifier, null);
-                                          } else {
-                                            // "All" is not selected (either null or specific values), select it
-                                            handleMultiSelectFilterChange(index, identifier, []);
-                                          }
-                                        }}
-                                        className="w-3 h-3"
-                                      />
-                                      <span className="text-xs">All</span>
-                                    </label>
-                                    {identifierUniqueValues[identifier]?.map((value, idx) => (
-                                      <label key={idx} className="flex items-center space-x-2 py-0.5 px-1 hover:bg-gray-50 cursor-pointer">
-                                        <input
-                                          type="checkbox"
-                                          checked={chartFilters[index]?.[identifier] === null ? false : (chartFilters[index]?.[identifier]?.length || 0) === 0 || chartFilters[index]?.[identifier]?.includes(value) || false}
-                                          onChange={(e) => {
-                                            const currentValues = chartFilters[index]?.[identifier] || [];
-                                            const allValues = identifierUniqueValues[identifier] || [];
-                                            
-                                            
-                                            if (e.target.checked) {
-                                                // Adding a value
-                                                let newValues;
-                                                if (currentValues.length === 0) {
-                                                  // Currently showing "All", so start with all values and add this one
-                                                  // But since we're adding a value, we're deselecting "All"
-                                                  newValues = [value];
-                                                } else if (currentValues === null) {
-                                                  // Currently in "none selected" state, start fresh with just this value
-                                                  newValues = [value];
-                                                } else {
-                                                  newValues = [...currentValues, value];
-                                                }
-                                                
-                                                // Check if all values are now selected (including this new one)
-                                                if (newValues.length === allValues.length) {
-                                                  // All values are selected, automatically select "All"
-                                                  handleMultiSelectFilterChange(index, identifier, []);
-                                                } else {
-                                                  // Keep the filter with the new values
-                                                  handleMultiSelectFilterChange(index, identifier, newValues);
-                                                }
-                                              } else {
-                                                // Removing a value
-                                                const newValues = currentValues.filter(v => v !== value);
-                                              
-                                                // If we're removing a value and currently showing "All" (empty array),
-                                                // we need to start with all values and then remove this one
-                                                if (currentValues.length === 0) {
-                                                  // Currently showing "All", so start with all values and remove this one
-                                                  const allValuesExceptThis = allValues.filter(v => v !== value);
-                                                  handleMultiSelectFilterChange(index, identifier, allValuesExceptThis);
-                                                } else if (currentValues === null) {
-                                                  // Currently in "none selected" state, stay in that state
-                                                  handleMultiSelectFilterChange(index, identifier, null);
-                                                } else {
-                                                  // Already filtering, just remove this value
-                                                  if (newValues.length === 0) {
-                                                    // No values left, show "All"
-                                                    handleMultiSelectFilterChange(index, identifier, []);
-                                                  } else {
-                                                    // Keep the filter with remaining values
-                                                    handleMultiSelectFilterChange(index, identifier, newValues);
-                                                  }
-                                                }
-                                            }
-                                          }}
-                                          className="w-3 h-3"
-                                        />
-                                        <span className="text-xs truncate">{value}</span>
-                                      </label>
-                                    ))}
-                                  </div>
+                                    <MultiSelectDropdown
+                                      label=""
+                                      selectedValues={chartFilters[index]?.[identifier] || []}
+                                      onSelectionChange={(selectedValues) => {
+                                        handleMultiSelectFilterChange(index, identifier, selectedValues);
+                                      }}
+                                      options={identifierUniqueValues[identifier]?.map((value) => ({ 
+                                        value, 
+                                        label: value 
+                                      })) || []}
+                                      showSelectAll={true}
+                                      maxHeight="200px"
+                                      className="w-full"
+                                    />
                                 </div>
                                 )}
                               </div>

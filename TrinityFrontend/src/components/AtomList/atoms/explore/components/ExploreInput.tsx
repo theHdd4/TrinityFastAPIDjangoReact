@@ -6,7 +6,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 
-import { Database } from 'lucide-react'
 import type { ExploreData, ExploreSettings } from "../ExploreAtom"
 import { VALIDATE_API, EXPLORE_API } from "@/lib/api"
 import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning'
@@ -337,13 +336,10 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
     <div className="space-y-4 p-2 h-full overflow-auto">
       {/* ---------------- File selector ---------------- */}
       <Card className="p-4 space-y-3">
-        <label className="text-sm font-medium text-gray-700 flex items-center">
-          <Database className="w-4 h-4 mr-2 text-blue-600" />
-          Input File
-        </label>
+        <label className="text-sm font-medium text-gray-700 block">Data Source</label>
         <Select value={selected} onValueChange={handleFrameChange}>
           <SelectTrigger className="bg-white border-gray-300">
-            <SelectValue placeholder="Select saved dataframe" />
+            <SelectValue placeholder="Choose a saved dataframe..." />
           </SelectTrigger>
           <SelectContent>
             {Array.isArray(frames)

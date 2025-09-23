@@ -13,6 +13,7 @@ import { FEATURE_OVERVIEW_API, CLUSTERING_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import ClusteringCardinalityView from './ClusteringCardinalityView';
 import Table from '@/templates/tables/table';
+import { MultiSelectDropdown } from '@/templates/dropdown';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   ContextMenu,
@@ -684,95 +685,30 @@ const ClusteringCanvas: React.FC<ClusteringCanvasProps> = ({
          </div>
          
                   {Array.isArray(filteredIdentifiers) && filteredIdentifiers.length > 0 ? (
-            <div className="grid grid-cols-3 gap-4">
+            <div className="flex flex-wrap gap-2">
               {filteredIdentifiers.map((identifier) => (
-                <div key={identifier} className="flex flex-col space-y-1">
+                <div key={identifier} className="flex flex-col space-y-1 w-auto">
                   {/* Identifier Name Label */}
                   <div className="text-xs font-medium text-black">
                     {capitalizeFirstLetter(identifier)}
                   </div>
 
-            <Select
-                  onValueChange={(value) => {
-                    if (value === "All") {
-                      handleIdentifierFilterChange(identifier, []);
-                    }
-                  }}
-                >
-                                                                           <SelectTrigger className="bg-white border border-gray-300 hover:border-gray-400 transition-colors w-full h-8 px-2">
-                                                                                                                                                                         <span className="text-xs text-gray-700">
-                         {identifierFilters[identifier]?.length === 0
-                           ? "None"
-                           : identifierFilters[identifier]?.length === uniqueValues[identifier]?.length
-                           ? "All values"
-                           : `${identifierFilters[identifier].length} selected`}
-                       </span>
-               </SelectTrigger>
-                  <SelectContent className="w-64 max-h-80">
-                    <div className="p-3 space-y-2">
-                      <div className="text-sm font-medium text-gray-700 mb-3 border-b pb-2">
-                        Select values for {capitalizeFirstLetter(identifier)}
-                      </div>
-                      
-                      {/* Select All option */}
-                      <div className="flex items-center space-x-3 p-2 hover:bg-gray-100 rounded cursor-pointer"
-                           onClick={() => {
-                             const allSelected = uniqueValues[identifier] && uniqueValues[identifier].length > 0 && identifierFilters[identifier] && identifierFilters[identifier].length === uniqueValues[identifier].length;
-                             if (allSelected) {
-                               handleClearAllValues(identifier);
-                             } else {
-                               handleSelectAllValues(identifier);
-                             }
-                           }}>
-                        <input
-                          type="checkbox"
-                          checked={uniqueValues[identifier] && uniqueValues[identifier].length > 0 && identifierFilters[identifier] && identifierFilters[identifier].length === uniqueValues[identifier].length}
-                          onChange={() => {
-                            const allSelected = uniqueValues[identifier] && uniqueValues[identifier].length > 0 && identifierFilters[identifier] && identifierFilters[identifier].length === uniqueValues[identifier].length;
-                            if (allSelected) {
-                              handleClearAllValues(identifier);
-                            } else {
-                              handleSelectAllValues(identifier);
-                            }
-                          }}
-                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className="text-sm font-medium">
-                          {uniqueValues[identifier] && uniqueValues[identifier].length > 0 && identifierFilters[identifier] && identifierFilters[identifier].length === uniqueValues[identifier].length 
-                            ? 'Deselect All' 
-                            : 'Select All'}
-                        </span>
-                      </div>
-                      
-                      <div className="border-t pt-2">
-                        {/* Individual value options with checkboxes */}
-                        {loadingValues[identifier] ? (
-                          <div className="text-center py-4 text-gray-500">
-                            <span className="text-xs">Loading values...</span>
-                          </div>
-                        ) : uniqueValues[identifier] && uniqueValues[identifier].length > 0 ? (
-                          uniqueValues[identifier].map((value) => (
-                            <div key={value} className="flex items-center space-x-2 p-2 hover:bg-gray-100 rounded cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={identifierFilters[identifier]?.includes(value)}
-                                onChange={() => handleIdentifierFilterChange(identifier, identifierFilters[identifier]?.includes(value) ? identifierFilters[identifier]?.filter(v => v !== value) : [...(identifierFilters[identifier] || []), value])}
-                                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                              />
-                              <span className="text-xs">{value}</span>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="text-center py-4 text-gray-500">
-                            <span className="text-xs">No unique values found for {capitalizeFirstLetter(identifier)}.</span>
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* Clear All option - removed, now handled by Select All/Deselect All toggle */}
-                    </div>
-              </SelectContent>
-            </Select>
+            <MultiSelectDropdown
+              label=""
+              selectedValues={identifierFilters[identifier] || []}
+              onSelectionChange={(selectedValues) => {
+                handleIdentifierFilterChange(identifier, selectedValues);
+              }}
+              options={uniqueValues[identifier]?.map(value => ({ 
+                value, 
+                label: value 
+              })) || []}
+              showSelectAll={true}
+              disabled={loadingValues[identifier]}
+              showTrigger={true}
+              identifierName={identifier}
+              className="w-full"
+            />
           </div>
         ))}
       </div>

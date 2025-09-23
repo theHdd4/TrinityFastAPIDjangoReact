@@ -285,6 +285,22 @@ async def get_dimensions_and_measures(
             identifiers = cfg.get("identifiers", [])
             measures = cfg.get("measures", [])
         
+        # 🔧 FALLBACK LOGIC: If identifiers and measures are not found from MongoDB,
+        # automatically detect categorical columns as identifiers and numerical columns as measures
+        if not identifiers and not measures:
+            print(f"⚠️ No identifiers and measures found from MongoDB for file_key={file_key}. Using automatic detection.")
+            
+            # Get numerical columns as measures
+            numeric_columns = df.select_dtypes(include=['number']).columns.tolist()
+            measures = numeric_columns
+            
+            # Get categorical columns as identifiers (non-numeric columns)
+            categorical_columns = df.select_dtypes(exclude=['number']).columns.tolist()
+            identifiers = categorical_columns
+            
+            print(f"🔍 Auto-detected identifiers (categorical): {identifiers}")
+            print(f"🔍 Auto-detected measures (numerical): {measures}")
+        
         # Filter out time-related identifiers
         # time_keywords = {"date", "time", "month", "months", "week", "weeks", "year"}
         # identifiers = [i for i in identifiers if i and i.lower() not in time_keywords]

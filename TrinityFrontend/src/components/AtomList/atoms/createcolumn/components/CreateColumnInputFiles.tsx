@@ -224,7 +224,7 @@ const CreateColumnInputFiles: React.FC<Props> = ({ atomId, selectedIdentifiers, 
         <label className="text-sm font-medium text-gray-700 block">Data Source</label>
         <Select value={settings.dataSource} onValueChange={handleFrameChange}>
           <SelectTrigger className="bg-white border-gray-300">
-            <SelectValue placeholder="Select saved dataframe" />
+            <SelectValue placeholder="Choose a saved dataframe..." />
           </SelectTrigger>
           <SelectContent>
             {(Array.isArray(frames) ? frames : []).map(f => (
