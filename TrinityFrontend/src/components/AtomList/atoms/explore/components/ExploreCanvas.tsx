@@ -351,39 +351,25 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   useEffect(() => {
     const nextChartFilters = safeData.chartFilters ?? {};
-    if (!deepEqual(chartFilters, nextChartFilters)) {
-      setChartFilters(nextChartFilters);
-    }
+    setChartFilters(prev => (deepEqual(prev, nextChartFilters) ? prev : nextChartFilters));
 
     const nextChartThemes = safeData.chartThemes ?? {};
-    if (!deepEqual(chartThemes, nextChartThemes)) {
-      setChartThemes(nextChartThemes);
-    }
+    setChartThemes(prev => (deepEqual(prev, nextChartThemes) ? prev : nextChartThemes));
 
     const nextChartOptions = safeData.chartOptions ?? {};
-    if (!deepEqual(chartOptions, nextChartOptions)) {
-      setChartOptions(nextChartOptions);
-    }
+    setChartOptions(prev => (deepEqual(prev, nextChartOptions) ? prev : nextChartOptions));
 
     const nextAppliedFilters = safeData.appliedFilters ?? {};
-    if (!deepEqual(appliedFilters, nextAppliedFilters)) {
-      setAppliedFilters(nextAppliedFilters);
-    }
+    setAppliedFilters(prev => (deepEqual(prev, nextAppliedFilters) ? prev : nextAppliedFilters));
 
     const nextChartDataSets = safeData.chartDataSets ?? {};
-    if (!deepEqual(chartDataSets, nextChartDataSets)) {
-      setChartDataSets(nextChartDataSets);
-    }
+    setChartDataSets(prev => (deepEqual(prev, nextChartDataSets) ? prev : nextChartDataSets));
 
     const nextChartGenerated = safeData.chartGenerated ?? {};
-    if (!deepEqual(chartGenerated, nextChartGenerated)) {
-      setChartGenerated(nextChartGenerated);
-    }
+    setChartGenerated(prev => (deepEqual(prev, nextChartGenerated) ? prev : nextChartGenerated));
 
     const nextChartNotes = safeData.chartNotes ?? {};
-    if (!deepEqual(chartNotes, nextChartNotes)) {
-      setChartNotes(nextChartNotes);
-    }
+    setChartNotes(prev => (deepEqual(prev, nextChartNotes) ? prev : nextChartNotes));
   }, [
     safeData.chartFilters,
     safeData.chartThemes,
@@ -392,13 +378,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     safeData.chartDataSets,
     safeData.chartGenerated,
     safeData.chartNotes,
-    chartFilters,
-    chartThemes,
-    chartOptions,
-    appliedFilters,
-    chartDataSets,
-    chartGenerated,
-    chartNotes,
   ]);
 
   // Update chartConfigs when AI-generated data arrives
@@ -659,9 +638,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         ? safeData.chartConfigs
         : [fallbackConfig];
 
-    if (!deepEqual(chartConfigs, nextConfigs)) {
-      setChartConfigs(nextConfigs);
-    }
+    setChartConfigs(prev => (deepEqual(prev, nextConfigs) ? prev : nextConfigs));
   }, [
     safeData.chartConfigs,
     safeData.xAxis,
@@ -673,7 +650,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     safeData.weightColumn,
     safeData.legendField,
     safeData.title,
-    chartConfigs,
   ]);
 
   // Persist chart state changes to parent atom settings for saving/loading
