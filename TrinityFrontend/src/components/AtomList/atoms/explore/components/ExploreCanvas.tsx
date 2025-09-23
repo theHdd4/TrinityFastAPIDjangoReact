@@ -260,7 +260,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   };
   
   // State for dropdown positioning
-  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
   
   // Helper function to capitalize first letter
   const capitalizeFirstLetter = (str: string) => {
@@ -282,7 +281,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   // Unique values for each identifier
   const [identifierUniqueValues, setIdentifierUniqueValues] = useState<{ [identifier: string]: string[] }>({});
   const [loadingUniqueValues, setLoadingUniqueValues] = useState<{ [identifier: string]: boolean }>({});
-  const [openDropdowns, setOpenDropdowns] = useState<{ [key: string]: boolean }>({});
   const [appliedFilters, setAppliedFilters] = useState<{ [chartIndex: number]: boolean }>({});
   const [originalChartData, setOriginalChartData] = useState<{ [chartIndex: number]: any }>({});
   const [chartGenerated, setChartGenerated] = useState<{ [chartIndex: number]: boolean }>(data.chartGenerated || {});
@@ -701,7 +699,6 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const handleOverlayClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setOpenDropdowns({});
     // closeChatBubble(); // COMMENTED OUT: Chat bubble functionality
     // setChatBubbleShouldRender(false); // COMMENTED OUT: Chat bubble functionality
   };
@@ -714,18 +711,17 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   useEffect(() => {
     const handleClickOutside = () => {
-      setOpenDropdowns({});
       // closeChatBubble(); // COMMENTED OUT: Chat bubble functionality
       // setChatBubbleShouldRender(false); // COMMENTED OUT: Chat bubble functionality
     };
     if (
-      Object.values(openDropdowns).some(Boolean)
+      false
       // || chatBubble.visible // COMMENTED OUT: Chat bubble functionality
     ) {
       document.addEventListener('click', handleClickOutside);
     }
     return () => document.removeEventListener('click', handleClickOutside);
-  }, [openDropdowns]); // COMMENTED OUT: chatBubble.visible dependency
+  }, []); // COMMENTED OUT: chatBubble.visible dependency
 
   // Initialize data summary collapse state
   useEffect(() => {
@@ -1005,11 +1001,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element;
       
-              // Check if click is outside any dropdown
-        if (!target.closest('.filter-dropdown')) {
-          setOpenDropdowns({});
-          setDropdownPosition(null);
-        }
+      // Check if click is outside any dropdown
+      // Removed old dropdown click outside logic
     };
     
     // Add event listener
@@ -1547,16 +1540,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       return newFilters;
     });
     
-    // Close all dropdowns for this chart
-    setOpenDropdowns(prev => {
-      const newDropdowns = { ...prev };
-      Object.keys(newDropdowns).forEach(key => {
-        if (key.startsWith(`${chartIndex}-`)) {
-          delete newDropdowns[key];
-        }
-      });
-      return newDropdowns;
-    });
+    // Removed old dropdown state logic
     
     // Clear applied filters state
     setAppliedFilters(prev => {
@@ -2467,7 +2451,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                 {capitalizeFirstLetter(identifier)}
                               </div>
                               {/* Dropdown Filter with dimension color and identifier name inside */}
-                              <div className="relative filter-dropdown">
+                              <div className="relative">
                                 {/* Cross button for removing filter - only visible when showFilterCrossButtons is true */}
                                 {showFilterCrossButtons[index] && (
                                   <button
@@ -2489,76 +2473,21 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                   </button>
                                 )}
                                 
-                                <div 
-                                  className={`flex items-center justify-between w-28 h-6 text-xs bg-white border-2 rounded-md hover:border-gray-400 px-2 cursor-pointer transition-colors duration-200 ${dimensionColor.replace('bg-', 'border-').replace('text-', '').replace('hover:bg-', '')}`}
-                                                                      onClick={(e) => {
-                                      // Close all other dropdowns first, then toggle current one
-                                      setOpenDropdowns(prev => {
-                                        const newState = {};
-                                        // Close all dropdowns for this chart
-                                        Object.keys(prev).forEach(key => {
-                                          if (key.startsWith(`${index}-`)) {
-                                            newState[key] = false;
-                                          }
-                                        });
-                                        // Toggle current dropdown
-                                        newState[`${index}-${identifier}`] = !prev[`${index}-${identifier}`];
-                                        return newState;
-                                      });
-                                      
-                                      // Store dropdown position for proper positioning
-                                      if (!openDropdowns[`${index}-${identifier}`]) {
-                                        const button = e.currentTarget;
-                                        const rect = button.getBoundingClientRect();
-                                        setDropdownPosition({
-                                          top: rect.bottom + window.scrollY + 4,
-                                          left: rect.left + window.scrollX
-                                        });
-                                      }
-                                    }}
-                                >
-                                  <span className="truncate font-medium">
-                                    {loadingUniqueValues[identifier] ? "Loading..." : 
-                                     (chartFilters[index]?.[identifier]?.length || 0) === 0 ? "All" :
-                                     (chartFilters[index]?.[identifier]?.length || 0) === 1 ? 
-                                       chartFilters[index]?.[identifier]?.[0] || "All" :
-                                       `${chartFilters[index]?.[identifier]?.length || 0} selected`
-                                    }
-                                    {!appliedFilters[index] && (chartFilters[index]?.[identifier]?.length || 0) > 0 && (
-                                      <span className="ml-1 text-orange-600">*</span>
-                                    )}
-                                  </span>
-                                  <ChevronDown className="w-3 h-3" />
-                                </div>
-                                
-                                {/* Multi-select dropdown content */}
-                                                                 {openDropdowns[`${index}-${identifier}`] && dropdownPosition && (
-                                    <div 
-                                    className="fixed w-48 bg-white border border-gray-300 rounded-md shadow-lg z-50"
-                                      style={{
-                                        top: `${dropdownPosition.top}px`,
-                                        left: `${dropdownPosition.left}px`,
-                                        position: 'fixed',
-                                        zIndex: 9999
-                                      }}
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                    <MultiSelectDropdown
-                                      label=""
-                                      selectedValues={chartFilters[index]?.[identifier] || []}
-                                      onSelectionChange={(selectedValues) => {
-                                        handleMultiSelectFilterChange(index, identifier, selectedValues);
-                                      }}
-                                      options={identifierUniqueValues[identifier]?.map((value) => ({ 
-                                        value, 
-                                        label: value 
-                                      })) || []}
-                                      showSelectAll={true}
-                                      maxHeight="200px"
-                                      className="w-full"
-                                    />
-                                </div>
-                                )}
+                                <MultiSelectDropdown
+                                  label=""
+                                  selectedValues={chartFilters[index]?.[identifier] || []}
+                                  onSelectionChange={(selectedValues) => {
+                                    handleMultiSelectFilterChange(index, identifier, selectedValues);
+                                  }}
+                                  options={identifierUniqueValues[identifier]?.map((value) => ({ 
+                                    value, 
+                                    label: value 
+                                  })) || []}
+                                  showSelectAll={true}
+                                  showTrigger={true}
+                                  placeholder={`Filter by ${identifier}`}
+                                  className="w-full"
+                                />
                               </div>
                             </div>
                           ));

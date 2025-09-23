@@ -953,19 +953,10 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
        
        {dimensionError && (
          <div
-           className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800 font-medium"
+           className="mb-4 text-sm text-red-600 font-medium"
            data-testid="fo-dimension-error"
          >
-           <div className="flex items-center gap-2">
-             <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
-             <span className="font-semibold">Column Classifier Required:</span>
-           </div>
-           <div className="mt-1 ml-4">
-             {dimensionError}
-           </div>
-           {/* <div className="mt-2 text-xs text-yellow-700">
-             Run Column Classifier on this dataset to enable hierarchical dimension analysis.
-           </div> */}
+           {dimensionError}
          </div>
        )}
 
