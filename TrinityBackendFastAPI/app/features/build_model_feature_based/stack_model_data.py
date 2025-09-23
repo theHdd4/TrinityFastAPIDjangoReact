@@ -357,8 +357,7 @@ class DataPooler:
                 pass
             
             filtered_df = df[available_columns].copy()
-            
-            
+
             return filtered_df
             
         except Exception as e:

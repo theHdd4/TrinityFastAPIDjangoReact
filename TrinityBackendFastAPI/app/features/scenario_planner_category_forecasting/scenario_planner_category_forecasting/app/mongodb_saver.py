@@ -9,8 +9,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Use the same MongoDB URI as other features for consistency
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin")
-MONGO_DB = os.getenv("MONGO_DB", "trinity_prod")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_db?authSource=admin")
+MONGO_DB = os.getenv("MONGO_DB", "trinity_db")
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[MONGO_DB]
 

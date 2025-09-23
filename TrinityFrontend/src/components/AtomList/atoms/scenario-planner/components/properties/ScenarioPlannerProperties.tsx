@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, Settings, Eye } from 'lucide-react';
 import { useLaboratoryStore, DEFAULT_SCENARIO_PLANNER_SETTINGS, ScenarioPlannerSettings as SettingsType } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { ScenarioPlannerSettings } from '../ScenarioPlannerSettings';
 import ScenarioPlannerInputFiles from '../ScenarioPlannerInputFiles';
@@ -163,25 +162,12 @@ export const ScenarioPlannerProperties: React.FC<ScenarioPlannerPropertiesProps>
 
   return (
     <div className="h-full flex flex-col">
-              <Tabs defaultValue="inputs" className="flex-1 flex flex-col">
+              <Tabs defaultValue="inputfiles" className="flex-1 flex flex-col">
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="inputs" className="text-xs font-medium">
-            <Upload className="w-3 h-3 mr-1" />
-            Input
-          </TabsTrigger>
-          <TabsTrigger value="settings" className="text-xs font-medium">
-            <Settings className="w-3 h-3 mr-1" />
-            Settings
-          </TabsTrigger>
-          <TabsTrigger value="exhibition" className="text-xs font-medium">
-            <Eye className="w-3 h-3 mr-1" />
-            Exhibition
-          </TabsTrigger>
+          <TabsTrigger value="inputfiles">Input Files</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
+          <TabsTrigger value="exhibition">Exhibition</TabsTrigger>
         </TabsList>
-        
-        <TabsContent value="inputs" className="flex-1 mt-0">
-          <ScenarioPlannerInputFiles atomId={atomId} />
-        </TabsContent>
         
         <TabsContent value="settings" className="flex-1 mt-0">
           {/* Show current scenario only (backend status removed) */}
@@ -196,8 +182,12 @@ export const ScenarioPlannerProperties: React.FC<ScenarioPlannerPropertiesProps>
           />
         </TabsContent>
         
+        <TabsContent value="inputfiles" className="flex-1 mt-0">
+          <ScenarioPlannerInputFiles atomId={atomId} />
+        </TabsContent>
+        
         <TabsContent value="exhibition" className="flex-1 mt-0">
-          {/* Exhibition tab content - empty for now */}
+          <ScenarioPlannerExhibition data={settings} />
         </TabsContent>
       </Tabs>
     </div>

@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { Plus, Play, X, Settings2, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon } from 'lucide-react';
+import { Plus, Play, X, Settings2, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Info } from 'lucide-react';
 import { BuildModelFeatureBasedData, VariableTransformation, ModelConfig } from '../BuildModelFeatureBasedAtom';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { BUILD_MODEL_API } from '@/lib/api';
@@ -1047,6 +1047,38 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                 <Label htmlFor="apply-interaction-terms" className="text-sm font-medium">
                   Apply Interaction Terms
                 </Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-4 w-4 p-0 hover:bg-gray-100">
+                      <Info className="h-3 w-3 text-gray-500" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80 p-4 bg-white border-gray-200 shadow-lg">
+                    <div className="space-y-3">
+                      <h4 className="font-semibold text-sm text-gray-900">Interaction Terms</h4>
+                      <div className="text-xs text-gray-600 space-y-2">
+                        <p>
+                          <strong>What are Interaction Terms?</strong><br/>
+                          Interaction terms capture the combined effect of two or more variables working together, beyond their individual effects.
+                        </p>
+                        <p>
+                          <strong>Example:</strong><br/>
+                          If you have variables "Price" and "Brand", an interaction term would be "Price × Brand" which captures how the effect of price changes depends on the brand.
+                        </p>
+                        <p>
+                          <strong>In Stack Modeling:</strong><br/>
+                          Interaction terms are created between numerical variables (like price, sales) and combinations {finalData?.selectedCombinations?.length > 0 ? `(like ${finalData.selectedCombinations.slice(0, 2).join(', ')}${finalData.selectedCombinations.length > 2 ? '...' : ''})` : '(like your selected combinations)'} to capture how the relationship between numerical variables varies across different groups.
+                        </p>
+                        <p>
+                          <strong>Benefits:</strong><br/>
+                          • Captures complex relationships between variables<br/>
+                          • Improves model accuracy by accounting for group-specific effects<br/>
+                          • Provides insights into how effects vary across different segments
+                        </p>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               {/* Interaction Terms Dropdown - Only show when interaction terms are enabled */}
