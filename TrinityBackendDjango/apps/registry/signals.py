@@ -1,15 +1,19 @@
 import os
+import re
+from datetime import UTC, datetime
 from django.db.models.signals import post_save, pre_save, post_delete
 from django.db.models import Q
 from django.dispatch import receiver
 from django.utils.text import slugify
 from django.conf import settings
 from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 from redis_store.redis_client import redis_client
 from .models import Project, RegistryEnvironment
 from common.minio_utils import create_prefix, rename_project_folder, remove_prefix
 from apps.accounts.models import UserEnvironmentVariable
 from redis_store.env_cache import invalidate_env, set_current_env
+from urllib.parse import quote
 
 TRINITY_DB_NAME = "trinity_db"
 
@@ -195,6 +199,14 @@ def update_env_vars_on_rename(sender, instance, **kwargs):
             except Exception:
                 pass
         rename_project_folder(tenant, app_slug, old.name, instance.name, old.slug)
+        _rename_project_documents_in_mongo(
+            tenant,
+            app_slug,
+            old.name,
+            instance.name,
+            old_pid,
+            new_pid,
+        )
         new_slug_base = slugify(instance.name)
         slug_val = new_slug_base
         counter = 1
@@ -277,3 +289,208 @@ def cleanup_on_delete(sender, instance, **kwargs):
     for client_slug in tenant_candidates:
         remove_prefix(f"{client_slug}/{app_slug}/{instance.name}")
         remove_prefix(f"{client_slug}/{app_slug}/{instance.slug}")
+def _mongo_auth_kwargs() -> dict:
+    """Return authentication kwargs for :class:`MongoClient` if provided."""
+
+    username = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER")
+    password = os.getenv("MONGO_PASSWORD")
+    auth_db = os.getenv("MONGO_AUTH_DB", "admin")
+    if username and password:
+        return {"username": username, "password": password, "authSource": auth_db}
+    return {}
+
+
+def _replace_project_tokens(
+    value,
+    *,
+    client_name: str,
+    app_name: str,
+    old_project: str,
+    new_project: str,
+    old_pid: str,
+    new_pid: str,
+    old_prefix: str,
+    new_prefix: str,
+):
+    """Recursively replace project specific identifiers within ``value``."""
+
+    if isinstance(value, dict):
+        return {
+            key: _replace_project_tokens(
+                val,
+                client_name=client_name,
+                app_name=app_name,
+                old_project=old_project,
+                new_project=new_project,
+                old_pid=old_pid,
+                new_pid=new_pid,
+                old_prefix=old_prefix,
+                new_prefix=new_prefix,
+            )
+            for key, val in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _replace_project_tokens(
+                item,
+                client_name=client_name,
+                app_name=app_name,
+                old_project=old_project,
+                new_project=new_project,
+                old_pid=old_pid,
+                new_pid=new_pid,
+                old_prefix=old_prefix,
+                new_prefix=new_prefix,
+            )
+            for item in value
+        ]
+    if isinstance(value, str):
+        env_prefix = f"env:{client_name}:{app_name}:"
+        if value == old_project:
+            return new_project
+        if value == old_pid:
+            return new_pid
+        if value.startswith(old_prefix):
+            return f"{new_prefix}{value[len(old_prefix):]}"
+        if value.startswith(env_prefix) and value.endswith(f":{old_project}"):
+            return f"{env_prefix}{new_project}"
+        if value.startswith("project:") and old_pid in value:
+            return value.replace(old_pid, new_pid, 1)
+    return value
+
+
+def _rename_project_documents_in_mongo(
+    client_name: str,
+    app_name: str,
+    old_project: str,
+    new_project: str,
+    old_pid: str,
+    new_pid: str,
+):
+    """Rename MongoDB documents that key off the project path."""
+
+    mongo_uri = getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db")
+    try:
+        mc = MongoClient(
+            mongo_uri,
+            serverSelectionTimeoutMS=5000,
+            **_mongo_auth_kwargs(),
+        )
+    except Exception as exc:  # pragma: no cover - network failure logging only
+        print(f"⚠️ Unable to connect to MongoDB for project rename: {exc}")
+        return
+
+    try:  # pragma: no cover - best effort connectivity check
+        mc.admin.command("ping")
+    except Exception:
+        pass
+
+    old_prefix = f"{client_name}/{app_name}/{old_project}"
+    new_prefix = f"{client_name}/{app_name}/{new_project}"
+    regex = f"^{re.escape(old_prefix)}([:/].*)?$"
+    redis_cleanup_keys: set[str] = {
+        f"env:{client_name}:{app_name}:{old_project}",
+        f"project:{old_pid}:dimensions",
+    }
+
+    db_candidates = {
+        TRINITY_DB_NAME,
+        os.getenv("MONGO_DB", TRINITY_DB_NAME),
+    }
+    try:
+        db_candidates.update(mc.list_database_names())
+    except PyMongoError:  # pragma: no cover - permissions dependent
+        pass
+
+    modified_total = 0
+    try:
+        for db_name in sorted({name for name in db_candidates if name}):
+            try:
+                database = mc[db_name]
+                collections = database.list_collection_names()
+            except PyMongoError as exc:  # pragma: no cover - permissions dependent
+                print(f"⚠️ Unable to inspect Mongo database {db_name}: {exc}")
+                continue
+
+            for coll_name in collections:
+                collection = database[coll_name]
+                try:
+                    matched_docs = list(collection.find({"_id": {"$regex": regex}}))
+                except PyMongoError as exc:  # pragma: no cover - permissions dependent
+                    print(
+                        f"⚠️ Unable to scan {db_name}.{coll_name} for project rename: {exc}"
+                    )
+                    continue
+
+                if not matched_docs:
+                    continue
+
+                moved = 0
+                for doc in matched_docs:
+                    old_id = doc.get("_id")
+                    if not isinstance(old_id, str) or not old_id.startswith(old_prefix):
+                        continue
+                    suffix = old_id[len(old_prefix) :]
+                    new_id = f"{new_prefix}{suffix}"
+
+                    body = {
+                        key: value
+                        for key, value in doc.items()
+                        if key != "_id"
+                    }
+                    body = _replace_project_tokens(
+                        body,
+                        client_name=client_name,
+                        app_name=app_name,
+                        old_project=old_project,
+                        new_project=new_project,
+                        old_pid=old_pid,
+                        new_pid=new_pid,
+                        old_prefix=old_prefix,
+                        new_prefix=new_prefix,
+                    )
+                    if body.get("project_name") == old_project:
+                        body["project_name"] = new_project
+                    if "env" in body and isinstance(body["env"], dict):
+                        env_map = body["env"]
+                        if env_map.get("PROJECT_NAME") == old_project:
+                            env_map["PROJECT_NAME"] = new_project
+                        if env_map.get("PROJECT_ID") == old_pid:
+                            env_map["PROJECT_ID"] = new_pid
+                    body["updated_at"] = datetime.now(UTC)
+                    body["_id"] = new_id
+
+                    collection.replace_one({"_id": new_id}, body, upsert=True)
+                    if new_id != old_id:
+                        collection.delete_one({"_id": old_id})
+                    moved += 1
+
+                    if coll_name == "column_classifier_config":
+                        base_key = f"{old_prefix}/column_classifier_config"
+                        redis_cleanup_keys.add(base_key)
+                        file_name = doc.get("file_name")
+                        if file_name:
+                            safe_file = quote(file_name, safe="")
+                            redis_cleanup_keys.add(f"{base_key}:{safe_file}")
+
+                if moved:
+                    modified_total += moved
+                    print(
+                        f"🍃 Mongo rename updated {moved} docs in {db_name}.{coll_name}"
+                    )
+    finally:
+        mc.close()
+
+    if redis_cleanup_keys:
+        for key in redis_cleanup_keys:
+            try:
+                redis_client.delete(key)
+            except Exception:  # pragma: no cover - Redis best effort cleanup
+                pass
+
+    if modified_total:
+        print(
+            f"✅ Project rename propagated to Mongo for {modified_total} documents:"
+            f" {old_prefix} -> {new_prefix}"
+        )
+
