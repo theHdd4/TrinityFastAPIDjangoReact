@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
 import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
@@ -18,6 +18,7 @@ import {
   CLASSIFIER_API,
 } from '@/lib/api';
 import { AIChatBot, AtomAIChatBot } from '@/components/TrinityAI';
+import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
 import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/FeatureOverviewAtom';
@@ -126,6 +127,18 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
   const [addDragTarget, setAddDragTarget] = useState<string | null>(null);
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [isCanvasLoading, setIsCanvasLoading] = useState(true);
+  const loadingMessages = useMemo(
+    () => [
+      'Loading project canvas',
+      'Fetching atom details',
+      'Preparing interactive workspace',
+    ],
+    [],
+  );
+  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
+  const currentLoadingMessage =
+    loadingMessages[loadingMessageIndex] ?? loadingMessages[0] ?? 'Loading';
   const prevLayout = React.useRef<LayoutCard[] | null>(null);
   const initialLoad = React.useRef(true);
 
@@ -702,14 +715,27 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     let initialCards: LayoutCard[] | null = null;
     let initialWorkflow: WorkflowMolecule[] | undefined;
     let isMounted = true;
+    let hasAppliedInitialCards = false;
+    let hasPendingAsyncLoad = false;
 
-    const applyInitialCards = (cards: LayoutCard[] | null, workflowOverride?: WorkflowMolecule[]) => {
-      if (!isMounted || cards === null) {
+    const markLoadingComplete = () => {
+      if (!isMounted) {
+        return;
+      }
+      setIsCanvasLoading(false);
+    };
+
+    const applyInitialCards = (
+      cards: LayoutCard[] | null | undefined,
+      workflowOverride?: WorkflowMolecule[],
+    ) => {
+      if (!isMounted) {
         return;
       }
 
-      setLayoutCards(cards);
-      const workflow = workflowOverride ?? deriveWorkflowMolecules(cards);
+      const normalizedCards = Array.isArray(cards) ? cards : [];
+      setLayoutCards(normalizedCards);
+      const workflow = workflowOverride ?? deriveWorkflowMolecules(normalizedCards);
       setWorkflowMolecules(workflow);
       setActiveTab(prevTab => {
         if (workflow.length === 0) {
@@ -722,6 +748,9 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
 
         return workflow[0].moleculeId;
       });
+
+      hasAppliedInitialCards = true;
+      markLoadingComplete();
     };
 
     const storedAtoms = localStorage.getItem('workflow-selected-atoms');
@@ -815,6 +844,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           }
 
           if (projectId) {
+            hasPendingAsyncLoad = true;
             fetch(`${REGISTRY_API}/projects/${projectId}/`, { credentials: 'include' })
               .then(res => (res.ok ? res.json() : null))
               .then(async data => {
@@ -849,7 +879,14 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
                   applyInitialCards(cardsFromConfig);
                 }
               })
-              .catch(() => {});
+              .catch(() => {
+                /* ignore load failures */
+              })
+              .finally(() => {
+                if (!hasAppliedInitialCards) {
+                  markLoadingComplete();
+                }
+              });
           }
         }
       }
@@ -857,12 +894,38 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
 
     if (initialCards) {
       applyInitialCards(initialCards, initialWorkflow);
+    } else if (!hasPendingAsyncLoad && !hasAppliedInitialCards) {
+      markLoadingComplete();
     }
 
     return () => {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isCanvasLoading) {
+      return;
+    }
+
+    if (typeof window === 'undefined' || loadingMessages.length <= 1) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setLoadingMessageIndex(prev => (prev + 1) % loadingMessages.length);
+    }, 2200);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [isCanvasLoading, loadingMessages]);
+
+  useEffect(() => {
+    if (!isCanvasLoading) {
+      setLoadingMessageIndex(0);
+    }
+  }, [isCanvasLoading]);
 
   // Persist layout to localStorage safely and store undo snapshot
   useEffect(() => {
@@ -1257,6 +1320,14 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       }
     }
   };
+
+  if (isCanvasLoading) {
+    return (
+      <div className="relative h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <LoadingAnimation status={currentLoadingMessage} className="rounded-xl" />
+      </div>
+    );
+  }
 
   if (workflowMolecules.length > 0) {
     return (

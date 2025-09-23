@@ -49,30 +49,38 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
       return;
     }
 
-    const anchorElement = document.querySelector(anchorSelector) as HTMLElement | null;
     const widgetElement = widgetRef.current;
 
-    if (!anchorElement || !widgetElement) {
+    if (!widgetElement) {
       return;
     }
 
-    const anchorRect = anchorElement.getBoundingClientRect();
     const widgetRect = widgetElement.getBoundingClientRect();
 
     if (widgetRect.width === 0 && widgetRect.height === 0) {
       return;
     }
 
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
+    const anchorElement = document.querySelector(anchorSelector) as HTMLElement | null;
+    const anchorRect = anchorElement?.getBoundingClientRect();
+    const headerElement = document.querySelector('[data-primary-menu]') as HTMLElement | null;
+    const headerRect = headerElement?.getBoundingClientRect();
 
+    const viewportWidth = window.innerWidth;
     const centeredX = Math.max((viewportWidth - widgetRect.width) / 2, VIEWPORT_PADDING);
-    const anchorOffsetX = anchorRect.right + VIEWPORT_PADDING;
+    const anchorOffsetX = anchorRect ? anchorRect.right + VIEWPORT_PADDING : centeredX;
     const targetX = Math.max(anchorOffsetX, centeredX);
 
+    const viewportHeight = window.innerHeight;
     const centeredY = Math.max((viewportHeight - widgetRect.height) / 2, VIEWPORT_PADDING);
-    const anchorMidpointY = anchorRect.top + anchorRect.height / 2 - widgetRect.height / 2;
-    const targetY = Math.max(anchorMidpointY, centeredY);
+    const anchorMidpointY = anchorRect
+      ? anchorRect.top + anchorRect.height / 2 - widgetRect.height / 2
+      : centeredY;
+    const headerOffsetY = headerRect ? headerRect.bottom + VIEWPORT_PADDING : null;
+    const targetY =
+      headerOffsetY !== null
+        ? Math.max(headerOffsetY, VIEWPORT_PADDING)
+        : Math.max(anchorMidpointY, centeredY);
 
     const nextPosition = clampPositionToViewport(targetX, targetY);
 
@@ -111,9 +119,10 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
       const anchorElement = anchorSelector
         ? (document.querySelector(anchorSelector) as HTMLElement | null)
         : null;
+      const headerElement = document.querySelector('[data-primary-menu]') as HTMLElement | null;
       const widgetElement = widgetRef.current;
 
-      if (!anchorElement || !widgetElement) {
+      if ((!anchorElement && !headerElement) || !widgetElement) {
         frameId = window.requestAnimationFrame(attemptAlignment);
         return;
       }
