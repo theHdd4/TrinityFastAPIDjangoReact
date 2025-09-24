@@ -106,7 +106,7 @@ def _redis_get_bytes(key: str) -> bytes | None:
     """Fetch binary content from Redis without triggering UTF-8 decoding."""
 
     try:
-        value = redis_client.get(key)
+        value = redis_binary_client.get(key)
     except Exception as exc:
         print(f"⚠️ redis binary get error for {key}: {exc}")
         return None
@@ -131,7 +131,7 @@ def _redis_set_bytes(key: str, value: bytes | bytearray | str, ttl: int = 3600) 
             data = value.encode("utf-8")
         else:
             data = str(value).encode("utf-8")
-        redis_client.setex(key, ttl, data)
+        redis_binary_client.setex(key, ttl, data)
     except Exception as exc:
         print(f"⚠️ redis binary set error for {key}: {exc}")
 
