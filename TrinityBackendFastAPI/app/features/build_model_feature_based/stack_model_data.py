@@ -911,15 +911,15 @@ class DataPooler:
                             alphas=alphas, l1_ratio=l1_ratios, cv=k_folds, random_state=42
                         )
                         
-                    elif model_name == "Stack Constrained Ridge":
+                    elif model_name == "Constrained Ridge":
                         # Extract constraints from parameters object
                         parameters = config.get('parameters', {})
                         negative_constraints = parameters.get('negative_constraints', [])
                         positive_constraints = parameters.get('positive_constraints', [])
-                        print(f"🔍 Stack Constrained Ridge - Negative constraints: {negative_constraints}")
-                        print(f"🔍 Stack Constrained Ridge - Positive constraints: {positive_constraints}")
+                        print(f"🔍 Constrained Ridge - Negative constraints: {negative_constraints}")
+                        print(f"🔍 Constrained Ridge - Positive constraints: {positive_constraints}")
                         
-                        # For Stack Constrained Ridge, we'll handle auto-tuning during training
+                        # For Constrained Ridge, we'll handle auto-tuning during training
                         # Create the model with a placeholder l2_penalty that will be updated during training
                         l2_penalty = parameters.get('l2_penalty', 0.1)  # Default value
                         logger.info(f"🔧 {model_name} - Created with l2_penalty: {l2_penalty} (will be auto-tuned during training if needed)")
@@ -938,13 +938,13 @@ class DataPooler:
                         if tuning_mode == 'auto':
                             best_parameters[model_name] = {'tuning_mode': 'auto'}
                         
-                    elif model_name == "Stack Constrained Linear Regression":
+                    elif model_name == "Constrained Linear Regression":
                         # Extract constraints from parameters object
                         parameters = config.get('parameters', {})
                         negative_constraints = parameters.get('negative_constraints', [])
                         positive_constraints = parameters.get('positive_constraints', [])
-                        print(f"🔍 Stack Constrained Linear Regression - Negative constraints: {negative_constraints}")
-                        print(f"🔍 Stack Constrained Linear Regression - Positive constraints: {positive_constraints}")
+                        print(f"🔍 Constrained Linear Regression - Negative constraints: {negative_constraints}")
+                        print(f"🔍 Constrained Linear Regression - Positive constraints: {positive_constraints}")
                         from .models import StackConstrainedLinearRegression
                         models_dict[model_name] = StackConstrainedLinearRegression(
                             learning_rate=parameters.get('learning_rate', 0.001),
@@ -1055,7 +1055,7 @@ class DataPooler:
             logger.info(f"🔍 Processing model: {model_name}")
             
             # Check if this is a constraint model
-            if model_name in ["Stack Constrained Ridge", "Stack Constrained Linear Regression"]:
+            if model_name in ["Constrained Ridge", "Constrained Linear Regression"]:
                 print(f"🔍 This is a constraint model: {model_name}")
                 logger.info(f"🔍 This is a constraint model: {model_name}")
                 print(f"  - X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
@@ -1080,14 +1080,14 @@ class DataPooler:
             logger.info(f"🔍 Model cloned successfully for: {model_name}")
             # Train model
             try:
-                if model_name in ["Stack Constrained Ridge", "Stack Constrained Linear Regression"]:
+                if model_name in ["Constrained Ridge", "Constrained Linear Regression"]:
                     print(f"🔍 Training constraint model: {model_name} with feature names")
                     logger.info(f"🔍 Training constraint model: {model_name} with feature names")
                     
-                    # Handle auto-tuning for Stack Constrained Ridge
-                    if model_name == "Stack Constrained Ridge" and model_name in best_parameters and best_parameters[model_name].get('tuning_mode') == 'auto':
-                        print(f"🔍 Auto-tuning Stack Constrained Ridge: Running RidgeCV to find optimal l2_penalty")
-                        logger.info(f"🔍 Auto-tuning Stack Constrained Ridge: Running RidgeCV to find optimal l2_penalty")
+                    # Handle auto-tuning for Constrained Ridge
+                    if model_name == "Constrained Ridge" and model_name in best_parameters and best_parameters[model_name].get('tuning_mode') == 'auto':
+                        print(f"🔍 Auto-tuning Constrained Ridge: Running RidgeCV to find optimal l2_penalty")
+                        logger.info(f"🔍 Auto-tuning Constrained Ridge: Running RidgeCV to find optimal l2_penalty")
                         
                         # Run RidgeCV to find optimal alpha
                         alphas = np.logspace(-2, 3, 50)  # Same range as Ridge Regression
@@ -1095,8 +1095,8 @@ class DataPooler:
                         ridge_cv.fit(X_train, y_train)
                         optimal_l2_penalty = ridge_cv.alpha_
                         
-                        print(f"🎯 Stack Constrained Ridge - Optimal l2_penalty from RidgeCV: {optimal_l2_penalty:.6f}")
-                        logger.info(f"🎯 Stack Constrained Ridge - Optimal l2_penalty from RidgeCV: {optimal_l2_penalty:.6f}")
+                        print(f"🎯 Constrained Ridge - Optimal l2_penalty from RidgeCV: {optimal_l2_penalty:.6f}")
+                        logger.info(f"🎯 Constrained Ridge - Optimal l2_penalty from RidgeCV: {optimal_l2_penalty:.6f}")
                         
                         # Update the model's l2_penalty
                         model.l2_penalty = optimal_l2_penalty
@@ -1107,7 +1107,7 @@ class DataPooler:
                             'best_cv_score': ridge_cv.best_score_
                         }
                     
-                        model.fit(X_train, y_train, x_variables)
+                    model.fit(X_train, y_train, x_variables)
                     print(f"✅ Constraint model trained successfully: {model_name}")
                     logger.info(f"✅ Constraint model trained successfully: {model_name}")
                 else:
@@ -1157,7 +1157,7 @@ class DataPooler:
             
             # Get coefficients
             try:
-                if model_name in ["Stack Constrained Ridge", "Stack Constrained Linear Regression"]:
+                if model_name in ["Constrained Ridge", "Constrained Linear Regression"]:
                     print(f"🔍 Extracting coefficients for constraint model: {model_name}")
                     logger.info(f"🔍 Extracting coefficients for constraint model: {model_name}")
                     if hasattr(model, 'W') and model.W is not None:
@@ -1228,7 +1228,7 @@ class DataPooler:
             if hasattr(model, 'l1_ratio_'):
                 result["best_l1_ratio"] = float(model.l1_ratio_)
             
-            # Add best parameters from stored values (for Stack Constrained Ridge with auto-tuning)
+            # Add best parameters from stored values (for Constrained Ridge with auto-tuning)
             if model_name in best_parameters:
                 if 'best_alpha' in best_parameters[model_name]:
                     result["best_alpha"] = float(best_parameters[model_name]['best_alpha'])
@@ -1290,7 +1290,7 @@ class DataPooler:
                 n_train = 1
                 n_test = n_samples - 1
                 
-            # Split indices
+                # Split indices
             test_indices_combination = combination_indices[:n_test]
             train_indices_combination = combination_indices[n_test:]
             
@@ -1300,11 +1300,11 @@ class DataPooler:
         # Convert to numpy arrays
         train_indices = np.array(train_indices)
         test_indices = np.array(test_indices)
-        
-        # Convert to positional indices (0-based)
+            
+            # Convert to positional indices (0-based)
         train_positions = np.searchsorted(df.index, train_indices)
         test_positions = np.searchsorted(df.index, test_indices)
-        
+            
         return train_positions, test_positions
     
     async def train_models_for_stacked_data(

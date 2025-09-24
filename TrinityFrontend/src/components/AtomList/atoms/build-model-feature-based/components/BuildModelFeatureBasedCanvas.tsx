@@ -164,7 +164,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
           return updatedConfig;
         }
         // Stack constrained models (for stack modeling)
-        else if (config.id === 'Stack Constrained Ridge' || config.id === 'Stack Constrained Linear Regression') {
+        else if (config.id === 'Constrained Ridge' || config.id === 'Constrained Linear Regression') {
           const updatedConfig = {
             ...config,
             parameters: {

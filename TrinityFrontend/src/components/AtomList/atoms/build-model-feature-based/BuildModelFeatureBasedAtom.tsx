@@ -118,8 +118,8 @@ const BuildModelFeatureBasedAtom: React.FC<Props> = ({ atomId }) => {
         { id: 'Lasso Regression', name: 'Lasso Regression', parameters: { 'Alpha': '1.0' }, tuning_mode: 'auto' },
         { id: 'ElasticNet Regression', name: 'ElasticNet Regression', parameters: { 'Alpha': '1.0', 'L1 Ratio': '0.5' }, tuning_mode: 'auto' },
         { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', parameters: {}, tuning_mode: 'manual' },
-        { id: 'Stack Constrained Ridge', name: 'Stack Constrained Ridge', parameters: { 'L2 Penalty': '0.1', 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' }, tuning_mode: 'auto' },
-        { id: 'Stack Constrained Linear Regression', name: 'Stack Constrained Linear Regression', parameters: { 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' }, tuning_mode: 'manual' }
+        { id: 'Constrained Ridge', name: 'Constrained Ridge', parameters: { 'L2 Penalty': '0.1', 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' }, tuning_mode: 'auto' },
+        { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', parameters: { 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' }, tuning_mode: 'manual' }
       ],
       poolByIdentifiers: [],
       numericalColumnsForClustering: [],

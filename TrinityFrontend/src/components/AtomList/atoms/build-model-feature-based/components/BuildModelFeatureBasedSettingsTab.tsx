@@ -32,8 +32,8 @@ const stackModels = [
   { id: 'Lasso Regression', name: 'Lasso Regression', params: ['Alpha'], supportsAutoTuning: true },
   { id: 'ElasticNet Regression', name: 'ElasticNet Regression', params: ['Alpha', 'L1 Ratio'], supportsAutoTuning: true },
   { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', params: [], supportsAutoTuning: false },
-  { id: 'Stack Constrained Ridge', name: 'Stack Constrained Ridge', params: ['L2 Penalty', 'Learning Rate', 'Iterations', 'Adam'], supportsAutoTuning: true },
-  { id: 'Stack Constrained Linear Regression', name: 'Stack Constrained Linear Regression', params: ['Learning Rate', 'Iterations', 'Adam'], supportsAutoTuning: false }
+  { id: 'Constrained Ridge', name: 'Constrained Ridge', params: ['L2 Penalty', 'Learning Rate', 'Iterations', 'Adam'], supportsAutoTuning: true },
+  { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', params: ['Learning Rate', 'Iterations', 'Adam'], supportsAutoTuning: false }
 ];
 
 const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettingsTabProps> = ({
@@ -265,7 +265,7 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
         <div className="p-4 space-y-4">
           {/* Enable Individual Modeling Toggle */}
           <div className="flex items-center space-x-2">
-            <Checkbox
+            <SwitchBuild
               id="individual-modeling"
               checked={data?.individualModeling ?? true}
               onCheckedChange={(checked) => onDataChange({ individualModeling: !!checked })}
@@ -501,7 +501,7 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
           <div className="p-4 space-y-4">
           {/* Enable Stack Modeling Toggle */}
           <div className="flex items-center space-x-2">
-            <Checkbox
+            <SwitchBuild
               id="stack-modeling"
               checked={data?.stackModeling || false}
               onCheckedChange={(checked) => onDataChange({ stackModeling: checked as boolean })}

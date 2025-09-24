@@ -1187,8 +1187,8 @@ def get_models():
         "Bayesian Ridge Regression": BayesianRidge(),
         "Custom Constrained Ridge": CustomConstrainedRidge(l2_penalty=0.1, learning_rate=0.001, iterations=10000),
         "Constrained Linear Regression": ConstrainedLinearRegression(learning_rate=0.001, iterations=10000),
-        "Stack Constrained Ridge": StackConstrainedRidge(l2_penalty=0.1, learning_rate=0.001, iterations=10000),
-        "Stack Constrained Linear Regression": StackConstrainedLinearRegression(learning_rate=0.001, iterations=10000)
+        "Constrained Ridge": StackConstrainedRidge(l2_penalty=0.1, learning_rate=0.001, iterations=10000),
+        "Constrained Linear Regression": StackConstrainedLinearRegression(learning_rate=0.001, iterations=10000)
     }
 
 # Helper function
