@@ -312,6 +312,7 @@ const LaboratoryMode = () => {
               className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
               onClick={handleSave}
               disabled={!canEdit}
+              data-lab-save="true"
             >
               <Save className="w-4 h-4 mr-2" />
               Save
