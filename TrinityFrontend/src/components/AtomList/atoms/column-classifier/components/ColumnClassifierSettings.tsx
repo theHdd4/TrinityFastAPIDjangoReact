@@ -145,13 +145,13 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
   };
 
   return (
-    <div className="space-y-6 p-2">
-      <Card className="p-4 space-y-4">
+    <div className="space-y-4 p-2">
+      <Card className="p-4 space-y-3">
         <div>
-          <Label className="text-sm mb-2 block">Saved Dataframe</Label>
+          <label className="text-sm font-medium text-gray-700 block">Data Source</label>
           <Select value={savedId} onValueChange={handleSavedIdChange}>
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select dataframe" />
+            <SelectTrigger className="bg-white border-gray-300">
+              <SelectValue placeholder="Choose a saved dataframe..." />
             </SelectTrigger>
             <SelectContent>
               {frames.map(f => (

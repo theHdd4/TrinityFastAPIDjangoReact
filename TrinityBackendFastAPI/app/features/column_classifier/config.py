@@ -4,6 +4,10 @@ from functools import lru_cache
 from typing import Optional
 import os
 
+from app.core.mongo import build_host_mongo_uri
+
+DEFAULT_MONGO_URI = build_host_mongo_uri()
+
 class Settings(BaseSettings):
     """Data Classification API Settings - MongoDB Focused"""
     
@@ -28,7 +32,7 @@ class Settings(BaseSettings):
     mongo_uri: str = (
         os.getenv("CLASSIFY_MONGO_URI")
         or os.getenv("MONGO_URI")
-        or "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin"
+        or DEFAULT_MONGO_URI
     )
     
     # Main database for classification data

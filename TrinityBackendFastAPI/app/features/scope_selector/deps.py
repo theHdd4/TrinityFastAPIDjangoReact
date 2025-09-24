@@ -25,10 +25,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # MongoDB Connection
-MONGO_URI = os.getenv(
-    "SCOPE_SELECTOR_MONGO_URI",
-    os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
-)
+MONGO_URI = settings.mongo_uri
 
 # Initialize MongoDB client
 mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(MONGO_URI)

@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SingleSelectDropdown } from '@/templates/dropdown';
 import { Badge } from '@/components/ui/badge';
 import { Save, Eye, Calculator, Trash2, Plus, ChevronUp, ChevronDown } from 'lucide-react';
 import Table from "@/templates/tables/table";
@@ -1347,51 +1348,33 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
                   {operation.type === 'residual' ? (
                     <>
                       {/* Y Variable selector (no label) */}
-                      <Select
+                      <SingleSelectDropdown
+                        label=""
+                        placeholder="Select Y"
                         value={opColumns[0] || ''}
                         onValueChange={value => updateColumnSelector(operation.id, 0, value)}
-                      >
-                        <SelectTrigger className="w-36">
-                          <SelectValue placeholder="Select Y" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableNumericalColumns.map(option => (
-                            <SelectItem 
-                              key={option} 
-                              value={option}
-                              className={isCreatedColumn(option, operationIndex) ? "text-blue-600 font-medium" : ""}
-                            >
-                              {option}
-                              {isCreatedColumn(option, operationIndex) && " (created)"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        options={availableNumericalColumns.map(option => ({
+                          value: option,
+                          label: `${option}${isCreatedColumn(option, operationIndex) ? " (created)" : ""}`
+                        }))}
+                        className="w-36"
+                      />
                       {/* X Variable selectors (always show at least one if Y is selected) */}
                       {opColumns[0] && (
                         <>
                           {(opColumns.length === 1 ? [''] : opColumns.slice(1)).map((col, idx) => (
                             <div key={idx + 1} className="flex items-center space-x-2">
-                              <Select
+                              <SingleSelectDropdown
+                                label=""
+                                placeholder="Select X"
                                 value={col}
                                 onValueChange={value => updateColumnSelector(operation.id, idx + 1, value)}
-                              >
-                                <SelectTrigger className="w-36">
-                                  <SelectValue placeholder="Select X" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {availableNumericalColumns.map(option => (
-                                    <SelectItem 
-                                      key={option} 
-                                      value={option}
-                                      className={isCreatedColumn(option, operationIndex) ? "text-blue-600 font-medium" : ""}
-                                    >
-                                      {option}
-                                      {isCreatedColumn(option, operationIndex) && " (created)"}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                                options={availableNumericalColumns.map(option => ({
+                                  value: option,
+                                  label: `${option}${isCreatedColumn(option, operationIndex) ? " (created)" : ""}`
+                                }))}
+                                className="w-36"
+                              />
                               {/* Bin icon for X variable (if more than one X) */}
                               {opColumns.length > 2 && (
                                 <Button
@@ -1421,26 +1404,17 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
                     <>
                       {opColumns.map((col, idx) => (
                         <div key={idx} className="flex items-center space-x-2">
-                          <Select
+                          <SingleSelectDropdown
+                            label=""
+                            placeholder={`Select column ${idx + 1}`}
                             value={col}
                             onValueChange={value => updateColumnSelector(operation.id, idx, value)}
-                          >
-                            <SelectTrigger className="w-36">
-                              <SelectValue placeholder={`Select column ${idx + 1}`} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {(operation.type === 'dummy' ? availableCategoricalColumns : availableNumericalColumns).map(option => (
-                                <SelectItem 
-                                  key={option} 
-                                  value={option}
-                                  className={isCreatedColumn(option, operationIndex) ? "text-blue-600 font-medium" : ""}
-                                >
-                                  {option}
-                                  {isCreatedColumn(option, operationIndex) && " (created)"}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            options={(operation.type === 'dummy' ? availableCategoricalColumns : availableNumericalColumns).map(option => ({
+                              value: option,
+                              label: `${option}${isCreatedColumn(option, operationIndex) ? " (created)" : ""}`
+                            }))}
+                            className="w-36"
+                          />
                           {opColumns.length > (multiColumnOps.includes(opType) ? 2 : 1) && (
                             <Button
                               size="icon"

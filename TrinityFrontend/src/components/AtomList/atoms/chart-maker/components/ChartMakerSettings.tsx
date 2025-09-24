@@ -171,7 +171,7 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
         ) : (
           <Select value={selectedDataSource} onValueChange={handleDataframeSelect}>
             <SelectTrigger className="bg-white border-gray-300">
-              <SelectValue placeholder="Select saved dataframe" />
+              <SelectValue placeholder="Choose a saved dataframe..." />
             </SelectTrigger>
             <SelectContent>
               {frames.map(f => (
@@ -193,7 +193,7 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
         )}
       </Card>
 
-      {data && !isLoading && (
+      {/* {data && !isLoading && (
         <Card className="p-4 space-y-3">
           <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-950/20 rounded-lg border border-green-200 dark:border-green-800">
             <Database className="w-4 h-4 text-green-600" />
@@ -213,7 +213,7 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
             </div>
           </div>
         </Card>
-      )}
+      )} */}
 
       {dialog}
       

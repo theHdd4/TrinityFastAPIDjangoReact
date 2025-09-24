@@ -5,6 +5,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
 import logging
 
+from app.core.mongo import build_host_mongo_uri
+
 # Configure logging
 logger = logging.getLogger(__name__)
 

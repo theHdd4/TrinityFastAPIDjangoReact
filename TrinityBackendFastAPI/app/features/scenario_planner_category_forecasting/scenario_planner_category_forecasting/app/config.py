@@ -5,10 +5,27 @@ from dotenv import load_dotenv
 import motor.motor_asyncio
 import redis
 import logging
+from typing import Optional
 from minio import Minio
+
+from app.core.mongo import build_host_mongo_uri
 
 load_dotenv()
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_mongo_uri(uri: Optional[str]) -> Optional[str]:
+    """Hide credentials when logging MongoDB connection strings."""
+
+    if not uri:
+        return uri
+    if "@" in uri:
+        try:
+            credentials = uri.split("@")[0].split("//")[1]
+        except IndexError:
+            return uri
+        return uri.replace(credentials, "***:***")
+    return uri
 
 # --------------------------------------------------------------------------- #
 # MongoDB                                                                     #
@@ -17,8 +34,8 @@ logger = logging.getLogger(__name__)
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_db?authSource=admin")
 
 # Debug: Log environment variables to see what's being set
-logger.info("Environment MONGO_URI: %s", os.getenv("MONGO_URI"))
-logger.info("Using MONGO_URI: %s", MONGO_URI)
+logger.info("Environment MONGO_URI: %s", _sanitize_mongo_uri(os.getenv("MONGO_URI")))
+logger.info("Using MONGO_URI: %s", _sanitize_mongo_uri(MONGO_URI))
 
 # Create MongoDB client using the same pattern as select atom
 mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=5000)
@@ -47,7 +64,7 @@ hierarchical_aggregations_collection = db["hierarchical_aggregations"]
 # New collection for scenario values
 scenario_values_collection = db["scenario_values_promo"]
 
-logger.info("Mongo URI: %s", MONGO_URI)
+logger.info("Mongo URI: %s", _sanitize_mongo_uri(MONGO_URI))
 
 # --------------------------------------------------------------------------- #
 # MinIO                                                                       #

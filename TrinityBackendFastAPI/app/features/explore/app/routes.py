@@ -1910,7 +1910,7 @@ async def chart_data_multidim(explore_atom_id: str):
             "redis_enabled": get_redis_client() is not None,
             "cache_hit": cache_hit,
             "cache_key": cache_key,
-            "redis_host": "10.2.1.65:9002"
+            "redis_host": f"{REDIS_HOST}:{REDIS_PORT}"
         },
         "saved_to_mongodb": save_result["status"] == "success",
         "chart_result_id": save_result.get("chart_result_id", ""),

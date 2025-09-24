@@ -34,6 +34,8 @@ interface UploadSectionProps {
   disabled?: boolean;
   /** When true, disable the validate button */
   disableValidation?: boolean;
+  /** When true, hide the heading and instruction text */
+  useMasterFile?: boolean;
 }
 
 const UploadSection: React.FC<UploadSectionProps> = ({
@@ -57,15 +59,12 @@ const UploadSection: React.FC<UploadSectionProps> = ({
   onDeleteFile,
   saveStatus,
   disabled = false,
-  disableValidation = false
+  disableValidation = false,
+  useMasterFile = false
 }) => {
   const inputId = useId();
   return (
     <Card className="h-full flex flex-col shadow-sm border-2 border-blue-200 bg-white">
-    <div className="p-4 border-b border-gray-100">
-      <h3 className="text-lg font-semibold text-gray-900 mb-1">Uploaded Files</h3>
-      <p className="text-sm text-gray-600">Manage your uploaded data files</p>
-    </div>
     <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
       {files.map((file, index) => (
         <div key={index} className="relative">
@@ -127,25 +126,31 @@ const UploadSection: React.FC<UploadSectionProps> = ({
       ))}
 
       <div
-        className={`border-2 border-dashed rounded-lg p-8 text-center transition-all duration-300 ${disabled ? 'opacity-50 cursor-not-allowed' : isDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-300'}`}
+        className={`border-2 border-dashed rounded-lg text-center transition-all duration-300 ${files.length > 0 ? 'p-4' : 'p-8'} ${disabled ? 'opacity-50 cursor-not-allowed' : isDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-300'}`}
         onDrop={disabled ? undefined : onDrop}
         onDragOver={disabled ? undefined : onDragOver}
         onDragLeave={disabled ? undefined : onDragLeave}
       >
-        <div className="mb-4">
-          <Upload className={`w-8 h-8 mx-auto mb-2 ${isDragOver ? 'text-blue-600' : 'text-gray-400'}`} />
-          <p className="text-sm font-medium text-gray-900 mb-1">{isDragOver ? 'Drop files here' : 'Drag and Drop your File'}</p>
-          <p className="text-xs text-gray-600 mb-4">OR</p>
+        <div className={files.length > 0 ? "mb-2" : "mb-6"}>
+          <p className="text-sm font-medium text-gray-900 mb-4">{isDragOver ? 'Drop files here' : 'Click here to upload your file(s)'}</p>
+          <label htmlFor={inputId} className="cursor-pointer">
+            <div className="w-16 h-16 mx-auto mb-2 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-2xl transform hover:scale-105 transition-transform duration-300">
+              <Upload className="w-8 h-8 text-white drop-shadow-lg" />
+            </div>
+          </label>
         </div>
         <input type="file" multiple accept=".csv,.xlsx,.xls,.json" onChange={onFileSelect} className="hidden" id={inputId} disabled={disabled} />
-        <label htmlFor={inputId}>
-          <Button asChild className={`cursor-pointer ${disabled ? 'pointer-events-none opacity-70' : ''}`} disabled={disabled}>
-            <span>Browse</span>
-          </Button>
-        </label>
+         {files.length === 0 && !useMasterFile && (
+           <>
+             <h3 className="text-3xl font-bold text-gray-900 mb-3 mt-6 bg-gradient-to-r from-blue-500 to-blue-600 bg-clip-text text-transparent">
+               Upload and Validate Operation
+             </h3>
+             <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">To ensure your data meets format requirements, go to Properties section and upload Master file for validation</p>
+           </>
+         )}
       </div>
-      {uploadedFiles.length > 0 && (
-        <Button className="w-full mt-4" onClick={onValidateFiles} disabled={disableValidation}>
+      {uploadedFiles.length > 0 && !disableValidation && (
+        <Button className="w-full mt-4" onClick={onValidateFiles}>
           Validate Files
         </Button>
       )}

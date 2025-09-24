@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { X } from 'lucide-react';
+import { SingleSelectDropdown } from '@/templates/dropdown';
 import type { GroupByData } from '../GroupByAtom';
 
 interface GroupBySettingsProps {
@@ -28,17 +29,21 @@ const GroupBySettings: React.FC<GroupBySettingsProps> = ({ data, onDataChange })
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <Label className="text-sm font-medium">Single Selection</Label>
-            <Select defaultValue="sales-data">
-              <SelectTrigger className="mt-2">
-                <SelectValue placeholder="Select data source" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="sales-data">Sales Data</SelectItem>
-                <SelectItem value="market-data">Market Data</SelectItem>
-                <SelectItem value="product-data">Product Data</SelectItem>
-              </SelectContent>
-            </Select>
+            <SingleSelectDropdown
+              label="Single Selection"
+              placeholder="Select data source"
+              value="sales-data"
+              onValueChange={(value) => {
+                // Handle value change if needed
+                console.log('Selected value:', value);
+              }}
+              options={[
+                { value: "sales-data", label: "Sales Data" },
+                { value: "market-data", label: "Market Data" },
+                { value: "product-data", label: "Product Data" }
+              ]}
+              className="mt-2"
+            />
           </div>
         </CardContent>
       </Card>

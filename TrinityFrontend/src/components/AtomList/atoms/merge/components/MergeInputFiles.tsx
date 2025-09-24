@@ -52,10 +52,7 @@ const MergeInputFiles: React.FC<MergeInputFilesProps> = ({ settings, onSettingsC
   }, []);
 
   return (
-    <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 to-blue-50 overflow-y-auto">
-      <div className="mb-6">
-        <h4 className="text-lg font-semibold text-gray-900 mb-4">Input Files</h4>
-      </div>
+    <div className="w-full h-full p-6 overflow-y-auto">
       <div className="space-y-6">
         <div>
           <label className="text-sm font-medium text-gray-700 block mb-2">Primary Source</label>

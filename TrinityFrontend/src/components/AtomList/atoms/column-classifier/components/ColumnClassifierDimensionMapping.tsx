@@ -1,6 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
 import { Tag, X, GripVertical } from 'lucide-react';
 // import {
 //   DndContext,
@@ -28,6 +30,7 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
 }) => {
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<{ visible: boolean; x: number; y: number }>({ visible: false, x: 0, y: 0 });
+  const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
   // const sensors = useSensors(
@@ -84,6 +87,34 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
     setContextMenu({ visible: false, x: 0, y: 0 });
   };
 
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      setPortalContainer(document.body);
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!contextMenu.visible || !contextMenuRef.current) {
+      return;
+    }
+    const menu = contextMenuRef.current.getBoundingClientRect();
+    const { innerWidth, innerHeight } = window;
+    const padding = 12;
+    let nextX = contextMenu.x;
+    let nextY = contextMenu.y;
+
+    if (menu.right > innerWidth) {
+      nextX = Math.max(padding, innerWidth - menu.width - padding);
+    }
+    if (menu.bottom > innerHeight) {
+      nextY = Math.max(padding, innerHeight - menu.height - padding);
+    }
+
+    if (nextX !== contextMenu.x || nextY !== contextMenu.y) {
+      setContextMenu(prev => (prev.visible ? { ...prev, x: nextX, y: nextY } : prev));
+    }
+  }, [contextMenu.visible, contextMenu.x, contextMenu.y]);
+
   // Close context menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -95,6 +126,19 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
     if (contextMenu.visible) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [contextMenu.visible]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setContextMenu({ visible: false, x: 0, y: 0 });
+      }
+    };
+
+    if (contextMenu.visible) {
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
     }
   }, [contextMenu.visible]);
 
@@ -198,16 +242,17 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
           </Badge>
         </div>
 
-        {/* Unified Dimension Mapping Box */}
-        <div className="w-full">
-          <div className="bg-white/80 backdrop-blur-sm overflow-hidden border-2 border-gray-200 rounded-xl">
+        <div className="p-4 space-y-6">
+          {/* Unified Dimension Mapping Box */}
+          <div className="p-4 w-full">
+          <Card className="bg-white/80 backdrop-blur-sm overflow-hidden border-2 border-gray-200 rounded-xl">
             <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-3">
               <div className="w-2 h-4 rounded-full bg-gradient-to-r from-blue-500/60 to-blue-600/80" />
               <h4 className="text-base font-semibold text-gray-900">Apply Dimension Mapping</h4>
             </div>
             <div className="p-5">
-              <div className="rounded-lg bg-white/50 p-4">
-                <div className="space-y-4">
+              <div className="relative rounded-lg bg-white/50 p-4">
+                <div className="space-y-6">
                   {/* Unattributed Section */}
                   {customDimensions['unattributed'] && customDimensions['unattributed'].length > 0 && (
                     <>
@@ -216,7 +261,7 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
                           <div className="w-2 h-2 rounded-full bg-gradient-to-r from-gray-400 to-gray-500" />
                           <span className="text-sm font-medium text-gray-600">Unattributed</span>
                         </div>
-                        <div className="flex flex-wrap gap-3">
+                        <div className="flex flex-wrap gap-3 ">
                           {customDimensions['unattributed'].map((column, index) => (
                             <SelectableColumnPill
                               key={`unattributed-${column}-${index}`}
@@ -246,7 +291,7 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
                             <div className={`w-2 h-2 rounded-full ${getDimensionColor(dimensionName, index).bg}`} />
                             <span className="text-sm font-medium text-gray-600">{dimensionName}</span>
                           </div>
-                          <div className="flex flex-wrap gap-3">
+                          <div className="flex flex-wrap gap-3 ">
                             {assignedColumns.map((column, colIndex) => (
                               <SelectableColumnPill
                                 key={`${dimensionName}-${column}-${colIndex}`}
@@ -277,43 +322,47 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
                 )}
               </div>
             </div>
+          </Card>
           </div>
         </div>
         
         {/* Context Menu */}
-        {contextMenu.visible && (
-          <div
-            ref={contextMenuRef}
-            className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[200px]"
-            style={{
-              left: contextMenu.x,
-              top: contextMenu.y,
-            }}
-          >
-            <div className="px-3 py-2 text-sm font-medium text-gray-500 border-b border-gray-100">
-              Assign to dimension:
-            </div>
-            <button
-              onClick={() => handleDimensionChange('unattributed')}
-              className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
-            >
-              <div className="w-2 h-2 rounded-full bg-gray-500" />
-              Unattributed
-            </button>
-            {Object.keys(customDimensions)
-              .filter(name => name !== 'unattributed')
-              .map((dimensionName, index) => (
+        {contextMenu.visible && portalContainer
+          ? createPortal(
+              <div
+                ref={contextMenuRef}
+                className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[200px]"
+                style={{
+                  left: contextMenu.x,
+                  top: contextMenu.y,
+                }}
+              >
+                <div className="px-3 py-2 text-sm font-medium text-gray-500 border-b border-gray-100">
+                  Assign to dimension:
+                </div>
                 <button
-                  key={dimensionName}
-                  onClick={() => handleDimensionChange(dimensionName)}
+                  onClick={() => handleDimensionChange('unattributed')}
                   className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
                 >
-                  <div className={`w-2 h-2 rounded-full ${getDimensionColor(dimensionName, index).bg}`} />
-                  {dimensionName}
+                  <div className="w-2 h-2 rounded-full bg-gray-500" />
+                  Unattributed
                 </button>
-              ))}
-          </div>
-        )}
+                {Object.keys(customDimensions)
+                  .filter(name => name !== 'unattributed')
+                  .map((dimensionName, index) => (
+                    <button
+                      key={dimensionName}
+                      onClick={() => handleDimensionChange(dimensionName)}
+                      className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <div className={`w-2 h-2 rounded-full ${getDimensionColor(dimensionName, index).bg}`} />
+                      {dimensionName}
+                    </button>
+                  ))}
+              </div>,
+              portalContainer
+            )
+          : null}
       </div>
     // </DndContext>
   );

@@ -185,7 +185,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         ...Object.fromEntries(
           uploaded.map((f) => [
             f.name,
-            settings.bypassMasterUpload ? f.name : settings.requiredFiles?.[0] || '',
+            !settings.bypassMasterUpload ? f.name : settings.requiredFiles?.[0] || '',
           ])
         ),
       },
@@ -203,7 +203,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       ...Object.fromEntries(
         uploaded.map((f) => [
           f.name,
-          settings.bypassMasterUpload ? f.name : settings.requiredFiles?.[0] || '',
+          !settings.bypassMasterUpload ? f.name : settings.requiredFiles?.[0] || '',
         ])
       ),
     }));
@@ -494,7 +494,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   };
 
   const handleSaveDataFrames = async () => {
-    if (!settings.validatorId && !settings.bypassMasterUpload) return;
+    if (!settings.validatorId && settings.bypassMasterUpload) return;
     console.log('🔧 Running save dataframes util');
     try {
       let query = '';
@@ -705,7 +705,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     );
   };
 
-  const allValid = settings.bypassMasterUpload || (
+  const allValid = !settings.bypassMasterUpload || (
     Object.values(validationResults).length > 0 &&
     Object.values(validationResults).every(v => v.includes('Success'))
   );
@@ -715,7 +715,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       <div className="flex-1 flex flex-col">
         <div className="flex-1 p-6 bg-gray-50 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
           <div className="flex h-full space-x-6 overflow-hidden">
-            <div className="flex-1 min-w-0">
+            <div className={settings.bypassMasterUpload ? "flex-1 min-w-0" : "w-full"}>
               <UploadSection
                 uploadedFiles={uploadedFiles}
                 files={uploadedFilesList}
@@ -732,30 +732,33 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 onValidateFiles={handleValidateFiles}
                 onSaveDataFrames={handleSaveDataFrames}
                 saveEnabled={allValid}
-                disableValidation={settings.bypassMasterUpload}
+                disableValidation={!settings.bypassMasterUpload}
                 isDragOver={isDragOver}
                 requiredOptions={settings.requiredFiles || []}
                 onDeleteFile={handleDeleteFile}
                 saveStatus={saveStatus}
-                disabled={!settings.bypassMasterUpload && (settings.requiredFiles || []).length === 0}
+                disabled={false}
+                useMasterFile={settings.bypassMasterUpload}
               />
             </div>
 
-            <div className="w-80">
-              <RequiredFilesSection
-                files={requiredFiles}
-                columnConfig={settings.columnConfig || {}}
-                renameTarget={renameTarget}
-                renameValue={renameValue}
-                setRenameValue={setRenameValue}
-                startRename={startRename}
-                commitRename={commitRename}
-                openFile={openFile}
-                setOpenFile={setOpenFile}
-                getStatusIcon={getStatusIcon}
-                bypassMasterUpload={settings.bypassMasterUpload}
-              />
-            </div>
+            {settings.bypassMasterUpload && (
+              <div className="w-80">
+                <RequiredFilesSection
+                  files={requiredFiles}
+                  columnConfig={settings.columnConfig || {}}
+                  renameTarget={renameTarget}
+                  renameValue={renameValue}
+                  setRenameValue={setRenameValue}
+                  startRename={startRename}
+                  commitRename={commitRename}
+                  openFile={openFile}
+                  setOpenFile={setOpenFile}
+                  getStatusIcon={getStatusIcon}
+                  useMasterFile={settings.bypassMasterUpload}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

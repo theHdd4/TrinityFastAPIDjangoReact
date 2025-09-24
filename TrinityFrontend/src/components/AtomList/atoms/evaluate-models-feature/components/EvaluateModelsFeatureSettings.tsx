@@ -27,7 +27,6 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
   onDataUpload
 }) => {
   const [frames, setFrames] = useState<{ object_name: string; csv_name?: string }[]>([]);
-  const [localGraphs, setLocalGraphs] = useState(data.graphs || []);
 
   const hasExistingUpdates = Boolean(
     (Array.isArray(data.modelResults) && data.modelResults.length > 0) ||
@@ -53,10 +52,6 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
     confirmDatasetChange(value, hasExistingUpdates && isDifferentSource);
   };
   
-  // Update local state when data.graphs changes
-  React.useEffect(() => {
-    setLocalGraphs(data.graphs || []);
-  }, [data.graphs]);
 
   useEffect(() => {
     let query = '';
@@ -197,53 +192,32 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
     onDataChange({ identifiers: updatedIdentifiers });
   };
 
-  const handleGraphToggle = (graphId: string, checked: boolean) => {
-    console.log('🔧 Settings: handleGraphToggle called with:', { graphId, checked });
-    console.log('🔧 Settings: Current localGraphs:', localGraphs);
-    
-    const updatedGraphs = localGraphs.map(graph =>
-      graph.id === graphId ? { ...graph, selected: checked } : graph
-    );
-    
-    console.log('🔧 Settings: Updated graphs:', updatedGraphs);
-    
-    // Update local state immediately for responsive UI
-    setLocalGraphs(updatedGraphs);
-    
-    console.log('🔧 Settings: Calling onDataChange with:', { graphs: updatedGraphs });
-    onDataChange({ graphs: updatedGraphs });
-  };
 
   return (
-    <div className="space-y-6">
-      {/* Data Selection */}
-      <Card>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label className="text-xs">Dataset</Label>
-            <Select
-              value={data.selectedDataframe}
-              onValueChange={handleDatasetChange}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select a dataset" />
-              </SelectTrigger>
-              <SelectContent>
-                {frames.map((f, idx) => (
-                  <SelectItem key={`${f.object_name}-${idx}`} value={f.object_name}>
-                    {f.csv_name.split('/').pop()}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
+    <div className="space-y-4 p-2">
+      <Card className="p-4 space-y-3">
+        <label className="text-sm font-medium text-gray-700 block">Data Source</label>
+        <Select
+          value={data.selectedDataframe}
+          onValueChange={handleDatasetChange}
+        >
+          <SelectTrigger className="bg-white border-gray-300">
+            <SelectValue placeholder="Choose a saved dataframe..." />
+          </SelectTrigger>
+          <SelectContent>
+            {frames.map((f, idx) => (
+              <SelectItem key={`${f.object_name}-${idx}`} value={f.object_name}>
+                {f.csv_name.split('/').pop()}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Card>
 
       {dialog}
 
-      {/* Combination Selection */}
-      <Card>
+      {/* Combination Selection - COMMENTED OUT FOR FRONTEND HIDING */}
+      {/* <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium">Select Combination</CardTitle>
         </CardHeader>
@@ -251,7 +225,7 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
           <div className="space-y-2">
             <Label className="text-xs">Combinations</Label>
             {/* Select All Checkbox */}
-            {combinationOptions.length > 0 && (
+            {/* {combinationOptions.length > 0 && (
               <div className="mb-3 p-2 border rounded bg-muted/20">
                 <div className="flex items-center space-x-2">
                                      <Checkbox
@@ -300,33 +274,8 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
           </div>
           
         </CardContent>
-      </Card>
+      </Card> */}
 
-      {/* Graph Types */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">Graph Types</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {localGraphs.map((graph) => (
-            <div key={graph.id} className="flex items-center space-x-2">
-              <Checkbox
-                id={`graph-${graph.id}`}
-                checked={graph.selected}
-                onCheckedChange={(checked) => 
-                  handleGraphToggle(graph.id, checked as boolean)
-                }
-              />
-              <Label 
-                htmlFor={`graph-${graph.id}`} 
-                className="text-xs font-normal cursor-pointer"
-              >
-                {graph.name}
-              </Label>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
 
       
     </div>

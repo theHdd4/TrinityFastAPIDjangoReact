@@ -20,6 +20,7 @@ import AtomAIChatBot from '@/components/TrinityAI/AtomAIChatBot';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import Table from '@/templates/tables/table';
+import { MultiSelectDropdown } from '@/templates/dropdown';
 import { CHART_MAKER_API } from '@/lib/api';
 
 // FilterMenu component moved outside to prevent recreation on every render
@@ -1188,137 +1189,29 @@ const renderChart = (
                               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
                               
                               {/* Responsive grid layout for simple filter columns */}
-                              <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                              <div className="relative z-10 flex flex-wrap gap-2">
                                 {Object.entries(chart.filters).map(([column, selectedValues]) => {
                                   const uniqueValues = getUniqueValuesForColumn(column);
                                   return (
-                                    <div key={column} className="flex flex-col space-y-2">
+                                    <div key={column} className="flex flex-col space-y-2 w-auto">
                                       <Label className={`font-semibold text-gray-800 ${isCompact ? 'text-xs' : 'text-sm'} bg-gradient-to-r from-gray-700 to-gray-600 bg-clip-text text-transparent truncate`}>
                                         {column}
                                       </Label>
-                                      <Popover>
-                                        <PopoverTrigger asChild>
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className={`justify-between w-full font-medium ${isCompact ? 'h-8 text-xs' : 'h-9 text-sm'} 
-                                              bg-gradient-to-r from-white to-gray-50/50 hover:from-gray-50 hover:to-white 
-                                              border-gray-300/60 hover:border-gray-400/60 shadow-sm hover:shadow-md 
-                                              transition-all duration-200 backdrop-blur-sm group`}
-                                          >
-                                            <span className="truncate font-medium text-gray-700 group-hover:text-gray-900 transition-colors text-left">
-                                              {selectedValues.length === 0
-                                                ? "No values selected"
-                                                : selectedValues.length === uniqueValues.length
-                                                ? "All values"
-                                                : selectedValues.length === 1
-                                                ? selectedValues[0]
-                                                : `${selectedValues.length} selected`
-                                              }
-                                            </span>
-                                            <ChevronDown className="h-3 w-3 text-gray-500 group-hover:text-gray-700 transition-colors flex-shrink-0 ml-2" />
-                                          </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-56 p-0 bg-white/95 backdrop-blur-lg border-gray-200/60 shadow-2xl rounded-lg overflow-hidden" align="start">
-                                          <div className="p-4 border-b border-gray-200/60 bg-gradient-to-r from-gray-50/80 to-white/80">
-                                            <div className="flex items-center justify-between">
-                                              <span className="text-sm font-semibold text-gray-800 bg-gradient-to-r from-gray-700 to-gray-600 bg-clip-text text-transparent">
-                                                Filter by {column}
-                                              </span>
-                                              {selectedValues.length > 0 && (
-                                                <Button
-                                                  variant="ghost"
-                                                  size="sm"
-                                                  className="h-7 px-3 text-xs font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100/60 transition-all duration-200"
-                                                  onClick={() => onChartFilterChange?.(chart.id, column, [])}
-                                                >
-                                                  Clear
-                                                </Button>
-                                              )}
-                                            </div>
-                                          </div>
-                                          <div className="flex gap-2 p-3 border-b border-gray-200/60 bg-gradient-to-r from-gray-50/40 to-white/40">
-                                            <Button
-                                              variant="outline"
-                                              size="sm"
-                                              className="flex-1 h-7 text-xs font-medium bg-white/80 hover:bg-gray-50 border-gray-300/60 hover:border-gray-400/60 transition-all duration-200"
-                                              onClick={() => onChartFilterChange?.(chart.id, column, uniqueValues)}
-                                            >
-                                              All
-                                            </Button>
-                                            <Button
-                                              variant="outline"
-                                              size="sm"
-                                              className="flex-1 h-7 text-xs font-medium bg-white/80 hover:bg-gray-50 border-gray-300/60 hover:border-gray-400/60 transition-all duration-200"
-                                              onClick={() => onChartFilterChange?.(chart.id, column, [])}
-                                            >
-                                              None
-                                            </Button>
-                                          </div>
-                                          <ScrollArea className="filter-scroll-area bg-white/50">
-                                            <RadioGroup value="" onValueChange={() => {}}>
-                                              <div className="p-3 space-y-2">
-                                                {uniqueValues.map((value, valueIdx) => (
-                                                  <div key={value} className="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-gray-50/80 transition-colors group"
-                                                    onClick={e => {
-                                                      if (!onChartFilterChange) return;
-                                                      if (e.shiftKey && lastSelectedIdx !== null) {
-                                                        // Range select
-                                                        const [start, end] = [lastSelectedIdx, valueIdx].sort((a, b) => a - b);
-                                                        const range = uniqueValues.slice(start, end + 1);
-                                                        const newSelected = Array.from(new Set([...selectedValues, ...range]));
-                                                        onChartFilterChange(chart.id, column, newSelected);
-                                                        setLastSelectedIdx(valueIdx);
-                                                      } else if (e.ctrlKey || e.metaKey) {
-                                                        // Toggle selection
-                                                        const isSelected = selectedValues.includes(value);
-                                                        const newSelected = isSelected
-                                                          ? selectedValues.filter(v => v !== value)
-                                                          : [...selectedValues, value];
-                                                        onChartFilterChange(chart.id, column, newSelected);
-                                                        setLastSelectedIdx(valueIdx);
-                                                      } else {
-                                                        // Single select (radio behavior)
-                                                        onChartFilterChange(chart.id, column, [value]);
-                                                        setLastSelectedIdx(valueIdx);
-                                                      }
-                                                    }}
-                                                    tabIndex={0}
-                                                    onKeyDown={e => {
-                                                      if (e.key === ' ' || e.key === 'Enter') {
-                                                        e.preventDefault();
-                                                        if (!onChartFilterChange) return;
-                                                        if (e.shiftKey && lastSelectedIdx !== null) {
-                                                          const [start, end] = [lastSelectedIdx, valueIdx].sort((a, b) => a - b);
-                                                          const range = uniqueValues.slice(start, end + 1);
-                                                          const newSelected = Array.from(new Set([...selectedValues, ...range]));
-                                                          onChartFilterChange(chart.id, column, newSelected);
-                                                          setLastSelectedIdx(valueIdx);
-                                                        } else if (e.ctrlKey || e.metaKey) {
-                                                          const isSelected = selectedValues.includes(value);
-                                                          const newSelected = isSelected
-                                                            ? selectedValues.filter(v => v !== value)
-                                                            : [...selectedValues, value];
-                                                          onChartFilterChange(chart.id, column, newSelected);
-                                                          setLastSelectedIdx(valueIdx);
-                                                        } else {
-                                                          onChartFilterChange(chart.id, column, [value]);
-                                                          setLastSelectedIdx(valueIdx);
-                                                        }
-                                                      }
-                                                    }}
-                                                  >
-                                                    <RadioGroupItem value={value} checked={selectedValues.includes(value)} tabIndex={-1} />
-                                                    <label className="text-xs cursor-pointer flex-1 truncate font-medium text-gray-700 group-hover:text-gray-900 transition-colors">
-                                                      {value || '(empty)'}
-                                                    </label>
-                                                  </div>
-                                                ))}
-                                              </div>
-                                            </RadioGroup>
-                                          </ScrollArea>
-                                        </PopoverContent>
-                                      </Popover>
+                                      <MultiSelectDropdown
+                                        label=""
+                                        selectedValues={selectedValues}
+                                        onSelectionChange={(newSelectedValues) => {
+                                          onChartFilterChange?.(chart.id, column, newSelectedValues);
+                                        }}
+                                        options={uniqueValues.map(value => ({ 
+                                          value, 
+                                          label: value || '(empty)' 
+                                        }))}
+                                        showSelectAll={true}
+                                        showTrigger={true}
+                                        placeholder={`Filter by ${column}`}
+                                        className="w-full"
+                                      />
                                     </div>
                                   );
                                 })}

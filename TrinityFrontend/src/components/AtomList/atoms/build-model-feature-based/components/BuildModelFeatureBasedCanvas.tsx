@@ -4,13 +4,15 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Plus, Play, X, Settings2, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Info } from 'lucide-react';
 import { BuildModelFeatureBasedData, VariableTransformation, ModelConfig } from '../BuildModelFeatureBasedAtom';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { BUILD_MODEL_API } from '@/lib/api';
+import { MultiSelectDropdown } from '@/templates/dropdown/multiselect';
+import { SingleSelectDropdown } from '@/templates/dropdown/single-select';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -55,22 +57,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
   const storeData = (storeAtom?.settings as any)?.data as BuildModelFeatureBasedData;
   
   // Use store data if available, otherwise use prop data
-  const currentData = storeData || data;
-  
-  // Subscribe to store changes more directly
-  const storeSubscription = useLaboratoryStore(state => 
-    atomId ? state.getAtom(atomId)?.settings?.data : null
-  );
-  
-  // Use store subscription data if available
-  const finalData = storeSubscription || currentData;
-  
-  // Debug logging removed
-
-  // Force re-render when store data changes
-  useEffect(() => {
-    // Store data changed - component will re-render
-  }, [storeData, storeSubscription]);
+  const finalData = storeData || data;
 
   // Get updateSettings function for Laboratory Mode
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
@@ -103,29 +90,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     handleDataChange({ xVariables: updatedXVariables });
   };
 
-  const toggleXVariable = (index: number, variable: string, checked: boolean) => {
-    const currentXVariables = finalData?.xVariables || [];
-    const currentValue = currentXVariables[index];
-    
-    if (Array.isArray(currentValue)) {
-      // If it's already an array, add or remove the variable
-      const newValue = checked 
-        ? [...currentValue, variable]
-        : currentValue.filter(v => v !== variable);
-      updateXVariable(index, newValue);
-    } else {
-      // If it's a string, convert to array
-      const newValue = checked ? [variable] : [];
-      updateXVariable(index, newValue);
-    }
-  };
-
-  const togglePopover = (index: number, open: boolean) => {
-    setOpenPopovers(prev => ({
-      ...prev,
-      [index]: open
-    }));
-  };
 
   const runModel = async () => {
     if (!finalData?.selectedScope || !finalData?.selectedCombinations || finalData.selectedCombinations.length === 0) {
@@ -421,7 +385,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
   // Fetch numerical columns when scope and combinations are selected
   const [numericalColumns, setNumericalColumns] = useState<string[]>([]);
   const [isLoadingColumns, setIsLoadingColumns] = useState(false);
-  const [openPopovers, setOpenPopovers] = useState<{ [key: number]: boolean }>({});
   const [isRunningModel, setIsRunningModel] = useState(false);
   const [modelResult, setModelResult] = useState<any>(() => {
     return data.modelResult || null;
@@ -930,106 +893,65 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
           {/* Combined Y & X-Variables Selection list */}
           <div className="space-y-3">
             {(finalData?.xVariables || []).map((variable, index) => (
-              <div key={`${variable}-${index}`} className={`grid grid-cols-12 gap-4 items-center p-3 rounded-lg shadow-sm ${index % 2 === 0 ? 'bg-white border-l-4 border-indigo-300' : 'bg-gray-50 border-l-4 border-teal-300'}`}>
+              <div key={`x-variable-${index}`} className={`grid grid-cols-12 gap-4 items-center p-3 rounded-lg shadow-sm ${index % 2 === 0 ? 'bg-white border-l-4 border-indigo-300' : 'bg-gray-50 border-l-4 border-teal-300'}`}>
                 {/* Y-variable column only for first row */}
                 {index === 0 ? (
-                  <div className="col-span-3">
-                    <Select value={finalData?.yVariable || ''} onValueChange={(value) => handleDataChange({ yVariable: value })}>
-                      <SelectTrigger>
-                        <SelectValue placeholder={isLoadingColumns ? "Loading..." : "Select Y-Variable"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {isLoadingColumns ? (
-                          <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading numerical columns...</div>
-                        ) : (
-                          numericalColumns
-                            .filter(col => {
-                              // Exclude any X-variables that are selected (either as strings or arrays)
-                              const isSelectedAsXVariable = finalData?.xVariables?.some(xVar => 
-                                Array.isArray(xVar) ? xVar.includes(col) : xVar === col
-                              );
-                              return !isSelectedAsXVariable;
-                            })
-                            .map(col => (
-                            <SelectItem key={col} value={col}>{col}</SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
+                  <div className="col-span-3 flex items-center">
+                    <SingleSelectDropdown
+                      label=""
+                      placeholder={isLoadingColumns ? "Loading..." : "Select Y-Variable"}
+                      value={finalData?.yVariable || ''}
+                      onValueChange={(value) => handleDataChange({ yVariable: value })}
+                      options={isLoadingColumns ? [] : numericalColumns
+                        .filter(col => {
+                          // Exclude any X-variables that are selected (either as strings or arrays)
+                          const isSelectedAsXVariable = finalData?.xVariables?.some(xVar => 
+                            Array.isArray(xVar) ? xVar.includes(col) : xVar === col
+                          );
+                          return !isSelectedAsXVariable;
+                        })
+                        .map(col => ({ value: col, label: col }))
+                      }
+                      disabled={isLoadingColumns}
+                      className="w-full"
+                    />
                   </div>
                 ) : (
                   <div className="col-span-3" />
                 )}
 
                 {/* X-variable select */}
-                <div className="col-span-3">
-                  <Popover open={openPopovers[index]} onOpenChange={(open) => togglePopover(index, open)}>
-                    <PopoverTrigger asChild>
-                      <Button 
-                        variant="outline" 
-                        className="w-full justify-between"
-                        disabled={isLoadingColumns}
-                      >
-                        <span>
-                          {isLoadingColumns 
-                            ? "Loading..." 
-                            : Array.isArray(variable) 
-                              ? variable.length > 0 
-                                ? `${variable.length} X-variable${variable.length > 1 ? 's' : ''} selected`
-                                : "Select X-Variables"
-                              : variable || "Select X-Variables"
-                          }
-                        </span>
-                        <ChevronDown className="w-4 h-4" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2" onPointerDownOutside={(e) => e.preventDefault()}>
-                      {isLoadingColumns ? (
-                        <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading numerical columns...</div>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-2 py-1 border-b mb-2">
-                            <Checkbox
-                              checked={Array.isArray(variable) && variable.length === numericalColumns.filter(col => col !== finalData?.yVariable).length}
-                              onCheckedChange={(checked) => {
-                                const availableColumns = numericalColumns.filter(col => col !== finalData?.yVariable);
-                                updateXVariable(index, checked ? availableColumns : []);
-                              }}
-                            />
-                            <span className="text-sm font-medium">Select All</span>
-                          </div>
-                          {numericalColumns
-                            .filter(col => col !== finalData?.yVariable)
-                            .map(col => {
-                              const isChecked = Array.isArray(variable) ? variable.includes(col) : variable === col;
-                              return (
-                                <div key={col} className="flex items-center gap-2 py-1">
-                                  <Checkbox
-                                    checked={isChecked}
-                                    onCheckedChange={(checked) => toggleXVariable(index, col, !!checked)}
-                                  />
-                                  <span className="text-sm">{col}</span>
-                                </div>
-                              );
-                            })}
-                        </>
-                      )}
-                    </PopoverContent>
-                  </Popover>
+                <div className="col-span-3 flex items-center">
+                  <MultiSelectDropdown
+                    label=""
+                    placeholder={isLoadingColumns ? "Loading..." : "Select X-Variables"}
+                    selectedValues={Array.isArray(variable) ? variable : variable ? [variable] : []}
+                    onSelectionChange={(selectedValues) => updateXVariable(index, selectedValues)}
+                    options={isLoadingColumns ? [] : numericalColumns
+                      .filter(col => col !== finalData?.yVariable)
+                      .map(col => ({ value: col, label: col }))
+                    }
+                    showSelectAll={true}
+                    showTrigger={true}
+                    disabled={isLoadingColumns}
+                    className="w-full"
+                  />
                 </div>
 
                 {/* Standardization select */}
-                <div className="col-span-3">
-                  <Select value={finalData?.transformations?.[index] || ''} onValueChange={(val) => updateTransformation(index, val)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Standardization" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">None</SelectItem>
-                      <SelectItem value="normalize">Normalize (Min-Max)</SelectItem>
-                      <SelectItem value="standardize">Standardize (Z-Score)</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <div className="col-span-3 flex items-center">
+                  <SingleSelectDropdown
+                    label=""
+                    placeholder="Standardization"
+                    value={finalData?.transformations?.[index] || ''}
+                    onValueChange={(val) => updateTransformation(index, val)}
+                    options={[
+                      { value: "none", label: "None" },
+                      { value: "normalize", label: "Normalize (Min-Max)" },
+                      { value: "standardize", label: "Standardize (Z-Score)" }
+                    ]}
+                    className="w-full"
+                  />
                 </div>
 
 
@@ -1416,10 +1338,10 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
           </div>
           <div className="p-6">
             {modelResult.combination_results && modelResult.combination_results.length > 0 ? (
-              <div className="space-y-8">
+              <div className="max-h-[600px] overflow-y-auto space-y-4">
                 {modelResult.combination_results.map((combination, comboIndex) => (
-                  <div key={comboIndex} className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow duration-200">
-                    <div className="flex items-center justify-between mb-4">
+                  <div key={comboIndex} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow duration-200">
+                    <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-green-100 rounded-lg">
                           <Target className="w-5 h-5 text-green-600" />

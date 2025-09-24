@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { SwitchBuild } from '@/components/ui/switch_build';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Cpu, Database, ChevronDown, ChevronRight } from 'lucide-react';
@@ -314,7 +315,7 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                 {/* Select All Individual Models Checkbox */}
             <div className="mb-3 p-2 border rounded bg-muted/20">
               <div className="flex items-center space-x-2">
-                <Checkbox
+                <SwitchBuild
                       id="select-all-individual-models"
                       checked={data?.individualSelectedModels?.length === individualModels.length}
                       onCheckedChange={(checked) => {
@@ -334,7 +335,8 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                             return {
                               id: model.id,
                               name: model.name,
-                              parameters: defaultParams
+                              parameters: defaultParams,
+                              tuning_mode: model.supportsAutoTuning ? 'auto' : 'manual'
                             };
                           });
                           onDataChange({
@@ -359,7 +361,7 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
               {individualModels.map(model => (
                 <div key={model.id} className="space-y-3">
                   <div className="flex items-center space-x-2">
-                    <Checkbox
+                    <SwitchBuild
                           id={`individual-${model.id}`}
                           checked={data?.individualSelectedModels?.includes(model.id) || false}
                           onCheckedChange={(checked) => {
@@ -403,33 +405,28 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                       
                       {data?.individualSelectedModels?.includes(model.id) && (
                         <div className="ml-6 space-y-2 border-l-2 border-border pl-4">
-                          {/* Tuning Mode Selector - Only show for models that support auto tuning */}
+                          {/* Manual Parameters Toggle - Only show for models that support auto tuning */}
                           {model.supportsAutoTuning && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Parameter Tuning</Label>
-                              <Select
-                                value={data?.individualModelConfigs?.find(c => c.id === model.id)?.tuning_mode || 'auto'}
-                                onValueChange={(value) => {
+                            <div className="flex items-center space-x-2">
+                              <Checkbox
+                                id={`manual-params-${model.id}`}
+                                checked={data?.individualModelConfigs?.find(c => c.id === model.id)?.tuning_mode === 'manual'}
+                                onCheckedChange={(checked) => {
                                   const updatedConfigs = (data?.individualModelConfigs || []).map(c => {
                                     if (c.id === model.id) {
                                       return {
                                         ...c,
-                                        tuning_mode: value
+                                        tuning_mode: checked ? 'manual' : 'auto'
                                       };
                                     }
                                     return c;
                                   });
                                   onDataChange({ individualModelConfigs: updatedConfigs });
                                 }}
-                              >
-                                <SelectTrigger className="mt-1">
-                                  <SelectValue placeholder="Select tuning mode" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="auto">Auto (RidgeCV/LassoCV/ElasticNetCV)</SelectItem>
-                                  <SelectItem value="manual">Manual Parameters</SelectItem>
-                                </SelectContent>
-                              </Select>
+                              />
+                              <Label htmlFor={`manual-params-${model.id}`} className="text-xs text-muted-foreground">
+                                Use Manual Parameters (default: auto-tuning)
+                              </Label>
                             </div>
                           )}
                           
@@ -679,7 +676,7 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                 {/* Select All Stack Models Checkbox */}
                 <div className="mb-3 p-2 border rounded bg-muted/20">
                   <div className="flex items-center space-x-2">
-                    <Checkbox
+                    <SwitchBuild
                       id="select-all-stack-models"
                       checked={data?.stackSelectedModels?.length === stackModels.length}
                       onCheckedChange={(checked) => {
@@ -726,7 +723,7 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                   {stackModels.map(model => (
                     <div key={model.id}>
                       <div className="flex items-center space-x-2">
-                        <Checkbox
+                        <SwitchBuild
                           id={`stack-${model.id}`}
                           checked={data?.stackSelectedModels?.includes(model.id) || false}
                           onCheckedChange={(checked) => {
@@ -770,33 +767,28 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                   
                       {data?.stackSelectedModels?.includes(model.id) && (
                     <div className="ml-6 space-y-2 border-l-2 border-border pl-4">
-                      {/* Tuning Mode Selector - Only show for models that support auto tuning */}
+                      {/* Manual Parameters Toggle - Only show for models that support auto tuning */}
                       {model.supportsAutoTuning && (
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Parameter Tuning</Label>
-                          <Select
-                            value={data?.stackModelConfigs?.find(c => c.id === model.id)?.tuning_mode || 'auto'}
-                            onValueChange={(value) => {
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`manual-params-stack-${model.id}`}
+                            checked={data?.stackModelConfigs?.find(c => c.id === model.id)?.tuning_mode === 'manual'}
+                            onCheckedChange={(checked) => {
                               const updatedConfigs = (data?.stackModelConfigs || []).map(c => {
                                 if (c.id === model.id) {
                                   return {
                                     ...c,
-                                    tuning_mode: value
+                                    tuning_mode: checked ? 'manual' : 'auto'
                                   };
                                 }
                                 return c;
                               });
                               onDataChange({ stackModelConfigs: updatedConfigs });
                             }}
-                          >
-                            <SelectTrigger className="mt-1">
-                              <SelectValue placeholder="Select tuning mode" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="auto">Auto (RidgeCV/LassoCV/ElasticNetCV)</SelectItem>
-                              <SelectItem value="manual">Manual Parameters</SelectItem>
-                            </SelectContent>
-                          </Select>
+                          />
+                          <Label htmlFor={`manual-params-stack-${model.id}`} className="text-xs text-muted-foreground">
+                            Use Manual Parameters (default: auto-tuning)
+                          </Label>
                         </div>
                       )}
                       

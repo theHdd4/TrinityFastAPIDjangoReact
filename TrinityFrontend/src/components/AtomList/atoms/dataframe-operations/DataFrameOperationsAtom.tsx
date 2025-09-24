@@ -56,7 +56,6 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     fileId: null,
     columnWidths: {},
     rowHeights: {},
-    columnFormulas: {},
     ...baseSettings,
     columnFormulas: baseSettings.columnFormulas || {},
   };
@@ -182,30 +181,29 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
 
   return (
     <ErrorBoundary>
-      <div className="w-full h-full bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden min-h-0">
-        <div className="h-full flex flex-col min-h-0">
-          {fileSelected && hasRenderableData ? (
-            <>
-              {viewMode === 'table' && (
-                <DataFrameOperationsCanvas
-                  data={data}
-                  settings={settings}
-                  onSettingsChange={handleSettingsChange}
-                  onDataUpload={handleDataUpload}
-                  onDataChange={handleDataChange}
-                  onClearAll={handleReset}
-                  fileId={settings.fileId || null}
-                  originalData={originalData}
-                />
-              )}
-              {viewMode === 'chart' && chartConfig && (
-                <div className="flex items-center justify-center h-full text-gray-800 text-lg font-semibold">
-                  [Chart will be rendered here]
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-green-50/30 to-green-50/50 overflow-y-auto relative min-h-0">
+      <div className="w-full h-full bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden flex flex-col">
+        {fileSelected && hasRenderableData ? (
+          <>
+            {viewMode === 'table' && (
+              <DataFrameOperationsCanvas
+                data={data}
+                settings={settings}
+                onSettingsChange={handleSettingsChange}
+                onDataUpload={handleDataUpload}
+                onDataChange={handleDataChange}
+                onClearAll={handleReset}
+                fileId={settings.fileId || null}
+                originalData={originalData}
+              />
+            )}
+            {viewMode === 'chart' && chartConfig && (
+              <div className="flex items-center justify-center h-full text-gray-800 text-lg font-semibold">
+                [Chart will be rendered here]
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-green-50/30 to-green-50/50 overflow-y-auto relative min-h-0">
               <div className="absolute inset-0 opacity-20">
                 <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
                   <defs>
@@ -232,7 +230,6 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
               </div>
             </div>
           )}
-        </div>
       </div>
     </ErrorBoundary>
   );

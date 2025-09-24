@@ -1487,11 +1487,56 @@ const RechartsChartRenderer: React.FC<Props> = ({
     if (!showChartTypeSubmenu) return null;
 
     const chartTypes = [
-      { key: 'pie_chart', label: 'Pie Chart', icon: '🥧' },
-      { key: 'bar_chart', label: 'Bar Chart', icon: '📊' },
-      { key: 'line_chart', label: 'Line Chart', icon: '📈' },
-      { key: 'area_chart', label: 'Area Chart', icon: '📉' },
-      { key: 'scatter_chart', label: 'Scatter Chart', icon: '⚪' }
+      { 
+        key: 'pie_chart', 
+        label: 'Pie Chart', 
+        icon: (
+          <svg className="w-5 h-5 text-gray-800" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+          </svg>
+        )
+      },
+      { 
+        key: 'bar_chart', 
+        label: 'Bar Chart', 
+        icon: (
+          <svg className="w-5 h-5 text-gray-800" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/>
+            <path d="M4 21h16v1H4z"/>
+          </svg>
+        )
+      },
+      { 
+        key: 'line_chart', 
+        label: 'Line Chart', 
+        icon: (
+          <svg className="w-5 h-5 text-gray-800" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M3.5 18.49l6-6.01 4 4L22 6.92l-1.41-1.41-7.09 7.97-4-4L2 16.99z"/>
+          </svg>
+        )
+      },
+      { 
+        key: 'area_chart', 
+        label: 'Area Chart', 
+        icon: (
+          <svg className="w-5 h-5 text-gray-800" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/>
+          </svg>
+        )
+      },
+      { 
+        key: 'scatter_chart', 
+        label: 'Scatter Chart', 
+        icon: (
+          <svg className="w-5 h-5 text-gray-800" fill="currentColor" viewBox="0 0 24 24">
+            <circle cx="7" cy="14" r="2"/>
+            <circle cx="11" cy="6" r="2"/>
+            <circle cx="16" cy="8" r="2"/>
+            <circle cx="16" cy="18" r="2"/>
+            <circle cx="19" cy="12" r="2"/>
+          </svg>
+        )
+      }
     ];
 
     const submenu = (
@@ -1521,7 +1566,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                 </svg>
               )}
-              <span className="text-lg mr-2">{chartType.icon}</span>
+              <span className="mr-2">{chartType.icon}</span>
               <span>{chartType.label}</span>
             </button>
           ))}
@@ -2237,7 +2282,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   if (active && payload && payload.length) {
                     return (
                       <div className="explore-chart-tooltip">
-                        <p className="font-semibold text-gray-900 mb-2 text-sm">{label}</p>
+                        <p className="font-semibold text-gray-900 mb-2 text-sm">
+                          {isDateAxis ? formatDateTick(new Date(label)) : label}
+                        </p>
                         {payload.map((entry: any, index: number) => {
                           // Use the actual Y-axis label instead of the dataKey
                           let displayName = entry.dataKey;
