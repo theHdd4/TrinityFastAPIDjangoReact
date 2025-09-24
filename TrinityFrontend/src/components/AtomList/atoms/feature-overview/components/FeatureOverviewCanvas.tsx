@@ -27,7 +27,7 @@ import { logSessionState, addNavigationItem } from "@/lib/session";
 import { useLaboratoryStore } from "@/components/LaboratoryMode/store/laboratoryStore";
 import { useToast } from "@/hooks/use-toast";
 import { csvParse } from "d3-dsv";
-import { chartMakerApi } from "@/components/AtomList/atoms/chart-maker/services/chartMakerApi";
+import { tableFromIPC, Type } from "apache-arrow";
 
 interface ColumnInfo {
   column: string;
@@ -48,6 +48,9 @@ const filterUnattributed = (mapping: Record<string, string[]>) =>
       ([key]) => key.toLowerCase() !== "unattributed",
     ),
   );
+
+const numericTextPattern =
+  /^[\s$€£₹¥₩₽+-]*\(?[0-9.,eE%]+\)?[\s$€£₹¥₩₽+-]*$/;
 
 const parseNumericValue = (raw: string): number | null => {
   if (raw == null) return null;
@@ -90,6 +93,390 @@ type LoadedSkuDataset = {
   columns: string[];
   numericColumns: string[];
   originalNumericColumns: string[];
+};
+
+const arrowNumericTypeIds = new Set<Type>([
+  Type.Int,
+  Type.Int8,
+  Type.Int16,
+  Type.Int32,
+  Type.Int64,
+  Type.Uint8,
+  Type.Uint16,
+  Type.Uint32,
+  Type.Uint64,
+  Type.Float,
+  Type.Float16,
+  Type.Float32,
+  Type.Float64,
+  Type.Decimal,
+]);
+
+type ArrowColumnMeta = {
+  original: string;
+  lower: string;
+  vector: any;
+  isNumeric: boolean;
+  isDimension: boolean;
+};
+
+const convertDimensionValue = (value: any): string => {
+  if (value == null) {
+    return "";
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "bigint") {
+    return String(value);
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  if (typeof value === "object") {
+    if (typeof value.toString === "function") {
+      const str = value.toString();
+      if (str && str !== "[object Object]") {
+        return str;
+      }
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+};
+
+const convertArrowValue = (
+  rawValue: any,
+  meta: ArrowColumnMeta,
+  numericColumns: Set<string>,
+): any => {
+  if (rawValue == null) {
+    return "";
+  }
+
+  const markNumeric = () => {
+    meta.isNumeric = true;
+    numericColumns.add(meta.lower);
+  };
+
+  if (rawValue instanceof Date) {
+    return rawValue.toISOString();
+  }
+
+  if (typeof rawValue === "number") {
+    markNumeric();
+    return rawValue;
+  }
+
+  if (typeof rawValue === "bigint") {
+    const numeric = Number(rawValue);
+    if (Number.isFinite(numeric)) {
+      markNumeric();
+      return numeric;
+    }
+    return rawValue.toString();
+  }
+
+  if (typeof rawValue === "string") {
+    const trimmed = rawValue.trim();
+    if (meta.isNumeric || numericColumns.has(meta.lower) || numericTextPattern.test(trimmed)) {
+      const parsed = parseNumericValue(trimmed);
+      if (parsed != null) {
+        markNumeric();
+        return parsed;
+      }
+    }
+    return rawValue;
+  }
+
+  if (typeof rawValue === "boolean") {
+    return rawValue ? "true" : "false";
+  }
+
+  if (typeof rawValue === "object") {
+    const toNumber = (rawValue as any).toNumber;
+    if (typeof toNumber === "function") {
+      const numeric = toNumber.call(rawValue);
+      if (typeof numeric === "number" && Number.isFinite(numeric)) {
+        markNumeric();
+        return numeric;
+      }
+    }
+
+    const valueOf = (rawValue as any).valueOf?.();
+    if (valueOf !== undefined && valueOf !== rawValue) {
+      if (typeof valueOf === "number" && Number.isFinite(valueOf)) {
+        markNumeric();
+        return valueOf;
+      }
+      if (typeof valueOf === "bigint") {
+        const numeric = Number(valueOf);
+        if (Number.isFinite(numeric)) {
+          markNumeric();
+          return numeric;
+        }
+        return valueOf.toString();
+      }
+      if (typeof valueOf === "string") {
+        const trimmed = valueOf.trim();
+        if (meta.isNumeric || numericColumns.has(meta.lower) || numericTextPattern.test(trimmed)) {
+          const parsed = parseNumericValue(trimmed);
+          if (parsed != null) {
+            markNumeric();
+            return parsed;
+          }
+        }
+        return trimmed;
+      }
+    }
+
+    const str = (rawValue as any).toString?.();
+    if (typeof str === "string" && str && str !== "[object Object]") {
+      const trimmed = str.trim();
+      if (meta.isNumeric || numericColumns.has(meta.lower) || numericTextPattern.test(trimmed)) {
+        const parsed = parseNumericValue(trimmed);
+        if (parsed != null) {
+          markNumeric();
+          return parsed;
+        }
+      }
+      return trimmed;
+    }
+
+    try {
+      return JSON.stringify(rawValue);
+    } catch {
+      return String(rawValue);
+    }
+  }
+
+  return rawValue;
+};
+
+const loadArrowDataset = async (
+  source: string,
+  numericColumns: Set<string>,
+  dimensionSet: Set<string>,
+): Promise<LoadedSkuDataset | null> => {
+  const response = await fetch(
+    `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(source)}`,
+    {
+      cache: "no-store",
+      credentials: "include",
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to load Arrow dataset (${response.status})`);
+  }
+
+  const buffer = await response.arrayBuffer();
+  if (!buffer || buffer.byteLength === 0) {
+    return {
+      rows: [],
+      columns: [],
+      numericColumns: Array.from(numericColumns),
+      originalNumericColumns: [],
+    };
+  }
+
+  const table = tableFromIPC(new Uint8Array(buffer));
+  if (!table) {
+    return null;
+  }
+
+  const fields = table.schema?.fields ?? [];
+  if (fields.length === 0) {
+    return {
+      rows: [],
+      columns: [],
+      numericColumns: Array.from(numericColumns),
+      originalNumericColumns: [],
+    };
+  }
+
+  const columnMetas: ArrowColumnMeta[] = [];
+  const originalNumericNames = new Set<string>();
+
+  fields.forEach((field, index) => {
+    if (!field) return;
+    const originalName = `${field.name ?? ""}`.trim();
+    if (!originalName) return;
+    const lowerName = originalName.toLowerCase();
+    const vector = table.getChildAt(index);
+    const isDimension = dimensionSet.has(lowerName);
+    const numericByType =
+      !isDimension && (arrowNumericTypeIds.has(field.typeId as Type) || numericColumns.has(lowerName));
+    if (numericByType) {
+      numericColumns.add(lowerName);
+      originalNumericNames.add(originalName);
+    }
+    columnMetas.push({
+      original: originalName,
+      lower: lowerName,
+      vector,
+      isNumeric: numericByType,
+      isDimension,
+    });
+  });
+
+  if (columnMetas.length === 0) {
+    return {
+      rows: [],
+      columns: [],
+      numericColumns: Array.from(numericColumns),
+      originalNumericColumns: Array.from(originalNumericNames),
+    };
+  }
+
+  const rows: Record<string, any>[] = [];
+  const rowCount =
+    typeof (table as any).numRows === "number"
+      ? (table as any).numRows
+      : typeof (table as any).length === "number"
+      ? (table as any).length
+      : 0;
+
+  for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
+    const normalized: Record<string, any> = {};
+    columnMetas.forEach((meta) => {
+      const vector = meta.vector;
+      const rawValue = vector ? vector.get(rowIndex) : undefined;
+      if (meta.isDimension) {
+        normalized[meta.lower] = convertDimensionValue(rawValue);
+        return;
+      }
+      const value = convertArrowValue(rawValue, meta, numericColumns);
+      normalized[meta.lower] = value;
+      if (meta.isNumeric && value !== "" && value != null) {
+        originalNumericNames.add(meta.original);
+      }
+    });
+    rows.push(normalized);
+  }
+
+  const numericLower = new Set<string>(numericColumns);
+  columnMetas.forEach((meta) => {
+    if (meta.isNumeric) {
+      numericLower.add(meta.lower);
+      originalNumericNames.add(meta.original);
+    }
+  });
+
+  return {
+    rows,
+    columns: columnMetas.map((meta) => meta.lower),
+    numericColumns: Array.from(numericLower),
+    originalNumericColumns: Array.from(originalNumericNames),
+  };
+};
+
+const loadCsvDataset = async (
+  source: string,
+  numericColumns: Set<string>,
+  dimensionSet: Set<string>,
+): Promise<LoadedSkuDataset> => {
+  const response = await fetch(
+    `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(source)}`,
+    {
+      credentials: "include",
+    },
+  );
+  if (!response.ok) {
+    throw new Error("Failed to load data");
+  }
+
+  const text = await response.text();
+  if (!text || !text.trim()) {
+    return {
+      rows: [],
+      columns: [],
+      numericColumns: Array.from(numericColumns),
+      originalNumericColumns: [],
+    };
+  }
+
+  const parsed = csvParse(text);
+  const rawColumns = (parsed.columns ?? []).filter(
+    (col): col is string => typeof col === "string" && col.trim().length > 0,
+  );
+  const columnKeys =
+    rawColumns.length > 0
+      ? rawColumns
+      : parsed.length > 0
+      ? Object.keys(parsed[0] as Record<string, any>)
+      : [];
+  const trimmedColumns = columnKeys
+    .map((col) => (typeof col === "string" ? col.trim() : col))
+    .filter((col): col is string => typeof col === "string" && col.length > 0);
+
+  const originalNameMap = new Map<string, string>();
+  const normalizedColumns = trimmedColumns
+    .map((col) => {
+      const lower = col.toLowerCase();
+      if (!originalNameMap.has(lower)) {
+        originalNameMap.set(lower, col);
+      }
+      return lower;
+    })
+    .filter((col) => col);
+
+  const normalizedRows = parsed.map((row) => {
+    const normalized: Record<string, any> = {};
+    trimmedColumns.forEach((col) => {
+      const lower = col.toLowerCase();
+      const rawValue = (row as Record<string, any>)[col];
+      if (dimensionSet.has(lower)) {
+        normalized[lower] = convertDimensionValue(rawValue);
+        return;
+      }
+
+      if (rawValue == null || rawValue === "") {
+        normalized[lower] = "";
+        return;
+      }
+
+      const stringValue = String(rawValue);
+      const trimmedValue = stringValue.trim();
+      const shouldAttemptNumeric =
+        numericColumns.has(lower) || numericTextPattern.test(trimmedValue);
+
+      if (shouldAttemptNumeric) {
+        const parsedValue = parseNumericValue(trimmedValue);
+        if (parsedValue != null) {
+          numericColumns.add(lower);
+          normalized[lower] = parsedValue;
+          return;
+        }
+      }
+
+      normalized[lower] = stringValue;
+    });
+    return normalized;
+  });
+
+  const numericColumnList = Array.from(numericColumns);
+  const originalNumericColumns = Array.from(
+    new Set(
+      numericColumnList
+        .map((lower) => originalNameMap.get(lower) ?? lower)
+        .filter((name) => typeof name === "string" && name.length > 0),
+    ),
+  );
+
+  return {
+    rows: normalizedRows,
+    columns: normalizedColumns,
+    numericColumns: numericColumnList,
+    originalNumericColumns,
+  };
 };
 
 const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
@@ -681,9 +1068,22 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     }
   };
 
-  const loadSkuDataset = async (): Promise<LoadedSkuDataset> => {
-    const baseNumericColumns = new Set<string>(numericColumnSet);
-    const source = typeof settings.dataSource === "string" ? settings.dataSource.trim() : "";
+  const loadSkuDataset = async (
+    dimensionColumns: string[],
+  ): Promise<LoadedSkuDataset> => {
+    const dimensionSet = new Set(
+      dimensionColumns.map((col) => col.toLowerCase()).filter((col) => col),
+    );
+
+    const baseNumericColumns = new Set<string>();
+    numericColumnSet.forEach((col) => {
+      if (!dimensionSet.has(col)) {
+        baseNumericColumns.add(col);
+      }
+    });
+
+    const source =
+      typeof settings.dataSource === "string" ? settings.dataSource.trim() : "";
     if (!source) {
       return {
         rows: [],
@@ -696,130 +1096,23 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     const lowerSource = source.toLowerCase();
     if (lowerSource.endsWith(".arrow")) {
       try {
-        const uploadResponse = await chartMakerApi.loadSavedDataframe(source);
-        const originalNumericColumns = Array.isArray(uploadResponse.numeric_columns)
-          ? uploadResponse.numeric_columns
-              .filter((col): col is string => typeof col === "string" && col.trim().length > 0)
-          : [];
-        originalNumericColumns.forEach((col) => baseNumericColumns.add(col.toLowerCase()));
-
-        const filterResponse = await chartMakerApi.filterData(uploadResponse.file_id, {});
-        const rawRows = Array.isArray(filterResponse.filtered_data)
-          ? filterResponse.filtered_data
-          : [];
-
-        const normalizedRows = rawRows.map((row) => {
-          const normalized: Record<string, any> = {};
-          if (row && typeof row === "object") {
-            Object.entries(row).forEach(([col, value]) => {
-              if (typeof col !== "string") return;
-              const lowerCol = col.toLowerCase();
-              if (!baseNumericColumns.has(lowerCol) && typeof value === "number") {
-                baseNumericColumns.add(lowerCol);
-              }
-
-              if (baseNumericColumns.has(lowerCol)) {
-                if (typeof value === "number") {
-                  normalized[lowerCol] = value;
-                } else if (typeof value === "bigint") {
-                  normalized[lowerCol] = Number(value);
-                } else if (typeof value === "string") {
-                  const parsedValue = parseNumericValue(value);
-                  if (parsedValue != null) {
-                    normalized[lowerCol] = parsedValue;
-                  } else if (value.trim().length > 0) {
-                    normalized[lowerCol] = value;
-                  }
-                } else if (value != null) {
-                  const maybeNumber = Number(value);
-                  if (Number.isFinite(maybeNumber)) {
-                    normalized[lowerCol] = maybeNumber;
-                  } else {
-                    normalized[lowerCol] = value;
-                  }
-                }
-              } else {
-                normalized[lowerCol] =
-                  value == null || value === ""
-                    ? ""
-                    : typeof value === "string"
-                    ? value
-                    : value;
-              }
-            });
-          }
-          return normalized;
-        });
-
-        const normalizedColumns = Array.isArray(uploadResponse.columns)
-          ? uploadResponse.columns
-              .filter((col): col is string => typeof col === "string" && col.trim().length > 0)
-              .map((col) => col.toLowerCase())
-          : Array.from(
-              new Set(
-                normalizedRows.flatMap((row) =>
-                  Object.keys(row ?? {}),
-                ),
-              ),
-            );
-
-        return {
-          rows: normalizedRows,
-          columns: normalizedColumns,
-          numericColumns: Array.from(baseNumericColumns),
-          originalNumericColumns,
-        };
+        const arrowResult = await loadArrowDataset(
+          source,
+          new Set(baseNumericColumns),
+          dimensionSet,
+        );
+        if (arrowResult) {
+          return arrowResult;
+        }
       } catch (err) {
-        console.warn("Chart Maker load_saved_dataframe failed, falling back to cached CSV", err);
+        console.warn(
+          "Arrow dataset load failed in Feature Overview, falling back to cached CSV",
+          err,
+        );
       }
     }
 
-    const res = await fetch(
-      `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(source)}`,
-      { credentials: "include" },
-    );
-    if (!res.ok) {
-      throw new Error("Failed to load data");
-    }
-    const text = await res.text();
-    const parsed = csvParse(text);
-    const rawColumns = (parsed.columns ?? []).filter(
-      (col): col is string => typeof col === "string" && col.trim().length > 0,
-    );
-    const columnKeys =
-      rawColumns.length > 0
-        ? rawColumns
-        : parsed.length > 0
-        ? Object.keys(parsed[0] as Record<string, any>)
-        : [];
-    const normalizedColumns = columnKeys.map((col) => col.toLowerCase());
-
-    const normalizedRows = parsed.map((row) => {
-      const normalized: Record<string, any> = {};
-      const sourceColumns = columnKeys.length > 0 ? columnKeys : Object.keys(row as Record<string, any>);
-      sourceColumns.forEach((col) => {
-        const lowerCol = col.toLowerCase();
-        const value = row[col as keyof typeof row] as string | undefined;
-        if (baseNumericColumns.has(lowerCol)) {
-          const parsedValue = parseNumericValue(value ?? "");
-          if (parsedValue != null) {
-            normalized[lowerCol] = parsedValue;
-          } else {
-            normalized[lowerCol] = value == null ? "" : String(value);
-          }
-        } else {
-          normalized[lowerCol] = value == null ? "" : String(value);
-        }
-      });
-      return normalized;
-    });
-
-    return {
-      rows: normalizedRows,
-      columns: normalizedColumns,
-      numericColumns: Array.from(baseNumericColumns),
-      originalNumericColumns: [],
-    };
+    return loadCsvDataset(source, baseNumericColumns, dimensionSet);
   };
 
   const aggregateSkuData = (
@@ -927,18 +1220,18 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     setError(null);
     try {
       console.log("🔎 loading dataset for", settings.dataSource);
-      const loaded = await loadSkuDataset();
+      const dimensionColumns = Object.values(dimensionMap)
+        .flat()
+        .map((col) => (typeof col === "string" ? col.toLowerCase() : ""))
+        .filter((col) => col);
+
+      const loaded = await loadSkuDataset(dimensionColumns);
       const rows = Array.isArray(loaded.rows) ? loaded.rows : [];
       if (rows.length === 0) {
         setSkuRows([]);
         onUpdateSettings({ skuTable: [] });
         return;
       }
-
-      const dimensionColumns = Object.values(dimensionMap)
-        .flat()
-        .map((col) => (typeof col === "string" ? col.toLowerCase() : ""))
-        .filter((col) => col);
 
       const numericColumns = new Set(
         loaded.numericColumns.map((col) => col.toLowerCase()).filter((col) => col),
