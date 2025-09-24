@@ -582,6 +582,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
           } else if (filterColumn === 'BIC') {
             cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
+          } else if (filterColumn === 'Best Alpha') {
+            cellValue = model.best_alpha ? String(model.best_alpha.toFixed(6)) : 'N/A';
           }
           return filterValues.includes(cellValue);
         });
@@ -605,6 +607,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
       } else if (column === 'BIC') {
         cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
+      } else if (column === 'Best Alpha') {
+        cellValue = model.best_alpha ? String(model.best_alpha.toFixed(6)) : 'N/A';
       }
       if (cellValue && !values.includes(cellValue)) {
         values.push(cellValue);
@@ -717,6 +721,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
           } else if (column === 'BIC') {
             cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
+          } else if (column === 'Best Alpha') {
+            cellValue = model.best_alpha ? String(model.best_alpha.toFixed(6)) : 'N/A';
           }
           return filterValues.includes(cellValue);
         });
@@ -753,6 +759,9 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         } else if (currentSortColumn === 'BIC') {
           aVal = a.bic || 0;
           bVal = b.bic || 0;
+        } else if (currentSortColumn === 'Best Alpha') {
+          aVal = a.best_alpha || 0;
+          bVal = b.best_alpha || 0;
         }
         
         if (aVal === bVal) return 0;
@@ -1162,9 +1171,9 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
           </div>
           <div className="p-6 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Negative Constraints */}
+              {/* Non-Positive Constraints */}
               <div className="space-y-3">
-                <Label className="text-sm font-medium text-red-700">Negative Constraints</Label>
+                <Label className="text-sm font-medium text-red-700">Non-Positive Constraints (≤0)</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button 
@@ -1239,9 +1248,9 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                 </Popover>
               </div>
 
-              {/* Positive Constraints */}
+              {/* Non-Negative Constraints */}
               <div className="space-y-3">
-                <Label className="text-sm font-medium text-green-700">Positive Constraints</Label>
+                <Label className="text-sm font-medium text-green-700">Non-Negative Constraints (≥0)</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button 
@@ -1759,6 +1768,50 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                         </ContextMenuContent>
                                       </ContextMenu>
                                     </TableHead>
+                                    <TableHead className="font-semibold text-gray-700">
+                                      <ContextMenu>
+                                        <ContextMenuTrigger asChild>
+                                          <div className="flex items-center gap-1 cursor-pointer">
+                                            Best Alpha
+                                            {(performanceSortColumn[comboIndex] || '') === 'Best Alpha' && (
+                                              (performanceSortDirection[comboIndex] || 'asc') === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                                            )}
+                                          </div>
+                                        </ContextMenuTrigger>
+                                        <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('Best Alpha', comboIndex, 'asc')}>
+                                                <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                                              </ContextMenuItem>
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('Best Alpha', comboIndex, 'desc')}>
+                                                <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                                              </ContextMenuItem>
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          <ContextMenuSeparator />
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                                              <PerformanceFilterMenu column="Best Alpha" modelResults={combination.model_results} comboIndex={comboIndex} />
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          {performanceColumnFilters[comboIndex]?.['Best Alpha']?.length > 0 && (
+                                            <>
+                                              <ContextMenuSeparator />
+                                              <ContextMenuItem onClick={() => clearPerformanceColumnFilter('Best Alpha', comboIndex)}>
+                                                Clear Filter
+                                              </ContextMenuItem>
+                                            </>
+                                          )}
+                                        </ContextMenuContent>
+                                      </ContextMenu>
+                                    </TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -1771,6 +1824,9 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                       <TableCell className="font-mono text-sm">{model.r2_test?.toFixed(1) || 'N/A'}</TableCell>
                                       <TableCell className="font-mono text-sm">{model.aic?.toFixed(1) || 'N/A'}</TableCell>
                                       <TableCell className="font-mono text-sm">{model.bic?.toFixed(1) || 'N/A'}</TableCell>
+                                      <TableCell className="font-mono text-sm">
+                                        {model.best_alpha ? model.best_alpha.toFixed(6) : 'N/A'}
+                                      </TableCell>
                                     </TableRow>
                                   ))}
                                 </TableBody>

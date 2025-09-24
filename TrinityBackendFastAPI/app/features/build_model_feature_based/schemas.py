@@ -117,6 +117,11 @@ class ModelResult(BaseModel):
     elasticity_calculated: bool = Field(False, description="Whether elasticity was calculated")
     fold_elasticities: Optional[List[float]] = Field(None, description="Elasticity values for each fold")
     
+    # Auto-tuning results
+    best_alpha: Optional[float] = Field(None, description="Best alpha value found during auto-tuning")
+    best_cv_score: Optional[float] = Field(None, description="Best cross-validation score during auto-tuning")
+    best_l1_ratio: Optional[float] = Field(None, description="Best L1 ratio found during auto-tuning (for ElasticNet)")
+    
     # ADD THESE NEW FIELDS
     csf: Optional[float] = Field(None, description="Consumer Surplus Fraction")
     mcv: Optional[float] = Field(None, description="Marginal Consumer Value")
@@ -142,6 +147,20 @@ class StackModelResult(BaseModel):
     aic: float = Field(..., description="Akaike Information Criterion")
     bic: float = Field(..., description="Bayesian Information Criterion")
     n_parameters: int = Field(..., description="Number of model parameters including intercept")
+    
+    # Auto-tuning results
+    best_alpha: Optional[float] = Field(None, description="Best alpha value found during auto-tuning")
+    best_cv_score: Optional[float] = Field(None, description="Best cross-validation score during auto-tuning")
+    best_l1_ratio: Optional[float] = Field(None, description="Best L1 ratio found during auto-tuning (for ElasticNet)")
+    
+    # Additional fields for consistency with individual modeling
+    mape_train_std: float = Field(0.0, description="Standard deviation of train MAPE")
+    mape_test_std: float = Field(0.0, description="Standard deviation of test MAPE")
+    r2_train_std: float = Field(0.0, description="Standard deviation of train R²")
+    r2_test_std: float = Field(0.0, description="Standard deviation of test R²")
+    fold_results: List[Dict[str, Any]] = Field(default_factory=list, description="Individual fold results")
+    train_size: int = Field(0, description="Number of training samples")
+    test_size: int = Field(0, description="Number of test samples")
 
 
 class CombinationModelResults(BaseModel):

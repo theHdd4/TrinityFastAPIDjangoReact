@@ -649,9 +649,10 @@ async def train_models_direct(request: dict):
                             y_variable=y_variable_lower,    # Use lowercase variable
                             price_column=None,  # Can be enhanced later
                             standardization=standardization,
-                            k_folds=individual_k_folds,  # Use individual K-folds
                             models_to_run=individual_models_to_run,  # Use individual models
                             custom_configs=individual_custom_model_configs,  # Use individual configs
+                            test_size=0.2,  # Use train/test split
+                            k_folds=individual_k_folds,  # Global k_folds for CV models
                             bucket_name=bucket_name  # Pass the correct bucket name
                         )
                     
@@ -782,7 +783,7 @@ async def train_models_direct(request: dict):
                             y_variable=y_variable_lower,
                             price_column=None,
                             standardization=standardization,
-                            k_folds=individual_k_folds,
+                            test_size=0.2,
                             run_id=run_id,
                             variable_data=variable_data
                         )
@@ -900,6 +901,8 @@ async def train_models_direct(request: dict):
                                 "mcv": None,
                                 "ppu_at_elasticity": None,
                                 "fold_results": [],  # Not available in stack modeling
+                                "train_size": model_metrics.get('train_size', 0),
+                                "test_size": model_metrics.get('test_size', 0),
                                 "elasticities": model_metrics.get('elasticities', {}),
                                 "contributions": model_metrics.get('contributions', {}),
                                 "elasticity_details": {
@@ -912,7 +915,11 @@ async def train_models_direct(request: dict):
                                     "variables_processed": list(model_metrics.get('contributions', {}).keys()),
                                     "total_contribution": sum(model_metrics.get('contributions', {}).values()),
                                     "transform_data_used": False
-                                }
+                                },
+                                # Auto-tuning results
+                                "best_alpha": model_metrics.get('best_alpha', None),
+                                "best_cv_score": model_metrics.get('best_cv_score', None),
+                                "best_l1_ratio": model_metrics.get('best_l1_ratio', None)
                             }
                             stack_model_results.append(stack_model_result)
                         
@@ -2811,6 +2818,7 @@ async def train_models_for_stacked_data(request: dict):
             models_to_run=models_to_run,
             custom_configs=custom_configs,
             price_column=price_column,
+            test_size=0.2,
             run_id=run_id
         )
         

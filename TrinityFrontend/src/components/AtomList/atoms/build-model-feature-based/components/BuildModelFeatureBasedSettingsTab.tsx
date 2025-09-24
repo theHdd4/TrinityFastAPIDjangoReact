@@ -16,23 +16,23 @@ interface BuildModelFeatureBasedSettingsTabProps {
 }
 
 const individualModels = [
-  { id: 'Linear Regression', name: 'Linear Regression', params: [] },
-  { id: 'Ridge Regression', name: 'Ridge Regression', params: ['Alpha'] },
-  { id: 'Lasso Regression', name: 'Lasso Regression', params: ['Alpha'] },
-  { id: 'ElasticNet Regression', name: 'ElasticNet Regression', params: ['Alpha', 'L1 Ratio'] },
-  { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', params: [] },
-  { id: 'Custom Constrained Ridge', name: 'Custom Constrained Ridge', params: ['L2 Penalty', 'Learning Rate', 'Iterations', 'Adam'] },
-  { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', params: ['Learning Rate', 'Iterations', 'Adam'] }
+  { id: 'Linear Regression', name: 'Linear Regression', params: [], supportsAutoTuning: false },
+  { id: 'Ridge Regression', name: 'Ridge Regression', params: ['Alpha'], supportsAutoTuning: true },
+  { id: 'Lasso Regression', name: 'Lasso Regression', params: ['Alpha'], supportsAutoTuning: true },
+  { id: 'ElasticNet Regression', name: 'ElasticNet Regression', params: ['Alpha', 'L1 Ratio'], supportsAutoTuning: true },
+  { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', params: [], supportsAutoTuning: false },
+  { id: 'Custom Constrained Ridge', name: 'Custom Constrained Ridge', params: ['L2 Penalty', 'Learning Rate', 'Iterations', 'Adam'], supportsAutoTuning: true },
+  { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', params: ['Learning Rate', 'Iterations', 'Adam'], supportsAutoTuning: false }
 ];
 
 const stackModels = [
-  { id: 'Linear Regression', name: 'Linear Regression', params: [] },
-  { id: 'Ridge Regression', name: 'Ridge Regression', params: ['Alpha'] },
-  { id: 'Lasso Regression', name: 'Lasso Regression', params: ['Alpha'] },
-  { id: 'ElasticNet Regression', name: 'ElasticNet Regression', params: ['Alpha', 'L1 Ratio'] },
-  { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', params: [] },
-  { id: 'Stack Constrained Ridge', name: 'Stack Constrained Ridge', params: ['L2 Penalty', 'Learning Rate', 'Iterations', 'Adam'] },
-  { id: 'Stack Constrained Linear Regression', name: 'Stack Constrained Linear Regression', params: ['Learning Rate', 'Iterations', 'Adam'] }
+  { id: 'Linear Regression', name: 'Linear Regression', params: [], supportsAutoTuning: false },
+  { id: 'Ridge Regression', name: 'Ridge Regression', params: ['Alpha'], supportsAutoTuning: true },
+  { id: 'Lasso Regression', name: 'Lasso Regression', params: ['Alpha'], supportsAutoTuning: true },
+  { id: 'ElasticNet Regression', name: 'ElasticNet Regression', params: ['Alpha', 'L1 Ratio'], supportsAutoTuning: true },
+  { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', params: [], supportsAutoTuning: false },
+  { id: 'Stack Constrained Ridge', name: 'Stack Constrained Ridge', params: ['L2 Penalty', 'Learning Rate', 'Iterations', 'Adam'], supportsAutoTuning: true },
+  { id: 'Stack Constrained Linear Regression', name: 'Stack Constrained Linear Regression', params: ['Learning Rate', 'Iterations', 'Adam'], supportsAutoTuning: false }
 ];
 
 const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettingsTabProps> = ({
@@ -45,7 +45,7 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
   const [poolIdentifiers, setPoolIdentifiers] = useState<string[]>([]);
   const [isLoadingIdentifiers, setIsLoadingIdentifiers] = useState(false);
   const [isIndividualModelingCollapsed, setIsIndividualModelingCollapsed] = useState(false);
-  const [isPoolRegressionCollapsed, setIsPoolRegressionCollapsed] = useState(false);
+  const [isStackModelingCollapsed, setIsStackModelingCollapsed] = useState(false);
 
   // Fetch numerical columns when scope and combinations are selected
   useEffect(() => {
@@ -154,7 +154,8 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
         updatedConfigs.push({
           id: modelId,
           name: model.name,
-          parameters: defaultParams
+          parameters: defaultParams,
+          tuning_mode: model.supportsAutoTuning ? 'auto' : 'manual'
         });
       }
     } else {
@@ -185,6 +186,20 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
     onDataChange({ modelConfigs: updatedConfigs });
   };
 
+  const handleTuningModeChange = (modelId: string, tuningMode: string) => {
+    const updatedConfigs = data.modelConfigs.map(config => {
+      if (config.id === modelId) {
+        return {
+          ...config,
+          tuning_mode: tuningMode
+        };
+      }
+      return config;
+    });
+
+    onDataChange({ modelConfigs: updatedConfigs });
+  };
+
   const handleSelectAllModels = (checked: boolean) => {
     if (checked) {
       // Select all models
@@ -204,7 +219,8 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
         return {
           id: model.id,
           name: model.name,
-          parameters: defaultParams
+          parameters: defaultParams,
+          tuning_mode: model.supportsAutoTuning ? 'auto' : 'manual'
         };
       });
       onDataChange({
@@ -365,7 +381,8 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                               const updatedConfigs = [...currentConfigs, {
                                 id: model.id,
                                 name: model.name,
-                                parameters: defaultParams
+                                parameters: defaultParams,
+                                tuning_mode: model.supportsAutoTuning ? 'auto' : 'manual'
                               }];
                               onDataChange({
                                 individualSelectedModels: updatedModels,
@@ -386,7 +403,44 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                       
                       {data?.individualSelectedModels?.includes(model.id) && (
                         <div className="ml-6 space-y-2 border-l-2 border-border pl-4">
-                          {model.params.map(param => {
+                          {/* Tuning Mode Selector - Only show for models that support auto tuning */}
+                          {model.supportsAutoTuning && (
+                            <div>
+                              <Label className="text-xs text-muted-foreground">Parameter Tuning</Label>
+                              <Select
+                                value={data?.individualModelConfigs?.find(c => c.id === model.id)?.tuning_mode || 'auto'}
+                                onValueChange={(value) => {
+                                  const updatedConfigs = (data?.individualModelConfigs || []).map(c => {
+                                    if (c.id === model.id) {
+                                      return {
+                                        ...c,
+                                        tuning_mode: value
+                                      };
+                                    }
+                                    return c;
+                                  });
+                                  onDataChange({ individualModelConfigs: updatedConfigs });
+                                }}
+                              >
+                                <SelectTrigger className="mt-1">
+                                  <SelectValue placeholder="Select tuning mode" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="auto">Auto (RidgeCV/LassoCV/ElasticNetCV)</SelectItem>
+                                  <SelectItem value="manual">Manual Parameters</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+                          
+                {/* Parameters - Only show when manual tuning is selected or model doesn't support auto tuning */}
+                {(!model.supportsAutoTuning || (data?.individualModelConfigs?.find(c => c.id === model.id)?.tuning_mode === 'manual')) && model.params.map(param => {
+                  // For Custom Constrained Ridge with auto tuning, hide L2 Penalty parameter
+                  if (model.id === 'Custom Constrained Ridge' && 
+                      data?.individualModelConfigs?.find(c => c.id === model.id)?.tuning_mode === 'auto' && 
+                      param === 'L2 Penalty') {
+                    return null;
+                  }
                             const config = data?.individualModelConfigs?.find(c => c.id === model.id);
                             const value = config?.parameters?.[param] || '';
                             
@@ -428,25 +482,25 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
         )}
       </Card>
 
-      {/* Pool Regression */}
+      {/* Stack Modeling */}
       <Card>
         <div className="p-4 border-b bg-muted/30">
           <div 
             className="flex items-center justify-between cursor-pointer"
-            onClick={() => setIsPoolRegressionCollapsed(!isPoolRegressionCollapsed)}
+            onClick={() => setIsStackModelingCollapsed(!isStackModelingCollapsed)}
           >
             <h4 className="font-medium text-foreground flex items-center gap-2">
               <Cpu className="w-4 h-4 text-primary" />
-              Pool Regression
+              Stack Modeling
             </h4>
-            {isPoolRegressionCollapsed ? (
+            {isStackModelingCollapsed ? (
               <ChevronRight className="w-4 h-4 text-muted-foreground" />
             ) : (
               <ChevronDown className="w-4 h-4 text-muted-foreground" />
             )}
           </div>
         </div>
-        {!isPoolRegressionCollapsed && (
+        {!isStackModelingCollapsed && (
           <div className="p-4 space-y-4">
           {/* Enable Stack Modeling Toggle */}
           <div className="flex items-center space-x-2">
@@ -645,7 +699,8 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                             return {
                               id: model.id,
                               name: model.name,
-                              parameters: defaultParams
+                              parameters: defaultParams,
+                              tuning_mode: model.supportsAutoTuning ? 'auto' : 'manual'
                             };
                           });
                           onDataChange({
@@ -693,7 +748,8 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                               const updatedConfigs = [...currentConfigs, {
                                 id: model.id,
                                 name: model.name,
-                                parameters: defaultParams
+                                parameters: defaultParams,
+                                tuning_mode: model.supportsAutoTuning ? 'auto' : 'manual'
                               }];
                               onDataChange({
                                 stackSelectedModels: updatedModels,
@@ -714,9 +770,47 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                   
                       {data?.stackSelectedModels?.includes(model.id) && (
                     <div className="ml-6 space-y-2 border-l-2 border-border pl-4">
-                      {model.params.map(param => {
+                      {/* Tuning Mode Selector - Only show for models that support auto tuning */}
+                      {model.supportsAutoTuning && (
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Parameter Tuning</Label>
+                          <Select
+                            value={data?.stackModelConfigs?.find(c => c.id === model.id)?.tuning_mode || 'auto'}
+                            onValueChange={(value) => {
+                              const updatedConfigs = (data?.stackModelConfigs || []).map(c => {
+                                if (c.id === model.id) {
+                                  return {
+                                    ...c,
+                                    tuning_mode: value
+                                  };
+                                }
+                                return c;
+                              });
+                              onDataChange({ stackModelConfigs: updatedConfigs });
+                            }}
+                          >
+                            <SelectTrigger className="mt-1">
+                              <SelectValue placeholder="Select tuning mode" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="auto">Auto (RidgeCV/LassoCV/ElasticNetCV)</SelectItem>
+                              <SelectItem value="manual">Manual Parameters</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+                      
+                      {/* Parameters - Only show when manual tuning is selected or model doesn't support auto tuning */}
+                      {(!model.supportsAutoTuning || (data?.stackModelConfigs?.find(c => c.id === model.id)?.tuning_mode === 'manual')) && model.params.map(param => {
                             const config = data?.stackModelConfigs?.find(c => c.id === model.id);
                         const value = config?.parameters?.[param] || '';
+                        
+                        // Hide L2 Penalty parameter for Stack Constrained Ridge when auto-tuning is enabled
+                        if (model.id === 'Stack Constrained Ridge' && 
+                            data?.stackModelConfigs?.find(c => c.id === model.id)?.tuning_mode === 'auto' && 
+                            param === 'L2 Penalty') {
+                          return null;
+                        }
                         
                         return (
                           <div key={param}>
