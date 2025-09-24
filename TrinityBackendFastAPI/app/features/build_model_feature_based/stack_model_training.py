@@ -45,6 +45,7 @@ class StackModelTrainer:
         models_to_run: Optional[List[str]] = None,
         custom_configs: Optional[Dict[str, Any]] = None,
         price_column: Optional[str] = None,
+        test_size: float = 0.2,
         run_id: str = None
     ) -> Dict[str, Any]:
         """
@@ -130,7 +131,8 @@ class StackModelTrainer:
                             pooled_data=split_clustered_data,
                             identifiers=None,  # Will auto-detect identifiers with >1 unique value
                             numerical_columns_for_interaction=numerical_columns_for_interaction,
-                            column_classifier_identifiers=all_identifiers
+                            column_classifier_identifiers=all_identifiers,
+                            standardization=standardization
                         )
                 else:
                     raise Exception(f"Clustering failed: {clustering_result.get('error', 'Unknown error')}")
@@ -155,7 +157,8 @@ class StackModelTrainer:
                 k_folds=k_folds,
                 models_to_run=models_to_run,
                 custom_configs=custom_configs,
-                price_column=price_column.lower() if price_column else None
+                price_column=price_column.lower() if price_column else None,
+                test_size=test_size
             )
             
 
@@ -180,20 +183,32 @@ class StackModelTrainer:
                             intercept=model_result.get('intercept', 0),
                             aic=model_result.get('aic', 0),
                             bic=model_result.get('bic', 0),
-                            n_parameters=model_result.get('n_parameters', 0)
+                            n_parameters=model_result.get('n_parameters', 0),
+                            # Auto-tuning results
+                            best_alpha=model_result.get('best_alpha', None),
+                            best_cv_score=model_result.get('best_cv_score', None),
+                            best_l1_ratio=model_result.get('best_l1_ratio', None),
+                            # Additional fields for consistency
+                            mape_train_std=model_result.get('mape_train_std', 0.0),
+                            mape_test_std=model_result.get('mape_test_std', 0.0),
+                            r2_train_std=model_result.get('r2_train_std', 0.0),
+                            r2_test_std=model_result.get('r2_test_std', 0.0),
+                            fold_results=model_result.get('fold_results', []),
+                            train_size=model_result.get('train_size', 0),
+                            test_size=model_result.get('test_size', 0)
                         )
                         simplified_model_results.append(simplified_model)
                     
                     # Convert to StackModelResults format
                     split_cluster_result = StackModelResults(
                         split_clustered_data_id=split_key,
-                        file_key=f"stack_model_{split_key}",  # Virtual file key for stack models
+                        file_key=f"stack_model_{split_key}",  
                         total_records=result.get('total_records', 0),
                         model_results=simplified_model_results
                     )
                     split_cluster_results.append(split_cluster_result)
             
-            # Prepare final response using the stack model schema
+
             from .schemas import StackModelTrainingResponse
             response = StackModelTrainingResponse(
                 scope_id=f"scope_{scope_number}",
@@ -494,15 +509,21 @@ class StackModelTrainer:
                 model_name = model_result.model_name
                 key = f"{split_cluster_id}_{model_name}"
                 stack_mape_by_cluster_model[key] = {
-                    'mape_train': model_result.mape_train,
-                    'mape_test': model_result.mape_test,
-                    'r2_train': model_result.r2_train,
-                    'r2_test': model_result.r2_test,
-                    'aic': model_result.aic,
-                    'bic': model_result.bic,
-                    'coefficients': model_result.coefficients,
-                    'standardized_coefficients': model_result.standardized_coefficients
-                }
+                     'mape_train': model_result.mape_train,
+                     'mape_test': model_result.mape_test,
+                     'r2_train': model_result.r2_train,
+                     'r2_test': model_result.r2_test,
+                     'aic': model_result.aic,
+                     'bic': model_result.bic,
+                     'coefficients': model_result.coefficients,
+                     'standardized_coefficients': model_result.standardized_coefficients,
+                     # Auto-tuning results
+                     'best_alpha': model_result.best_alpha,
+                     'best_cv_score': model_result.best_cv_score,
+                     'best_l1_ratio': model_result.best_l1_ratio,
+                     'train_size': model_result.train_size,
+                     'test_size': model_result.test_size
+                 }
 
         for combination in combinations:
             try:
@@ -511,8 +532,6 @@ class StackModelTrainer:
                 if df is None:
                     continue
         
-                
-                # Convert column names to lowercase for consistency
                 df.columns = df.columns.str.lower()
                 
                 # Filter to only include required columns
@@ -611,26 +630,32 @@ class StackModelTrainer:
                     stack_metrics = stack_mape_by_cluster_model.get(stack_key, {})
                     
                     combination_metrics[model_name] = {
-                        'combination': combination,
-                        'model_name': model_name,
-                        'individual_samples': n,
-                        'mape_train': stack_metrics.get('mape_train', 0.0),  # From stack modeling
-                        'mape_test': individual_mape,  # From individual combination
-                        'r2_train': stack_metrics.get('r2_train', 0.0),  # From stack modeling
-                        'r2_test': individual_r2,  # From individual combination
-                        'aic': individual_aic,  # Individual combination AIC
-                        'bic': individual_bic,  # Individual combination BIC
-                        'stack_aic': stack_metrics.get('aic', 0.0),  # Stack modeling AIC for reference
-                        'stack_bic': stack_metrics.get('bic', 0.0),  # Stack modeling BIC for reference
-                        'elasticities': elasticities,  # Individual combination elasticities
-                        'contributions': contributions,  # Individual combination contributions
-                        'variable_means': variable_means,  # Variable means from individual combination data
-                        'variable_stds': variable_stds,  # Variable standard deviations from individual combination data
-                        'y_mean': y_mean,  # Y variable mean from individual combination data
-                        'y_std': y_std,  # Y variable standard deviation from individual combination data
-                        'betas': betas,  # Destandardized betas (original scale)
-                        'standardized_betas': stack_metrics.get('standardized_coefficients', {})  # Standardized betas from stack modeling
-                    }
+                         'combination': combination,
+                         'model_name': model_name,
+                         'individual_samples': n,
+                         'mape_train': stack_metrics.get('mape_train', 0.0),  # From stack modeling
+                         'mape_test': individual_mape,  # From individual combination
+                         'r2_train': stack_metrics.get('r2_train', 0.0),  # From stack modeling
+                         'r2_test': individual_r2,  # From individual combination
+                         'aic': individual_aic,  # Individual combination AIC
+                         'bic': individual_bic,  # Individual combination BIC
+                         'stack_aic': stack_metrics.get('aic', 0.0),  # Stack modeling AIC for reference
+                         'stack_bic': stack_metrics.get('bic', 0.0),  # Stack modeling BIC for reference
+                         'elasticities': elasticities,  # Individual combination elasticities
+                         'contributions': contributions,  # Individual combination contributions
+                         'variable_means': variable_means,  # Variable means from individual combination data
+                         'variable_stds': variable_stds,  # Variable standard deviations from individual combination data
+                         'y_mean': y_mean,  # Y variable mean from individual combination data
+                         'y_std': y_std,  # Y variable standard deviation from individual combination data
+                         'betas': betas,  # Destandardized betas (original scale)
+                         'standardized_betas': stack_metrics.get('standardized_coefficients', {}),  # Standardized betas from stack modeling
+                         # Auto-tuning results from stack modeling
+                         'best_alpha': stack_metrics.get('best_alpha', None),
+                         'best_cv_score': stack_metrics.get('best_cv_score', None),
+                         'best_l1_ratio': stack_metrics.get('best_l1_ratio', None),
+                         'train_size': stack_metrics.get('train_size', 0),
+                         'test_size': stack_metrics.get('test_size', 0)
+                     }
                     
                 individual_metrics[combination] = combination_metrics
                 

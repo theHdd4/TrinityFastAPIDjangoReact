@@ -20,11 +20,17 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_
 logger.info("Environment MONGO_URI: %s", os.getenv("MONGO_URI"))
 logger.info("Using MONGO_URI: %s", MONGO_URI)
 
-# Create MongoDB client using the same pattern as clustering atom
+# Create MongoDB client using the same pattern as select atom
 mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=5000)
 
-# Get primary database from URI
-db = mongo_client.get_default_database()
+# Get database explicitly like select atom
+MONGO_DB = os.getenv("MONGO_DB", "trinity_db")
+db = mongo_client[MONGO_DB]
+
+# Debug: Log database information
+logger.info("Environment MONGO_DB: %s", os.getenv("MONGO_DB"))
+logger.info("Using MONGO_DB: %s", MONGO_DB)
+logger.info("Database name: %s", db.name)
 
 # Collection  inshared config database for identifier structure
 CONFIG_DB = os.getenv("CLASSIFIER_CONFIG_DB", "trinity_db")

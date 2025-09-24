@@ -434,7 +434,25 @@ async def train_models_direct(request: dict):
         k_folds = request.get('k_folds', 5)
         models_to_run = request.get('models_to_run')
         
+        # Individual modeling parameters
+        individual_modeling = request.get('individual_modeling', True)
+        individual_k_folds = request.get('individual_k_folds', 5)
+        individual_test_size = request.get('individual_test_size', 0.2)
+        individual_models_to_run = request.get('individual_models_to_run', [])
+        individual_custom_model_configs = request.get('individual_custom_model_configs', [])
+        # Convert list to dictionary for individual model configs
+        if isinstance(individual_custom_model_configs, list):
+            individual_custom_model_configs = {config.get('id', ''): config for config in individual_custom_model_configs if config.get('id')}
+        
+        # Stack modeling parameters
         stack_modeling = request.get('stack_modeling', False)
+        stack_k_folds = request.get('stack_k_folds', 5)
+        stack_test_size = request.get('stack_test_size', 0.2)
+        stack_models_to_run = request.get('stack_models_to_run', [])
+        stack_custom_model_configs = request.get('stack_custom_model_configs', [])
+        # Convert list to dictionary for stack model configs
+        if isinstance(stack_custom_model_configs, list):
+            stack_custom_model_configs = {config.get('id', ''): config for config in stack_custom_model_configs if config.get('id')}
         pool_by_identifiers = request.get('pool_by_identifiers', [])
         # Clustering is automatically enabled when stack modeling is enabled
         apply_clustering = stack_modeling  # True if stack_modeling is True, False otherwise
@@ -443,7 +461,7 @@ async def train_models_direct(request: dict):
         apply_interaction_terms = request.get('apply_interaction_terms', True)
         numerical_columns_for_interaction = request.get('numerical_columns_for_interaction', [])
         
-        # Request parameters received
+
         
         if not scope_number or not combinations or not x_variables or not y_variable:
             raise HTTPException(
@@ -451,8 +469,20 @@ async def train_models_direct(request: dict):
                 detail="Missing required parameters: scope_number, combinations, x_variables, or y_variable"
             )
         
-        # Validate stack modeling parameters if stack modeling is enabled
+        # Validate individual modeling parameters if individual modeling is enabled
+        if individual_modeling:
+            if not individual_models_to_run:
+                raise HTTPException(
+                    status_code=400,
+                    detail="individual_models_to_run is required when individual_modeling is enabled"
+                )
+        
         if stack_modeling:
+            if not stack_models_to_run:
+                raise HTTPException(
+                    status_code=400,
+                    detail="stack_models_to_run is required when stack_modeling is enabled"
+                )
             if not pool_by_identifiers:
                 raise HTTPException(
                     status_code=400,
@@ -467,7 +497,6 @@ async def train_models_direct(request: dict):
         # Find files in MinIO based on scope number and combinations
         minio_client = get_minio_client()
         
-        # Dynamically get the bucket and prefix structure (same as scope selector)
         try:
             # Import scope selector settings to get the correct bucket
             from ..scope_selector.config import get_settings
@@ -492,7 +521,9 @@ async def train_models_direct(request: dict):
         
         # Initialize progress tracking
         total_combinations = len(combinations)
-        total_models = len(models_to_run) if models_to_run else 0
+        individual_models_count = len(individual_models_to_run) if individual_modeling and individual_models_to_run else 0
+        stack_models_count = len(stack_models_to_run) if stack_modeling and stack_models_to_run else 0
+        total_models = individual_models_count + stack_models_count
         total_tasks = total_combinations * total_models
         
         training_progress[run_id] = {
@@ -606,25 +637,31 @@ async def train_models_direct(request: dict):
                     # Add a small delay to make progress visible
                     await asyncio.sleep(0.5)
                     
-                    # Train models for this combination
-                    model_results, variable_data = await train_models_for_combination_enhanced(
-                        file_key=target_file_key,
-                        x_variables=x_variables_lower,  # Use lowercase variables
-                        y_variable=y_variable_lower,    # Use lowercase variable
-                        price_column=None,  # Can be enhanced later
-                        standardization=standardization,
-                        k_folds=k_folds,
-                        models_to_run=models_to_run,
-                        custom_configs=None,
-                        bucket_name=bucket_name  # Pass the correct bucket name
-                    )
+                    # Train individual models for this combination (if individual modeling is enabled)
+                    model_results = []
+                    variable_data = {}
                     
-                    # Update progress - completed combination
-                    training_progress[run_id]["current"] += total_models
-                    training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
-                    training_progress[run_id]["completed_combinations"] += 1
+                    if individual_modeling and individual_models_to_run:
+                        logger.info(f"Training individual models for combination {combination}")
+                        model_results, variable_data = await train_models_for_combination_enhanced(
+                            file_key=target_file_key,
+                            x_variables=x_variables_lower,  # Use lowercase variables
+                            y_variable=y_variable_lower,    # Use lowercase variable
+                            price_column=None,  # Can be enhanced later
+                            standardization=standardization,
+                            models_to_run=individual_models_to_run,  # Use individual models
+                            custom_configs=individual_custom_model_configs,  # Use individual configs
+                            test_size=0.2,  # Use train/test split
+                            k_folds=individual_k_folds,  # Global k_folds for CV models
+                            bucket_name=bucket_name  # Pass the correct bucket name
+                        )
                     
-                    # Extract fold elasticities from model results
+                    # Update progress - completed individual models for this combination
+                    if individual_modeling and individual_models_to_run:
+                        training_progress[run_id]["current"] += individual_models_count
+                        training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
+                    
+                    
                     for model_result in model_results:
                         fold_elasticities = []
                         if 'fold_results' in model_result:
@@ -634,22 +671,17 @@ async def train_models_direct(request: dict):
                         
                         if fold_elasticities:
                             model_result['fold_elasticities'] = fold_elasticities
-                    
-                    # Store variable statistics
+
                     all_variable_stats[combination] = variable_data
-                    
-                    # Calculate elasticities and contributions for each model
+
                     logger.info(f"Starting elasticity calculation for combination {combination}")
                     for model_result in model_results:
                         try:
-                            # Get coefficients and means that are already available
                             coefficients = model_result.get('coefficients', {})
                             variable_averages = variable_data.get('variable_averages', {})
                             
-                            # Try to get createcolumn transformation data from MongoDB
                             transform_data = None
                             try:
-                                # Try to get client/app/project info from the request or use defaults
                                 client_name = request.get('client_name', 'default_client')
                                 app_name = request.get('app_name', 'default_app')
                                 project_name = request.get('project_name', 'default_project')
@@ -668,11 +700,10 @@ async def train_models_direct(request: dict):
                             except Exception as e:
                                 logger.warning(f"Failed to fetch createcolumn transformation data: {e}, using direct calculation")
                             
-                            # Calculate elasticities using the CORRECT formula since Y is NOT standardized
+
                             elasticities = {}
                             contributions = {}
                             
-                            # Get unstandardized coefficients (these are the correct ones since Y is not standardized)
                             unstandardized_coeffs = model_result.get('unstandardized_coefficients', {})
                             
                             # For each X variable, calculate elasticity and contribution
@@ -747,15 +778,15 @@ async def train_models_direct(request: dict):
                                 "set_name": f"Scope_{scope_number}",
                                 "record_count": len(df)
                             },
-                    model_results=model_results,
-                            x_variables=x_variables,
-                            y_variable=y_variable,
+                            model_results=model_results,
+                            x_variables=x_variables_lower,
+                            y_variable=y_variable_lower,
                             price_column=None,
                             standardization=standardization,
-                            k_folds=k_folds,
-                    run_id=run_id,
-                    variable_data=variable_data
-                )
+                            test_size=0.2,
+                            run_id=run_id,
+                            variable_data=variable_data
+                        )
 
                         total_saved += len(saved_ids)
                         
@@ -771,6 +802,9 @@ async def train_models_direct(request: dict):
                         "model_results": model_results
                     })
                     
+                    # Update progress - combination completed
+                    training_progress[run_id]["completed_combinations"] += 1
+                    
                 else:
                     logger.warning(f"Could not find file for combination: {combination}")
                     continue
@@ -779,11 +813,7 @@ async def train_models_direct(request: dict):
                 logger.error(f"Error processing combination {combination}: {e}")
                 continue
         
-        # Log individual model results summary
-        logger.info(f"📊 Individual model processing completed:")
-        logger.info(f"  - Total combinations processed: {len(combinations)}")
-        logger.info(f"  - Successful individual combinations: {len(combination_results)}")
-        logger.info(f"  - Failed combinations: {len(combinations) - len(combination_results)}")
+
         
         # Add stack modeling results if requested (even if individual models failed)
         if stack_modeling:
@@ -818,15 +848,20 @@ async def train_models_direct(request: dict):
                     apply_interaction_terms=apply_interaction_terms,
                     numerical_columns_for_interaction=numerical_columns_for_interaction,
                     standardization=standardization,
-                    k_folds=k_folds,
-                    models_to_run=models_to_run,
-                    custom_configs=None,
+                    k_folds=stack_k_folds,  # Use stack K-folds
+                    models_to_run=stack_models_to_run,  # Use stack models
+                    custom_configs=stack_custom_model_configs,  # Use stack configs
                     price_column=None,
                     run_id=run_id
                 )
                 
                 logger.info(f"📊 Stack modeling call completed. Status: {individual_metrics.get('status', 'unknown')}")
                 logger.info(f"Individual metrics keys: {list(individual_metrics.keys())}")
+                
+                # Update progress for stack modeling completion
+                if stack_models_count > 0:
+                    training_progress[run_id]["current"] += stack_models_count * total_combinations
+                    training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
                 
                 if individual_metrics.get('status') == 'success':
                     logger.info(f"Stack modeling completed successfully for {len(individual_metrics.get('individual_combination_metrics', {}))} combinations")
@@ -866,6 +901,8 @@ async def train_models_direct(request: dict):
                                 "mcv": None,
                                 "ppu_at_elasticity": None,
                                 "fold_results": [],  # Not available in stack modeling
+                                "train_size": model_metrics.get('train_size', 0),
+                                "test_size": model_metrics.get('test_size', 0),
                                 "elasticities": model_metrics.get('elasticities', {}),
                                 "contributions": model_metrics.get('contributions', {}),
                                 "elasticity_details": {
@@ -878,7 +915,11 @@ async def train_models_direct(request: dict):
                                     "variables_processed": list(model_metrics.get('contributions', {}).keys()),
                                     "total_contribution": sum(model_metrics.get('contributions', {}).values()),
                                     "transform_data_used": False
-                                }
+                                },
+                                # Auto-tuning results
+                                "best_alpha": model_metrics.get('best_alpha', None),
+                                "best_cv_score": model_metrics.get('best_cv_score', None),
+                                "best_l1_ratio": model_metrics.get('best_l1_ratio', None)
                             }
                             stack_model_results.append(stack_model_result)
                         
@@ -894,6 +935,7 @@ async def train_models_direct(request: dict):
                                 # Merge stack models into existing combination's model_results
                                 existing_combination['model_results'].extend(stack_model_results)
                                 logger.info(f"Merged {len(stack_model_results)} stack models into existing combination {combination}")
+                                # Note: Don't increment completed_combinations here as it was already counted for individual models
                             else:
                                 # If no existing combination found, create a new entry (fallback)
                                 # Add stack model results as new combination entry (fallback case)
@@ -903,6 +945,9 @@ async def train_models_direct(request: dict):
                                     "total_records": model_metrics.get('individual_samples', 0),
                                     "model_results": stack_model_results
                                 })
+                                
+                                # Update progress - combination completed (for stack-only mode)
+                                training_progress[run_id]["completed_combinations"] += 1
                                 
                                 logger.info(f"Added {len(stack_model_results)} stack models as new combination {combination} (no existing entry found)")
                 
@@ -2773,6 +2818,7 @@ async def train_models_for_stacked_data(request: dict):
             models_to_run=models_to_run,
             custom_configs=custom_configs,
             price_column=price_column,
+            test_size=0.2,
             run_id=run_id
         )
         

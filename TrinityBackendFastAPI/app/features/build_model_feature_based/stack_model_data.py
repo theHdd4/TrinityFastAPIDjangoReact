@@ -358,7 +358,6 @@ class DataPooler:
             
             filtered_df = df[available_columns].copy()
             
-            
             return filtered_df
             
         except Exception as e:
@@ -787,8 +786,6 @@ class DataPooler:
             Dictionary of enhanced DataFrames with interaction terms
         """
         enhanced_pools = {}
-        
-        
         for pool_key, df in pooled_data.items():
             # Make a copy to avoid modifying original data
             enhanced_df = df.copy()
@@ -832,7 +829,7 @@ class DataPooler:
                     # Check if the column (scaled or original) exists
                     if scaled_col in enhanced_df.columns:
                         # Create interaction term: encoded_combination_col * numerical_col (scaled if available)
-                        interaction_col_name = f"{encoded_combination_col}_x_{numerical_col}"
+                        interaction_col_name = f"{encoded_combination_col}_x_{scaled_col}"
                         enhanced_df[interaction_col_name] = enhanced_df[encoded_combination_col] * enhanced_df[scaled_col]
                         interaction_columns_created.append(interaction_col_name)
                     elif numerical_col in enhanced_df.columns:
@@ -854,14 +851,16 @@ class DataPooler:
         standardization: str,
         k_folds: int,
         models_to_run: Optional[List[str]],
-        custom_configs: Optional[Dict[str, Any]]
+        custom_configs: Optional[Dict[str, Any]],
+        test_size: float = 0.2
     ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Train models directly with a DataFrame instead of reading from MinIO.
         This is a simplified version of train_models_for_combination_enhanced that works with DataFrames.
         """
         from .models import get_models
-        from sklearn.model_selection import KFold
+        from sklearn.model_selection import KFold, train_test_split
+        from sklearn.linear_model import RidgeCV, LassoCV, ElasticNetCV, Ridge, Lasso, ElasticNet
         from sklearn.preprocessing import StandardScaler, MinMaxScaler
         from sklearn.metrics import mean_absolute_percentage_error, r2_score
         from sklearn.base import clone
@@ -869,19 +868,176 @@ class DataPooler:
         
         # Get models
         all_models = get_models()
+        print(f"🔍 All available models: {list(all_models.keys())}")
+        logger.info(f"🔍 All available models: {list(all_models.keys())}")
+        
         if models_to_run:
             models_dict = {name: model for name, model in all_models.items() if name in models_to_run}
+            print(f"🔍 Filtered models to run: {list(models_dict.keys())}")
+            logger.info(f"🔍 Filtered models to run: {list(models_dict.keys())}")
         else:
             models_dict = all_models
+            print(f"🔍 Using all models: {list(models_dict.keys())}")
+            logger.info(f"🔍 Using all models: {list(models_dict.keys())}")
+        
+        # Store best parameters for models that use auto-tuning
+        best_parameters = {}
+        
+        # Apply custom configurations and handle auto/manual parameter tuning
+        if custom_configs:
+            for model_name, config in custom_configs.items():
+                if model_name in models_dict:
+                    parameters = config.get('parameters', {})
+                    tuning_mode = config.get('tuning_mode', 'manual')  # 'auto' or 'manual'
+                    
+                    if model_name == "Ridge Regression" and tuning_mode == 'auto':
+                        # Use RidgeCV for automatic alpha tuning with reasonable alpha range
+                        alphas = np.logspace(-2, 3, 50)  # 0.01 to 1000 (reasonable range)
+                        logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values)")
+                        models_dict[model_name] = RidgeCV(alphas=alphas, cv=k_folds)
+                        
+                    elif model_name == "Lasso Regression" and tuning_mode == 'auto':
+                        # Use LassoCV for automatic alpha tuning with reasonable alpha range
+                        alphas = np.logspace(-3, 2, 50)  # 0.001 to 100 (reasonable range for Lasso)
+                        logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values)")
+                        models_dict[model_name] = LassoCV(alphas=alphas, cv=k_folds, random_state=42)
+                        
+                    elif model_name == "ElasticNet Regression" and tuning_mode == 'auto':
+                        # Use ElasticNetCV for automatic alpha and l1_ratio tuning with reasonable ranges
+                        alphas = np.logspace(-3, 2, 50)  # 0.001 to 100 (reasonable range for ElasticNet)
+                        l1_ratios = np.linspace(0.1, 0.9, 9)  # Default l1_ratio range
+                        logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values), l1_ratio range: {l1_ratios[0]:.2f} to {l1_ratios[-1]:.2f} ({len(l1_ratios)} values)")
+                        models_dict[model_name] = ElasticNetCV(
+                            alphas=alphas, l1_ratio=l1_ratios, cv=k_folds, random_state=42
+                        )
+                        
+                    elif model_name == "Stack Constrained Ridge":
+                        # Extract constraints from parameters object
+                        parameters = config.get('parameters', {})
+                        negative_constraints = parameters.get('negative_constraints', [])
+                        positive_constraints = parameters.get('positive_constraints', [])
+                        print(f"🔍 Stack Constrained Ridge - Negative constraints: {negative_constraints}")
+                        print(f"🔍 Stack Constrained Ridge - Positive constraints: {positive_constraints}")
+                        
+                        # For Stack Constrained Ridge, we'll handle auto-tuning during training
+                        # Create the model with a placeholder l2_penalty that will be updated during training
+                        l2_penalty = parameters.get('l2_penalty', 0.1)  # Default value
+                        logger.info(f"🔧 {model_name} - Created with l2_penalty: {l2_penalty} (will be auto-tuned during training if needed)")
+                        
+                        from .models import StackConstrainedRidge
+                        models_dict[model_name] = StackConstrainedRidge(
+                            l2_penalty=float(l2_penalty),
+                            learning_rate=parameters.get('learning_rate', 0.001),
+                            iterations=parameters.get('iterations', 10000),
+                            adam=parameters.get('adam', False),
+                            negative_constraints=negative_constraints,
+                            positive_constraints=positive_constraints
+                        )
+                        
+                        # Store tuning mode for later use
+                        if tuning_mode == 'auto':
+                            best_parameters[model_name] = {'tuning_mode': 'auto'}
+                        
+                    elif model_name == "Stack Constrained Linear Regression":
+                        # Extract constraints from parameters object
+                        parameters = config.get('parameters', {})
+                        negative_constraints = parameters.get('negative_constraints', [])
+                        positive_constraints = parameters.get('positive_constraints', [])
+                        print(f"🔍 Stack Constrained Linear Regression - Negative constraints: {negative_constraints}")
+                        print(f"🔍 Stack Constrained Linear Regression - Positive constraints: {positive_constraints}")
+                        from .models import StackConstrainedLinearRegression
+                        models_dict[model_name] = StackConstrainedLinearRegression(
+                            learning_rate=parameters.get('learning_rate', 0.001),
+                            iterations=parameters.get('iterations', 10000),
+                            adam=parameters.get('adam', False),
+                            negative_constraints=negative_constraints,
+                            positive_constraints=positive_constraints
+                        )
+                    else:
+                        # Manual parameter tuning - use provided parameters
+                        if model_name == "Ridge Regression":
+                            alpha = parameters.get('Alpha', 1.0)
+                            logger.info(f"🔧 {model_name} - Manual tuning with alpha: {alpha}")
+                            models_dict[model_name] = Ridge(alpha=float(alpha))
+                        elif model_name == "Lasso Regression":
+                            alpha = parameters.get('Alpha', 0.1)
+                            logger.info(f"🔧 {model_name} - Manual tuning with alpha: {alpha}")
+                            models_dict[model_name] = Lasso(alpha=float(alpha), random_state=42)
+                        elif model_name == "ElasticNet Regression":
+                            alpha = parameters.get('Alpha', 0.1)
+                            l1_ratio = parameters.get('L1 Ratio', 0.5)
+                            logger.info(f"🔧 {model_name} - Manual tuning with alpha: {alpha}, l1_ratio: {l1_ratio}")
+                            models_dict[model_name] = ElasticNet(
+                                alpha=float(alpha), 
+                                l1_ratio=float(l1_ratio),
+                                random_state=42
+                        )
         
         # Prepare data
         X = df[x_variables].values
         y = df[y_variable].values
         
+        # Convert boolean values to numerical (0/1) for constraint models
+        # This is needed because encoded variables contain True/False values
+        if X.dtype == object:
+            print(f"🔍 Converting object dtype to numerical (boolean True/False -> 1/0)")
+            try:
+                # First try direct conversion
+                X = X.astype(float)
+                print(f"🔍 After conversion - X dtype: {X.dtype}, shape: {X.shape}")
+            except (ValueError, TypeError):
+                # If direct conversion fails, handle mixed types
+                print(f"🔍 Direct conversion failed, handling mixed types...")
+                X_converted = np.zeros_like(X, dtype=float)
+                for i in range(X.shape[1]):
+                    for j in range(X.shape[0]):
+                        val = X[j, i]
+                        if isinstance(val, bool):
+                            X_converted[j, i] = 1.0 if val else 0.0
+                        elif isinstance(val, (int, float)):
+                            X_converted[j, i] = float(val)
+                        else:
+                            X_converted[j, i] = 0.0
+                X = X_converted
+                print(f"🔍 After mixed type conversion - X dtype: {X.dtype}, shape: {X.shape}")
+        
+        # Ensure X is numerical
+        if not np.issubdtype(X.dtype, np.number):
+            print(f"🔍 Final conversion to numerical type")
+            X = X.astype(float)
+ 
+        
         # Standardization is already applied earlier in the pipelin     # No need to apply it again during modeling
         
-        # Initialize K-fold cross-validation with combination-aware splitting
-        kf = KFold(n_splits=k_folds, shuffle=True, random_state=42)
+        # Check if we have combination column for combination-aware splitting
+        has_combination_column = 'combination' in df.columns
+        
+        if has_combination_column:
+            # Use combination-aware train/test split
+            train_positions, test_positions = self._create_combination_aware_train_test_split(
+                df, test_size=test_size, random_state=42
+            )
+            X_train, X_test = X[train_positions], X[test_positions]
+            y_train, y_test = y[train_positions], y[test_positions]
+            print(f"🔍 Using combination-aware train/test split: {len(train_positions)} train, {len(test_positions)} test")
+            
+            # Debug: Check combination distribution in train/test sets
+            train_combinations = df.iloc[train_positions]['combination'].unique()
+            test_combinations = df.iloc[test_positions]['combination'].unique()
+            print(f"🔍 Train combinations: {len(train_combinations)} - {train_combinations}")
+            print(f"🔍 Test combinations: {len(test_combinations)} - {test_combinations}")
+            
+            # Check if all combinations are represented in both sets
+            all_combinations = df['combination'].unique()
+            train_has_all = all(combo in train_combinations for combo in all_combinations)
+            test_has_all = all(combo in test_combinations for combo in all_combinations)
+            print(f"🔍 All combinations in train: {train_has_all}, All combinations in test: {test_has_all}")
+        else:
+            # Use standard train/test split
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=test_size, random_state=42, shuffle=True
+            )
+            print(f"🔍 Using standard train/test split: {len(X_train)} train, {len(X_test)} test")
         
         model_results = []
         variable_data = {
@@ -894,137 +1050,216 @@ class DataPooler:
             'target_std': df[y_variable].std()
         }
         
-        # Check if we have combination column for stratified splitting
-        has_combination_column = 'combination' in df.columns
-        if has_combination_column:
-            print(f"🔍 Using combination-aware splitting for {df['combination'].nunique()} unique combinations")
-            print(f"  Combinations: {df['combination'].unique().tolist()}")
-        else:
-            print(f"⚠️ No 'combination' column found, using standard K-fold splitting")
-
-        for model_name, model_class in models_dict.items():
+        for model_name, model in models_dict.items():
+            print(f"🔍 Processing model: {model_name}")
+            logger.info(f"🔍 Processing model: {model_name}")
             
-            fold_results = []
-            fold_elasticities = []
+            # Check if this is a constraint model
+            if model_name in ["Stack Constrained Ridge", "Stack Constrained Linear Regression"]:
+                print(f"🔍 This is a constraint model: {model_name}")
+                logger.info(f"🔍 This is a constraint model: {model_name}")
+                print(f"  - X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
+                print(f"  - X_test shape: {X_test.shape}, y_test shape: {y_test.shape}")
+                print(f"  - Feature names: {x_variables}")
+                print(f"  - Data types: X_train={X_train.dtype}, y_train={y_train.dtype}")
+                print(f"  - X_train contains NaN: {np.isnan(X_train).any()}")
+                print(f"  - y_train contains NaN: {np.isnan(y_train).any()}")
+                print(f"  - X_train contains Inf: {np.isinf(X_train).any()}")
+                print(f"  - y_train contains Inf: {np.isinf(y_train).any()}")
+                logger.info(f"  - X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
+                logger.info(f"  - X_test shape: {X_test.shape}, y_test shape: {y_test.shape}")
+                logger.info(f"  - Feature names: {x_variables}")
+                logger.info(f"  - Data types: X_train={X_train.dtype}, y_train={y_train.dtype}")
+                logger.info(f"  - X_train contains NaN: {np.isnan(X_train).any()}")
+                logger.info(f"  - y_train contains NaN: {np.isnan(y_train).any()}")
+                logger.info(f"  - X_train contains Inf: {np.isinf(X_train).any()}")
+                logger.info(f"  - y_train contains Inf: {np.isinf(y_train).any()}")
             
-            if has_combination_column:
-                # Use combination-aware splitting
-                fold_splits = self._create_combination_aware_splits(df, k_folds, random_state=42)
-            else:
-                # Use standard K-fold splitting
-                fold_splits = list(kf.split(X))
-            
-            for fold_idx, (train_idx, val_idx) in enumerate(fold_splits):
-                X_train, X_val = X[train_idx], X[val_idx]
-                y_train, y_val = y[train_idx], y[val_idx]
-                
-                # Debug: Check combination distribution in train/val sets
-                if has_combination_column:
-                    train_combinations = df.iloc[train_idx]['combination'].unique()
-                    val_combinations = df.iloc[val_idx]['combination'].unique()
-                
-                model = clone(model_class)
-                if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression"]:
-                    model.fit(X_train, y_train, x_variables)
+            model = clone(model)
+            print(f"🔍 Model cloned successfully for: {model_name}")
+            logger.info(f"🔍 Model cloned successfully for: {model_name}")
+            # Train model
+            try:
+                if model_name in ["Stack Constrained Ridge", "Stack Constrained Linear Regression"]:
+                    print(f"🔍 Training constraint model: {model_name} with feature names")
+                    logger.info(f"🔍 Training constraint model: {model_name} with feature names")
+                    
+                    # Handle auto-tuning for Stack Constrained Ridge
+                    if model_name == "Stack Constrained Ridge" and model_name in best_parameters and best_parameters[model_name].get('tuning_mode') == 'auto':
+                        print(f"🔍 Auto-tuning Stack Constrained Ridge: Running RidgeCV to find optimal l2_penalty")
+                        logger.info(f"🔍 Auto-tuning Stack Constrained Ridge: Running RidgeCV to find optimal l2_penalty")
+                        
+                        # Run RidgeCV to find optimal alpha
+                        alphas = np.logspace(-2, 3, 50)  # Same range as Ridge Regression
+                        ridge_cv = RidgeCV(alphas=alphas, cv=k_folds)
+                        ridge_cv.fit(X_train, y_train)
+                        optimal_l2_penalty = ridge_cv.alpha_
+                        
+                        print(f"🎯 Stack Constrained Ridge - Optimal l2_penalty from RidgeCV: {optimal_l2_penalty:.6f}")
+                        logger.info(f"🎯 Stack Constrained Ridge - Optimal l2_penalty from RidgeCV: {optimal_l2_penalty:.6f}")
+                        
+                        # Update the model's l2_penalty
+                        model.l2_penalty = optimal_l2_penalty
+                        
+                        # Store the best alpha for later display
+                        best_parameters[model_name] = {
+                            'best_alpha': optimal_l2_penalty,
+                            'best_cv_score': ridge_cv.best_score_
+                        }
+                    
+                        model.fit(X_train, y_train, x_variables)
+                    print(f"✅ Constraint model trained successfully: {model_name}")
+                    logger.info(f"✅ Constraint model trained successfully: {model_name}")
                 else:
+                    print(f"🔍 Training standard model: {model_name}")
+                    logger.info(f"🔍 Training standard model: {model_name}")
                     model.fit(X_train, y_train)
-
-                y_pred = model.predict(X_val)
-                
-                from .models import safe_mape
-                mape = safe_mape(y_val, y_pred)
-                r2 = r2_score(y_val, y_pred)
-                
-                fold_results.append({
-                    'fold': fold_idx + 1,
-                    'mape': mape,
-                    'r2': r2,
-                    'predictions': y_pred.tolist(),
-                    'actual': y_val.tolist()
-                })
-                
-                # Skip elasticity calculations for now
+                    print(f"✅ Standard model trained successfully: {model_name}")
+                    logger.info(f"✅ Standard model trained successfully: {model_name}")
+            except Exception as e:
+                print(f"❌ Error training model {model_name}: {str(e)}")
+                logger.error(f"❌ Error training model {model_name}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                logger.error(f"❌ Traceback for {model_name}: {traceback.format_exc()}")
+                continue
             
-            # Calculate average metrics
-            avg_mape = np.mean([fold['mape'] for fold in fold_results])
-            avg_r2 = np.mean([fold['r2'] for fold in fold_results])
+            # Log best alpha for CV models
+            if hasattr(model, 'alpha_') and hasattr(model, 'best_score_'):
+                logger.info(f"🎯 {model_name} - Best Alpha: {model.alpha_:.6f}, Best CV Score: {model.best_score_:.6f}")
+            elif hasattr(model, 'alpha_'):
+                logger.info(f"🎯 {model_name} - Best Alpha: {model.alpha_:.6f}")
+            elif hasattr(model, 'l1_ratio_') and hasattr(model, 'alpha_'):
+                logger.info(f"🎯 {model_name} - Best Alpha: {model.alpha_:.6f}, Best L1 Ratio: {model.l1_ratio_:.6f}")
             
-            # Calculate AIC and BIC (simplified)
-            # Train on full dataset for final model
-            final_model = clone(model_class)
-            if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression"]:
-                final_model.fit(X, y, x_variables)
-            else:
-                final_model.fit(X, y)
-            y_pred_full = final_model.predict(X)
+            # Predictions
+            try:
+                print(f"🔍 Making predictions for: {model_name}")
+                logger.info(f"🔍 Making predictions for: {model_name}")
+                y_train_pred = model.predict(X_train)
+                y_test_pred = model.predict(X_test)
+                print(f"✅ Predictions made successfully for: {model_name}")
+                logger.info(f"✅ Predictions made successfully for: {model_name}")
+            except Exception as e:
+                print(f"❌ Error making predictions for {model_name}: {str(e)}")
+                logger.error(f"❌ Error making predictions for {model_name}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                logger.error(f"❌ Traceback for predictions {model_name}: {traceback.format_exc()}")
+                continue
+            
+            # Calculate metrics
+            from .models import safe_mape
+            mape_train = safe_mape(y_train, y_train_pred)
+            mape_test = safe_mape(y_test, y_test_pred)
+            r2_train = r2_score(y_train, y_train_pred)
+            r2_test = r2_score(y_test, y_test_pred)
+            
+            # Get coefficients
+            try:
+                if model_name in ["Stack Constrained Ridge", "Stack Constrained Linear Regression"]:
+                    print(f"🔍 Extracting coefficients for constraint model: {model_name}")
+                    logger.info(f"🔍 Extracting coefficients for constraint model: {model_name}")
+                    if hasattr(model, 'W') and model.W is not None:
+                        coefficients = {name: float(coef) for name, coef in zip(x_variables, model.W)}
+                        intercept = float(model.b) if hasattr(model, 'b') else 0.0
+                        print(f"✅ Constraint model coefficients extracted: {len(coefficients)} features, intercept={intercept}")
+                        logger.info(f"✅ Constraint model coefficients extracted: {len(coefficients)} features, intercept={intercept}")
+                    else:
+                        coefficients = {name: 0.0 for name in x_variables}
+                        intercept = 0.0
+                        print(f"⚠️ Constraint model has no W attribute or W is None")
+                        logger.warning(f"⚠️ Constraint model has no W attribute or W is None")
+                else:
+                    print(f"🔍 Extracting coefficients for standard model: {model_name}")
+                    logger.info(f"🔍 Extracting coefficients for standard model: {model_name}")
+                    if hasattr(model, 'coef_'):
+                        coefficients = {name: float(coef) for name, coef in zip(x_variables, model.coef_)}
+                        intercept = float(model.intercept_) if hasattr(model, 'intercept_') else 0.0
+                        print(f"✅ Standard model coefficients extracted: {len(coefficients)} features, intercept={intercept}")
+                        logger.info(f"✅ Standard model coefficients extracted: {len(coefficients)} features, intercept={intercept}")
+                    else:
+                        coefficients = {name: 0.0 for name in x_variables}
+                        intercept = 0.0
+                        print(f"⚠️ Standard model has no coef_ attribute")
+                        logger.warning(f"⚠️ Standard model has no coef_ attribute")
+            except Exception as e:
+                print(f"❌ Error extracting coefficients for {model_name}: {str(e)}")
+                logger.error(f"❌ Error extracting coefficients for {model_name}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                logger.error(f"❌ Traceback for coefficients {model_name}: {traceback.format_exc()}")
+                continue
             
             # Calculate AIC and BIC
-            n = len(y)
-            k = len(x_variables)
-            mse = np.mean((y - y_pred_full) ** 2)
-            log_likelihood = -n/2 * np.log(2 * np.pi * mse) - n/2
-            aic = 2 * k - 2 * log_likelihood
-            bic = k * np.log(n) - 2 * log_likelihood
+            n_parameters = len(coefficients) + 1  # +1 for intercept
+            n_samples = len(y_train)
+            mse_train = np.mean((y_train - y_train_pred) ** 2)
+            aic = n_samples * np.log(mse_train) + 2 * n_parameters
+            bic = n_samples * np.log(mse_train) + np.log(n_samples) * n_parameters
             
-            # Calculate train metrics (using full dataset)
-            y_pred_train = final_model.predict(X)
-            from .models import safe_mape
-            mape_train = safe_mape(y, y_pred_train)
-            r2_train = r2_score(y, y_pred_train)
-            
-            # Calculate test metrics (average across folds)
-            mape_test = avg_mape
-            r2_test = avg_r2
-            
-            # Prepare coefficients in the expected format
-            coefficients = {}
-            if hasattr(final_model, 'coef_') and hasattr(final_model, 'feature_names_in_'):
-                for i, feature in enumerate(final_model.feature_names_in_):
-                    coefficients[feature] = float(final_model.coef_[i])
-            elif hasattr(final_model, 'coef_'):
-                for i, feature in enumerate(x_variables):
-                    coefficients[feature] = float(final_model.coef_[i])
-            
-            # Skip elasticity and contribution calculations for now - only return betas
-            model_result = {
-                'model_name': model_name,
-                'mape_train': float(mape_train),
-                'mape_test': float(mape_test),
-                'r2_train': float(r2_train),
-                'r2_test': float(r2_test),
-                'mape_train_std': 0.0,  # Not calculated in simplified version
-                'mape_test_std': float(np.std([fold['mape'] for fold in fold_results])),
-                'r2_train_std': 0.0,  # Not calculated in simplified version
-                'r2_test_std': float(np.std([fold['r2'] for fold in fold_results])),
-                'aic': float(aic),
-                'bic': float(bic),
-                'n_parameters': len(x_variables) + 1,  # +1 for intercept
-                'coefficients': coefficients,
-                'standardized_coefficients': coefficients,  # In stack modeling, coefficients are already standardized if standardization was applied
-                'intercept': float(final_model.intercept_) if hasattr(final_model, 'intercept_') else 0.0,
-
+            # Create result dictionary
+            result = {
+                "model_name": model_name,
+                "mape_train": mape_train,
+                "mape_test": mape_test,
+                "r2_train": r2_train,
+                "r2_test": r2_test,
+                "mape_train_std": 0.0,  # No std for single train/test split
+                "mape_test_std": 0.0,   # No std for single train/test split
+                "r2_train_std": 0.0,    # No std for single train/test split
+                "r2_test_std": 0.0,     # No std for single train/test split
+                "coefficients": coefficients,
+                "standardized_coefficients": coefficients,  # Same as unstandardized for now
+                "intercept": intercept,
+                "fold_results": [],  # Empty for train/test split
+                "aic": aic,
+                "bic": bic,
+                "n_parameters": n_parameters,
+                "train_size": len(y_train),
+                "test_size": len(y_test)
             }
             
-            model_results.append(model_result)
+            # Add best parameters for CV models
+            if hasattr(model, 'alpha_'):
+                result["best_alpha"] = float(model.alpha_)
+            if hasattr(model, 'best_score_'):
+                result["best_cv_score"] = float(model.best_score_)
+            if hasattr(model, 'l1_ratio_'):
+                result["best_l1_ratio"] = float(model.l1_ratio_)
+            
+            # Add best parameters from stored values (for Stack Constrained Ridge with auto-tuning)
+            if model_name in best_parameters:
+                if 'best_alpha' in best_parameters[model_name]:
+                    result["best_alpha"] = float(best_parameters[model_name]['best_alpha'])
+                if 'best_cv_score' in best_parameters[model_name]:
+                    result["best_cv_score"] = float(best_parameters[model_name]['best_cv_score'])
+            
+            model_results.append(result)
+            print(f"✅ Model {model_name} completed - Train MAPE: {mape_train:.4f}, Test MAPE: {mape_test:.4f}")
+            logger.info(f"✅ Model {model_name} completed - Train MAPE: {mape_train:.4f}, Test MAPE: {mape_test:.4f}")
+            print(f"🔍 Total models completed so far: {len(model_results)}")
+            logger.info(f"🔍 Total models completed so far: {len(model_results)}")
         
         return model_results, variable_data
     
-    def _create_combination_aware_splits(self, df: pd.DataFrame, n_splits: int, random_state: int = 42) -> List[Tuple[np.ndarray, np.ndarray]]:
+    
+    def _create_combination_aware_train_test_split(self, df: pd.DataFrame, test_size: float = 0.2, random_state: int = 42) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """
-        Create K-fold splits that ensure each combination is represented in both training and validation sets.
+        Create train/test split that ensures each combination is represented in both training and test sets.
         
         Strategy:
-        1. For each combination, split its data into n_splits parts
-        2. For each fold, use 1/n_splits of each combination's data for validation
-        3. Use the remaining (n_splits-1)/n_splits of each combination's data for training
+        1. For each combination, split its data into train/test based on test_size
+        2. Ensure each combination has at least 1 sample in both train and test sets
+        3. Combine all combination splits into final train/test sets
         
         Args:
             df: DataFrame with 'combination' column
-            n_splits: Number of folds
+            test_size: Proportion of data to use for testing (0.0 to 1.0)
             random_state: Random seed for reproducibility
             
         Returns:
-            List of (train_indices, val_indices) tuples
+            Tuple of (X_train, X_test, y_train, y_test) arrays
         """
         import numpy as np
         from sklearn.model_selection import KFold
@@ -1034,55 +1269,43 @@ class DataPooler:
         # Get unique combinations
         combinations = df['combination'].unique()
         
-        fold_splits = []
+        train_indices = []
+        test_indices = []
         
-        for fold_idx in range(n_splits):
-            train_indices = []
-            val_indices = []
+        for combination in combinations:
+            # Get all indices for this combination
+            combination_mask = df['combination'] == combination
+            combination_indices = df[combination_mask].index.values
             
-            for combination in combinations:
-                # Get all indices for this combination
-                combination_mask = df['combination'] == combination
-                combination_indices = df[combination_mask].index.values
-                
-                # Shuffle the indices for this combination
-                np.random.shuffle(combination_indices)
-                
-                # Calculate split point for this fold
-                n_samples = len(combination_indices)
-                val_size = max(1, n_samples // n_splits)  # Ensure at least 1 sample in validation
-                
-                # Calculate start and end indices for validation set
-                val_start = fold_idx * val_size
-                val_end = min((fold_idx + 1) * val_size, n_samples)
-                
-                # If this is the last fold, include any remaining samples
-                if fold_idx == n_splits - 1:
-                    val_end = n_samples
-                
-                # Split indices
-                val_indices_fold = combination_indices[val_start:val_end]
-                train_indices_fold = np.concatenate([
-                    combination_indices[:val_start],
-                    combination_indices[val_end:]
-                ])
-                
-                train_indices.extend(train_indices_fold)
-                val_indices.extend(val_indices_fold)
-                
+            # Shuffle the indices for this combination
+            np.random.shuffle(combination_indices)
             
-            # Convert to numpy arrays and ensure proper indexing
-            train_indices = np.array(train_indices)
-            val_indices = np.array(val_indices)
+            # Calculate split point for this combination
+            n_samples = len(combination_indices)
+            n_test = max(1, int(n_samples * test_size))  # Ensure at least 1 sample in test
+            n_train = n_samples - n_test
             
-            # Convert to positional indices (0-based)
-            train_positions = np.searchsorted(df.index, train_indices)
-            val_positions = np.searchsorted(df.index, val_indices)
+            # Ensure we have at least 1 sample in train set
+            if n_train < 1:
+                n_train = 1
+                n_test = n_samples - 1
+                
+            # Split indices
+            test_indices_combination = combination_indices[:n_test]
+            train_indices_combination = combination_indices[n_test:]
             
-            fold_splits.append((train_positions, val_positions))
-            
+            train_indices.extend(train_indices_combination)
+            test_indices.extend(test_indices_combination)
         
-        return fold_splits
+        # Convert to numpy arrays
+        train_indices = np.array(train_indices)
+        test_indices = np.array(test_indices)
+        
+        # Convert to positional indices (0-based)
+        train_positions = np.searchsorted(df.index, train_indices)
+        test_positions = np.searchsorted(df.index, test_indices)
+        
+        return train_positions, test_positions
     
     async def train_models_for_stacked_data(
         self,
@@ -1093,7 +1316,8 @@ class DataPooler:
         k_folds: int = 5,
         models_to_run: Optional[List[str]] = None,
         custom_configs: Optional[Dict[str, Any]] = None,
-        price_column: Optional[str] = None
+        price_column: Optional[str] = None,
+        test_size: float = 0.2
     ) -> Dict[str, Any]:
         """
         Train models on split clustered data using the same models as individual combinations.
@@ -1123,9 +1347,11 @@ class DataPooler:
             models_dict = all_models
         
         for split_key, df in split_clustered_data.items():
+            print(f"🔍 Processing split: {split_key} with {len(df)} records")
             
             # Determine feature set based on available columns
             feature_columns = []
+            
             
             # 1. Add x_variables (prioritize scaled versions if standardization was applied)
             for var in x_variables:
@@ -1138,7 +1364,7 @@ class DataPooler:
 
                 
                 # Use scaled variable if it exists, otherwise use original
-                if scaled_var and scaled_var in df.columns:
+                if scaled_var in df.columns:
                     feature_columns.append(scaled_var)
                 elif var in df.columns:
                     feature_columns.append(var)
@@ -1177,10 +1403,15 @@ class DataPooler:
                     standardization=standardization,
                     k_folds=k_folds,
                     models_to_run=models_to_run,
-                    custom_configs=custom_configs
+                    custom_configs=custom_configs,
+                    test_size=test_size
                 )
                 
                 # Store results
+                print(f"✅ Split {split_key} completed with {len(model_results)} models")
+                for result in model_results:
+                    print(f"  - {result['model_name']}: MAPE={result['mape_test']:.4f}, R²={result['r2_test']:.4f}")
+                
                 results[split_key] = {
                     'model_results': model_results,
                     'variable_data': variable_data,
@@ -1212,11 +1443,10 @@ class StackModelDataProcessor:
         pass
     
     async def get_column_classifier_config(self) -> Dict[str, Any]:
-
+        """Get column classifier configuration using the same pattern as routes."""
         try:
-            from .mongodb_saver import client
+            from .mongodb_saver import get_column_classifier_config_from_mongo
             from ..data_upload_validate.app.routes import get_object_prefix
-            import os
             
             # Get the current prefix
             prefix = await get_object_prefix()
@@ -1228,17 +1458,14 @@ class StackModelDataProcessor:
                 app_name = prefix_parts[1]
                 project_name = prefix_parts[2] if len(prefix_parts) > 2 else "default_project"
                 
-                # Create the document ID
-                doc_id = f"Quant_Matrix_AI_Schema/forecasting/New Forecasting Analysis Project"
-                
-                # Fetch from column_classifier_config collection
-                collection = client["trinity_db"]["column_classifier_config"]
-                config = await collection.find_one({"_id": doc_id})
+                # Use the same function as routes
+                config = await get_column_classifier_config_from_mongo(client_name, app_name, project_name)
                 
                 if config:
+                    logger.info(f"✅ Retrieved column classifier config for {client_name}/{app_name}/{project_name}")
                     return config
                 else:
-                    logger.warning(f"No column classifier config found for {doc_id}")
+                    logger.warning(f"No column classifier config found for {client_name}/{app_name}/{project_name}")
                     return {}
             else:
                 logger.error(f"Invalid prefix format: {prefix}")

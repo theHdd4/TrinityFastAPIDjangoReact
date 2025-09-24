@@ -6,6 +6,7 @@ export interface ModelConfig {
   id: string;
   name: string;
   parameters: Record<string, any>;
+  tuning_mode?: 'auto' | 'manual';
 }
 
 export interface VariableTransformation {
@@ -31,12 +32,25 @@ export interface BuildModelFeatureBasedData {
   outputFileName: string;
   kFolds?: number;
   testSize?: number;
+  // Individual modeling fields
+  individualModeling: boolean;
+  individualKFolds?: number;
+  individualTestSize?: number;
+  individualSelectedModels: string[];
+  individualModelConfigs: ModelConfig[];
   // Stack modeling fields
   stackModeling: boolean;
+  stackKFolds?: number;
+  stackTestSize?: number;
+  stackSelectedModels: string[];
+  stackModelConfigs: ModelConfig[];
   poolByIdentifiers: string[];
   numericalColumnsForClustering: string[];
   applyInteractionTerms: boolean;
   numericalColumnsForInteraction: string[];
+  // Constraint configuration
+  negativeConstraints: string[];
+  positiveConstraints: string[];
 }
 
 export interface BuildModelFeatureBasedSettings {
@@ -79,12 +93,41 @@ const BuildModelFeatureBasedAtom: React.FC<Props> = ({ atomId }) => {
       outputFileName: '',
       kFolds: 5,
       testSize: 0.2,
+      // Individual modeling defaults
+      individualModeling: true,
+      individualKFolds: 5,
+      individualTestSize: 0.2,
+      individualSelectedModels: ['Linear Regression', 'Ridge Regression', 'Lasso Regression', 'ElasticNet Regression', 'Bayesian Ridge Regression', 'Custom Constrained Ridge', 'Constrained Linear Regression'],
+      individualModelConfigs: [
+        { id: 'Linear Regression', name: 'Linear Regression', parameters: {}, tuning_mode: 'manual' },
+        { id: 'Ridge Regression', name: 'Ridge Regression', parameters: { 'Alpha': '1.0' }, tuning_mode: 'auto' },
+        { id: 'Lasso Regression', name: 'Lasso Regression', parameters: { 'Alpha': '1.0' }, tuning_mode: 'auto' },
+        { id: 'ElasticNet Regression', name: 'ElasticNet Regression', parameters: { 'Alpha': '1.0', 'L1 Ratio': '0.5' }, tuning_mode: 'auto' },
+        { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', parameters: {}, tuning_mode: 'manual' },
+        { id: 'Custom Constrained Ridge', name: 'Custom Constrained Ridge', parameters: { 'L2 Penalty': '0.1', 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' }, tuning_mode: 'auto' },
+        { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', parameters: { 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' }, tuning_mode: 'manual' }
+      ],
       // Stack modeling defaults
       stackModeling: false,
+      stackKFolds: 5,
+      stackTestSize: 0.2,
+      stackSelectedModels: [],
+      stackModelConfigs: [
+        { id: 'Linear Regression', name: 'Linear Regression', parameters: {}, tuning_mode: 'manual' },
+        { id: 'Ridge Regression', name: 'Ridge Regression', parameters: { 'Alpha': '1.0' }, tuning_mode: 'auto' },
+        { id: 'Lasso Regression', name: 'Lasso Regression', parameters: { 'Alpha': '1.0' }, tuning_mode: 'auto' },
+        { id: 'ElasticNet Regression', name: 'ElasticNet Regression', parameters: { 'Alpha': '1.0', 'L1 Ratio': '0.5' }, tuning_mode: 'auto' },
+        { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', parameters: {}, tuning_mode: 'manual' },
+        { id: 'Stack Constrained Ridge', name: 'Stack Constrained Ridge', parameters: { 'L2 Penalty': '0.1', 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' }, tuning_mode: 'auto' },
+        { id: 'Stack Constrained Linear Regression', name: 'Stack Constrained Linear Regression', parameters: { 'Learning Rate': '0.001', 'Iterations': '10000', 'Adam': 'false' }, tuning_mode: 'manual' }
+      ],
       poolByIdentifiers: [],
       numericalColumnsForClustering: [],
       applyInteractionTerms: false,
-      numericalColumnsForInteraction: []
+      numericalColumnsForInteraction: [],
+      // Constraint configuration
+      negativeConstraints: [],
+      positiveConstraints: []
     };
 
     const defaultSettings = {

@@ -9,9 +9,10 @@ from bson import ObjectId
 import io
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, train_test_split
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.metrics import r2_score
+from sklearn.linear_model import RidgeCV, LassoCV, ElasticNetCV, Ridge, Lasso, ElasticNet
 from .models import get_models, safe_mape, CustomConstrainedRidge, ConstrainedLinearRegression
 import uuid
 from datetime import datetime
@@ -432,9 +433,10 @@ async def train_models_for_combination_enhanced(
     y_variable: str,
     price_column: Optional[str],
     standardization: str,
-    k_folds: int,
     models_to_run: Optional[List[str]],
     custom_configs: Optional[Dict[str, Any]],
+    test_size: float = 0.2,
+    k_folds: int = 5,
     bucket_name: Optional[str] = None
 ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
@@ -557,6 +559,11 @@ async def train_models_for_combination_enhanced(
             scaler = MinMaxScaler()
             X = scaler.fit_transform(X)
         
+        # Train/test split
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=42, shuffle=True
+        )
+        
         # Get models
         all_models = get_models()
         
@@ -566,166 +573,162 @@ async def train_models_for_combination_enhanced(
         else:
             models_dict = all_models
         
-        # Apply custom configurations
+        # Store best parameters for models that use auto-tuning
+        best_parameters = {}
+        
+        # Apply custom configurations and handle auto/manual parameter tuning
         if custom_configs:
             for model_name, config in custom_configs.items():
                 if model_name in models_dict:
-                    if model_name == "Custom Constrained Ridge":
-                        models_dict[model_name] = CustomConstrainedRidge(
-                            l2_penalty=config.get('l2_penalty', 0.1),
-                            learning_rate=config.get('learning_rate', 0.001),
-                            iterations=config.get('iterations', 10000),
-                            adam=config.get('adam', False)
+                    parameters = config.get('parameters', {})
+                    tuning_mode = config.get('tuning_mode', 'manual')  # 'auto' or 'manual'
+                    
+                    if model_name == "Ridge Regression" and tuning_mode == 'auto':
+                        # Use RidgeCV for automatic alpha tuning with reasonable alpha range
+                        alphas = np.logspace(-2, 3, 50)  # 0.0001 to 10000 (reasonable range)
+                        logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values)")
+                        models_dict[model_name] = RidgeCV(alphas=alphas, cv=k_folds)
+                        
+                    elif model_name == "Lasso Regression" and tuning_mode == 'auto':
+                        # Use LassoCV for automatic alpha tuning with reasonable alpha range
+                        alphas = np.logspace(-3, 2, 50)  # 0.0001 to 10 (reasonable range for Lasso)
+                        logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values)")
+                        models_dict[model_name] = LassoCV(alphas=alphas, cv=k_folds, random_state=42)
+                        
+                    elif model_name == "ElasticNet Regression" and tuning_mode == 'auto':
+                        # Use ElasticNetCV for automatic alpha and l1_ratio tuning with reasonable ranges
+                        alphas = np.logspace(-3, 2, 50)  # 0.0001 to 10 (reasonable range for ElasticNet)
+                        l1_ratios = np.linspace(0.1, 0.9, 9)  # Default l1_ratio range
+                        logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values), l1_ratio range: {l1_ratios[0]:.2f} to {l1_ratios[-1]:.2f} ({len(l1_ratios)} values)")
+                        models_dict[model_name] = ElasticNetCV(
+                            alphas=alphas, l1_ratio=l1_ratios, cv=k_folds, random_state=42
                         )
+                        
+                    elif model_name == "Custom Constrained Ridge":
+                        # Extract constraints from parameters object
+                        parameters = config.get('parameters', {})
+                        negative_constraints = parameters.get('negative_constraints', [])
+                        positive_constraints = parameters.get('positive_constraints', [])
+                        print(f"🔍 Custom Constrained Ridge - Negative constraints: {negative_constraints}")
+                        print(f"🔍 Custom Constrained Ridge - Positive constraints: {positive_constraints}")
+                        
+                        # Check if we should use auto-tuning for l2_penalty
+                        if tuning_mode == 'auto':
+                            # First run RidgeCV to find optimal alpha, then use it as l2_penalty
+                            logger.info(f"🔧 {model_name} - Auto tuning: Running RidgeCV to find optimal l2_penalty")
+                            alphas = np.logspace(-2, 3, 50)  # Same range as Ridge Regression
+                            ridge_cv = RidgeCV(alphas=alphas, cv=k_folds)
+                            ridge_cv.fit(X_train, y_train)
+                            optimal_l2_penalty = ridge_cv.alpha_
+                            logger.info(f"🎯 {model_name} - Optimal l2_penalty from RidgeCV: {optimal_l2_penalty:.6f}")
+                            
+                            # Store the best alpha for later display
+                            best_parameters[model_name] = {
+                                'best_alpha': optimal_l2_penalty,
+                                'best_cv_score': ridge_cv.best_score_
+                            }
+                            
+                            models_dict[model_name] = CustomConstrainedRidge(
+                                l2_penalty=optimal_l2_penalty,
+                                learning_rate=parameters.get('learning_rate', 0.001),
+                                iterations=parameters.get('iterations', 10000),
+                                adam=parameters.get('adam', False),
+                                negative_constraints=negative_constraints,
+                                positive_constraints=positive_constraints
+                            )
+                        else:
+                            # Manual tuning - use provided l2_penalty
+                            l2_penalty = parameters.get('l2_penalty', 0.1)
+                            logger.info(f"🔧 {model_name} - Manual tuning with l2_penalty: {l2_penalty}")
+                            models_dict[model_name] = CustomConstrainedRidge(
+                                l2_penalty=float(l2_penalty),
+                                learning_rate=parameters.get('learning_rate', 0.001),
+                                iterations=parameters.get('iterations', 10000),
+                                adam=parameters.get('adam', False),
+                                negative_constraints=negative_constraints,
+                                positive_constraints=positive_constraints
+                            )
+                        
                     elif model_name == "Constrained Linear Regression":
+                        # Extract constraints from parameters object
+                        parameters = config.get('parameters', {})
+                        negative_constraints = parameters.get('negative_constraints', [])
+                        positive_constraints = parameters.get('positive_constraints', [])
+                        print(f"🔍 Constrained Linear Regression - Negative constraints: {negative_constraints}")
+                        print(f"🔍 Constrained Linear Regression - Positive constraints: {positive_constraints}")
                         models_dict[model_name] = ConstrainedLinearRegression(
-                            learning_rate=config.get('learning_rate', 0.001),
-                            iterations=config.get('iterations', 10000),
-                            adam=config.get('adam', False)
+                             l2_penalty=parameters.get('l2_penalty', 0.1),
+                            learning_rate=parameters.get('learning_rate', 0.001),
+                            iterations=parameters.get('iterations', 10000),
+                            adam=parameters.get('adam', False),
+                            negative_constraints=negative_constraints,
+                            positive_constraints=positive_constraints
                         )
-        
-        # K-fold cross validation with fold tracking
-        kfold = KFold(n_splits=k_folds, shuffle=True, random_state=42)
+                    else:
+                        # Manual parameter tuning - use provided parameters
+                        if model_name == "Ridge Regression":
+                            alpha = parameters.get('Alpha', 1.0)
+                            logger.info(f"🔧 {model_name} - Manual tuning with alpha: {alpha}")
+                            models_dict[model_name] = Ridge(alpha=float(alpha))
+                        elif model_name == "Lasso Regression":
+                            alpha = parameters.get('Alpha', 0.1)
+                            logger.info(f"🔧 {model_name} - Manual tuning with alpha: {alpha}")
+                            models_dict[model_name] = Lasso(alpha=float(alpha), random_state=42)
+                        elif model_name == "ElasticNet Regression":
+                            alpha = parameters.get('Alpha', 0.1)
+                            l1_ratio = parameters.get('L1 Ratio', 0.5)
+                            logger.info(f"🔧 {model_name} - Manual tuning with alpha: {alpha}, l1_ratio: {l1_ratio}")
+                            models_dict[model_name] = ElasticNet(
+                                alpha=float(alpha), 
+                                l1_ratio=float(l1_ratio),
+                                random_state=42
+                            )
         
         results = []
         
         for model_name, model in models_dict.items():
-            fold_results = []
-            mape_train_scores = []
-            mape_test_scores = []
-            r2_train_scores = []
-            r2_test_scores = []
-            fold_elasticities = []
-            
-            for fold_idx, (train_idx, test_idx) in enumerate(kfold.split(X)):
-                X_train, X_test = X[train_idx], X[test_idx]
-                y_train, y_test = y[train_idx], y[test_idx]
-                
-                # Train model
-                if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression"]:
-                    model.fit(X_train, y_train, x_variables)
-                else:
-                    model.fit(X_train, y_train)
-                
-                # Predictions
-                y_train_pred = model.predict(X_train)
-                y_test_pred = model.predict(X_test)
-                
-                # Calculate metrics
-                mape_train = safe_mape(y_train, y_train_pred)
-                mape_test = safe_mape(y_test, y_test_pred)
-                r2_train = r2_score(y_train, y_train_pred)
-                r2_test = r2_score(y_test, y_test_pred)
-                
-                mape_train_scores.append(mape_train)
-                mape_test_scores.append(mape_test)
-                r2_train_scores.append(r2_train)
-                r2_test_scores.append(r2_test)
-                
-                # Calculate elasticity for this fold ONLY if price is in x_variables
-                fold_elasticity = None
-                if calculate_elasticity and hasattr(model, 'coef_'):
-                    # Get fold-specific coefficients
-                    fold_coefs = {}
-                    fold_intercept = model.intercept_ if hasattr(model, 'intercept_') else 0.0
-                    
-                    # Back-transform coefficients for elasticity calculation
-                    if standardization == 'standard':
-                        for i, var in enumerate(x_variables):
-                            if x_stds[i] != 0:
-                                unstandardized_coef = model.coef_[i] / x_stds[i]
-                            else:
-                                unstandardized_coef = model.coef_[i]
-                            fold_coefs[f"Beta_{var}"] = float(unstandardized_coef)
-                        
-                        fold_intercept = y_mean - np.sum(
-                            [fold_coefs[f"Beta_{var}"] * x_means[i] 
-                             for i, var in enumerate(x_variables)]
-                        )
-                    elif standardization == 'minmax':
-                        for i, var in enumerate(x_variables):
-                            # Get original data statistics for proper destandardization
-                            X_original_fold = X_original.iloc[train_idx]
-                            x_mins = X_original_fold.min().values
-                            x_ranges = X_original_fold.max().values - x_mins
-                            
-                            # Correct min-max destandardization: β_original = β_scaled * (1/range(X))
-                            if x_ranges[i] != 0:
-                                unstandardized_coef = model.coef_[i] * (1 / x_ranges[i])
-                            else:
-                                unstandardized_coef = model.coef_[i]
-                            fold_coefs[f"Beta_{var}"] = float(unstandardized_coef)
-                        
-                        # Calculate intercept using original data statistics
-                        fold_intercept = fold_intercept - np.sum(
-                            [fold_coefs[f"Beta_{var}"] * x_mins[i] 
-                             for i, var in enumerate(x_variables)]
-                        )
-                    else:
-                        for i, var in enumerate(x_variables):
-                            fold_coefs[f"Beta_{var}"] = float(model.coef_[i])
-                    
-                    # Calculate elasticity
-                    fold_elasticity = calculate_price_elasticity(
-                        coefficients=fold_coefs,
-                        intercept=float(fold_intercept),
-                        x_variables=x_variables,
-                        price_column=price_column,
-                        variable_averages=variable_averages,
-                        df=df
-                    )
-                
-                if fold_elasticity is not None:
-                    fold_elasticities.append(fold_elasticity)
-                
-                # Store fold results - NO CSF/MCV HERE
-                fold_results.append({
-                    "fold_index": fold_idx,
-                    "mape_train": mape_train,
-                    "mape_test": mape_test,
-                    "r2_train": r2_train,
-                    "r2_test": r2_test,
-                    "train_size": len(train_idx),
-                    "test_size": len(test_idx),
-                    "price_elasticity": fold_elasticity if calculate_elasticity else None
-                })
-            
-            # Train final model on full data for coefficients and AIC/BIC
+            # Train model
             if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression"]:
-                model.fit(X, y, x_variables)
+                model.fit(X_train, y_train, x_variables)
             else:
-                model.fit(X, y)
+                model.fit(X_train, y_train)
             
-            # Get predictions on full dataset for AIC/BIC calculation
-            y_pred_full = model.predict(X)
+            # Log best alpha for CV models
+            if hasattr(model, 'alpha_') and hasattr(model, 'best_score_'):
+                logger.info(f"🎯 {model_name} - Best Alpha: {model.alpha_:.6f}, Best CV Score: {model.best_score_:.6f}")
+            elif hasattr(model, 'alpha_'):
+                logger.info(f"🎯 {model_name} - Best Alpha: {model.alpha_:.6f}")
+            elif hasattr(model, 'l1_ratio_') and hasattr(model, 'alpha_'):
+                logger.info(f"🎯 {model_name} - Best Alpha: {model.alpha_:.6f}, Best L1 Ratio: {model.l1_ratio_:.6f}")
             
-            # Calculate number of parameters (coefficients + intercept)
-            n_parameters = len(x_variables) + 1  # +1 for intercept
+            # Predictions
+            y_train_pred = model.predict(X_train)
+            y_test_pred = model.predict(X_test)
             
-            # Calculate AIC and BIC
-            aic, bic = calculate_aic_bic(y, y_pred_full, n_parameters)
+            # Calculate metrics
+            mape_train = safe_mape(y_train, y_train_pred)
+            mape_test = safe_mape(y_test, y_test_pred)
+            r2_train = r2_score(y_train, y_train_pred)
+            r2_test = r2_score(y_test, y_test_pred)
             
-            # Extract and back-transform coefficients
-            coefficients = {}
-            unstandardized_coefficients = {}
-            unstandardized_intercept = 0.0
-            
-            if hasattr(model, 'coef_'):
-                standardized_coefs = model.coef_
-                standardized_intercept = model.intercept_ if hasattr(model, 'intercept_') else 0.0
+            # Calculate elasticity ONLY if price is in x_variables
+            overall_elasticity = None
+            if calculate_elasticity and hasattr(model, 'coef_'):
+                # Get coefficients
+                coefs = {}
+                intercept = model.intercept_ if hasattr(model, 'intercept_') else 0.0
                 
+                # Back-transform coefficients for elasticity calculation
                 if standardization == 'standard':
                     for i, var in enumerate(x_variables):
                         if x_stds[i] != 0:
-                            unstandardized_coef = standardized_coefs[i] / x_stds[i]
+                            unstandardized_coef = model.coef_[i] / x_stds[i]
                         else:
-                            unstandardized_coef = standardized_coefs[i]
-                        
-                        coefficients[f"Beta_{var}"] = float(standardized_coefs[i])
-                        unstandardized_coefficients[f"Beta_{var}"] = float(unstandardized_coef)
+                            unstandardized_coef = model.coef_[i]
+                        coefs[f"Beta_{var}"] = float(unstandardized_coef)
                     
-                    unstandardized_intercept = y_mean - np.sum(
-                        [unstandardized_coefficients[f"Beta_{var}"] * x_means[i] 
+                    intercept = y_mean - np.sum(
+                        [coefs[f"Beta_{var}"] * x_means[i] 
                          for i, var in enumerate(x_variables)]
                     )
                 elif standardization == 'minmax':
@@ -736,72 +739,120 @@ async def train_models_for_combination_enhanced(
                         
                         # Correct min-max destandardization: β_original = β_scaled * (1/range(X))
                         if x_ranges[i] != 0:
-                            unstandardized_coef = standardized_coefs[i] * (1 / x_ranges[i])
+                            unstandardized_coef = model.coef_[i] * (1 / x_ranges[i])
                         else:
-                            unstandardized_coef = standardized_coefs[i]
-                        unstandardized_coefficients[f"Beta_{var}"] = float(unstandardized_coef)
-                        coefficients[f"Beta_{var}"] = float(standardized_coefs[i])
+                            unstandardized_coef = model.coef_[i]
+                        coefs[f"Beta_{var}"] = float(unstandardized_coef)
                     
                     # Calculate intercept using original data statistics
-                    unstandardized_intercept = standardized_intercept - np.sum(
-                        [unstandardized_coefficients[f"Beta_{var}"] * x_mins[i] 
+                    intercept = intercept - np.sum(
+                        [coefs[f"Beta_{var}"] * x_mins[i] 
                          for i, var in enumerate(x_variables)]
                     )
                 else:
                     for i, var in enumerate(x_variables):
-                        coefficients[f"Beta_{var}"] = float(standardized_coefs[i])
-                        unstandardized_coefficients[f"Beta_{var}"] = float(standardized_coefs[i])
-                    unstandardized_intercept = standardized_intercept
-            
-            # Calculate overall elasticity ONLY if price is in x_variables
-            overall_elasticity = None
-            elasticity_std = None
-            csf = None
-            mcv = None
-            ppu_at_elasticity = None
-            
-            if calculate_elasticity and unstandardized_coefficients:
+                        coefs[f"Beta_{var}"] = float(model.coef_[i])
+                
+                # Calculate elasticity
                 overall_elasticity = calculate_price_elasticity(
-                    coefficients=unstandardized_coefficients,
-                    intercept=float(unstandardized_intercept),
+                    coefficients=coefs,
+                    intercept=float(intercept),
                     x_variables=x_variables,
                     price_column=price_column,
                     variable_averages=variable_averages,
                     df=df
                 )
-                
-                # Calculate elasticity statistics only if we have valid fold elasticities
-                if fold_elasticities:
-                    valid_elasticities = [e for e in fold_elasticities if e is not None and not np.isnan(e)]
-                    if valid_elasticities:
-                        elasticity_std = float(np.std(valid_elasticities))
-                
-                # Calculate CSF and MCV only if elasticity was calculated successfully
-                if overall_elasticity is not None and not np.isnan(overall_elasticity) and overall_elasticity != 0:
-                    # Calculate CSF (Consumer Surplus Fraction)
-                    csf = 1 - (1 / overall_elasticity)
-                    
-                    # Get average PPU for MCV calculation
-                    ppu_at_elasticity = variable_averages.get(price_column, 0)
-                    
-                    # Calculate MCV (Marginal Consumer Value)
-                    if ppu_at_elasticity > 0:
-                        mcv = csf * ppu_at_elasticity
             
-            results.append({
+            # Get coefficients for final model
+            coefficients = {}
+            unstandardized_coefficients = {}
+            unstandardized_intercept = 0.0
+            
+            if hasattr(model, 'coef_'):
+                # Back-transform coefficients for final results
+                if standardization == 'standard':
+                    for i, var in enumerate(x_variables):
+                        if x_stds[i] != 0:
+                            unstandardized_coef = model.coef_[i] / x_stds[i]
+                        else:
+                            unstandardized_coef = model.coef_[i]
+                        coefficients[f"Beta_{var}"] = float(model.coef_[i])
+                        unstandardized_coefficients[f"Beta_{var}"] = float(unstandardized_coef)
+                    
+                    unstandardized_intercept = y_mean - np.sum(
+                        [unstandardized_coefficients[f"Beta_{var}"] * x_means[i] 
+                         for i, var in enumerate(x_variables)]
+                    )
+                elif standardization == 'minmax':
+                    for i, var in enumerate(x_variables):
+                        x_mins = X_original.min().values
+                        x_ranges = X_original.max().values - x_mins
+                        
+                        if x_ranges[i] != 0:
+                            unstandardized_coef = model.coef_[i] * (1 / x_ranges[i])
+                        else:
+                            unstandardized_coef = model.coef_[i]
+                        coefficients[f"Beta_{var}"] = float(model.coef_[i])
+                        unstandardized_coefficients[f"Beta_{var}"] = float(unstandardized_coef)
+                    
+                    unstandardized_intercept = model.intercept_ - np.sum(
+                        [unstandardized_coefficients[f"Beta_{var}"] * x_mins[i] 
+                         for i, var in enumerate(x_variables)]
+                    )
+                else:
+                    for i, var in enumerate(x_variables):
+                        coefficients[f"Beta_{var}"] = float(model.coef_[i])
+                        unstandardized_coefficients[f"Beta_{var}"] = float(model.coef_[i])
+                    unstandardized_intercept = model.intercept_ if hasattr(model, 'intercept_') else 0.0
+            else:
+                unstandardized_intercept = model.intercept_ if hasattr(model, 'intercept_') else 0.0
+            
+            # Calculate AIC and BIC
+            n_parameters = len(x_variables) + 1
+            n_samples = len(y_train)
+            
+            # Calculate residuals
+            train_residuals = y_train - y_train_pred
+            train_mse = np.mean(train_residuals ** 2)
+            
+            # AIC = 2k - 2ln(L) = 2k + n*ln(MSE)
+            aic = 2 * n_parameters + n_samples * np.log(train_mse)
+            
+            # BIC = k*ln(n) - 2ln(L) = k*ln(n) + n*ln(MSE)
+            bic = n_parameters * np.log(n_samples) + n_samples * np.log(train_mse)
+            
+            # Calculate elasticity statistics
+            elasticity_std = 0.0
+            csf = 0.0
+            mcv = 0.0
+            ppu_at_elasticity = 0.0
+            
+            if overall_elasticity is not None and not np.isnan(overall_elasticity) and overall_elasticity != 0:
+                # Calculate CSF (Consumer Surplus Fraction)
+                csf = 1 - (1 / overall_elasticity)
+                
+                # Get average PPU for MCV calculation
+                ppu_at_elasticity = variable_averages.get(price_column, 0)
+                
+                # Calculate MCV (Marginal Consumer Value)
+                if ppu_at_elasticity > 0:
+                    mcv = csf * ppu_at_elasticity
+            
+            # Store results
+            result = {
                 "model_name": model_name,
-                "mape_train": np.mean(mape_train_scores),
-                "mape_test": np.mean(mape_test_scores),
-                "r2_train": np.mean(r2_train_scores),
-                "r2_test": np.mean(r2_test_scores),
-                "mape_train_std": np.std(mape_train_scores),
-                "mape_test_std": np.std(mape_test_scores),
-                "r2_train_std": np.std(r2_train_scores),
-                "r2_test_std": np.std(r2_test_scores),
+                "mape_train": mape_train,
+                "mape_test": mape_test,
+                "r2_train": r2_train,
+                "r2_test": r2_test,
+                "mape_train_std": 0.0,  # No std for single train/test split
+                "mape_test_std": 0.0,   # No std for single train/test split
+                "r2_train_std": 0.0,    # No std for single train/test split
+                "r2_test_std": 0.0,     # No std for single train/test split
                 "coefficients": unstandardized_coefficients,
                 "standardized_coefficients": coefficients,
                 "intercept": float(unstandardized_intercept),
-                "fold_results": fold_results,
+                "fold_results": [],  # Empty for train/test split
                 "aic": aic,
                 "bic": bic,
                 "n_parameters": n_parameters,
@@ -810,8 +861,27 @@ async def train_models_for_combination_enhanced(
                 "elasticity_calculated": calculate_elasticity,
                 "csf": csf,
                 "mcv": mcv,
-                "ppu_at_elasticity": ppu_at_elasticity
-            })
+                "ppu_at_elasticity": ppu_at_elasticity,
+                "train_size": len(y_train),
+                "test_size": len(y_test)
+            }
+            
+            # Add best parameters for CV models
+            if hasattr(model, 'alpha_'):
+                result["best_alpha"] = float(model.alpha_)
+            if hasattr(model, 'best_score_'):
+                result["best_cv_score"] = float(model.best_score_)
+            if hasattr(model, 'l1_ratio_'):
+                result["best_l1_ratio"] = float(model.l1_ratio_)
+            
+            # Add best parameters from stored values (for Custom Constrained Ridge with auto-tuning)
+            if model_name in best_parameters:
+                if 'best_alpha' in best_parameters[model_name]:
+                    result["best_alpha"] = float(best_parameters[model_name]['best_alpha'])
+                if 'best_cv_score' in best_parameters[model_name]:
+                    result["best_cv_score"] = float(best_parameters[model_name]['best_cv_score'])
+            
+            results.append(result)
         
         return results, {"variable_statistics": list(variable_stats.values()), "variable_averages": variable_averages}
         
@@ -833,7 +903,7 @@ async def save_model_results_enhanced(
     y_variable: str,
     price_column: Optional[str],  # ADD THIS PARAMETER
     standardization: str,
-    k_folds: int,
+    test_size: float,
     run_id: str,
     variable_data: Dict[str, Any]
 ) -> List[str]:
@@ -862,7 +932,7 @@ async def save_model_results_enhanced(
                 "x_variables": [f"{var}_{standardization}" for var in x_variables] if standardization != 'none' else x_variables,
                 "y_variable": y_variable,
                 "standardization": standardization,
-                "k_folds": k_folds,
+                "test_size": test_size,
                 
                 # Model performance (aggregated)
                 "mape_train": model_result["mape_train"],

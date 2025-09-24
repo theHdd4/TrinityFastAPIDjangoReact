@@ -41,7 +41,7 @@ async def init_cache(
 
     Steps
     -----
-    1. Check if existing cache is fresh (< 24 hours old)
+    1. Check if existing cache is fresh (< 6 hours old)
     2. Check if source data has actually changed
     3. Only rebuild cache when necessary
     4. Return detailed action taken (reused/extended/refreshed)
@@ -1263,5 +1263,154 @@ async def get_scenario_results_endpoint(
     except Exception as e:
         logger.error(f"Error retrieving scenario results: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve scenario results: {str(e)}")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+#  GET /api/scenario/select-configs/{model_id}
+# ────────────────────────────────────────────────────────────────────────────
+@router.get("/select-configs/{model_id:path}")
+async def get_select_configs_metadata(model_id: str):
+    """
+    Fetch select_configs metadata by model_id.
+    
+    Args:
+        model_id: The model _id to fetch metadata for
+        
+    Returns:
+        Dictionary containing the select_configs metadata
+    """
+    try:
+        # Handle URL-encoded model_ids
+        if '%' in model_id:
+            decoded_model_id = urllib.parse.unquote(model_id)
+            logger.info("🔧 URL-decoded model_id: %s -> %s", model_id, decoded_model_id)
+        else:
+            decoded_model_id = model_id
+            logger.info("🔧 Using model_id as-is: %s", model_id)
+        
+        # Fetch the select_configs document
+        from ..config import select_models_collection
+        
+        logger.info("🔍 Searching for model_id: %s in select_configs collection", decoded_model_id)
+        logger.info("🔍 Collection name: %s", select_models_collection.name)
+        
+        # First, let's check if the collection exists and has any documents
+        collection_count = await select_models_collection.count_documents({})
+        logger.info("📊 Total documents in select_configs collection: %d", collection_count)
+        
+        # List a few sample document IDs to help debug
+        sample_docs = await select_models_collection.find({}, {"_id": 1}).limit(5).to_list(length=5)
+        logger.info("📋 Sample document IDs in select_configs: %s", [doc["_id"] for doc in sample_docs])
+        
+        document = await select_models_collection.find_one({"_id": decoded_model_id})
+        
+        if not document:
+            logger.warning("❌ No select_configs found for model_id: %s", decoded_model_id)
+            
+            # Try to find similar documents
+            similar_docs = await select_models_collection.find(
+                {"_id": {"$regex": decoded_model_id.split("/")[-1]}}, 
+                {"_id": 1}
+            ).limit(3).to_list(length=3)
+            
+            if similar_docs:
+                logger.info("🔍 Found similar document IDs: %s", [doc["_id"] for doc in similar_docs])
+            
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No select_configs metadata found for model_id: {decoded_model_id}"
+            )
+        
+        # Convert ObjectId to string if present
+        if "_id" in document and hasattr(document["_id"], '__str__'):
+            document["_id"] = str(document["_id"])
+        
+        # Convert datetime objects to ISO strings
+        for key, value in document.items():
+            if hasattr(value, 'isoformat'):  # datetime objects
+                document[key] = value.isoformat()
+        
+        logger.info("✅ Successfully retrieved select_configs for model_id: %s", decoded_model_id)
+        
+        return {
+            "status": "success",
+            "model_id": decoded_model_id,
+            "data": document,
+            "collection": "select_configs"
+        }
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving select_configs metadata: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to retrieve select_configs metadata: {str(e)}"
+        )
+
+
+# ────────────────────────────────────────────────────────────────────────────
+#  GET /api/scenario/test-route
+# ────────────────────────────────────────────────────────────────────────────
+@router.get("/test-route")
+async def test_route():
+    """
+    Test endpoint to verify the scenario router is working.
+    """
+    return {
+        "status": "success",
+        "message": "Scenario router is working",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+# ────────────────────────────────────────────────────────────────────────────
+#  GET /api/scenario/test-path/{test_id:path}
+# ────────────────────────────────────────────────────────────────────────────
+@router.get("/test-path/{test_id:path}")
+async def test_path_parameter(test_id: str):
+    """
+    Test endpoint to verify path parameters with slashes work.
+    """
+    logger.info("🔍 Test path parameter received: %s", test_id)
+    return {
+        "status": "success",
+        "test_id": test_id,
+        "message": "Path parameter with slashes is working",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+# ────────────────────────────────────────────────────────────────────────────
+#  GET /api/scenario/list-models
+# ────────────────────────────────────────────────────────────────────────────
+@router.get("/list-models")
+async def list_available_models():
+    """
+    List all available model IDs in the select_configs collection.
+    """
+    try:
+        from ..config import select_models_collection
+        
+        # Get all document IDs
+        documents = await select_models_collection.find({}, {"_id": 1}).to_list(length=None)
+        model_ids = [doc["_id"] for doc in documents]
+        
+        logger.info("📋 Found %d models in select_configs collection", len(model_ids))
+        
+        return {
+            "status": "success",
+            "count": len(model_ids),
+            "model_ids": model_ids,
+            "collection": "select_configs"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error listing models: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to list models: {str(e)}"
+        )
 
     
