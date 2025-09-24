@@ -3,9 +3,13 @@ const hostIp = import.meta.env.VITE_HOST_IP;
 // Django/FASTAPI are published on 8003/8004/8005 respectively. Detect this
 // scenario using the current browser port so the correct defaults are used when
 // no explicit environment variables are provided.
+// Also detect development environment by hostname, port, or environment variable
 const isDevStack =
   (typeof window !== 'undefined' && window.location.port === '8081') ||
-  import.meta.env.VITE_FRONTEND_PORT === '8081';
+  import.meta.env.VITE_FRONTEND_PORT === '8081' ||
+  (typeof window !== 'undefined' && window.location.hostname === '172.19.128.1') ||
+  (typeof window !== 'undefined' && window.location.port === '8080') ||
+  import.meta.env.VITE_ENVIRONMENT === 'development';
 
 const djangoPort =
   import.meta.env.VITE_DJANGO_PORT || (isDevStack ? '8003' : '8000');
@@ -45,6 +49,17 @@ const djangoPrefix = usesProxy ? '/admin/api' : '/api';
 
 // Set `VITE_BACKEND_ORIGIN` if the APIs live on a different domain.
 
+console.log('🔧 API Configuration Debug:', {
+  hostIp,
+  isDevStack,
+  djangoPort,
+  fastapiPort,
+  aiPort,
+  frontendPort,
+  backendOrigin,
+  windowLocation: typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port}` : 'server-side',
+  buildModelApi: `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-model-feature-based`
+});
 console.log('Using backend origin', backendOrigin);
 
 const normalizeUrl = (url?: string) => {
@@ -104,6 +119,7 @@ export const CREATECOLUMN_API =
   import.meta.env.VITE_CREATECOLUMN_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/create-column`;
 
 
+
 export const GROUPBY_API =
   import.meta.env.VITE_GROUPBY_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/groupby`;
 
@@ -118,6 +134,10 @@ export const TRINITY_AI_API = normalizedAiBase.endsWith('/trinityai')
   ? normalizedAiBase
   : `${normalizedAiBase}/trinityai`;
 
+
+export const INSIGHT_API = `${TRINITY_AI_API}/insights`;
+
+
 export const LAB_ACTIONS_API = `${REGISTRY_API}/laboratory-actions`;
 
 export const CLASSIFIER_API =
@@ -131,21 +151,17 @@ export const CLUSTERING_API =
   normalizeUrl(import.meta.env.VITE_CLUSTERING_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/clustering`;
 
-export const CORRELATION_API =
-  normalizeUrl(import.meta.env.VITE_CORRELATION_API) ||
-  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/correlation`;
 export const CHART_MAKER_API =
   normalizeUrl(import.meta.env.VITE_CHART_MAKER_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/chart-maker`;
-
-export const EXPLORE_API =
-  normalizeUrl(import.meta.env.VITE_EXPLORE_API) ||
-  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/explore`;
 
 export const BUILD_MODEL_API =
   normalizeUrl(import.meta.env.VITE_BUILD_MODEL_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-model-feature-based`;
 
+export const AUTO_REGRESSIVE_API =
+  normalizeUrl(import.meta.env.VITE_AUTO_REGRESSIVE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-autoregressive`;
 export const SCENARIO_PLANNER_API =
   normalizeUrl(import.meta.env.VITE_SCENARIO_PLANNER_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/scenario`;
@@ -165,6 +181,113 @@ export const SELECT_API =
   normalizeUrl(import.meta.env.VITE_SELECT_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/select`;
 
+export const CORRELATION_API =
+  normalizeUrl(import.meta.env.VITE_CORRELATION_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/correlation`;
+
+export const EXPLORE_API =
+  normalizeUrl(import.meta.env.VITE_EXPLORE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/explore`;
+
 export const EVALUATE_API =
   normalizeUrl(import.meta.env.VITE_EVALUATE_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/evaluate`;
+
+// Growth Rates API functions
+export const calculateFiscalGrowth = async (params: {
+  scope: string;
+  combination: string;
+  forecast_horizon: number;
+  fiscal_start_month?: number;
+  frequency?: string;
+  start_year?: number;
+  run_id?: string;  // Add run_id parameter
+}) => {
+  const formData = new FormData();
+  formData.append('scope', params.scope);
+  formData.append('combination', params.combination);
+  formData.append('forecast_horizon', params.forecast_horizon.toString());
+  formData.append('fiscal_start_month', (params.fiscal_start_month || 1).toString());
+  formData.append('frequency', params.frequency || 'M');
+  formData.append('start_year', (params.start_year || 2017).toString());
+  
+  // Add run_id if provided
+  if (params.run_id) {
+    formData.append('run_id', params.run_id);
+  }
+
+  const response = await fetch(`${AUTO_REGRESSIVE_API}/calculate-fiscal-growth`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  return response.json();
+};
+
+export const calculateHalfYearlyGrowth = async (params: {
+  scope: string;
+  combination: string;
+  forecast_horizon: number;
+  fiscal_start_month?: number;
+  frequency?: string;
+  run_id?: string;  // Add run_id parameter
+}) => {
+  const formData = new FormData();
+  formData.append('scope', params.scope);
+  formData.append('combination', params.combination);
+  formData.append('forecast_horizon', params.forecast_horizon.toString());
+  formData.append('fiscal_start_month', (params.fiscal_start_month || 1).toString());
+  formData.append('frequency', params.frequency || 'M');
+  
+  // Add run_id if provided
+  if (params.run_id) {
+    formData.append('run_id', params.run_id);
+  }
+
+  const response = await fetch(`${AUTO_REGRESSIVE_API}/calculate-halfyearly-growth`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  return response.json();
+};
+
+export const calculateQuarterlyGrowth = async (params: {
+  scope: string;
+  combination: string;
+  forecast_horizon: number;
+  fiscal_start_month?: number;
+  frequency?: string;
+  run_id?: string;  // Add run_id parameter
+}) => {
+  const formData = new FormData();
+  formData.append('scope', params.scope);
+  formData.append('combination', params.combination);
+  formData.append('forecast_horizon', params.forecast_horizon.toString());
+  formData.append('fiscal_start_month', (params.fiscal_start_month || 1).toString());
+  formData.append('frequency', params.frequency || 'M');
+  
+  // Add run_id if provided
+  if (params.run_id) {
+    formData.append('run_id', params.run_id);
+  }
+
+  const response = await fetch(`${AUTO_REGRESSIVE_API}/calculate-quarterly-growth`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  return response.json();
+};

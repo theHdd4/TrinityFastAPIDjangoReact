@@ -2,18 +2,20 @@ from minio import Minio
 from minio.error import S3Error
 import os
 from fastapi import APIRouter, Form, HTTPException
-from urllib.parse import unquote
+from urllib.parse import unquote, quote
 from fastapi.responses import JSONResponse, Response
 import pandas as pd
 import io
 import json
 import pyarrow as pa
 import pyarrow.ipc as ipc
+import polars as pl
 from datetime import date, datetime
-from typing import List
+from typing import Any, List
 from fastapi import Depends
 from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorCollection
+from functools import reduce
 from .deps import (
     get_unique_dataframe_results_collection,
     get_summary_results_collection,
@@ -100,6 +102,40 @@ ensure_minio_bucket()
 router = APIRouter()
 
 
+def _redis_get_bytes(key: str) -> bytes | None:
+    """Fetch binary content from Redis without triggering UTF-8 decoding."""
+
+    try:
+        value = redis_client.get(key)
+    except Exception as exc:
+        print(f"⚠️ redis binary get error for {key}: {exc}")
+        return None
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    if isinstance(value, memoryview):
+        return value.tobytes()
+    return str(value).encode("utf-8")
+
+
+def _redis_set_bytes(key: str, value: bytes | bytearray | str, ttl: int = 3600) -> None:
+    """Store binary content in Redis with a TTL, tolerating failures."""
+
+    try:
+        if isinstance(value, (bytes, bytearray)):
+            data = bytes(value)
+        elif isinstance(value, memoryview):
+            data = value.tobytes()
+        elif isinstance(value, str):
+            data = value.encode("utf-8")
+        else:
+            data = str(value).encode("utf-8")
+        redis_client.setex(key, ttl, data)
+    except Exception as exc:
+        print(f"⚠️ redis binary set error for {key}: {exc}")
+
+
 @router.get("/column_summary")
 async def column_summary(object_name: str):
     """Return column summary statistics for a saved dataframe."""
@@ -146,15 +182,36 @@ async def column_summary(object_name: str):
         if df is None:
             if not object_name.endswith(".arrow"):
                 raise ValueError("Unsupported file format")
-            content = redis_client.get(object_name)
+            content = _redis_get_bytes(object_name)
             if content is None:
                 response = minio_client.get_object(MINIO_BUCKET, object_name)
                 content = response.read()
-                redis_client.setex(object_name, 3600, content)
+                _redis_set_bytes(object_name, content)
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
 
-        df.columns = df.columns.str.lower()
+        def _safe_lower(name: Any) -> str:
+            """Return a lower-cased column name while tolerating bytes values.
+
+            Some legacy Arrow exports stored the column name metadata as raw
+            bytes.  Pandas' ``Index.str`` helpers always assume UTF-8 encoded
+            text and would therefore raise ``UnicodeDecodeError`` when
+            encountering these byte strings (for example ones beginning with
+            ``0xff``).  Converting eagerly to ``str`` with a best-effort decode
+            avoids the crash while preserving the original column label as
+            faithfully as possible.
+            """
+
+            if isinstance(name, bytes):
+                try:
+                    name = name.decode("utf-8")
+                except UnicodeDecodeError:
+                    name = name.decode("latin1", errors="replace")
+            else:
+                name = str(name)
+            return name.lower()
+
+        df.columns = [_safe_lower(col) for col in df.columns]
         summary = []
         for col in df.columns:
             column_series = df[col].dropna()
@@ -224,11 +281,11 @@ async def cached_dataframe(object_name: str):
         except Exception as exc:
             print(f"⚠️ flight dataframe error for {object_name}: {exc}")
 
-        content = redis_client.get(object_name)
+        content = _redis_get_bytes(object_name)
         if content is None:
             response = minio_client.get_object(MINIO_BUCKET, object_name)
             content = response.read()
-            redis_client.setex(object_name, 3600, content)
+            _redis_set_bytes(object_name, content)
 
         if object_name.endswith(".arrow"):
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
@@ -294,6 +351,7 @@ class DimensionMappingRequest(BaseModel):
     client_name: str
     app_name: str
     project_name: str
+    object_name: str | None = None
 
 
 @router.post("/dimension_mapping")
@@ -311,14 +369,25 @@ async def dimension_mapping(req: DimensionMappingRequest):
     client = req.client_name
     app = req.app_name
     project = req.project_name
+    object_name = req.object_name or ""
 
     env_key = f"env:{client}:{app}:{project}"
-    cached_env = redis_client.get(env_key)
+    cached_env = None
+    file_env_key = None
+    if object_name:
+        safe_file = quote(object_name, safe="")
+        file_env_key = f"{env_key}:file:{safe_file}"
+        cached_env = redis_client.get(file_env_key)
+    if cached_env is None:
+        cached_env = redis_client.get(env_key)
     if cached_env:
         print("✅ found env in redis")
         try:
             env = json.loads(cached_env)
-            dims = env.get("dimensions")
+            if object_name and env.get("file_name") and env["file_name"] != object_name:
+                dims = None
+            else:
+                dims = env.get("dimensions")
             if isinstance(dims, dict):
                 return {"mapping": dims, "source": "env"}
         except Exception as exc:  # pragma: no cover
@@ -326,16 +395,127 @@ async def dimension_mapping(req: DimensionMappingRequest):
     else:
         print("🔍 env not in redis")
 
-    mongo_cfg = get_classifier_config_from_mongo(client, app, project)
+    mongo_cfg = get_classifier_config_from_mongo(
+        client,
+        app,
+        project,
+        object_name or None,
+    )
     if mongo_cfg and mongo_cfg.get("dimensions"):
         print("📦 loaded mapping from MongoDB")
         try:
             redis_client.setex(env_key, 3600, json.dumps(mongo_cfg, default=str))
+            if file_env_key:
+                redis_client.setex(file_env_key, 3600, json.dumps(mongo_cfg, default=str))
         except Exception:
             pass
         return {"mapping": mongo_cfg["dimensions"], "config": mongo_cfg}
 
     raise HTTPException(status_code=404, detail="Mapping not found")
+
+
+def _load_polars_frame(object_name: str, flight_path: str | None = None) -> pl.DataFrame:
+    """Load a dataframe for feature overview analysis as a Polars frame."""
+
+    if flight_path:
+        try:
+            pandas_df = download_dataframe(flight_path)
+            if pandas_df is not None:
+                return pl.from_pandas(pandas_df)
+        except Exception as exc:
+            print(f"⚠️ polars load via flight failed for {flight_path}: {exc}")
+
+    if not object_name.endswith(".arrow"):
+        raise ValueError("Unsupported file format")
+
+    content = _redis_get_bytes(object_name)
+    if content is None:
+        response = minio_client.get_object(MINIO_BUCKET, object_name)
+        content = response.read()
+        _redis_set_bytes(object_name, content)
+
+    try:
+        return pl.read_ipc(io.BytesIO(content))
+    except Exception as exc:
+        print(f"⚠️ polars read_ipc failed for {object_name}: {exc}")
+        reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+        table = reader.read_all()
+        pandas_df = table.to_pandas()
+        return pl.from_pandas(pandas_df)
+
+
+def _lowercase_columns(df: pl.DataFrame) -> pl.DataFrame:
+    """Return a dataframe with normalized lowercase column names."""
+
+    rename_map: dict[str, str] = {}
+    seen: dict[str, int] = {}
+    for original in df.columns:
+        lowered = str(original).strip().lower()
+        if not lowered:
+            lowered = "column"
+        index = seen.get(lowered, 0)
+        seen[lowered] = index + 1
+        if index:
+            lowered = f"{lowered}_{index}"
+        rename_map[original] = lowered
+
+    return df.rename(rename_map) if rename_map else df
+
+
+def _parse_datetime_column(frame: pl.DataFrame, column: str) -> pl.DataFrame:
+    """Ensure the provided column is represented as a Polars Datetime column."""
+
+    dtype = frame.schema.get(column)
+    if dtype in (pl.Date, pl.Datetime):
+        return frame.with_columns(pl.col(column).cast(pl.Datetime).alias(column))
+
+    return frame.with_columns(
+        pl.col(column)
+        .cast(pl.Utf8, strict=False)
+        .str.strptime(pl.Datetime, strict=False, exact=False)
+        .alias(column)
+    )
+
+
+def _prepare_timeseries(
+    frame: pl.DataFrame, x_col: str, y_col: str
+) -> tuple[list[dict[str, float]], dict[str, float]]:
+    """Convert a filtered dataframe into timeseries points and summary stats."""
+
+    if frame.is_empty():
+        return [], {"avg": 0.0, "min": 0.0, "max": 0.0}
+
+    stats_row = (
+        frame.select(
+            [
+                pl.col(y_col).mean().alias("avg"),
+                pl.col(y_col).min().alias("min"),
+                pl.col(y_col).max().alias("max"),
+            ]
+        )
+        .to_dicts()[0]
+    )
+
+    summary = {k: float(stats_row.get(k, 0.0) or 0.0) for k in ("avg", "min", "max")}
+
+    series = []
+    for row in frame.iter_rows(named=True):
+        dt_value = row.get(x_col)
+        y_value = row.get(y_col)
+        if dt_value is None or y_value is None:
+            continue
+        if isinstance(dt_value, datetime):
+            ts = dt_value.date().isoformat()
+        elif isinstance(dt_value, date):
+            ts = dt_value.isoformat()
+        else:
+            ts = str(dt_value)
+        try:
+            series.append({"date": ts, "value": float(y_value)})
+        except Exception:
+            continue
+
+    return series, summary
 
 
 @router.get("/sku_stats")
@@ -377,56 +557,50 @@ async def sku_stats(
                 file_key, flight_path, original_csv = info
                 set_ticket(file_key, object_name, flight_path, original_csv)
                 print(f"🗄 restored ticket for {object_name}: {flight_path}")
-        df = None
         if flight_path:
             print(f"📡 trying flight download {flight_path}")
-            try:
-                df = download_dataframe(flight_path)
-            except Exception as e:
-                print(f"⚠️ sku_stats flight download failed for {object_name}: {e}")
-        if df is None:
-            if not object_name.endswith(".arrow"):
-                raise ValueError("Unsupported file format")
-            content = redis_client.get(object_name)
-            if content is None:
-                response = minio_client.get_object(MINIO_BUCKET, object_name)
-                content = response.read()
-                redis_client.setex(object_name, 3600, content)
 
-            reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
-            df = reader.read_all().to_pandas()
+        frame = _load_polars_frame(object_name, flight_path)
+        frame = _lowercase_columns(frame)
 
-        df.columns = df.columns.str.lower()
         y_col = y_column.lower()
-        if y_col not in df.columns:
+        if y_col not in frame.columns:
             raise ValueError("y_column not found")
 
         x_col = x_column.lower()
-        if x_col not in df.columns:
-            date_cols = [c for c in df.columns if "date" in c or "time" in c]
+        if x_col not in frame.columns:
+            date_cols = [c for c in frame.columns if "date" in c or "time" in c]
             if not date_cols:
                 raise ValueError("no date column found")
             x_col = date_cols[0]
 
-        mask = pd.Series(True, index=df.index)
-        for k, v in combo.items():
-            col = k.lower()
-            if col in df.columns:
-                mask &= df[col] == v
+        filter_exprs = []
+        for raw_key, raw_value in combo.items():
+            col = raw_key.lower()
+            if col not in frame.columns:
+                continue
+            frame = frame.with_columns(
+                pl.col(col).cast(pl.Utf8, strict=False).alias(col)
+            )
+            if isinstance(raw_value, list):
+                values = ["" if v is None else str(v) for v in raw_value]
+                filter_exprs.append(pl.col(col).is_in(values))
+            else:
+                value = "" if raw_value is None else str(raw_value)
+                filter_exprs.append(pl.col(col) == value)
 
-        sub = df.loc[mask, [x_col, y_col]].dropna()
-        sub[x_col] = pd.to_datetime(sub[x_col], errors="coerce")
-        sub = sub.dropna(subset=[x_col]).sort_values(x_col)
+        if filter_exprs:
+            condition = reduce(lambda acc, expr: acc & expr, filter_exprs[1:], filter_exprs[0])
+            frame = frame.filter(condition)
 
-        series = [
-            {"date": str(d.date() if hasattr(d, "date") else d), "value": float(val)}
-            for d, val in zip(sub[x_col], sub[y_col])
-        ]
-        summary = {
-            "avg": float(sub[y_col].mean()) if not sub.empty else 0,
-            "min": float(sub[y_col].min()) if not sub.empty else 0,
-            "max": float(sub[y_col].max()) if not sub.empty else 0,
-        }
+        subset = frame.select([x_col, y_col])
+        subset = subset.with_columns(
+            pl.col(y_col).cast(pl.Float64, strict=False).alias(y_col)
+        )
+        subset = _parse_datetime_column(subset, x_col)
+        subset = subset.drop_nulls([x_col, y_col]).sort(x_col)
+
+        series, summary = _prepare_timeseries(subset, x_col, y_col)
         return {"timeseries": series, "summary": summary}
     except S3Error as e:
         error_code = getattr(e, "code", "")

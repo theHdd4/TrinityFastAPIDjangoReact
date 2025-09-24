@@ -5,11 +5,17 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
 import logging
 
+from app.core.mongo import build_host_mongo_uri
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
 # Use the same MongoDB URI as other features for consistency
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin")
+DEFAULT_MONGO_URI = build_host_mongo_uri()
+MONGO_URI = os.getenv(
+    "SCENARIO_PLANNER_MONGO_URI",
+    os.getenv("MONGO_URI", DEFAULT_MONGO_URI)
+)
 MONGO_DB = os.getenv("MONGO_DB", "trinity_prod")
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[MONGO_DB]

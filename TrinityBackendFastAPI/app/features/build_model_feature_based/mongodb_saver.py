@@ -5,11 +5,14 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
 import logging
 
+from app.core.mongo import build_host_mongo_uri
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin")
-MONGO_DB = os.getenv("MONGO_DB", "trinity_prod")
+DEFAULT_MONGO_URI = build_host_mongo_uri()
+MONGO_URI = os.getenv("MONGO_URI", DEFAULT_MONGO_URI)
+MONGO_DB = os.getenv("MONGO_DB", "trinity_db")
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[MONGO_DB]
 
@@ -110,7 +113,7 @@ async def get_scope_config_from_mongo(client_name: str, app_name: str, project_n
     """Retrieve saved scope configuration from scopeselector_configs collection."""
     try:
         document_id = f"{client_name}/{app_name}/{project_name}"
-        result = await client["trinity_prod"]["scopeselector_configs"].find_one({"_id": document_id})
+        result = await client["trinity_db"]["scopeselector_configs"].find_one({"_id": document_id})
         return result
     except Exception as e:
         logger.error(f"❌ MongoDB read error for scopeselector_configs: {e}")

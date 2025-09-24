@@ -55,5 +55,20 @@ Body: `{ "df_id": "<id>", "operations": [ {"op": "filter_rows", "params": {"colu
 ### POST `/save`
 Existing endpoint for persisting data to MinIO.
 
+**Body**
+
+```json
+{
+  "df_id": "optional session identifier",
+  "filename": "optional override for the saved Arrow file name",
+  "csv_data": "CSV fallback used when no in-memory session is available"
+}
+```
+
+When `df_id` is supplied the API reads directly from the active in-memory
+session, which captures all of the latest dataframe operations without having
+to reparse CSV payloads from the browser. If the session has expired, provide
+`csv_data` so the dataframe can still be saved.
+
 ## Frontend Integration
 The frontend calls these APIs via `DATAFRAME_OPERATIONS_API` defined in `src/lib/api.ts`. Actions like editing cells, adding rows, or sorting send requests to the corresponding endpoints and refresh the table with returned data.

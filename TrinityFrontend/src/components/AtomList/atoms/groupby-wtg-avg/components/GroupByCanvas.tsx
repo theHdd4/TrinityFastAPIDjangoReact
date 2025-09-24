@@ -64,8 +64,12 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const hasWeightedMean = selectedMeasures.some((m: any) => m.aggregator === 'Weighted Mean');
 
   // Total rows (before slicing) and Save DataFrame states
-  const [totalRows, setTotalRows] = useState(0);
-  const [allResults, setAllResults] = useState<Record<string, any>[]>([]);
+  const [totalRows, setTotalRows] = useState(() => {
+    return settings.groupbyResults?.unsaved_data?.length || 0;
+  });
+  const [allResults, setAllResults] = useState<Record<string, any>[]>(() => {
+    return settings.groupbyResults?.unsaved_data || [];
+  });
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -185,6 +189,13 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     )
   ).map((c: any) => c.column);
 
+  // Debug: Log numeric columns for Weight By dropdown
+  console.log('🔍 Debug - Weight By numericColumns:', {
+    allColumns: settings.allColumns?.length || 0,
+    numericColumns: numericColumns,
+    hasWeightedMean: hasWeightedMean
+  });
+
   // Fetch cardinality data on mount
   React.useEffect(() => {
     fetchCardinalityData();
@@ -215,10 +226,29 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     ? settings.selectedMeasureNames 
     : fallbackMeasures;
 
-  const [results, setResults] = useState<any[]>([]);
-  const [resultsHeaders, setResultsHeaders] = useState<string[]>([]);
+  // Initialize results from global store
+  const [results, setResults] = useState<any[]>(() => {
+    return settings.groupbyResults?.unsaved_data || [];
+  });
+  const [resultsHeaders, setResultsHeaders] = useState<string[]>(() => {
+    return settings.groupbyResults?.unsaved_data?.length > 0 
+      ? Object.keys(settings.groupbyResults.unsaved_data[0] || {})
+      : [];
+  });
   const [resultsLoading, setResultsLoading] = useState(false);
   const [resultsError, setResultsError] = useState<string | null>(null);
+
+  // Sync with global store changes
+  React.useEffect(() => {
+    if (settings.groupbyResults?.unsaved_data) {
+      setResults(settings.groupbyResults.unsaved_data);
+      setAllResults(settings.groupbyResults.unsaved_data);
+      setTotalRows(settings.groupbyResults.unsaved_data.length);
+      if (settings.groupbyResults.unsaved_data.length > 0) {
+        setResultsHeaders(Object.keys(settings.groupbyResults.unsaved_data[0] || {}));
+      }
+    }
+  }, [settings.groupbyResults?.unsaved_data]);
 
   // Cardinality View state
   const [cardinalityData, setCardinalityData] = useState<any[]>([]);
@@ -495,13 +525,14 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           
           setResultsHeaders(headers);
           
-          // Persist result metadata
+          // Persist result metadata and data
           updateSettings(atomId, {
             groupbyResults: {
               result_file: data.result_file,
               result_shape: [allRows.length, headers.length],
               row_count: data.row_count,
-              columns: data.columns
+              columns: data.columns,
+              unsaved_data: allRows
             },
           });
           
@@ -543,7 +574,8 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                     result_file: data.result_file,
                     result_shape: [rows.length, headers.length],
                     row_count: data.row_count,
-                    columns: data.columns
+                    columns: data.columns,
+                    unsaved_data: rows
                   },
                 });
                 
@@ -753,6 +785,38 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     );
   };
 
+  // Show placeholder when no data source is selected
+  if (!settings.dataSource) {
+    return (
+      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-green-50/30 to-green-50/50 overflow-y-auto relative">
+        <div className="absolute inset-0 opacity-20">
+          <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
+            <defs>
+              <pattern id="emptyGrid" width="80" height="80" patternUnits="userSpaceOnUse">
+                <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(148 163 184 / 0.15)" strokeWidth="1"/>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#emptyGrid)" />
+          </svg>
+        </div>
+
+        <div className="relative z-10 flex items-center justify-center h-full">
+          <div className="text-center max-w-md">
+            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+              <BarChart className="w-12 h-12 text-white drop-shadow-lg" />
+            </div>
+            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-green-500 to-green-600 bg-clip-text text-transparent">
+              GroupBy Operation
+            </h3>
+            <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
+              Select a data source from the properties panel to get started
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-6 h-full overflow-auto bg-gradient-to-br from-slate-50 to-slate-100">
       {/* Cardinality View */}
@@ -761,8 +825,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
       ) : cardinalityError ? (
         <div className="p-4 text-red-600">{cardinalityError}</div>
       ) : cardinalityData && cardinalityData.length > 0 ? (
-        <div className="mx-auto max-w-screen-2xl">
-          <Table
+        <Table
             headers={[
               <ContextMenu key="Column">
                 <ContextMenuTrigger asChild>
@@ -951,7 +1014,6 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
               </tr>
             ))}
           </Table>
-        </div>
       ) : null}
       
       {/* Group By Section */}
@@ -1044,9 +1106,13 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                         <SelectValue placeholder="Select weight column" />
                       </SelectTrigger>
                       <SelectContent>
-                        {numericColumns.map((col: string) => (
-                          <SelectItem key={col} value={col}>{col}</SelectItem>
-                        ))}
+                        {numericColumns.length > 0 ? (
+                          numericColumns.map((col: string) => (
+                            <SelectItem key={col} value={col}>{col}</SelectItem>
+                          ))
+                        ) : (
+                          <div className="p-2 text-sm text-gray-500">No numeric columns available</div>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>

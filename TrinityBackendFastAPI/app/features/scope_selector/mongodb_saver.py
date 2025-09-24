@@ -5,12 +5,18 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
 import logging
 
+from app.core.mongo import build_host_mongo_uri
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
 # Use the same MongoDB URI as column classifier for consistency
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin")
-MONGO_DB = os.getenv("MONGO_DB", "trinity_prod")  # Use trinity_prod database like column classifier
+DEFAULT_MONGO_URI = build_host_mongo_uri()
+MONGO_URI = os.getenv(
+    "SCOPE_SELECTOR_MONGO_URI",
+    os.getenv("MONGO_URI", DEFAULT_MONGO_URI)
+)
+MONGO_DB = os.getenv("MONGO_DB", "trinity_db")  # Use trinity_db database like column classifier
 client = AsyncIOMotorClient(MONGO_URI)
 db = client[MONGO_DB]
 
@@ -34,7 +40,7 @@ async def save_scope_config(
             file_key = scope_data.get("file_key", "")
             if file_key:
                 # Search in createandtransform_configs collection for files with matching saved_file
-                createandtransform_collection = client["trinity_prod"]["createandtransform_configs"]
+                createandtransform_collection = client["trinity_db"]["createandtransform_configs"]
                 createandtransform_docs = await createandtransform_collection.find({
                     "files": {
                         "$elemMatch": {
@@ -85,7 +91,7 @@ async def save_scope_config(
             **scope_data,
         }
         
-        # Save to scopeselector_configs collection in trinity_prod database (same as column classifier)
+        # Save to scopeselector_configs collection in trinity_db database (same as column classifier)
         result = await db["scopeselector_configs"].replace_one(
             {"_id": document_id},
             document,
@@ -124,10 +130,10 @@ async def test_mongodb_connection():
         databases = await client.list_database_names()
         logger.info(f"🔍 DEBUG: Available databases: {databases}")
         
-        # Test access to trinity_prod database
-        if "trinity_prod" in databases:
+        # Test access to trinity_db database
+        if "trinity_db" in databases:
             collections = await db.list_collection_names()
-            logger.info(f"🔍 DEBUG: Collections in trinity_prod: {collections}")
+            logger.info(f"🔍 DEBUG: Collections in trinity_db: {collections}")
             
             # Test write access by inserting a test document
             test_doc = {"_id": "test_connection", "timestamp": datetime.utcnow()}
@@ -151,7 +157,7 @@ async def test_mongodb_connection():
         else:
             return {
                 "status": "error",
-                "message": "trinity_prod database not found",
+                "message": "trinity_db database not found",
                 "databases": databases
             }
             

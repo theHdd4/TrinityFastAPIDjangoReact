@@ -9,6 +9,7 @@ import { Separator } from '@/components/ui/separator';
 // Removed Badge and icon imports to avoid type issues
 import { EvaluateModelsFeatureData, type EvaluateModelsFeatureSettings } from '../EvaluateModelsFeatureAtom';
 import { VALIDATE_API, EVALUATE_API, SELECT_API } from '@/lib/api';
+import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
 
 interface EvaluateModelsFeatureSettingsProps {
   data: EvaluateModelsFeatureData;
@@ -26,12 +27,31 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
   onDataUpload
 }) => {
   const [frames, setFrames] = useState<{ object_name: string; csv_name?: string }[]>([]);
-  const [localGraphs, setLocalGraphs] = useState(data.graphs || []);
+
+  const hasExistingUpdates = Boolean(
+    (Array.isArray(data.modelResults) && data.modelResults.length > 0) ||
+    (Array.isArray(data.performanceData) && data.performanceData.length > 0) ||
+    (Array.isArray(data.yoyData) && data.yoyData.length > 0) ||
+    (Array.isArray(data.weightedEnsembleData) && data.weightedEnsembleData.length > 0) ||
+    (Array.isArray(data.elasticityData) && data.elasticityData.length > 0)
+  );
+
+  const applyDatasetChange = (value: string) => {
+    onDataChange({
+      selectedDataframe: value,
+      selectedCombinations: []
+    });
+  };
+
+  const { requestChange: confirmDatasetChange, dialog } = useDataSourceChangeWarning(async value => {
+    applyDatasetChange(value);
+  });
+
+  const handleDatasetChange = (value: string) => {
+    const isDifferentSource = value !== (data.selectedDataframe || '');
+    confirmDatasetChange(value, hasExistingUpdates && isDifferentSource);
+  };
   
-  // Update local state when data.graphs changes
-  React.useEffect(() => {
-    setLocalGraphs(data.graphs || []);
-  }, [data.graphs]);
 
   useEffect(() => {
     let query = '';
@@ -172,57 +192,32 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
     onDataChange({ identifiers: updatedIdentifiers });
   };
 
-  const handleGraphToggle = (graphId: string, checked: boolean) => {
-    console.log('🔧 Settings: handleGraphToggle called with:', { graphId, checked });
-    console.log('🔧 Settings: Current localGraphs:', localGraphs);
-    
-    const updatedGraphs = localGraphs.map(graph =>
-      graph.id === graphId ? { ...graph, selected: checked } : graph
-    );
-    
-    console.log('🔧 Settings: Updated graphs:', updatedGraphs);
-    
-    // Update local state immediately for responsive UI
-    setLocalGraphs(updatedGraphs);
-    
-    console.log('🔧 Settings: Calling onDataChange with:', { graphs: updatedGraphs });
-    onDataChange({ graphs: updatedGraphs });
-  };
 
   return (
-    <div className="space-y-6">
-      {/* Data Selection */}
-      <Card>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label className="text-xs">Dataset</Label>
-                         <Select 
-               value={data.selectedDataframe} 
-               onValueChange={(value) => {
-                 // When dataset changes, we'll populate combinations in useEffect
-                 onDataChange({ 
-                   selectedDataframe: value,
-                   selectedCombinations: []
-                 });
-               }}
-             >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select a dataset" />
-              </SelectTrigger>
-              <SelectContent>
-                {frames.map((f, idx) => (
-                  <SelectItem key={`${f.object_name}-${idx}`} value={f.object_name}>
-                    {f.csv_name.split('/').pop()}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
+    <div className="space-y-4 p-2">
+      <Card className="p-4 space-y-3">
+        <label className="text-sm font-medium text-gray-700 block">Data Source</label>
+        <Select
+          value={data.selectedDataframe}
+          onValueChange={handleDatasetChange}
+        >
+          <SelectTrigger className="bg-white border-gray-300">
+            <SelectValue placeholder="Choose a saved dataframe..." />
+          </SelectTrigger>
+          <SelectContent>
+            {frames.map((f, idx) => (
+              <SelectItem key={`${f.object_name}-${idx}`} value={f.object_name}>
+                {f.csv_name.split('/').pop()}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Card>
 
-      {/* Combination Selection */}
-      <Card>
+      {dialog}
+
+      {/* Combination Selection - COMMENTED OUT FOR FRONTEND HIDING */}
+      {/* <Card>
         <CardHeader>
           <CardTitle className="text-sm font-medium">Select Combination</CardTitle>
         </CardHeader>
@@ -230,7 +225,7 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
           <div className="space-y-2">
             <Label className="text-xs">Combinations</Label>
             {/* Select All Checkbox */}
-            {combinationOptions.length > 0 && (
+            {/* {combinationOptions.length > 0 && (
               <div className="mb-3 p-2 border rounded bg-muted/20">
                 <div className="flex items-center space-x-2">
                                      <Checkbox
@@ -279,33 +274,8 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
           </div>
           
         </CardContent>
-      </Card>
+      </Card> */}
 
-      {/* Graph Types */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">Graph Types</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {localGraphs.map((graph) => (
-            <div key={graph.id} className="flex items-center space-x-2">
-              <Checkbox
-                id={`graph-${graph.id}`}
-                checked={graph.selected}
-                onCheckedChange={(checked) => 
-                  handleGraphToggle(graph.id, checked as boolean)
-                }
-              />
-              <Label 
-                htmlFor={`graph-${graph.id}`} 
-                className="text-xs font-normal cursor-pointer"
-              >
-                {graph.name}
-              </Label>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
 
       
     </div>

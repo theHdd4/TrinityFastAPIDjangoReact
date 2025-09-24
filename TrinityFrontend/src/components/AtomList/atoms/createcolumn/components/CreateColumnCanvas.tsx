@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SingleSelectDropdown } from '@/templates/dropdown';
 import { Badge } from '@/components/ui/badge';
 import { Save, Eye, Calculator, Trash2, Plus, ChevronUp, ChevronDown } from 'lucide-react';
 import Table from "@/templates/tables/table";
@@ -14,7 +15,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { CREATECOLUMN_API, FEATURE_OVERVIEW_API } from '@/lib/api';
+import { CREATECOLUMN_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import {
   Pagination,
   PaginationContent,
@@ -64,9 +65,10 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   // Get columns from atom settings (from selected data source)
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const settings = atom?.settings || {};
   
   // Get input file name for clickable subtitle
-  const inputFileName = atom?.settings?.dataSource || '';
+  const inputFileName = settings.dataSource || '';
 
   // Handle opening the input file in a new tab
   const handleViewDataClick = () => {
@@ -155,7 +157,10 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   };
 
   const [loading, setLoading] = useState(false);
-  const [preview, setPreview] = useState<any[]>([]);
+  // Initialize preview from global store
+  const [preview, setPreview] = useState<any[]>(() => {
+    return settings.createResults?.results || [];
+  });
   const [error, setError] = useState<string | null>(null);
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -190,6 +195,13 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize] = useState(20);
   
+  // Sync with global store changes
+  React.useEffect(() => {
+    if (settings.createResults?.results) {
+      setPreview(settings.createResults.results);
+    }
+  }, [settings.createResults?.results]);
+
   // Sorting and filtering state for results
   const [resultsSortColumn, setResultsSortColumn] = useState<string>('');
   const [resultsSortDirection, setResultsSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -417,7 +429,10 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         const currentSettings = atom?.settings || {};
         updateSettings(atomId, {
           ...currentSettings,
-          createResults: data.createResults
+          createResults: {
+            ...data.createResults,
+            results: data.results || []
+          }
         });
       }
       
@@ -618,27 +633,20 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
     setCardinalityError(null);
     
     try {
-      const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(atom.settings.dataSource)}`
-      );
+      const formData = new FormData();
+      formData.append('validator_atom_id', atom.settings.validator_atom_id || '');
+      formData.append('file_key', atom.settings.dataSource || '');
+      formData.append('bucket_name', 'trinity');
+      formData.append('object_names', atom.settings.dataSource || '');
       
-      if (!res.ok) {
-        setCardinalityError('Failed to fetch cardinality data');
-        return;
-      }
-      
+      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
       const data = await res.json();
-      const summary = Array.isArray(data.summary) ? data.summary.filter(Boolean) : [];
       
-      // Transform the data to match the expected format
-      const cardinalityData = summary.map((col: any) => ({
-        column: col.column,
-        data_type: col.data_type,
-        unique_count: col.unique_count,
-        unique_values: col.unique_values || []
-      }));
-      
-      setCardinalityData(cardinalityData);
+      if (data.status === 'SUCCESS' && data.cardinality) {
+        setCardinalityData(data.cardinality);
+      } else {
+        setCardinalityError(data.error || 'Failed to fetch cardinality data');
+      }
     } catch (e: any) {
       setCardinalityError(e.message || 'Error fetching cardinality data');
     } finally {
@@ -959,6 +967,38 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   React.useEffect(() => {
     setCurrentPage(1);
   }, [preview]);
+
+  // Show placeholder when no data source is selected
+  if (!atom?.settings?.dataSource) {
+    return (
+      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-green-50/30 to-green-50/50 overflow-y-auto relative">
+        <div className="absolute inset-0 opacity-20">
+          <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
+            <defs>
+              <pattern id="emptyGrid" width="80" height="80" patternUnits="userSpaceOnUse">
+                <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(148 163 184 / 0.15)" strokeWidth="1"/>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#emptyGrid)" />
+          </svg>
+        </div>
+
+        <div className="relative z-10 flex items-center justify-center h-full">
+          <div className="text-center max-w-md">
+            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+              <Plus className="w-12 h-12 text-white drop-shadow-lg" />
+            </div>
+            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-green-500 to-green-600 bg-clip-text text-transparent">
+              Create Column Operation
+            </h3>
+            <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
+              Select a data source from the properties panel to get started
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 h-full">
@@ -1308,51 +1348,33 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
                   {operation.type === 'residual' ? (
                     <>
                       {/* Y Variable selector (no label) */}
-                      <Select
+                      <SingleSelectDropdown
+                        label=""
+                        placeholder="Select Y"
                         value={opColumns[0] || ''}
                         onValueChange={value => updateColumnSelector(operation.id, 0, value)}
-                      >
-                        <SelectTrigger className="w-36">
-                          <SelectValue placeholder="Select Y" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableNumericalColumns.map(option => (
-                            <SelectItem 
-                              key={option} 
-                              value={option}
-                              className={isCreatedColumn(option, operationIndex) ? "text-blue-600 font-medium" : ""}
-                            >
-                              {option}
-                              {isCreatedColumn(option, operationIndex) && " (created)"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        options={availableNumericalColumns.map(option => ({
+                          value: option,
+                          label: `${option}${isCreatedColumn(option, operationIndex) ? " (created)" : ""}`
+                        }))}
+                        className="w-36"
+                      />
                       {/* X Variable selectors (always show at least one if Y is selected) */}
                       {opColumns[0] && (
                         <>
                           {(opColumns.length === 1 ? [''] : opColumns.slice(1)).map((col, idx) => (
                             <div key={idx + 1} className="flex items-center space-x-2">
-                              <Select
+                              <SingleSelectDropdown
+                                label=""
+                                placeholder="Select X"
                                 value={col}
                                 onValueChange={value => updateColumnSelector(operation.id, idx + 1, value)}
-                              >
-                                <SelectTrigger className="w-36">
-                                  <SelectValue placeholder="Select X" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {availableNumericalColumns.map(option => (
-                                    <SelectItem 
-                                      key={option} 
-                                      value={option}
-                                      className={isCreatedColumn(option, operationIndex) ? "text-blue-600 font-medium" : ""}
-                                    >
-                                      {option}
-                                      {isCreatedColumn(option, operationIndex) && " (created)"}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                                options={availableNumericalColumns.map(option => ({
+                                  value: option,
+                                  label: `${option}${isCreatedColumn(option, operationIndex) ? " (created)" : ""}`
+                                }))}
+                                className="w-36"
+                              />
                               {/* Bin icon for X variable (if more than one X) */}
                               {opColumns.length > 2 && (
                                 <Button
@@ -1382,26 +1404,17 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
                     <>
                       {opColumns.map((col, idx) => (
                         <div key={idx} className="flex items-center space-x-2">
-                          <Select
+                          <SingleSelectDropdown
+                            label=""
+                            placeholder={`Select column ${idx + 1}`}
                             value={col}
                             onValueChange={value => updateColumnSelector(operation.id, idx, value)}
-                          >
-                            <SelectTrigger className="w-36">
-                              <SelectValue placeholder={`Select column ${idx + 1}`} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {(operation.type === 'dummy' ? availableCategoricalColumns : availableNumericalColumns).map(option => (
-                                <SelectItem 
-                                  key={option} 
-                                  value={option}
-                                  className={isCreatedColumn(option, operationIndex) ? "text-blue-600 font-medium" : ""}
-                                >
-                                  {option}
-                                  {isCreatedColumn(option, operationIndex) && " (created)"}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            options={(operation.type === 'dummy' ? availableCategoricalColumns : availableNumericalColumns).map(option => ({
+                              value: option,
+                              label: `${option}${isCreatedColumn(option, operationIndex) ? " (created)" : ""}`
+                            }))}
+                            className="w-36"
+                          />
                           {opColumns.length > (multiColumnOps.includes(opType) ? 2 : 1) && (
                             <Button
                               size="icon"

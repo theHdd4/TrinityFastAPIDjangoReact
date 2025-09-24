@@ -37,6 +37,7 @@ import { ArrowUp, ArrowDown, FilterIcon, Plus } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SingleSelectDropdown, MultiSelectDropdown } from '@/templates/dropdown';
 // Icons
 const Loader2 = ({ className }: { className?: string }) => (
   <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -479,25 +480,11 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
       .catch(()=>setFrames([]));
   }, []);
 
-  const handleFile1Change = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    updateSettings(atomId, { file1: e.target.value });
-  };
-  const handleFile2Change = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    updateSettings(atomId, { file2: e.target.value });
-  };
 
   // ==== Store updater for settings ====
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
 
-  const handleJoinTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    updateSettings(atomId, { joinType: e.target.value });
-  };
-
-  const handleJoinColumnsChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selected = Array.from(e.target.selectedOptions).map(o => (o as HTMLOptionElement).value);
-    updateSettings(atomId, { joinColumns: selected });
-  };
 
 
   const parseCSV = (csvText: string): { headers: string[]; rows: Record<string, any>[] } => {
@@ -727,12 +714,31 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
   
   if (!hasFileSelections && !resultFilePath && !unsavedData) {
     return (
-      <div className="p-4">
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-gray-500">Please select both files in the settings tab to begin</p>
-          </CardContent>
-        </Card>
+      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-green-50/30 to-green-50/50 overflow-y-auto relative">
+        <div className="absolute inset-0 opacity-20">
+          <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
+            <defs>
+              <pattern id="emptyGrid" width="80" height="80" patternUnits="userSpaceOnUse">
+                <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(148 163 184 / 0.15)" strokeWidth="1"/>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#emptyGrid)" />
+          </svg>
+        </div>
+
+        <div className="relative z-10 flex items-center justify-center h-full">
+          <div className="text-center max-w-md">
+            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+              <GitMerge className="w-12 h-12 text-white drop-shadow-lg" />
+            </div>
+            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-green-500 to-green-600 bg-clip-text text-transparent">
+              Merge Operation
+            </h3>
+            <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
+              Select both files from the properties panel to get started
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -968,84 +974,78 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
                     <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
                     <span className="font-medium text-gray-700">Primary Source</span>
                   </div>
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                    <div className="flex items-center space-x-2">
-                      <select value={file1} onChange={handleFile1Change} className="w-full bg-transparent text-sm font-medium text-gray-800 focus:outline-none cursor-pointer">
-                        <option value="">Select file</option>
-                        {frames.map(f => (
-                          <option key={f.object_name} value={f.object_name}>{f.csv_name.split('/').pop()}</option>
-                        ))}
-                      </select>
-                      
-                    </div>
-                  </div>
+                  <SingleSelectDropdown
+                    label=""
+                    placeholder="Select file"
+                    value={file1 || ""}
+                    onValueChange={(value) => updateSettings(atomId, { file1: value })}
+                    options={frames.map(f => ({ 
+                      value: f.object_name, 
+                      label: f.csv_name.split('/').pop() || f.csv_name
+                    }))}
+                    className="w-full"
+                  />
                 </div>
                 <div>
                   <div className="flex items-center mb-2">
                     <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
                     <span className="font-medium text-gray-700">Secondary Source</span>
                   </div>
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                    <div className="flex items-center space-x-2">
-                      <select value={file2} onChange={handleFile2Change} className="w-full bg-transparent text-sm font-medium text-gray-800 focus:outline-none cursor-pointer">
-                        <option value="">Select file</option>
-                        {frames.map(f => (
-                          <option key={f.object_name} value={f.object_name}>{f.csv_name.split('/').pop()}</option>
-                        ))}
-                      </select>
-                      
-                    </div>
-                  </div>
+                  <SingleSelectDropdown
+                    label=""
+                    placeholder="Select file"
+                    value={file2 || ""}
+                    onValueChange={(value) => updateSettings(atomId, { file2: value })}
+                    options={frames.map(f => ({ 
+                      value: f.object_name, 
+                      label: f.csv_name.split('/').pop() || f.csv_name
+                    }))}
+                    className="w-full"
+                  />
                 </div>
                 <div>
                   <div className="flex items-center mb-2">
                     <div className="w-2 h-2 bg-purple-500 rounded-full mr-2"></div>
                     <span className="font-medium text-gray-700">Join Type</span>
                   </div>
-                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-                    <div className="flex items-center space-x-2">
-                      <GitMerge className="w-4 h-4 text-purple-600 flex-shrink-0" />
-                      <select
-                        value={joinType}
-                        onChange={handleJoinTypeChange}
-                        className="w-full bg-transparent text-sm font-medium text-gray-800 capitalize focus:outline-none cursor-pointer"
-                      >
-                        <option value="inner">Inner</option>
-                        <option value="outer">Outer</option>
-                        <option value="left">Left</option>
-                        <option value="right">Right</option>
-                      </select>
-                    </div>
-                  </div>
+                  <SingleSelectDropdown
+                    label=""
+                    placeholder="Select join type"
+                    value={joinType}
+                    onValueChange={(value) => updateSettings(atomId, { joinType: value })}
+                    options={[
+                      { value: "inner", label: "Inner" },
+                      { value: "outer", label: "Outer" },
+                      { value: "left", label: "Left" },
+                      { value: "right", label: "Right" }
+                    ]}
+                    className="w-full"
+                  />
                 </div>
                 <div>
                   <div className="flex items-center mb-2">
                     <div className="w-2 h-2 bg-amber-500 rounded-full mr-2"></div>
                     <span className="font-medium text-gray-700">Join Columns</span>
                   </div>
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                    <div className="max-h-20 overflow-y-auto space-y-1">
-                      {availableColumns.length === 0 ? (
-                        <span className="text-sm text-gray-500">No columns</span>
-                      ) : (
-                        availableColumns.map(col => (
-                          <label key={col} className="flex items-center space-x-2 text-sm text-gray-800">
-                            <input
-                              type="checkbox"
-                              checked={joinColumns.includes(col)}
-                              onChange={() => {
-                                const next = joinColumns.includes(col)
-                                  ? joinColumns.filter(c => c !== col)
-                                  : [...joinColumns, col];
-                                updateSettings(atomId, { joinColumns: next });
-                              }}
-                            />
-                            <span>{col}</span>
-                          </label>
-                        ))
-                      )}
-                    </div>
-                  </div>
+                  {availableColumns.length === 0 ? (
+                    <span className="text-sm text-gray-500">No columns</span>
+                  ) : (
+                    <MultiSelectDropdown
+                      label=""
+                      selectedValues={joinColumns}
+                      onSelectionChange={(selectedValues) => {
+                        updateSettings(atomId, { joinColumns: selectedValues });
+                      }}
+                      options={availableColumns.map(col => ({ 
+                        value: col, 
+                        label: col 
+                      }))}
+                      showSelectAll={true}
+                      showTrigger={true}
+                      placeholder="Select columns"
+                      className="w-full"
+                    />
+                  )}
                 </div>
               </div>
             </div>

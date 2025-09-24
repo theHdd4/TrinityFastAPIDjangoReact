@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Database, Filter, Eye } from 'lucide-react';
+import { Upload, Settings, Eye } from 'lucide-react';
 import { useLaboratoryStore, DEFAULT_CLUSTERING_SETTINGS, ClusteringSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import ClusteringInputFiles from '../ClusteringInputFiles';
 import  ClusteringSelections  from '../ClusteringSelections';
@@ -28,40 +28,38 @@ const ClusteringProperties: React.FC<Props> = ({ atomId }) => {
   };
 
   return (
-    <div className="w-full">
-      <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-          <TabsTrigger value="inputs" className="text-xs">
-            <Database className="w-3 h-3 mr-1" />
-            Input Files
+    <div className="h-full flex flex-col">
+      <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="inputs" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Input
           </TabsTrigger>
-          <TabsTrigger value="selections" className="text-xs">
-            <Filter className="w-3 h-3 mr-1" />
-            Selections
+          <TabsTrigger value="selections" className="text-xs font-medium">
+            <Settings className="w-3 h-3 mr-1" />
+            Settings
           </TabsTrigger>
-          <TabsTrigger value="exhibition" className="text-xs">
+          <TabsTrigger value="exhibition" className="text-xs font-medium">
             <Eye className="w-3 h-3 mr-1" />
             Exhibition
           </TabsTrigger>
         </TabsList>
 
-        <div className="px-4">
-          <TabsContent value="inputs" className="space-y-4" forceMount>
-            <ClusteringInputFiles 
-              atomId={atomId}
-            />
-          </TabsContent>
-          <TabsContent value="selections" className="space-y-4" forceMount>
-            <ClusteringSelections 
-              atomId={atomId}
-            />
-          </TabsContent>
-          <TabsContent value="exhibition" className="space-y-4" forceMount>
-            <ClusteringExhibition 
-              settings={settings}
-            />
-          </TabsContent>
-        </div>
+        <TabsContent value="inputs" className="flex-1 mt-0" forceMount>
+          <ClusteringInputFiles 
+            atomId={atomId}
+          />
+        </TabsContent>
+        <TabsContent value="selections" className="flex-1 mt-0" forceMount>
+          <ClusteringSelections 
+            atomId={atomId}
+          />
+        </TabsContent>
+        <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
+          <ClusteringExhibition 
+            settings={settings}
+          />
+        </TabsContent>
       </Tabs>
     </div>
   );

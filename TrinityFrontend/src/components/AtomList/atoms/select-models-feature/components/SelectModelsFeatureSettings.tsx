@@ -4,6 +4,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card } from '@/components/ui/card';
 import { VALIDATE_API, SELECT_API } from '@/lib/api';
+import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
 
 interface SelectModelsFeatureSettingsProps {
   data: any;
@@ -101,18 +102,24 @@ const SelectModelsFeatureSettings: React.FC<SelectModelsFeatureSettingsProps> = 
   };
 
   // Handle dataset selection
-  const handleDatasetChange = (value: string) => {
+  const hasExistingUpdates = Boolean(
+    (Array.isArray(data.elasticityData) && data.elasticityData.length > 0) ||
+    (Array.isArray(data.weightedEnsembleData) && data.weightedEnsembleData.length > 0) ||
+    (Array.isArray(data.selectedModelPerformance) && data.selectedModelPerformance.length > 0) ||
+    (Array.isArray(data.performanceData) && data.performanceData.length > 0) ||
+    (Array.isArray(data.yoyData) && data.yoyData.length > 0)
+  );
+
+  const applyDatasetChange = async (value: string) => {
     onDataChange({ selectedDataset: value });
-    
+
     if (value) {
-      // Find the frame to get the file key
       const selectedFrame = frames.find(f => f.object_name === value);
       if (selectedFrame) {
-        fetchCombinationIds(selectedFrame.object_name);
+        await fetchCombinationIds(selectedFrame.object_name);
       }
     } else {
-      // Clear combination IDs when no dataset is selected
-      onDataChange({ 
+      onDataChange({
         availableCombinationIds: [],
         selectedCombinationId: ''
       });
@@ -120,59 +127,60 @@ const SelectModelsFeatureSettings: React.FC<SelectModelsFeatureSettingsProps> = 
     }
   };
 
+  const { requestChange: confirmDatasetChange, dialog } = useDataSourceChangeWarning(applyDatasetChange);
+
+  const handleDatasetChange = (value: string) => {
+    const isDifferentSource = value !== (data.selectedDataset || '');
+    confirmDatasetChange(value, hasExistingUpdates && isDifferentSource);
+  };
+
   return (
-    <div className="w-full h-full p-6 space-y-6 bg-background overflow-y-auto">
-      {/* Data Source Section */}
-      <Card className="p-6">
-        
-        <div className="space-y-4">
-          <div>
-            <Label htmlFor="data-source" className="text-sm font-medium text-foreground">
-              Select Data Source
-            </Label>
-            <Select 
-              value={data.selectedDataset} 
-              onValueChange={handleDatasetChange}
-            >
-              <SelectTrigger className="mt-2 bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-colors">
-                <SelectValue placeholder="Select dataframe" />
-              </SelectTrigger>
-              <SelectContent>
-                {(Array.isArray(frames) ? frames : []).map(f => (
-                  <SelectItem key={f.object_name} value={f.object_name}>
-                    {f.csv_name.split('/').pop()}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Combination ID Status */}
-          {isLoadingCombinations && (
-            <div className="mt-4">
-              <div className="text-sm text-blue-600">
-                🔄 Loading combination IDs from selected dataset...
-              </div>
-            </div>
-          )}
-
-          {combinationError && (
-            <div className="mt-4">
-              <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">
-                <strong>Combination ID Error:</strong> {combinationError}
-              </div>
-            </div>
-          )}
-
-          {data.availableCombinationIds && data.availableCombinationIds.length > 0 && !combinationError && (
-            <div className="mt-4">
-              <div className="text-sm text-green-600 bg-green-50 border border-green-200 rounded-md p-3">
-                ✅ Found {data.availableCombinationIds.length} unique combination IDs
-              </div>
-            </div>
-          )}
-        </div>
+    <div className="space-y-4 p-2">
+      <Card className="p-4 space-y-3">
+        <label className="text-sm font-medium text-gray-700 block">Data Source</label>
+        <Select 
+          value={data.selectedDataset} 
+          onValueChange={handleDatasetChange}
+        >
+          <SelectTrigger className="bg-white border-gray-300">
+            <SelectValue placeholder="Choose a saved dataframe..." />
+          </SelectTrigger>
+          <SelectContent>
+            {(Array.isArray(frames) ? frames : []).map(f => (
+              <SelectItem key={f.object_name} value={f.object_name}>
+                {f.csv_name.split('/').pop()}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Card>
+
+      {/* Combination ID Status */}
+      {isLoadingCombinations && (
+        <div className="mt-4">
+          <div className="text-sm text-blue-600">
+            🔄 Loading combination IDs from selected dataset...
+          </div>
+        </div>
+      )}
+
+      {combinationError && (
+        <div className="mt-4">
+          <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">
+            <strong>Combination ID Error:</strong> {combinationError}
+          </div>
+        </div>
+      )}
+
+      {data.availableCombinationIds && data.availableCombinationIds.length > 0 && !combinationError && (
+        <div className="mt-4">
+          <div className="text-sm text-green-600 bg-green-50 border border-green-200 rounded-md p-3">
+            ✅ Found {data.availableCombinationIds.length} unique combination IDs
+          </div>
+        </div>
+      )}
+
+      {dialog}
 
       {/* Ensemble Method Section */}
       <Card className="p-6">
@@ -194,7 +202,6 @@ const SelectModelsFeatureSettings: React.FC<SelectModelsFeatureSettingsProps> = 
           </div>
         </div>
       </Card>
-
 
     </div>
   );

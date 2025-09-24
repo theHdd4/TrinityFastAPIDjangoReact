@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -357,74 +355,49 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
   };
 
   return (
-    <div className="space-y-6">
-      {/* File Selection */}
-      <Card className="p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div></div>
-          <div className="flex items-center space-x-2">
-            {availableFiles.length > 0 && (
-              <Badge variant="outline" className="text-sm">
-                {availableFiles.length} file{availableFiles.length !== 1 ? 's' : ''} available
-              </Badge>
-            )}
-            
-            {/* ✅ NEW: Refresh Cache Button */}
-            {selectedFile && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => refreshCache(selectedFile)}
-                disabled={refreshingCache}
-                className="flex items-center space-x-2"
-              >
-                <RefreshCw className={`h-4 w-4 ${refreshingCache ? 'animate-spin' : ''}`} />
-              </Button>
-            )}
-          </div>
-        </div>
-        
-        {loading ? (
-          <div className="text-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-            <p className="text-gray-600">Loading available files...</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="flex items-center space-x-4">
-              <Label htmlFor="file-select" className="text-sm font-medium text-gray-700">
-                Choose a data file:
-              </Label>
-              <Select onValueChange={handleFileSelect} value={selectedFile}>
-                <SelectTrigger id="file-select" className="w-[300px]">
-                  <SelectValue placeholder="Select a file" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableFiles.map((file) => (
-                    <SelectItem key={file.object_name} value={file.object_name}>
-                      <div className="flex flex-col">
-                        <span className="font-medium">{file.csv_name || file.object_name}</span>
-                        {file.size && (
-                          <span className="text-xs text-gray-500">
-                            Size: {(file.size / 1024 / 1024).toFixed(2)} MB
-                          </span>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            {availableFiles.length === 0 && (
-              <div className="text-center py-8 text-gray-500">
-                <p>No files available. Please upload a file first.</p>
-              </div>
-            )}
-          </div>
-        )}
+    <div className="space-y-4 p-2">
+      <Card className="p-4 space-y-3">
+        <label className="text-sm font-medium text-gray-700 block">Data Source</label>
+        <Select onValueChange={handleFileSelect} value={selectedFile}>
+          <SelectTrigger className="bg-white border-gray-300">
+            <SelectValue placeholder="Choose a saved dataframe..." />
+          </SelectTrigger>
+          <SelectContent>
+            {Array.isArray(availableFiles) && availableFiles.map((file) => (
+              <SelectItem key={file.object_name} value={file.object_name}>
+                {file.csv_name ? file.csv_name.split('/').pop() : file.object_name.split('/').pop()}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Card>
 
+      {/* Status Messages */}
+      {loading && (
+        <div className="text-center py-4">
+          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
+          <p className="text-gray-600 text-sm">Loading available files...</p>
+        </div>
+      )}
+      
+      {initializingCache && (
+        <div className="text-center py-4">
+          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
+          <p className="text-gray-600 text-sm">🔄 Auto-initializing scenario planner...</p>
+        </div>
+      )}
+      
+      {selectedFile && !initializingCache && (
+        <div className="text-center py-4">
+          <p className="text-green-600 text-sm">✅ File ready! Identifiers and features loaded automatically.</p>
+        </div>
+      )}
+      
+      {availableFiles.length === 0 && !loading && (
+        <div className="text-center py-4 text-gray-500">
+          <p className="text-sm">No files available. Please upload a file first.</p>
+        </div>
+      )}
     </div>
   );
 };

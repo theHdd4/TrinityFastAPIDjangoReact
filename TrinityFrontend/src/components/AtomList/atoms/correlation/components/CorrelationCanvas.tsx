@@ -7,6 +7,11 @@ import {
   Target,
   Zap,
   X,
+  Activity,
+  ArrowUp,
+  ArrowDown,
+  FilterIcon,
+  Plus,
 } from "lucide-react";
 import {
   Select,
@@ -25,6 +30,18 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { MultiSelectDropdown } from '@/templates/dropdown';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+  ContextMenuSeparator,
+} from '@/components/ui/context-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { CorrelationSettings } from "@/components/LaboratoryMode/store/laboratoryStore";
 import { useLaboratoryStore } from "@/components/LaboratoryMode/store/laboratoryStore";
 import { correlationAPI } from "../helpers/correlationAPI";
@@ -34,11 +51,91 @@ import MatrixSettingsTray, {
   COLOR_THEMES,
 } from "./MatrixSettingsTray";
 import RechartsChartRenderer from "@/templates/charts/RechartsChartRenderer";
+import Table from "@/templates/tables/table";
+import { GROUPBY_API } from '@/lib/api';
+import correlation from "../index";
 
 interface CorrelationCanvasProps {
   data: CorrelationSettings;
   onDataChange: (newData: Partial<CorrelationSettings>) => void;
 }
+
+// FilterMenu component defined outside to prevent recreation on every render
+const FilterMenu = ({ 
+  column, 
+  uniqueValues, 
+  currentFilters, 
+  onColumnFilter 
+}: { 
+  column: string;
+  uniqueValues: string[];
+  currentFilters: string[];
+  onColumnFilter: (column: string, values: string[]) => void;
+}) => {
+  const [temp, setTemp] = useState<string[]>([]);
+  const [selectAll, setSelectAll] = useState(false);
+
+  React.useEffect(() => {
+    setTemp(currentFilters);
+    setSelectAll(currentFilters.length === uniqueValues.length && uniqueValues.length > 0);
+  }, [currentFilters, uniqueValues.length]);
+
+  const handleSelectAll = () => {
+    if (selectAll) {
+      setTemp([]);
+      setSelectAll(false);
+    } else {
+      setTemp(uniqueValues);
+      setSelectAll(true);
+    }
+  };
+
+  const apply = () => {
+    onColumnFilter(column, temp);
+  };
+
+  const cancel = () => {
+    setTemp(currentFilters);
+    setSelectAll(currentFilters.length === uniqueValues.length && uniqueValues.length > 0);
+  };
+
+  return (
+    <div className="p-3 max-h-64 overflow-y-auto">
+      <div className="flex items-center justify-between mb-2">
+        <Checkbox
+          checked={selectAll}
+          onCheckedChange={handleSelectAll}
+        />
+        <span className="text-sm font-medium">Select All</span>
+      </div>
+      <div className="space-y-1 mb-3">
+        {uniqueValues.map(value => (
+          <div key={value} className="flex items-center space-x-2">
+            <Checkbox
+              checked={temp.includes(value)}
+              onCheckedChange={(checked) => {
+                if (checked) {
+                  setTemp([...temp, value]);
+                } else {
+                  setTemp(temp.filter(v => v !== value));
+                }
+              }}
+            />
+            <span className="text-sm">{value}</span>
+          </div>
+        ))}
+      </div>
+      <div className="flex space-x-2">
+        <Button size="sm" onClick={apply} className="flex-1">
+          Apply
+        </Button>
+        <Button size="sm" variant="outline" onClick={cancel} className="flex-1">
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+};
 
 // Transform dictionary correlation matrix to 2D array, filtering out non-numeric columns
 const transformCorrelationMatrix = (
@@ -175,50 +272,32 @@ const FilterDimensionButton: React.FC<{
   onValuesChange,
   onRemove,
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
-
-  const getButtonText = () => {
-    if (selectedValues.length === 0) return "All";
-    if (selectedValues.length === 1) return selectedValues[0];
-    return `${selectedValues.length} selected`;
-  };
-
   return (
     <div className="flex flex-col gap-1">
       <label className="text-xs font-medium text-muted-foreground truncate">
         {columnName}
       </label>
 
-      <Popover open={isOpen} onOpenChange={setIsOpen}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs justify-between w-full"
-          >
-            <span className="truncate">{getButtonText()}</span>
-            <div className="flex items-center gap-1 ml-1">
-              <ChevronDown className="h-3 w-3" />
-              <X
-                className="h-3 w-3 hover:bg-destructive hover:text-destructive-foreground rounded"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemove();
-                }}
-              />
-            </div>
-          </Button>
-        </PopoverTrigger>
-
-        <PopoverContent className="w-60 p-0" align="start">
-          <MultiSelectValues
-            columnName={columnName}
-            selectedValues={selectedValues}
-            availableValues={availableValues}
-            onValuesChange={onValuesChange}
-          />
-        </PopoverContent>
-      </Popover>
+      <div className="flex items-center gap-2">
+        <MultiSelectDropdown
+          label=""
+          selectedValues={selectedValues}
+          onSelectionChange={onValuesChange}
+          options={availableValues.map(value => ({ value, label: value }))}
+          showSelectAll={true}
+          showTrigger={true}
+          placeholder="All"
+          className="flex-1"
+        />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0 hover:bg-destructive hover:text-destructive-foreground flex-shrink-0"
+          onClick={onRemove}
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
     </div>
   );
 };
@@ -238,14 +317,160 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     showLegend: true,
     showGrid: true,
   });
+  const [timeSeriesSortOrder, setTimeSeriesSortOrder] = useState<'asc' | 'desc' | null>(null);
   const [settingsPosition, setSettingsPosition] = useState<{
     x: number;
     y: number;
   } | null>(null);
   const auxPanelActive = useLaboratoryStore((state) => state.auxPanelActive);
 
+  // Cardinality View state
+  const [cardinalityData, setCardinalityData] = useState<any[]>([]);
+  const [cardinalityLoading, setCardinalityLoading] = useState(false);
+  const [cardinalityError, setCardinalityError] = useState<string | null>(null);
+  
+  // Sorting and filtering state for Cardinality View
+  const [sortColumn, setSortColumn] = useState<string>('unique_count');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+
   // Determine if we're in compact mode (when auxiliary panels are open)
   const isCompactMode = auxPanelActive !== null;
+
+  // Fetch cardinality data
+  const fetchCardinalityData = async () => {
+    if (!data.selectedFile) return;
+    
+    setCardinalityLoading(true);
+    setCardinalityError(null);
+    
+    try {
+      const formData = new FormData();
+      formData.append('validator_atom_id', 'correlation_atom'); // Use a default ID for correlation
+      formData.append('file_key', data.selectedFile || '');
+      formData.append('bucket_name', 'trinity');
+      formData.append('object_names', data.selectedFile || '');
+      
+      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
+      const responseData = await res.json();
+      
+      if (responseData.status === 'SUCCESS' && responseData.cardinality) {
+        setCardinalityData(responseData.cardinality);
+      } else {
+        setCardinalityError(responseData.error || 'Failed to fetch cardinality data');
+      }
+    } catch (e: any) {
+      setCardinalityError(e.message || 'Error fetching cardinality data');
+    } finally {
+      setCardinalityLoading(false);
+    }
+  };
+
+  // Cardinality filtering and sorting logic
+  const displayedCardinality = React.useMemo(() => {
+    let filtered = Array.isArray(cardinalityData) ? cardinalityData : [];
+
+    // Filter out columns with unique_count = 0 (only exclude zero values)
+    filtered = filtered.filter(c => c.unique_count > 0);
+
+    // Apply column filters
+    Object.entries(columnFilters).forEach(([column, values]) => {
+      if (Array.isArray(values) && values.length > 0) {
+        filtered = filtered.filter(item => {
+          const itemValue = item[column];
+          return values.some(value => 
+            String(itemValue).toLowerCase().includes(String(value).toLowerCase())
+          );
+        });
+      }
+    });
+
+    // Apply sorting
+    if (sortColumn) {
+      filtered.sort((a, b) => {
+        const aVal = a[sortColumn];
+        const bVal = b[sortColumn];
+        
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+        }
+        
+        const aStr = String(aVal).toLowerCase();
+        const bStr = String(bVal).toLowerCase();
+        return sortDirection === 'asc' 
+          ? aStr.localeCompare(bStr)
+          : bStr.localeCompare(aStr);
+      });
+    }
+
+    return filtered;
+  }, [cardinalityData, columnFilters, sortColumn, sortDirection]);
+
+  // Sorting and filtering functions
+  const handleSort = (column: string, direction: 'asc' | 'desc') => {
+    setSortColumn(column);
+    setSortDirection(direction);
+  };
+
+  // Handle sort order change for time series chart
+  const handleTimeSeriesSortOrderChange = (order: 'asc' | 'desc' | null) => {
+    setTimeSeriesSortOrder(order);
+  };
+
+  // Handle data labels toggle for time series chart
+  const handleTimeSeriesDataLabelsToggle = (enabled: boolean) => {
+    setMatrixSettings((prev) => ({ ...prev, showDataLabels: enabled }));
+  };
+
+  // Handle chart type change for time series chart
+  const handleTimeSeriesChartTypeChange = (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
+    // For correlation atom, we typically keep it as line_chart, but we can allow the change
+    console.log('Chart type change requested:', newType);
+  };
+
+  // Handle save action for time series chart
+  const handleTimeSeriesSave = () => {
+    // Implement save functionality if needed
+    console.log('Save time series chart');
+  };
+
+  const handleColumnFilter = (column: string, values: string[]) => {
+    setColumnFilters(prev => ({
+      ...prev,
+      [column]: values
+    }));
+  };
+
+  const clearColumnFilter = (column: string) => {
+    setColumnFilters(prev => {
+      const newFilters = { ...prev };
+      delete newFilters[column];
+      return newFilters;
+    });
+  };
+
+  const getUniqueColumnValues = (column: string): string[] => {
+    let filteredData = Array.isArray(cardinalityData) ? cardinalityData : [];
+    
+    // Apply other active filters to get context-aware unique values
+    Object.entries(columnFilters).forEach(([filterColumn, values]) => {
+      if (filterColumn !== column && Array.isArray(values) && values.length > 0) {
+        filteredData = filteredData.filter(item => {
+          const itemValue = item[filterColumn];
+          return values.some(value => 
+            String(itemValue).toLowerCase().includes(String(value).toLowerCase())
+          );
+        });
+      }
+    });
+
+    // Filter out columns with unique_count = 0
+    filteredData = filteredData.filter(c => c.unique_count > 0);
+
+    const uniqueValues = [...new Set(filteredData.map(item => String(item[column])))];
+    return uniqueValues.sort();
+  };
+
 
   // Recalculate canvas width whenever its container resizes
   useEffect(() => {
@@ -275,6 +500,13 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       }
     })();
   }, []);
+
+  // Fetch cardinality data on mount or when selectedFile changes
+  React.useEffect(() => {
+    if (data.selectedFile) {
+      fetchCardinalityData();
+    }
+  }, [data.selectedFile]);
 
   const handleSaveSettings = async (newSettings: MatrixSettings) => {
     setMatrixSettings(newSettings);
@@ -1058,6 +1290,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     }
     return data.timeSeriesData
       .map((d, idx) => {
+        // Ensure date values are properly formatted as timestamps
         const xValue = isDateAxis
           ? typeof d.date === "number"
             ? d.date
@@ -1103,7 +1336,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       showAxisLabels: matrixSettings.showAxisLabels,
       showGrid: matrixSettings.showGrid,
       initialShowDataLabels: false,
-      sortOrder: "asc" as const,
+      sortOrder: timeSeriesSortOrder,
       height: timeSeriesChartHeight,
       onGridToggle: (enabled: boolean) =>
         setMatrixSettings((prev) => ({ ...prev, showGrid: enabled })),
@@ -1111,6 +1344,10 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         setMatrixSettings((prev) => ({ ...prev, showLegend: enabled })),
       onAxisLabelsToggle: (enabled: boolean) =>
         setMatrixSettings((prev) => ({ ...prev, showAxisLabels: enabled })),
+      onDataLabelsToggle: handleTimeSeriesDataLabelsToggle,
+      onSave: handleTimeSeriesSave,
+      onChartTypeChange: handleTimeSeriesChartTypeChange,
+      onSortChange: handleTimeSeriesSortOrderChange,
     } as const;
   }, [
     data.selectedVar1,
@@ -1120,6 +1357,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     timeSeriesChartHeight,
     timeSeriesXField,
     isDateAxis,
+    timeSeriesSortOrder,
   ]);
 
   const timeSeriesChartElement = useMemo(() => {
@@ -1137,23 +1375,259 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     >
       {/* Show default message when no data is loaded */}
       {!data.isUsingFileData || !data.fileData ? (
-        <div className="flex flex-col items-center justify-center py-12 space-y-4 bg-muted/20 rounded-lg border-2 border-dashed border-muted-foreground/25">
-          <div className="p-4 bg-muted/50 rounded-full">
-            <BarChart3 className="w-8 h-8 text-muted-foreground" />
+        <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-purple-50/30 to-purple-50/50 overflow-y-auto relative">
+          <div className="absolute inset-0 opacity-20">
+            <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
+              <defs>
+                <pattern id="emptyGrid" width="80" height="80" patternUnits="userSpaceOnUse">
+                  <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(148 163 184 / 0.15)" strokeWidth="1"/>
+                </pattern>
+              </defs>
+              <rect width="100%" height="100%" fill="url(#emptyGrid)" />
+            </svg>
           </div>
-          <div className="text-center space-y-2">
-            <h3 className="text-lg font-semibold text-foreground">
-              No Dataset Loaded
-            </h3>
-            <p className="text-muted-foreground max-w-md">
-              Select a dataset through the Settings tab to start analyzing
-              correlations between your variables.
-            </p>
+
+          <div className="relative z-10 flex items-center justify-center h-full">
+            <div className="text-center max-w-md">
+              <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+                <Activity className="w-12 h-12 text-white drop-shadow-lg" />
+              </div>
+              <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-purple-500 to-purple-600 bg-clip-text text-transparent">
+                Correlation Operation
+              </h3>
+              <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
+                Select a dataset from the properties panel to get started
+              </p>
+            </div>
           </div>
         </div>
       ) : (
         <>
-          {/* Show All Columns toggle */}
+          {/* Cardinality View - Show immediately after dataset input */}
+          {data.selectedFile && (
+        <div className="space-y-4">
+          {cardinalityLoading && (
+            <div className="flex items-center justify-center p-8">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500 mx-auto mb-2"></div>
+                <span className="text-purple-600">Loading cardinality data...</span>
+              </div>
+            </div>
+          )}
+          
+          {cardinalityError && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-md">
+              <p className="text-red-600 text-sm">Error loading cardinality data: {cardinalityError}</p>
+            </div>
+          )}
+          
+          {!cardinalityLoading && !cardinalityError && displayedCardinality.length > 0 && (
+            <Table
+              headers={[
+                <ContextMenu key="Column">
+                  <ContextMenuTrigger asChild>
+                    <div className="flex items-center gap-1 cursor-pointer">
+                      Column
+                      {sortColumn === 'column' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      )}
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuItem onClick={() => handleSort('column', 'asc')}>
+                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => handleSort('column', 'desc')}>
+                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                        </ContextMenuItem>
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    <ContextMenuSeparator />
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                        <FilterMenu 
+                          column="column" 
+                          uniqueValues={getUniqueColumnValues('column')}
+                          currentFilters={columnFilters['column'] || []}
+                          onColumnFilter={handleColumnFilter}
+                        />
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    {columnFilters['column']?.length > 0 && (
+                      <>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onClick={() => clearColumnFilter('column')}>
+                          Clear Filter
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>,
+                <ContextMenu key="Data type">
+                  <ContextMenuTrigger asChild>
+                    <div className="flex items-center gap-1 cursor-pointer">
+                      Data type
+                      {sortColumn === 'data_type' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      )}
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuItem onClick={() => handleSort('data_type', 'asc')}>
+                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => handleSort('data_type', 'desc')}>
+                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                        </ContextMenuItem>
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    <ContextMenuSeparator />
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                        <FilterMenu 
+                          column="data_type" 
+                          uniqueValues={getUniqueColumnValues('data_type')}
+                          currentFilters={columnFilters['data_type'] || []}
+                          onColumnFilter={handleColumnFilter}
+                        />
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    {columnFilters['data_type']?.length > 0 && (
+                      <>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onClick={() => clearColumnFilter('data_type')}>
+                          Clear Filter
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>,
+                <ContextMenu key="Unique count">
+                  <ContextMenuTrigger asChild>
+                    <div className="flex items-center gap-1 cursor-pointer">
+                      Unique count
+                      {sortColumn === 'unique_count' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                      )}
+                    </div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                        <ContextMenuItem onClick={() => handleSort('unique_count', 'asc')}>
+                          <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                        </ContextMenuItem>
+                        <ContextMenuItem onClick={() => handleSort('unique_count', 'desc')}>
+                          <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                        </ContextMenuItem>
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    <ContextMenuSeparator />
+                    <ContextMenuSub>
+                      <ContextMenuSubTrigger className="flex items-center">
+                        <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                      </ContextMenuSubTrigger>
+                      <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                        <FilterMenu 
+                          column="unique_count" 
+                          uniqueValues={getUniqueColumnValues('unique_count')}
+                          currentFilters={columnFilters['unique_count'] || []}
+                          onColumnFilter={handleColumnFilter}
+                        />
+                      </ContextMenuSubContent>
+                    </ContextMenuSub>
+                    {columnFilters['unique_count']?.length > 0 && (
+                      <>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onClick={() => clearColumnFilter('unique_count')}>
+                          Clear Filter
+                        </ContextMenuItem>
+                      </>
+                    )}
+                  </ContextMenuContent>
+                </ContextMenu>,
+                "Sample values"
+              ]}
+              colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
+              bodyClassName="max-h-[484px] overflow-y-auto"
+              defaultMinimized={true}
+              borderColor={`border-${correlation.color.replace('bg-', '')}`}
+              customHeader={{
+                title: "Cardinality View",
+                subtitle: "Click Here to View Data",
+                subtitleClickable: !!data.selectedFile,
+                onSubtitleClick: () => {
+                  if (data.selectedFile) {
+                    window.open(`/dataframe?name=${encodeURIComponent(data.selectedFile)}`, '_blank');
+                  }
+                }
+              }}
+            >
+              {displayedCardinality.map((col, index) => (
+                <tr key={index} className="table-row">
+                  <td className="table-cell">{col.column || col.Column || ''}</td>
+                  <td className="table-cell">{col.data_type || col.Data_Type || ''}</td>
+                  <td className="table-cell">{col.unique_count || col.Unique_Count || 0}</td>
+                  <td className="table-cell">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {Array.isArray(col.unique_values) && col.unique_values.length > 0 ? (
+                        <>
+                          {col.unique_values.slice(0, 2).map((val: any, i: number) => (
+                            <span
+                              key={i}
+                              className="inline-block bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs mr-1 mb-1"
+                            >
+                              {String(val)}
+                            </span>
+                          ))}
+                          {col.unique_values.length > 2 && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="flex items-center gap-0.5 text-xs text-slate-600 font-medium cursor-pointer">
+                                  <Plus className="w-3 h-3" />
+                                  {col.unique_values.length - 2} more
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent className="text-xs max-w-xs whitespace-pre-wrap">
+                                {col.unique_values
+                                  .slice(2)
+                                  .map((val: any) => String(val))
+                                  .join(', ')}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </Table>
+          )}
+        </div>
+      )}
+
         {/* Filter Dimensions - Dynamic from actual data */}
         <Card className="p-4 mb-4" onContextMenu={handleMatrixContextMenu}>
           <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">

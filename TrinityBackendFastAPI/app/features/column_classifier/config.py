@@ -2,6 +2,11 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from typing import Optional
+import os
+
+from app.core.mongo import build_host_mongo_uri
+
+DEFAULT_MONGO_URI = build_host_mongo_uri()
 
 class Settings(BaseSettings):
     """Data Classification API Settings - MongoDB Focused"""
@@ -24,7 +29,11 @@ class Settings(BaseSettings):
     # =============================================================================
     # MONGODB SETTINGS
     # =============================================================================
-    mongo_uri: str = "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin"
+    mongo_uri: str = (
+        os.getenv("CLASSIFY_MONGO_URI")
+        or os.getenv("MONGO_URI")
+        or DEFAULT_MONGO_URI
+    )
     
     # Main database for classification data
     classification_database: str = "validator_atoms_db"  # ✅ FIXED: Added missing 'd'
@@ -33,9 +42,9 @@ class Settings(BaseSettings):
     validator_atoms_collection: str = "validator_atoms"
     column_classifications_collection: str = "column_classifications"
     business_dimensions_collection: str = "business_dimensions_with_assignments"
-    classifier_configs_collection: str = "column_classifier_configs"
+    classifier_configs_collection: str = "column_classifier_config"
     # Database used for classifier config documents
-    classifier_configs_database: str = "trinity_prod"
+    classifier_configs_database: str = "trinity_db"
     
     # =============================================================================
     # CLASSIFICATION SETTINGS

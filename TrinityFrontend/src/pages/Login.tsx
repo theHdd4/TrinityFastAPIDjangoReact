@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,6 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Eye, EyeOff, User, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
+import LoginAnimation from '@/components/LoginAnimation';
+import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 
 const Login = () => {
   const [username, setUsername] = useState('');
@@ -15,39 +17,153 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showAnimation, setShowAnimation] = useState(false);
+  const [loginSuccessful, setLoginSuccessful] = useState(false);
+  const [animationCompleted, setAnimationCompleted] = useState(false);
+  const animationStartRef = useRef<number | null>(null);
+  const animationCompletionMetaRef = useRef<{
+    startedAt: number;
+    totalDuration: number;
+    completedAt: number;
+  } | null>(null);
   const navigate = useNavigate();
   const { login } = useAuth();
+
+  const handleAnimationComplete = useCallback(() => {
+    const startedAt = animationStartRef.current ?? Date.now();
+    const totalDuration = LOGIN_ANIMATION_TOTAL_DURATION;
+    const completedAt = Date.now();
+
+    animationCompletionMetaRef.current = {
+      startedAt,
+      totalDuration,
+      completedAt,
+    };
+    animationStartRef.current = null;
+    setAnimationCompleted(true);
+  }, []);
+
+  const finalizeNavigation = useCallback(() => {
+    let meta = animationCompletionMetaRef.current;
+
+    if (!meta && animationStartRef.current) {
+      meta = {
+        startedAt: animationStartRef.current,
+        totalDuration: LOGIN_ANIMATION_TOTAL_DURATION,
+        completedAt: Date.now(),
+      };
+    }
+
+    if (!meta) {
+      const stored = sessionStorage.getItem('trinity-login-anim');
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored) as {
+            startedAt?: number;
+            totalDuration?: number;
+          };
+          if (typeof parsed.startedAt === 'number') {
+            meta = {
+              startedAt: parsed.startedAt,
+              totalDuration:
+                typeof parsed.totalDuration === 'number'
+                  ? parsed.totalDuration
+                  : LOGIN_ANIMATION_TOTAL_DURATION,
+              completedAt: Date.now(),
+            };
+          }
+        } catch {
+          meta = null;
+        }
+      }
+    }
+
+    if (meta) {
+      sessionStorage.setItem('trinity-login-anim', JSON.stringify(meta));
+    } else {
+      sessionStorage.removeItem('trinity-login-anim');
+    }
+
+    animationCompletionMetaRef.current = null;
+    animationStartRef.current = null;
+    setIsLoading(false);
+    navigate('/apps', { replace: true });
+  }, [navigate]);
+
+  useEffect(() => {
+    if (loginSuccessful && animationCompleted) {
+      finalizeNavigation();
+    }
+  }, [animationCompleted, finalizeNavigation, loginSuccessful]);
+
+  useEffect(() => {
+    if (loginSuccessful && !showAnimation) {
+      finalizeNavigation();
+    }
+  }, [finalizeNavigation, loginSuccessful, showAnimation]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
+    setLoginSuccessful(false);
+    setAnimationCompleted(false);
+    animationCompletionMetaRef.current = null;
 
-    console.log('Submitting login form for', username);
+    const success = await login(username, password, {
+      onInitialSuccess: () => {
+        const startedAt = Date.now();
+        animationStartRef.current = startedAt;
+        sessionStorage.setItem(
+          'trinity-login-anim',
+          JSON.stringify({ startedAt, totalDuration: LOGIN_ANIMATION_TOTAL_DURATION })
+        );
+        setShowAnimation(true);
+      },
+    });
 
-    const success = await login(username, password);
     if (success) {
-      navigate('/apps');
+      setLoginSuccessful(true);
+      if (!animationStartRef.current) {
+        const startedAt = Date.now();
+        animationStartRef.current = startedAt;
+        sessionStorage.setItem(
+          'trinity-login-anim',
+          JSON.stringify({ startedAt, totalDuration: LOGIN_ANIMATION_TOTAL_DURATION })
+        );
+        setShowAnimation(true);
+      }
     } else {
       setError('Invalid credentials.');
-      console.log('Login failed for', username);
+      setIsLoading(false);
+      animationStartRef.current = null;
+      animationCompletionMetaRef.current = null;
+      setShowAnimation(false);
+      setAnimationCompleted(false);
+      setLoginSuccessful(false);
+      sessionStorage.removeItem('trinity-login-anim');
     }
-
-    setIsLoading(false);
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
+      <LoginAnimation active={showAnimation} onComplete={handleAnimationComplete} />
       <video
         autoPlay
         loop
         muted
         playsInline
-        className="absolute inset-0 w-full h-full object-cover"
+        className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${
+          showAnimation ? 'opacity-0' : 'opacity-100'
+        }`}
       >
         <source src="/background.mp4" type="video/mp4" />
       </video>
-      <div className="w-full max-w-md space-y-6 relative z-10">
+      <div
+        className={`relative z-10 w-full max-w-md space-y-6 transition-opacity duration-500 ${
+          showAnimation ? 'pointer-events-none opacity-0' : 'opacity-100'
+        }`}
+      >
         <Card className="bg-white/5 backdrop-blur-lg border border-white/10 text-white shadow-2xl">
           <CardHeader className="flex flex-col items-center space-y-2 text-center">
             <AnimatedLogo className="w-20 h-20 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />

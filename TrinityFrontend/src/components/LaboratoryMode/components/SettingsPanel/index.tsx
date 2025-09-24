@@ -31,6 +31,7 @@ import ConcatProperties from '@/components/AtomList/atoms/concat/components/prop
 import ScopeSelectorProperties from '@/components/AtomList/atoms/scope-selector/components/properties/ScopeSelectorProperties';
 import CreateColumnProperties from '@/components/AtomList/atoms/createcolumn/components/properties/CreateColumnProperties';
 import BuildModelFeatureBasedPropertiesPanel from '@/components/AtomList/atoms/build-model-feature-based/components/properties/BuildModelFeatureBasedProperties';
+import AutoRegressiveModelsProperties from '@/components/AtomList/atoms/auto-regressive-models/components/properties/AutoRegressiveModelsProperties';
 import MergeProperties from '@/components/AtomList/atoms/merge/components/properties/MergeProperties';
 import ColumnClassifierProperties from '@/components/AtomList/atoms/column-classifier/components/properties/ColumnClassifierProperties';
 import DataFrameOperationsProperties from '@/components/AtomList/atoms/dataframe-operations/components/properties/DataFrameOperationsProperties';
@@ -146,6 +147,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <BuildModelFeatureBasedPropertiesPanel atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'select-models-feature' ? (
             <SelectModelsFeatureProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'auto-regressive-models' ? (
+            <AutoRegressiveModelsProperties atomId={selectedAtomId} />
                      ) : selectedAtomId && atom?.atomId === 'evaluate-models-feature' ? (
              <EvaluateModelsFeatureProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'concat' ? (

@@ -7,6 +7,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import numpy as np
+from minio.error import S3Error
 from ..data_upload_validate.app.routes import get_object_prefix
 from .merge.base import get_common_columns, merge_dataframes
 from .deps import get_minio_df, get_minio_content_with_flight_fallback, minio_client, MINIO_BUCKET, redis_client
@@ -20,8 +21,52 @@ async def init_merge(
     bucket_name: str = Form(...)
 ):
     try:
-        df1 = get_minio_df(bucket_name, file1)
-        df2 = get_minio_df(bucket_name, file2)
+        # Get the current object prefix for proper path resolution
+        prefix = await get_object_prefix()
+        
+        # Construct full object paths
+        full_path1 = f"{prefix}{file1}" if not file1.startswith(prefix) else file1
+        full_path2 = f"{prefix}{file2}" if not file2.startswith(prefix) else file2
+        
+        print(f"🔍 MERGE INIT - Path resolution:")
+        print(f"   Original file1: {file1}")
+        print(f"   Original file2: {file2}")
+        print(f"   Current prefix: {prefix}")
+        print(f"   Full path1: {full_path1}")
+        print(f"   Full path2: {full_path2}")
+        
+        # Load dataframes using direct MinIO access (same as perform endpoint)
+        print(f"📁 Loading dataframe 1 for init: {full_path1}")
+        try:
+            response1 = minio_client.get_object(bucket_name, full_path1)
+            content1 = response1.read()
+            if full_path1.endswith(".csv"):
+                df1 = pd.read_csv(io.BytesIO(content1))
+            elif full_path1.endswith(".xlsx"):
+                df1 = pd.read_excel(io.BytesIO(content1))
+            elif full_path1.endswith(".arrow"):
+                reader1 = ipc.RecordBatchFileReader(pa.BufferReader(content1))
+                df1 = reader1.read_all().to_pandas()
+            else:
+                raise ValueError("Unsupported file type for file1")
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch file1 from MinIO: {e}")
+            
+        print(f"📁 Loading dataframe 2 for init: {full_path2}")
+        try:
+            response2 = minio_client.get_object(bucket_name, full_path2)
+            content2 = response2.read()
+            if full_path2.endswith(".csv"):
+                df2 = pd.read_csv(io.BytesIO(content2))
+            elif full_path2.endswith(".xlsx"):
+                df2 = pd.read_excel(io.BytesIO(content2))
+            elif full_path2.endswith(".arrow"):
+                reader2 = ipc.RecordBatchFileReader(pa.BufferReader(content2))
+                df2 = reader2.read_all().to_pandas()
+            else:
+                raise ValueError("Unsupported file type for file2")
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch file2 from MinIO: {e}")
 
         df1.columns = df1.columns.str.strip().str.lower()
         df2.columns = df2.columns.str.strip().str.lower()
@@ -31,6 +76,7 @@ async def init_merge(
         df2 = df2.applymap(lambda x: x.strip().lower() if isinstance(x, str) else x)
         common_cols = get_common_columns(df1, df2)
 
+        print(f"✅ MERGE INIT - Found {len(common_cols)} common columns: {common_cols}")
 
         return {
             "common_columns": common_cols,
@@ -38,6 +84,7 @@ async def init_merge(
             "fillna_method":["mean", "median", "mode", "ffill", "bfill", "value"]
         }
     except Exception as e:
+        print(f"❌ MERGE INIT - Error: {e}")
         raise HTTPException(status_code=400, detail=f"Init failed: {str(e)}")
 
 
@@ -142,11 +189,52 @@ async def perform_merge(
             print(f"   Raw join_columns: {join_columns}")
             raise ValueError(f"Invalid join_columns JSON: {e}")
         
-        # Load dataframes
-        print(f"📁 Loading dataframe 1: {file1}")
-        df1 = get_minio_df(bucket_name, file1)
-        print(f"📁 Loading dataframe 2: {file2}")
-        df2 = get_minio_df(bucket_name, file2)
+        # Get the current object prefix for proper path resolution
+        prefix = await get_object_prefix()
+        
+        # Construct full object paths
+        full_path1 = f"{prefix}{file1}" if not file1.startswith(prefix) else file1
+        full_path2 = f"{prefix}{file2}" if not file2.startswith(prefix) else file2
+        
+        print(f"🔍 MERGE PERFORM - Path resolution:")
+        print(f"   Original file1: {file1}")
+        print(f"   Original file2: {file2}")
+        print(f"   Current prefix: {prefix}")
+        print(f"   Full path1: {full_path1}")
+        print(f"   Full path2: {full_path2}")
+        
+        # Load dataframes using direct MinIO access (same as cardinality endpoint)
+        print(f"📁 Loading dataframe 1: {full_path1}")
+        try:
+            response1 = minio_client.get_object(bucket_name, full_path1)
+            content1 = response1.read()
+            if full_path1.endswith(".csv"):
+                df1 = pd.read_csv(io.BytesIO(content1))
+            elif full_path1.endswith(".xlsx"):
+                df1 = pd.read_excel(io.BytesIO(content1))
+            elif full_path1.endswith(".arrow"):
+                reader1 = ipc.RecordBatchFileReader(pa.BufferReader(content1))
+                df1 = reader1.read_all().to_pandas()
+            else:
+                raise ValueError("Unsupported file type for file1")
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch file1 from MinIO: {e}")
+            
+        print(f"📁 Loading dataframe 2: {full_path2}")
+        try:
+            response2 = minio_client.get_object(bucket_name, full_path2)
+            content2 = response2.read()
+            if full_path2.endswith(".csv"):
+                df2 = pd.read_csv(io.BytesIO(content2))
+            elif full_path2.endswith(".xlsx"):
+                df2 = pd.read_excel(io.BytesIO(content2))
+            elif full_path2.endswith(".arrow"):
+                reader2 = ipc.RecordBatchFileReader(pa.BufferReader(content2))
+                df2 = reader2.read_all().to_pandas()
+            else:
+                raise ValueError("Unsupported file type for file2")
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch file2 from MinIO: {e}")
         
         print(f"📊 DataFrame shapes: df1={df1.shape}, df2={df2.shape}")
         print(f"📊 DataFrame 1 columns: {list(df1.columns)}")
@@ -410,8 +498,21 @@ async def get_merge_cardinality_data(
         print(f"  Full object path: {full_object_path}")
         print(f"  Source type: {source_type}")
         
-        # Load the dataframe
-        df = get_minio_df(bucket=bucket_name, file_key=full_object_path)
+        # Load the dataframe using direct MinIO access (like concat)
+        try:
+            response = minio_client.get_object(bucket_name, full_object_path)
+            content = response.read()
+            if full_object_path.endswith(".csv"):
+                df = pd.read_csv(io.BytesIO(content))
+            elif full_object_path.endswith(".xlsx"):
+                df = pd.read_excel(io.BytesIO(content))
+            elif full_object_path.endswith(".arrow"):
+                reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+                df = reader.read_all().to_pandas()
+            else:
+                raise ValueError("Unsupported file type")
+        except Exception as e:
+            raise RuntimeError(f"Failed to fetch file from MinIO: {e}")
         df.columns = df.columns.str.strip().str.lower()
         
         print(f"✅ Successfully loaded {source_type} dataframe for cardinality with shape: {df.shape}")
@@ -445,7 +546,13 @@ async def get_merge_cardinality_data(
             "cardinality": cardinality_data
         }
         
+    except S3Error as e:
+        error_code = getattr(e, "code", "")
+        if error_code in {"NoSuchKey", "NoSuchBucket"}:
+            redis_client.delete(object_names)
+            raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         print(f"❌ Error in Merge cardinality endpoint: {e}")
-        raise HTTPException(status_code=400, detail=f"Failed to get cardinality data: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
  

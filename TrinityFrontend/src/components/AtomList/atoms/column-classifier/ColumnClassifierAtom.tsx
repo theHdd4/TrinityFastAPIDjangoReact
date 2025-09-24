@@ -1,5 +1,6 @@
 import React from 'react';
 import { useToast } from '@/hooks/use-toast';
+import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 
 import ColumnClassifierCanvas from './components/ColumnClassifierCanvas';
 import ColumnClassifierDimensionMapping from './components/ColumnClassifierDimensionMapping';
@@ -27,33 +28,202 @@ interface Props {
 const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: SettingsType = (atom?.settings as SettingsType) || {
-    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS
+  const settings: SettingsType = {
+    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
+    ...(atom?.settings as SettingsType)
   };
-  const classifierData = settings.data;
+  const classifierData = settings.data || DEFAULT_COLUMN_CLASSIFIER_SETTINGS.data;
   const { toast } = useToast();
   const { user } = useAuth();
 
+  const processedFileRef = React.useRef<string | null>(null);
+  const pendingMappingRef = React.useRef<AbortController | null>(null);
+  const lastActiveIndexRef = React.useRef<number | null>(null);
+  const lastFileNameRef = React.useRef<string | null>(null);
+
   React.useEffect(() => {
-    const loadMapping = async () => {
-      const mapping = await fetchDimensionMapping();
-      if (Object.keys(mapping).length && classifierData.files.length > 0) {
-        const file = classifierData.files[0];
-        const updatedFile: ColumnClassifierFile = {
-          ...file,
-          customDimensions: mapping,
-        };
+    const activeIndex = classifierData.activeFileIndex ?? 0;
+    const activeFile = classifierData.files[activeIndex];
+    const fileName = activeFile?.fileName || null;
+
+    const ensureToggleState = (enable: boolean, dims: string[]) => {
+      const sortedDims = enable ? [...dims].sort() : [];
+      const currentDims = [...(settings.dimensions || [])].sort();
+      const dimsChanged =
+        sortedDims.length !== currentDims.length ||
+        sortedDims.some((dim, idx) => dim !== currentDims[idx]);
+      const currentToggle = settings.enableDimensionMapping || false;
+      if (dimsChanged || currentToggle !== enable) {
         updateSettings(atomId, {
-          data: { files: [updatedFile], activeFileIndex: 0 },
-          dimensions: Object.keys(mapping),
-          enableDimensionMapping: true,
+          enableDimensionMapping: enable,
+          dimensions: sortedDims,
         });
       }
     };
-    if (classifierData.files.length > 0) {
-      loadMapping();
+
+    const fileChanged =
+      lastActiveIndexRef.current !== activeIndex ||
+      lastFileNameRef.current !== fileName;
+
+    if (!activeFile) {
+      processedFileRef.current = null;
+      lastActiveIndexRef.current = classifierData.activeFileIndex ?? null;
+      lastFileNameRef.current = null;
+      if (pendingMappingRef.current) {
+        pendingMappingRef.current.abort();
+        pendingMappingRef.current = null;
+      }
+      if ((settings.enableDimensionMapping || false) || (settings.dimensions || []).length) {
+        ensureToggleState(false, []);
+      }
+      return;
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    if (fileChanged) {
+      lastActiveIndexRef.current = activeIndex;
+      lastFileNameRef.current = fileName;
+      processedFileRef.current = null;
+      if (pendingMappingRef.current) {
+        pendingMappingRef.current.abort();
+        pendingMappingRef.current = null;
+      }
+      ensureToggleState(false, []);
+    }
+
+    if (!fileName) {
+      processedFileRef.current = null;
+      return;
+    }
+
+    if (processedFileRef.current === fileName) {
+      return;
+    }
+
+    const controller = new AbortController();
+    if (pendingMappingRef.current) {
+      pendingMappingRef.current.abort();
+    }
+    pendingMappingRef.current = controller;
+
+    (async () => {
+      try {
+        const { mapping, config } = await fetchDimensionMapping({
+          objectName: fileName,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) {
+          return;
+        }
+        processedFileRef.current = fileName;
+        const keys = Object.keys(mapping || {});
+        const sortedKeys = keys.length > 0 ? [...keys].sort() : [];
+        const store = useLaboratoryStore.getState();
+        const atomSnapshot = store.getAtom(atomId);
+
+        if (!atomSnapshot) {
+          ensureToggleState(keys.length > 0, sortedKeys);
+          return;
+        }
+
+        const snapshotSettings: SettingsType = {
+          ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
+          ...(atomSnapshot.settings as SettingsType),
+        };
+        const snapshotData =
+          snapshotSettings.data || DEFAULT_COLUMN_CLASSIFIER_SETTINGS.data;
+
+        if (!snapshotData.files.length) {
+          ensureToggleState(keys.length > 0, sortedKeys);
+          return;
+        }
+
+        const snapshotIndex = snapshotData.activeFileIndex ?? activeIndex;
+        const identifierSet = new Set(
+          Array.isArray(config?.identifiers) ? config?.identifiers : [],
+        );
+        const measureSet = new Set(
+          Array.isArray(config?.measures) ? config?.measures : [],
+        );
+        const syncCategories = identifierSet.size > 0 || measureSet.size > 0;
+
+        const updatedFiles = snapshotData.files.map((file, index) => {
+          if (index !== snapshotIndex) {
+            return file;
+          }
+          const updatedColumns = syncCategories
+            ? file.columns.map(col => {
+                if (identifierSet.has(col.name)) {
+                  return { ...col, category: 'identifiers' };
+                }
+                if (measureSet.has(col.name)) {
+                  return { ...col, category: 'measures' };
+                }
+                return { ...col, category: 'unclassified' };
+              })
+            : file.columns;
+          return {
+            ...file,
+            columns: updatedColumns,
+            customDimensions: keys.length > 0 ? mapping : {},
+          };
+        });
+
+        store.updateAtomSettings(atomId, {
+          data: { ...snapshotData, files: updatedFiles },
+          dimensions: sortedKeys,
+          enableDimensionMapping: keys.length > 0,
+          filterColumnViewUnique:
+            snapshotSettings.filterColumnViewUnique ?? true,
+        });
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          processedFileRef.current = fileName;
+          const store = useLaboratoryStore.getState();
+          const atomSnapshot = store.getAtom(atomId);
+          if (atomSnapshot) {
+            const snapshotSettings: SettingsType = {
+              ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
+              ...(atomSnapshot.settings as SettingsType),
+            };
+            const snapshotData =
+              snapshotSettings.data || DEFAULT_COLUMN_CLASSIFIER_SETTINGS.data;
+            if (snapshotData.files.length) {
+              const snapshotIndex = snapshotData.activeFileIndex ?? activeIndex;
+              const clearedFiles = snapshotData.files.map((file, index) =>
+                index === snapshotIndex
+                  ? { ...file, customDimensions: {} }
+                  : file,
+              );
+              store.updateAtomSettings(atomId, {
+                data: { ...snapshotData, files: clearedFiles },
+                dimensions: [],
+                enableDimensionMapping: false,
+              });
+            } else {
+              ensureToggleState(false, []);
+            }
+          } else {
+            ensureToggleState(false, []);
+          }
+        }
+      } finally {
+        if (pendingMappingRef.current === controller) {
+          pendingMappingRef.current = null;
+        }
+      }
+    })();
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    atomId,
+    classifierData.activeFileIndex,
+    classifierData.files,
+    settings.dimensions,
+    settings.enableDimensionMapping,
+    updateSettings,
+  ]);
 
   React.useEffect(() => {
     const stored = localStorage.getItem('column-classifier-config');
@@ -61,6 +231,9 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     try {
       const cfg = JSON.parse(stored);
       const file = classifierData.files[0];
+      if (cfg?.file_name && file?.fileName && cfg.file_name !== file.fileName) {
+        return;
+      }
       const updatedFile: ColumnClassifierFile = {
         ...file,
         columns: file.columns.map(col => ({
@@ -86,12 +259,15 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
 
 
   const handleColumnMove = (
-    columnName: string,
+    columnName: string | string[],
     newCategory: string,
     fileIndex?: number
   ) => {
     const targetFileIndex =
       fileIndex !== undefined ? fileIndex : classifierData.activeFileIndex;
+
+    // Convert single column to array for consistent processing
+    const columnsToMove = Array.isArray(columnName) ? columnName : [columnName];
 
     const updated = {
       ...classifierData,
@@ -100,8 +276,10 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
 
         const updatedCustom = { ...file.customDimensions };
         // remove from all custom dimensions first
-        Object.keys(updatedCustom).forEach(key => {
-          updatedCustom[key] = updatedCustom[key].filter(col => col !== columnName);
+        columnsToMove.forEach(colName => {
+          Object.keys(updatedCustom).forEach(key => {
+            updatedCustom[key] = updatedCustom[key].filter(col => col !== colName);
+          });
         });
 
         let updatedColumns = file.columns;
@@ -111,18 +289,20 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
           newCategory === 'measures' ||
           newCategory === 'unclassified'
         ) {
-          // regular category change
+          // regular category change - update all specified columns
           updatedColumns = file.columns.map(col =>
-            col.name === columnName ? { ...col, category: newCategory } : col
+            columnsToMove.includes(col.name) ? { ...col, category: newCategory } : col
           );
         } else {
           // assigning to a dimension: keep identifier category
           if (!updatedCustom[newCategory]) {
             updatedCustom[newCategory] = [];
           }
-          if (!updatedCustom[newCategory].includes(columnName)) {
-            updatedCustom[newCategory].push(columnName);
-          }
+          columnsToMove.forEach(colName => {
+            if (!updatedCustom[newCategory].includes(colName)) {
+              updatedCustom[newCategory].push(colName);
+            }
+          });
         }
 
         return {
@@ -188,7 +368,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       .filter(c => c.category === 'measures')
       .map(c => c.name);
 
-    const payload = {
+    const payload: Record<string, any> = {
       project_id: project.id || null,
       client_name: env.CLIENT_NAME || '',
       app_name: env.APP_NAME || '',
@@ -197,49 +377,46 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       measures,
       dimensions: currentFile.customDimensions
     };
+    if (currentFile.fileName) {
+      payload.file_name = currentFile.fileName;
+    }
 
-    const key = `${payload.client_name}/${payload.app_name}/${payload.project_name}/column_classifier_config`;
-    console.log('🆔 identifiers', identifiers);
-    console.log('🏷️ dimensions', payload.dimensions);
-    console.log('📁 will save configuration to', key);
-    console.log('📦 saving configuration', payload);
-    const res = await fetch(`${CLASSIFIER_API}/save_config`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      credentials: 'include'
-    });
-    console.log('✅ save configuration response', res.status);
-    if (res.ok) {
-      toast({ title: 'Configuration Saved Successfully' });
-      try {
-        const json = await res.json();
-        console.log('📝 configuration save result', json);
-        console.log('🔑 redis namespace', json.key);
-        console.log('📂 saved data', json.data);
-      } catch (err) {
-        console.warn('assignment save result parse error', err);
+    try {
+      const res = await fetch(`${CLASSIFIER_API}/save_config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'include'
+      });
+
+      if (res.ok) {
+        toast({ title: 'Configuration Saved Successfully' });
+        localStorage.setItem('column-classifier-config', JSON.stringify(payload));
+        updateSessionState(user?.id, {
+          identifiers,
+          measures,
+          dimensions: currentFile.customDimensions,
+        });
+        addNavigationItem(user?.id, {
+          atom: 'column-classifier',
+          identifiers,
+          measures,
+          dimensions: currentFile.customDimensions,
+        });
+        logSessionState(user?.id);
+      } else {
+        toast({ title: 'Unable to Save Configuration', variant: 'destructive' });
+        try {
+          const txt = await res.text();
+          console.warn('assignment save error response', txt);
+        } catch (err) {
+          console.warn('assignment save error parse fail', err);
+        }
+        logSessionState(user?.id);
       }
-      updateSessionState(user?.id, {
-        identifiers,
-        measures,
-        dimensions: currentFile.customDimensions,
-      });
-      addNavigationItem(user?.id, {
-        atom: 'column-classifier',
-        identifiers,
-        measures,
-        dimensions: currentFile.customDimensions,
-      });
-      logSessionState(user?.id);
-    } else {
+    } catch (err) {
       toast({ title: 'Unable to Save Configuration', variant: 'destructive' });
-      try {
-        const txt = await res.text();
-        console.warn('assignment save error response', txt);
-      } catch (err) {
-        console.warn('assignment save error parse fail', err);
-      }
+      console.warn('assignment save request failed', err);
       logSessionState(user?.id);
     }
   };
@@ -257,19 +434,23 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
   return (
     <div className="w-full h-full bg-white flex flex-col">
         <div className="flex flex-1">
-          <div className="w-full p-4">
-            <ColumnClassifierCanvas
-              data={classifierData}
-              onColumnMove={handleColumnMove}
-              onActiveFileChange={setActiveFile}
-              showColumnView={settings.enableColumnView ?? true}
-              filterUnique={settings.filterColumnViewUnique || false}
-              onFilterToggle={handleFilterToggle}
-              atomId={atomId}
-            />
+          <div className="relative w-full h-full p-4 min-h-[450px]">
+            {settings.isLoading ? (
+              <LoadingAnimation status={settings.loadingStatus} />
+            ) : (
+              <ColumnClassifierCanvas
+                data={classifierData}
+                onColumnMove={handleColumnMove}
+                onActiveFileChange={setActiveFile}
+                showColumnView={settings.enableColumnView ?? true}
+                filterUnique={settings.filterColumnViewUnique || false}
+                onFilterToggle={handleFilterToggle}
+                atomId={atomId}
+              />
+            )}
           </div>
         </div>
-      {settings.enableDimensionMapping && (
+      {!settings.isLoading && settings.enableDimensionMapping && (
         <div className="border-t p-4 overflow-y-auto">
           <ColumnClassifierDimensionMapping
             customDimensions={

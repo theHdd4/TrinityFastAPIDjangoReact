@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, Iterable, Mapping
 import numpy as np
 from pymongo import MongoClient
 from fastapi.encoders import jsonable_encoder
@@ -36,10 +36,83 @@ def get_llm_config() -> Dict[str, str]:
 # ``DataStorageRetrieval`` package and ``app`` utilities can be
 # imported normally when running outside Docker.
 BACKEND_ROOT = Path(__file__).resolve().parent
-sys.path.append(str(BACKEND_ROOT))
-BACKEND_API = BACKEND_ROOT.parent / "TrinityBackendFastAPI" / "app"
-if BACKEND_API.exists():
-    sys.path.append(str(BACKEND_API))
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.append(str(BACKEND_ROOT))
+
+BACKEND_REPO = BACKEND_ROOT.parent / "TrinityBackendFastAPI"
+BACKEND_API = BACKEND_REPO / "app"
+
+# ``app`` is a top-level package inside ``TrinityBackendFastAPI`` while
+# helpers such as ``DataStorageRetrieval`` live inside the ``app`` folder.
+# Add both locations to ``sys.path`` so the imports work when running the
+# AI service outside the Docker compose environment.
+for path in (BACKEND_REPO, BACKEND_API):
+    if path.exists():
+        path_str = str(path)
+        if path_str not in sys.path:
+            sys.path.append(path_str)
+
+try:
+    from app.core.mongo import build_host_mongo_uri
+except ModuleNotFoundError:
+    logger.warning(
+        "FastAPI backend package unavailable; falling back to local Mongo URI builder"
+    )
+
+    def _first_non_empty(vars_: Iterable[str], default: str) -> str:
+        """Return the first non-empty environment variable value."""
+
+        for name in vars_:
+            value = os.getenv(name)
+            if value is None:
+                continue
+            stripped = value.strip()
+            if stripped:
+                return stripped
+        return default
+
+    def build_host_mongo_uri(
+        *,
+        username: str = "admin_dev",
+        password: str = "pass_dev",
+        auth_source: str = "admin",
+        default_host: str = "localhost",
+        default_port: str = "9005",
+        host_env_vars: Tuple[str, ...] = ("HOST_IP", "MONGO_HOST"),
+        port_env_vars: Tuple[str, ...] = ("MONGO_PORT",),
+        auth_source_env_vars: Tuple[str, ...] = ("MONGO_AUTH_SOURCE", "MONGO_AUTH_DB"),
+        database: str | None = None,
+        options: Mapping[str, str] | None = None,
+    ) -> str:
+        """Construct a MongoDB URI using host information from the environment."""
+
+        host = _first_non_empty(host_env_vars, default_host)
+        port = _first_non_empty(port_env_vars, default_port)
+        auth_db = _first_non_empty(auth_source_env_vars, auth_source)
+
+        credentials = ""
+        if username and password:
+            credentials = f"{username}:{password}@"
+        elif username:
+            credentials = f"{username}@"
+
+        path = f"/{database}" if database else "/"
+
+        query_params: Dict[str, str] = {}
+        if auth_db:
+            query_params["authSource"] = auth_db
+        if options:
+            for key, value in options.items():
+                if value is None:
+                    continue
+                query_params[key] = value
+
+        query = ""
+        if query_params:
+            joined = "&".join(f"{key}={value}" for key, value in query_params.items())
+            query = f"?{joined}"
+
+        return f"mongodb://{credentials}{host}:{port}{path}{query}"
 
 # Load environment variables from Redis so subsequent configuration
 # functions see CLIENT_NAME, APP_NAME and PROJECT_NAME
@@ -53,14 +126,18 @@ load_env_from_redis()
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
 
-MONGO_URI = os.getenv(
-    "CLASSIFY_MONGO_URI",
-    "mongodb://admin_dev:pass_dev@10.2.1.65:9005/?authSource=admin",
+DEFAULT_MONGO_URI = build_host_mongo_uri()
+MONGO_URI = (
+    os.getenv("CLASSIFY_MONGO_URI")
+    or os.getenv("MONGO_URI")
+    or DEFAULT_MONGO_URI
 )
-CONFIG_DB = os.getenv("CLASSIFIER_CONFIG_DB", "trinity_prod")
+# Column classifier configurations are stored in the shared "trinity_db"
+# database under the "column_classifier_config" collection.
+CONFIG_DB = os.getenv("CLASSIFIER_CONFIG_DB", "trinity_db")
 CONFIG_COLLECTION = os.getenv(
     "CLASSIFIER_CONFIGS_COLLECTION",
-    "column_classifier_configs",
+    "column_classifier_config",
 )
 
 try:
@@ -291,11 +368,13 @@ CONCAT_PATH = Path(__file__).resolve().parent / "Agent_concat"
 CREATE_TRANSFORM_PATH = Path(__file__).resolve().parent / "Agent_create_transform"
 GROUPBY_PATH = Path(__file__).resolve().parent / "Agent_groupby"
 CHARTMAKER_PATH = Path(__file__).resolve().parent / "Agent_chartmaker"
+EXPLORE_PATH = Path(__file__).resolve().parent / "Agent_explore"
 sys.path.append(str(MERGE_PATH))
 sys.path.append(str(CONCAT_PATH))
 sys.path.append(str(CREATE_TRANSFORM_PATH))
 sys.path.append(str(GROUPBY_PATH))
 sys.path.append(str(CHARTMAKER_PATH))
+sys.path.append(str(EXPLORE_PATH))
 
 from single_llm_processor import SingleLLMProcessor
 from Agent_Merge.main_app import router as merge_router
@@ -303,6 +382,8 @@ from Agent_concat.main_app import router as concat_router
 from Agent_create_transform.main_app import router as create_transform_router
 from Agent_groupby.main_app import router as groupby_router
 from Agent_chartmaker.main_app import router as chartmaker_router
+from Agent_explore.main_app import router as explore_router
+from insight import router as insight_router
 
 def convert_numpy(obj):
     if isinstance(obj, dict):
@@ -485,6 +566,8 @@ api_router.include_router(concat_router)
 api_router.include_router(create_transform_router)
 api_router.include_router(groupby_router)
 api_router.include_router(chartmaker_router)
+api_router.include_router(explore_router)
+api_router.include_router(insight_router)
 
 # Enable CORS for browser-based clients
 app.add_middleware(

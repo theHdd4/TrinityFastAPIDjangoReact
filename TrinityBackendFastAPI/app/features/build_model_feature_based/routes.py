@@ -2376,18 +2376,18 @@ async def test_mongo_connection():
         # List all databases
         databases = await client.list_database_names()
         
-        # Check if trinity_prod exists
-        if "trinity_prod" in databases:
-            # List collections in trinity_prod
-            collections = await client["trinity_prod"].list_collection_names()
+        # Check if trinity_db exists
+        if "trinity_db" in databases:
+            # List collections in trinity_db
+            collections = await client["trinity_db"].list_collection_names()
         else:
-            logger.warning("trinity_prod database does not exist")
+            logger.warning("trinity_db database does not exist")
         
         return {
             "success": True,
             "databases": databases,
-            "trinity_prod_exists": "trinity_prod" in databases,
-            "collections_in_trinity_prod": collections if "trinity_prod" in databases else []
+            "trinity_db_exists": "trinity_db" in databases,
+            "collections_in_trinity_db": collections if "trinity_db" in databases else []
         }
         
     except Exception as e:

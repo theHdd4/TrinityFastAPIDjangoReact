@@ -7,6 +7,7 @@ import { chartMakerApi } from '../services/chartMakerApi';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VALIDATE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
+import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
 
 interface ChartMakerSettingsProps {
   data: ChartData | null;
@@ -19,6 +20,7 @@ interface ChartMakerSettingsProps {
   };
   error?: string;
   dataSource?: string;
+  hasExistingUpdates?: boolean;
 }
 
 interface Frame {
@@ -26,8 +28,8 @@ interface Frame {
   arrow_name: string;
 }
 
-const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({ 
-  data, 
+const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
+  data,
   onDataUpload,
   loading = {
     uploading: false,
@@ -36,7 +38,8 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
     filtering: false,
   },
   error,
-  dataSource
+  dataSource,
+  hasExistingUpdates = false
 }) => {
   const [frames, setFrames] = useState<Frame[]>([]);
   const [selectedDataSource, setSelectedDataSource] = useState<string>(dataSource || '');
@@ -66,73 +69,60 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
     }
   }, [dataSource]);
 
-  const handleDataframeSelect = async (objectName: string) => {
-    if (!objectName) return;
-    
+  const applyDataframeSelect = async (objectName: string) => {
     console.log('[ChartMakerSettings] Starting dataframe selection:', objectName);
     const startTime = performance.now();
-    
+
     try {
       setUploadError(null);
       setSelectedDataSource(objectName);
-      
-      // Immediately call parent to show loading state
+
       console.log('[ChartMakerSettings] Setting loading state immediately');
       onDataUpload(null, '', objectName);
-      
-      // Add .arrow extension if not present
+
       let processedObjectName = objectName;
       if (!processedObjectName.endsWith('.arrow')) {
         processedObjectName += '.arrow';
       }
-      
+
       let uploadResponse;
-      
+
       try {
-        // Try the optimized direct loading method first
         console.log('[ChartMakerSettings] Attempting direct loading method');
         uploadResponse = await chartMakerApi.loadSavedDataframe(processedObjectName);
         console.log('[ChartMakerSettings] Direct loading successful');
       } catch (error) {
         console.log('[ChartMakerSettings] Direct loading failed, falling back to download/upload method:', error);
-        
-        // Fallback to the original download/upload method
+
         const displayName =
           frames
             .find(df => df.object_name === objectName)
             ?.arrow_name.split('/').pop()?.replace('.arrow', '') || objectName;
         const isArrow = processedObjectName.endsWith('.arrow');
-        
+
         if (isArrow) {
-          // Fetch the Arrow file from the backend
           console.log('[ChartMakerSettings] Downloading Arrow file...');
           const response = await fetch(`${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(processedObjectName)}`);
           if (!response.ok) {
             throw new Error(`Failed to load Arrow dataframe: ${response.statusText}`);
           }
           const arrowBuffer = await response.arrayBuffer();
-          // Create a File object for Arrow
           const file = new File([arrowBuffer], `${displayName}.arrow`, { type: 'application/vnd.apache.arrow.file' });
-          // Upload Arrow file to backend
           console.log('[ChartMakerSettings] Re-uploading Arrow file...');
           uploadResponse = await chartMakerApi.uploadArrow(file);
         } else {
-          // Fallback: Fetch the CSV data from the saved dataframe
           console.log('[ChartMakerSettings] Downloading CSV file...');
           const response = await fetch(`${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(processedObjectName)}`);
           if (!response.ok) {
             throw new Error(`Failed to load dataframe: ${response.statusText}`);
           }
           const csvContent = await response.text();
-          // Create a File object from the CSV content
           const file = new File([csvContent], `${displayName}.csv`, { type: 'text/csv' });
-          // Upload CSV file to backend
           console.log('[ChartMakerSettings] Re-uploading CSV file...');
           uploadResponse = await chartMakerApi.uploadCSV(file);
         }
       }
-      
-      // Use the upload response to build chart data
+
       const chartData: ChartData = {
         columns: uploadResponse.columns,
         rows: uploadResponse.sample_data,
@@ -142,18 +132,24 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
         file_id: uploadResponse.file_id,
         row_count: uploadResponse.row_count
       };
-      
+
       const endTime = performance.now();
       console.log(`[ChartMakerSettings] Data loading completed in ${endTime - startTime}ms`);
-      
-      // Call the parent handler with chart data, file ID, and dataSource
+
       onDataUpload(chartData, uploadResponse.file_id, objectName);
     } catch (error) {
       console.error('Error loading saved dataframe:', error);
       setUploadError(error instanceof Error ? error.message : 'Failed to load saved dataframe');
-      // Call parent with error to clear loading state
       onDataUpload(null, '', objectName);
     }
+  };
+
+  const { requestChange: confirmDataSourceChange, dialog } = useDataSourceChangeWarning(applyDataframeSelect);
+
+  const handleDataframeSelect = (objectName: string) => {
+    if (!objectName) return;
+    const isDifferentSource = objectName !== (dataSource || '');
+    confirmDataSourceChange(objectName, hasExistingUpdates && isDifferentSource);
   };
 
   const isLoading = loading.uploading || loading.fetchingColumns || loading.fetchingUniqueValues;
@@ -175,7 +171,7 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
         ) : (
           <Select value={selectedDataSource} onValueChange={handleDataframeSelect}>
             <SelectTrigger className="bg-white border-gray-300">
-              <SelectValue placeholder="Select saved dataframe" />
+              <SelectValue placeholder="Choose a saved dataframe..." />
             </SelectTrigger>
             <SelectContent>
               {frames.map(f => (
@@ -197,7 +193,7 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
         )}
       </Card>
 
-      {data && !isLoading && (
+      {/* {data && !isLoading && (
         <Card className="p-4 space-y-3">
           <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-950/20 rounded-lg border border-green-200 dark:border-green-800">
             <Database className="w-4 h-4 text-green-600" />
@@ -210,14 +206,16 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
               </p>
             </div>
           </div>
-          
+
           <div className="text-xs space-y-2">
             <div>
               <strong>Columns:</strong> {data.columns.join(', ')}
             </div>
           </div>
         </Card>
-      )}
+      )} */}
+
+      {dialog}
       
       {frames.length === 0 && !isLoading && (
         <Card className="p-4">

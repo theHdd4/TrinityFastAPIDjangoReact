@@ -1,13 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { VALIDATE_API, FEATURE_OVERVIEW_API, CLUSTERING_API } from '@/lib/api';
-import { Save, Edit3 } from 'lucide-react';
+import { Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface Props {
@@ -113,76 +111,23 @@ const ClusteringInputFiles: React.FC<Props> = ({ atomId }) => {
   };
 
   return (
-    <div className="space-y-6">
-      {/* File Selection */}
-      <Card className="p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">Select Data Source</h3>
-          {availableFiles.length > 0 && (
-            <Badge variant="outline" className="text-sm">
-              {availableFiles.length} file{availableFiles.length !== 1 ? 's' : ''} available
-            </Badge>
-          )}
-        </div>
-        
-        {loading ? (
-          <div className="text-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-            <p className="text-gray-600">Loading available files...</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="flex items-center space-x-4">
-              <Label htmlFor="file-select" className="text-sm font-medium text-gray-700">
-                Choose a data file:
-              </Label>
-              <Select onValueChange={handleFileSelect} value={selectedFile}>
-                <SelectTrigger id="file-select" className="w-[300px]">
-                  <SelectValue placeholder="Select a file" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableFiles.map((file) => (
-                    <SelectItem key={file.object_name} value={file.object_name}>
-                      <div className="flex flex-col">
-                        <span className="font-medium">{file.csv_name || file.object_name}</span>
-                        {file.size && (
-                          <span className="text-xs text-gray-500">
-                            Size: {(file.size / 1024 / 1024).toFixed(2)} MB
-                          </span>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            {availableFiles.length === 0 && (
-              <div className="text-center py-8 text-gray-500">
-                <p>No files available. Please upload a file first.</p>
-              </div>
-            )}
-          </div>
-        )}
+    <div className="space-y-4 p-2">
+      <Card className="p-4 space-y-3">
+        <label className="text-sm font-medium text-gray-700 block">Data Source</label>
+        <Select onValueChange={handleFileSelect} value={selectedFile}>
+          <SelectTrigger className="bg-white border-gray-300">
+            <SelectValue placeholder="Choose a saved dataframe..." />
+          </SelectTrigger>
+          <SelectContent>
+            {Array.isArray(availableFiles) && availableFiles.map((file) => (
+              <SelectItem key={file.object_name} value={file.object_name}>
+                {file.csv_name ? file.csv_name.split('/').pop() : file.object_name.split('/').pop()}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Card>
 
-      {/* Selected File Info */}
-      {selectedFile && (
-        <Card className="p-4 bg-blue-50 border border-blue-200">
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <h4 className="font-medium text-blue-900">Selected File</h4>
-              <p className="text-sm text-blue-700">{selectedFile}</p>
-              <p className="text-xs text-blue-600 mt-1">
-                File selected successfully. Column information will be loaded automatically.
-              </p>
-            </div>
-            <Badge className="bg-blue-100 text-blue-800">
-              Ready for Clustering
-            </Badge>
-          </div>
-        </Card>
-      )}
 
       {/* Output Path Section - Shows after saving dataframe */}
       {clusteringData.outputPath && clusteringData.outputPath.trim() !== '' && (

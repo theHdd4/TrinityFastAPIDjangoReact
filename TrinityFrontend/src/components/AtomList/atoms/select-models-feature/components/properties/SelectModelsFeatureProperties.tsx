@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Database, Settings, Eye } from 'lucide-react';
+import { Upload, Settings, Eye } from 'lucide-react';
 import SelectModelsFeatureSettings from '../SelectModelsFeatureSettings';
 import SelectModelsFeatureExhibition from '../SelectModelsFeatureExhibtion';
 import SelectModelsFeatureVisualisation from '../SelectModelsFeatureVisualisation';
@@ -12,7 +12,7 @@ interface Props {
 }
 
 const SelectModelsFeatureProperties: React.FC<Props> = ({ atomId }) => {
-  const [tab, setTab] = useState('settings');
+  const [tab, setTab] = useState('inputs');
   const [error, setError] = useState<string | null>(null);
   
   try {
@@ -43,36 +43,27 @@ const SelectModelsFeatureProperties: React.FC<Props> = ({ atomId }) => {
             </button>
           </div>
         )}
-        <Tabs value={tab} onValueChange={setTab} className="w-full h-full flex flex-col">
-          <TabsList className="grid w-full grid-cols-3 bg-gray-50 mb-4 shrink-0 mx-4 mt-4">
-            <TabsTrigger value="settings" className="text-xs font-medium">
-              <Settings className="w-3 h-3 mr-1" />
-              Settings
+        <Tabs value={tab} onValueChange={setTab} className="flex-1 flex flex-col">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="inputs" className="text-xs font-medium">
+              <Upload className="w-3 h-3 mr-1" />
+              Input
             </TabsTrigger>
             <TabsTrigger value="exhibition" className="text-xs font-medium">
               <Eye className="w-3 h-3 mr-1" />
               Exhibition
             </TabsTrigger>
-            <TabsTrigger value="visualisation" className="text-xs font-medium">
-              <Database className="w-3 h-3 mr-1" />
-              Visualisation
-            </TabsTrigger>
           </TabsList>
 
-          <div className="flex-1 overflow-auto px-4">
-            <TabsContent value="settings" className="mt-0 h-full" forceMount>
-              <SelectModelsFeatureSettings 
-                data={settings} 
-                onDataChange={handleChange}
-              />
-            </TabsContent>
-            <TabsContent value="exhibition" className="mt-0 h-full" forceMount>
-              <SelectModelsFeatureExhibition data={settings} />
-            </TabsContent>
-            <TabsContent value="visualisation" className="mt-0 h-full" forceMount>
-              <SelectModelsFeatureVisualisation data={settings} />
-            </TabsContent>
-          </div>
+          <TabsContent value="inputs" className="flex-1 mt-0" forceMount>
+            <SelectModelsFeatureSettings 
+              data={settings} 
+              onDataChange={handleChange}
+            />
+          </TabsContent>
+          <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
+            {/* Exhibition tab content - empty for now */}
+          </TabsContent>
         </Tabs>
       </div>
     );

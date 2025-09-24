@@ -33,6 +33,7 @@ export interface DataFrameSettings {
   fileId?: string | null; // Persist backend dataframe id
   columnWidths: { [key: string]: number };
   rowHeights: { [key: number]: number };
+  columnFormulas: Record<string, string>;
 }
 
 interface Props {
@@ -43,7 +44,8 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   const cards = useLaboratoryStore(state => state.cards);
   const atom = cards.flatMap(card => card.atoms).find(a => a.id === atomId);
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: DataFrameSettings = atom?.settings || {
+  const baseSettings = (atom?.settings as Partial<DataFrameSettings> | undefined) || {};
+  const settings: DataFrameSettings = {
     rowsPerPage: 15,
     searchTerm: '',
     sortColumns: [],
@@ -54,6 +56,8 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     fileId: null,
     columnWidths: {},
     rowHeights: {},
+    ...baseSettings,
+    columnFormulas: baseSettings.columnFormulas || {},
   };
   // Always use tableData as the source of truth
   const data = settings.tableData || null;
@@ -80,6 +84,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
       fileId: backendFileId || settings.fileId || null,
       columnWidths: {},
       rowHeights: {},
+      columnFormulas: {},
     };
     updateSettings(atomId, newSettings);
   };
@@ -124,12 +129,16 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
         enableEditing: true,
         columnWidths: {},
         rowHeights: {},
+        columnFormulas: {},
       });
     }
   };
 
   // Only show table/chart after file selection (like concat atom)
   const fileSelected = settings.selectedFile;
+  const hasRenderableData = Boolean(
+    data && Array.isArray(data.headers) && data.headers.length > 0 && Array.isArray(data.rows)
+  );
 
   // Automatically load dataframe if a file is selected but no table data exists
   useEffect(() => {
@@ -137,10 +146,17 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     setLoading(true);
     loadDataframeByKey(settings.selectedFile)
       .then(resp => {
-        const columnTypes: Record<string, string> = {};
+        const columnTypes: Record<string, 'text' | 'number' | 'date'> = {};
         resp.headers.forEach(h => {
-          const t = resp.types[h];
-          columnTypes[h] = t.includes('float') || t.includes('int') ? 'number' : 'text';
+          const rawType = resp.types[h];
+          const normalized = (typeof rawType === 'string' ? rawType : String(rawType || '')).toLowerCase();
+          if (['float', 'double', 'int', 'decimal', 'numeric', 'number'].some(token => normalized.includes(token))) {
+            columnTypes[h] = 'number';
+          } else if (['datetime', 'date', 'time', 'timestamp'].some(token => normalized.includes(token))) {
+            columnTypes[h] = 'date';
+          } else {
+            columnTypes[h] = 'text';
+          }
         });
         const fileName = settings.selectedFile!.split('/').pop() || settings.selectedFile!;
         const newData: DataFrameData = {
@@ -165,30 +181,29 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
 
   return (
     <ErrorBoundary>
-      <div className="w-full h-full bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden">
-        <div className="h-full flex flex-col">
-          {fileSelected && data && data.headers && data.rows && data.headers.length > 0 && data.rows.length > 0 ? (
-            <div className="h-full flex flex-col">
-              {viewMode === 'table' && (
-                <DataFrameOperationsCanvas
-                  data={data}
-                  settings={settings}
-                  onSettingsChange={handleSettingsChange}
-                  onDataUpload={handleDataUpload}
-                  onDataChange={handleDataChange}
-                  onClearAll={handleReset}
-                  fileId={settings.fileId || null}
-                  originalData={originalData}
-                />
-              )}
-              {viewMode === 'chart' && chartConfig && (
-                <div className="flex items-center justify-center h-full text-gray-800 text-lg font-semibold">
-                  [Chart will be rendered here]
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-green-50/30 to-green-50/50 overflow-y-auto relative">
+      <div className="w-full h-full bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden flex flex-col">
+        {fileSelected && hasRenderableData ? (
+          <>
+            {viewMode === 'table' && (
+              <DataFrameOperationsCanvas
+                data={data}
+                settings={settings}
+                onSettingsChange={handleSettingsChange}
+                onDataUpload={handleDataUpload}
+                onDataChange={handleDataChange}
+                onClearAll={handleReset}
+                fileId={settings.fileId || null}
+                originalData={originalData}
+              />
+            )}
+            {viewMode === 'chart' && chartConfig && (
+              <div className="flex items-center justify-center h-full text-gray-800 text-lg font-semibold">
+                [Chart will be rendered here]
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-green-50/30 to-green-50/50 overflow-y-auto relative min-h-0">
               <div className="absolute inset-0 opacity-20">
                 <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
                   <defs>
@@ -215,7 +230,6 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
               </div>
             </div>
           )}
-        </div>
       </div>
     </ErrorBoundary>
   );

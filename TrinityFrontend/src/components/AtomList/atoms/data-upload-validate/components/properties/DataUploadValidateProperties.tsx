@@ -795,106 +795,108 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       <div className="p-3 border-b border-gray-200">
         <h3 className="font-semibold text-gray-900 flex items-center space-x-2">
           <Settings className="w-4 h-4" />
-          <span>Data Upload and Validate Properties</span>
+          <span>Data Upload and Validate</span>
         </h3>
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-gray-300">
         <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-          <span className="text-sm font-medium text-gray-700">Bypass Master File Upload (Allow any file to be uploaded)</span>
+          <span className="text-sm font-medium text-gray-700">Enable validation steps</span>
           <Switch
             checked={bypassMasterUpload}
             onCheckedChange={handleBypassToggle}
             className="data-[state=checked]:bg-[#458EE2]"
           />
         </div>
-        {/* Master File Upload Section */}
-        <div className="p-4 border-b border-gray-200 bg-gray-50">
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-700 block mb-2">
-                Upload Master File
-              </label>
-              <input
-                type="file"
-                multiple
-                accept=".csv,.xls,.xlsx"
-                onChange={handleMasterFileSelect}
-                className="hidden"
-                id="master-file-upload"
-                ref={fileInputRef}
-              />
-              <label htmlFor="master-file-upload">
-                <Button
-                  asChild
-                  variant="outline"
-                  className="w-full cursor-pointer border-gray-300"
-                >
-                  <span className="flex items-center justify-center space-x-2">
-                    <Upload className="w-4 h-4" />
-                    <span>Choose Files</span>
-                  </span>
-                </Button>
-              </label>
-            </div>
-
-            {allAvailableFiles.length > 0 && (
-              <div className="space-y-2">
-                {allAvailableFiles.map(file => (
-                  <div key={file.name} className="flex items-center justify-between">
-                    {renameTarget === file.name ? (
-                      <Input
-                        value={renameValue}
-                        onChange={e => setRenameValue(e.target.value)}
-                        onBlur={() => commitRename(file.name)}
-                        className="h-7 text-xs flex-1 mr-2"
-                      />
-                    ) : (
-                      <span className="text-sm truncate flex-1 max-w-[140px]" title={file.name}>{file.name}</span>
-                    )}
-                    <div className="flex items-center space-x-1 ml-2">
-                      <Pencil className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => startRename(file.name)} />
-                      <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => deleteMasterFile(file.name)} />
-                    </div>
-                  </div>
-                ))}
+        {/* Master File Upload Section - Only show when toggle is enabled */}
+        {bypassMasterUpload && (
+          <div className="p-4 border-b border-gray-200 bg-gray-50">
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-2">
+                  Upload Master File
+                </label>
+                <input
+                  type="file"
+                  multiple
+                  accept=".csv,.xls,.xlsx"
+                  onChange={handleMasterFileSelect}
+                  className="hidden"
+                  id="master-file-upload"
+                  ref={fileInputRef}
+                />
+                <label htmlFor="master-file-upload">
+                  <Button
+                    asChild
+                    variant="outline"
+                    className="w-full cursor-pointer border-gray-300"
+                  >
+                    <span className="flex items-center justify-center space-x-2">
+                      <Upload className="w-4 h-4" />
+                      <span>Choose Files</span>
+                    </span>
+                  </Button>
+                </label>
               </div>
-            )}
 
-            <div>
-              <label className="text-sm font-medium text-gray-700 block mb-2">
-                Select Master File
-              </label>
-              <Select
-                value={selectedMasterFile}
-                onValueChange={setSelectedMasterFile}
-              >
-                <SelectTrigger className="bg-white border-gray-300">
-                  <SelectValue placeholder="Select a master file..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {allAvailableFiles.length === 0 ? (
-                    <SelectItem value="no-files" disabled>
-                      No files available
-                    </SelectItem>
-                  ) : (
-                    allAvailableFiles.map((file, index) => (
-                      <SelectItem
-                        key={`${file.source}-${index}`}
-                        value={file.name}
-                      >
-                        {file.name}
+              {allAvailableFiles.length > 0 && (
+                <div className="space-y-2">
+                  {allAvailableFiles.map(file => (
+                    <div key={file.name} className="flex items-center justify-between">
+                      {renameTarget === file.name ? (
+                        <Input
+                          value={renameValue}
+                          onChange={e => setRenameValue(e.target.value)}
+                          onBlur={() => commitRename(file.name)}
+                          className="h-7 text-xs flex-1 mr-2"
+                        />
+                      ) : (
+                        <span className="text-sm truncate flex-1 max-w-[140px]" title={file.name}>{file.name}</span>
+                      )}
+                      <div className="flex items-center space-x-1 ml-2">
+                        <Pencil className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => startRename(file.name)} />
+                        <Trash2 className="w-4 h-4 text-gray-400 cursor-pointer" onClick={() => deleteMasterFile(file.name)} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-2">
+                  Select Master File
+                </label>
+                <Select
+                  value={selectedMasterFile}
+                  onValueChange={setSelectedMasterFile}
+                >
+                  <SelectTrigger className="bg-white border-gray-300">
+                    <SelectValue placeholder="Select a master file..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allAvailableFiles.length === 0 ? (
+                      <SelectItem value="no-files" disabled>
+                        No files available
                       </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+                    ) : (
+                      allAvailableFiles.map((file, index) => (
+                        <SelectItem
+                          key={`${file.source}-${index}`}
+                          value={file.name}
+                        >
+                          {file.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
-        {/* Tabs Section - Only active when master file is selected */}
-        {selectedMasterFile && selectedMasterFile !== "no-files" && (
+        {/* Tabs Section - Only active when master file is selected and use master file is enabled */}
+        {bypassMasterUpload && selectedMasterFile && selectedMasterFile !== "no-files" && (
           <Tabs defaultValue="datatype" className="w-full">
             <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
               <TabsTrigger value="datatype" className="text-xs">
@@ -1324,12 +1326,15 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
           </Tabs>
         )}
 
-        {/* Message when no master file is selected */}
-        {(!selectedMasterFile || selectedMasterFile === "no-files") && (
+        {/* Message when no master file is selected or master file mode is disabled */}
+        {(!bypassMasterUpload || !selectedMasterFile || selectedMasterFile === "no-files") && (
           <div className="p-8 text-center text-gray-500">
             <Table className="w-12 h-12 mx-auto mb-4 text-gray-300" />
             <p className="text-sm">
-              Select a master file to configure data types and settings
+              {!bypassMasterUpload 
+                ? "Enable 'Validation' to configure data types and settings"
+                : "Select a master file to configure data types and settings"
+              }
             </p>
           </div>
         )}

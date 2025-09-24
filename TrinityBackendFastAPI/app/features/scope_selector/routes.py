@@ -77,7 +77,7 @@ async def identifier_options(
 
     1. Attempt to read JSON config from Redis key
        `<client>/<app>/<project>/column_classifier_config`.
-    2. If missing, fetch from Mongo (`column_classifier_configs` collection).
+    2. If missing, fetch from Mongo (`column_classifier_config` collection).
        Cache the document back into Redis.
     3. If still unavailable, return empty list – the frontend will
        fall back to its existing column_summary extraction flow.
@@ -1258,8 +1258,21 @@ async def create_multi_filtered_scope(
 
                 combination_filename = f"{set_name}_{'_'.join(combination_name_parts)}"
 
-                # Get the standard prefix using get_object_prefix
-                prefix = await get_object_prefix()
+                # Get the standard prefix using get_object_prefix with client/app/project names
+                # Extract client, app, project from file_key for proper prefix resolution
+                file_key_parts = request.file_key.split('/')
+                if len(file_key_parts) >= 3:
+                    client_name = file_key_parts[0]
+                    app_name = file_key_parts[1]
+                    project_name = file_key_parts[2]
+                    prefix = await get_object_prefix(
+                        client_name=client_name,
+                        app_name=app_name,
+                        project_name=project_name
+                    )
+                else:
+                    # Fallback to default prefix if file_key structure is unexpected
+                    prefix = await get_object_prefix()
                 
                 # Construct the full path with the standard structure
                 combination_file_key = f"{prefix}filtered-data/{new_scope_id}/{combination_filename}_{timestamp}.arrow"
@@ -1579,18 +1592,18 @@ async def test_mongo_connection():
         # List all databases
         databases = await client.list_database_names()
         
-        # Check if trinity_prod exists
-        if "trinity_prod" in databases:
-            # List collections in trinity_prod
-            collections = await client["trinity_prod"].list_collection_names()
+        # Check if trinity_db exists
+        if "trinity_db" in databases:
+            # List collections in trinity_db
+            collections = await client["trinity_db"].list_collection_names()
         else:
-            logger.warning("trinity_prod database does not exist")
+            logger.warning("trinity_db database does not exist")
         
         return {
             "success": True,
             "databases": databases,
-            "trinity_prod_exists": "trinity_prod" in databases,
-            "collections_in_trinity_prod": collections if "trinity_prod" in databases else []
+            "trinity_db_exists": "trinity_db" in databases,
+            "collections_in_trinity_db": collections if "trinity_db" in databases else []
         }
         
     except Exception as e:
