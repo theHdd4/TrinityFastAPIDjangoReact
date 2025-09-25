@@ -30,24 +30,26 @@ def _sanitize_mongo_uri(uri: Optional[str]) -> Optional[str]:
 # --------------------------------------------------------------------------- #
 # MongoDB                                                                     #
 # --------------------------------------------------------------------------- #
-# Use the same database as the build atom (trinity_prod)
-DEFAULT_MONGO_URI = build_host_mongo_uri(database="trinity_prod")
-MONGO_URI = os.getenv(
-    "SCENARIO_PLANNER_MONGO_URI",
-    os.getenv("MONGO_URI", DEFAULT_MONGO_URI)
-)
+# Use the same database as the build atom (trinity_db)
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:rootpass@mongo:27017/trinity_db?authSource=admin")
 
 # Debug: Log environment variables to see what's being set
 logger.info("Environment MONGO_URI: %s", _sanitize_mongo_uri(os.getenv("MONGO_URI")))
 logger.info("Using MONGO_URI: %s", _sanitize_mongo_uri(MONGO_URI))
 
-# Create MongoDB client using the same pattern as clustering atom
+# Create MongoDB client using the same pattern as select atom
 mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, serverSelectionTimeoutMS=5000)
 
-# Get primary database from URI
-db = mongo_client.get_default_database()
+# Get database explicitly like select atom
+MONGO_DB = os.getenv("MONGO_DB", "trinity_db")
+db = mongo_client[MONGO_DB]
 
-# Collection in shared config database for identifier structure
+# Debug: Log database information
+logger.info("Environment MONGO_DB: %s", os.getenv("MONGO_DB"))
+logger.info("Using MONGO_DB: %s", MONGO_DB)
+logger.info("Database name: %s", db.name)
+
+# Collection  inshared config database for identifier structure
 CONFIG_DB = os.getenv("CLASSIFIER_CONFIG_DB", "trinity_db")
 column_classifier_config = mongo_client[CONFIG_DB]["column_classifier_config"]
 

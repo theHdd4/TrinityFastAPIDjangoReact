@@ -119,6 +119,16 @@ async def get_scope_config_from_mongo(client_name: str, app_name: str, project_n
         logger.error(f"❌ MongoDB read error for scopeselector_configs: {e}")
         return None
 
+async def get_column_classifier_config_from_mongo(client_name: str, app_name: str, project_name: str):
+    """Retrieve column classifier configuration from column_classifier_config collection."""
+    try:
+        document_id = f"{client_name}/{app_name}/{project_name}"
+        result = await client["trinity_db"]["column_classifier_config"].find_one({"_id": document_id})
+        return result
+    except Exception as e:
+        logger.error(f"❌ MongoDB read error for column_classifier_config: {e}")
+        return None
+
 async def get_combination_column_values(minio_client, bucket_name: str, file_key: str, identifiers: list):
     """Get unique column values for identifiers from a source file."""
     try:

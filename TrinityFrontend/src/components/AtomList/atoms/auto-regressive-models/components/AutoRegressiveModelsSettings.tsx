@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -32,6 +32,13 @@ const AutoRegressiveModelsSettings: React.FC<AutoRegressiveModelsSettingsProps> 
   onSettingsChange,
   onDataUpload
 }) => {
+  // State for numerical columns from API
+  const [numericalColumns, setNumericalColumns] = useState<string[]>([]);
+  const [isLoadingColumns, setIsLoadingColumns] = useState(false);
+  
+  // State for pool identifiers from API
+  const [poolIdentifiers, setPoolIdentifiers] = useState<string[]>([]);
+  const [isLoadingIdentifiers, setIsLoadingIdentifiers] = useState(false);
   // fetch saved dataframes list on mount
   useEffect(() => {
     fetch(`${VALIDATE_API}/list_saved_dataframes`)

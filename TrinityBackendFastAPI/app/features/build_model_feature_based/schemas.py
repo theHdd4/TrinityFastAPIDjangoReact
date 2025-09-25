@@ -20,9 +20,6 @@ class Health(BaseModel):
 class ScopeCombination(BaseModel):
     """Schema for individual combination within a scope."""
     combination_id: str
-    channel: str
-    brand: str
-    ppg: str
     file_key: str
     filename: str
     set_name: str
@@ -61,9 +58,6 @@ class ScopeSetRequest(BaseModel):
 class Combination(BaseModel):
     """Basic combination information."""
     combination_id: str
-    channel: str
-    brand: str
-    ppg: str
     file_key: str
 
 class CombinationList(BaseModel):
@@ -123,6 +117,11 @@ class ModelResult(BaseModel):
     elasticity_calculated: bool = Field(False, description="Whether elasticity was calculated")
     fold_elasticities: Optional[List[float]] = Field(None, description="Elasticity values for each fold")
     
+    # Auto-tuning results
+    best_alpha: Optional[float] = Field(None, description="Best alpha value found during auto-tuning")
+    best_cv_score: Optional[float] = Field(None, description="Best cross-validation score during auto-tuning")
+    best_l1_ratio: Optional[float] = Field(None, description="Best L1 ratio found during auto-tuning (for ElasticNet)")
+    
     # ADD THESE NEW FIELDS
     csf: Optional[float] = Field(None, description="Consumer Surplus Fraction")
     mcv: Optional[float] = Field(None, description="Marginal Consumer Value")
@@ -135,15 +134,48 @@ class ModelResult(BaseModel):
     contribution_details: Optional[Dict[str, Any]] = Field(None, description="Details about contribution calculation")
 
 
+class StackModelResult(BaseModel):
+    """Simplified result for a single model in stack modeling (beta coefficients only)."""
+    model_name: str
+    mape_train: float
+    mape_test: float
+    r2_train: float
+    r2_test: float
+    coefficients: Dict[str, float] = Field(..., description="Beta coefficients")
+    standardized_coefficients: Optional[Dict[str, float]] = Field(None, description="Standardized coefficients for reference")
+    intercept: float = Field(..., description="Model intercept")
+    aic: float = Field(..., description="Akaike Information Criterion")
+    bic: float = Field(..., description="Bayesian Information Criterion")
+    n_parameters: int = Field(..., description="Number of model parameters including intercept")
+    
+    # Auto-tuning results
+    best_alpha: Optional[float] = Field(None, description="Best alpha value found during auto-tuning")
+    best_cv_score: Optional[float] = Field(None, description="Best cross-validation score during auto-tuning")
+    best_l1_ratio: Optional[float] = Field(None, description="Best L1 ratio found during auto-tuning (for ElasticNet)")
+    
+    # Additional fields for consistency with individual modeling
+    mape_train_std: float = Field(0.0, description="Standard deviation of train MAPE")
+    mape_test_std: float = Field(0.0, description="Standard deviation of test MAPE")
+    r2_train_std: float = Field(0.0, description="Standard deviation of train R²")
+    r2_test_std: float = Field(0.0, description="Standard deviation of test R²")
+    fold_results: List[Dict[str, Any]] = Field(default_factory=list, description="Individual fold results")
+    train_size: int = Field(0, description="Number of training samples")
+    test_size: int = Field(0, description="Number of test samples")
+
+
 class CombinationModelResults(BaseModel):
     """Results for all models on a single combination."""
     combination_id: str
-    channel: str
-    brand: str
-    ppg: str
     file_key: str
     total_records: int
     model_results: List[ModelResult]
+
+class StackModelResults(BaseModel):
+    """Results for all models on a single split cluster."""
+    split_clustered_data_id: str
+    file_key: str
+    total_records: int
+    model_results: List[StackModelResult]
 
 class ModelTrainingResponse(BaseModel):
     """Response from model training endpoint."""
@@ -157,6 +189,39 @@ class ModelTrainingResponse(BaseModel):
     combination_results: List[CombinationModelResults]
     summary: Dict[str, Any]
 
+class StackModelTrainingResponse(BaseModel):
+    """Response from stack model training endpoint."""
+    scope_id: str
+    set_name: str
+    x_variables: List[str]
+    y_variable: str
+    standardization: str
+    k_folds: int
+    total_split_clusters: int
+    stack_model_results: List[StackModelResults]
+    summary: Dict[str, Any]
+
+
+class CombinationBetaResult(BaseModel):
+    """Beta coefficients for a single combination."""
+    combination: str
+    model_name: str
+    intercept: float
+    coefficients: Dict[str, float] = Field(..., description="Final beta coefficients for each variable")
+
+
+class CombinationBetasResponse(BaseModel):
+    """Response from combination betas endpoint."""
+    scope_id: str
+    set_name: str
+    x_variables: List[str]
+    y_variable: str
+    standardization: str
+    k_folds: int
+    total_combinations: int
+    combination_betas: List[CombinationBetaResult]
+    summary: Dict[str, Any]
+
 
 
 
@@ -167,9 +232,6 @@ class ModelResultDocument(BaseModel):
     scope_name: str
     set_name: str
     combination_id: str
-    channel: str
-    brand: str
-    ppg: str
     file_key: str
     model_name: str
     model_type: str = "regression"

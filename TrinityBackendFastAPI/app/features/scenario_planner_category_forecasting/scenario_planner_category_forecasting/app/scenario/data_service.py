@@ -23,6 +23,7 @@ from ..config import (
     select_models_collection,
     column_classifier_config,
     build_collection,
+    db
 )
 from ..utils.file_loader import FileLoader
 
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────── #
 # Redis helpers                                                              #
 # ─────────────────────────────────────────────────────────────────────────── #
-def _redis_set(key: str, obj, ttl: int = 48 * 60 * 60) -> None:  # 2 days default TTL
+def _redis_set(key: str, obj, ttl: int = 6 * 60 * 60) -> None:  # 6 hours default TTL
     try:
         cache.set(key, pickle.dumps(obj), ex=ttl)
     except Exception:
@@ -131,6 +132,7 @@ class DataService:
         """Fetch model metadata from MongoDB using the model_id. Assumes _id stored as string."""
         try:
             cursor = select_models_collection.find({"_id": model_id})
+            logger.info("fetch_models_by_id: %s", cursor)
             docs = await cursor.to_list(length=None)
             return docs
         except Exception as e:
@@ -338,24 +340,35 @@ class DataService:
 
     @classmethod
     def _parse_x_variables(cls, x_variables_str: str) -> List[str]:
-        """Parse x_variables from string format like "['SalesValue' 'VolumeUnits' 'D1' 'Week']"."""
+        """Parse x_variables from string format like "['SalesValue' 'VolumeUnits' 'D1' 'Week']" or "['Year', 'Month', 'Week', 'SalesValue']"."""
         try:
             if not x_variables_str or x_variables_str == "[]":
                 return []
             
-            # Handle the format: "['SalesValue' 'VolumeUnits' 'D1' 'Week']"
-            # Remove brackets and split by spaces, then clean up quotes
+            # Remove brackets
             cleaned = x_variables_str.strip("[]")
             if not cleaned:
                 return []
             
-            # Split by spaces and clean up quotes
             variables = []
-            for var in cleaned.split():
-                var = var.strip("'\"")
-                if var:
-                    variables.append(var)
             
+            # Check if the string contains commas (new format)
+            if ',' in cleaned:
+                # Handle format with commas: "['Year', 'Month', 'Week', 'SalesValue', 'VolumeUnits', 'D1']"
+                # Split by commas and clean up quotes and spaces
+                for var in cleaned.split(','):
+                    var = var.strip().strip("'\"")
+                    if var:
+                        variables.append(var)
+            else:
+                # Handle format without commas: "['SalesValue' 'VolumeUnits' 'D1' 'Week']"
+                # Split by spaces and clean up quotes
+                for var in cleaned.split():
+                    var = var.strip("'\"")
+                    if var:
+                        variables.append(var)
+            
+            logger.info("✅ Parsed x_variables: %s -> %s", x_variables_str, variables)
             return variables
         except Exception as e:
             logger.warning("Failed to parse x_variables '%s': %s", x_variables_str, e)
@@ -762,7 +775,7 @@ class DataService:
                 "cache_version": "2.0"
             }
             cache_key = f"cache_metadata:{d0_key}"
-            _redis_set(cache_key, metadata, ttl=48 * 3600)  # 2 days TTL
+            _redis_set(cache_key, metadata, ttl=6 * 3600)  # 6 hours TTL
             logger.info("Stored cache metadata for %s", d0_key)
         except Exception as e:
             logger.error("Failed to store cache metadata: %s", e, exc_info=True)

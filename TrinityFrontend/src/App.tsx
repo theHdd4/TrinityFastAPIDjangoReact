@@ -17,6 +17,7 @@ import NotFound from "./pages/NotFound";
 import Users from "./pages/Users";
 import Clients from "./pages/Clients";
 import DataFrameView from "./components/AtomList/atoms/data-upload-validate/DataFrameView";
+import KeyboardShortcuts from "./components/KeyboardShortcuts";
 
 const queryClient = new QueryClient();
 
@@ -27,6 +28,7 @@ const App = () => (
       <Sonner />
       <AuthProvider>
         <BrowserRouter>
+          <KeyboardShortcuts />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/projects" element={

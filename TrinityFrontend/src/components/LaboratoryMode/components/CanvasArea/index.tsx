@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { safeStringify } from '@/utils/safeStringify';
 import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
@@ -145,6 +146,31 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     loadingMessages[loadingMessageIndex] ?? loadingMessages[0] ?? 'Loading';
   const prevLayout = React.useRef<LayoutCard[] | null>(null);
   const initialLoad = React.useRef(true);
+
+  useEffect(() => {
+    if (!expandedCard) {
+      return;
+    }
+
+    if (typeof document === 'undefined' || typeof window === 'undefined') {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setExpandedCard(null);
+      }
+    };
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [expandedCard]);
 
   const { updateCard, setCards } = useExhibitionStore();
   const { toast } = useToast();
@@ -1819,11 +1845,22 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       </div>
 
       {/* Fullscreen Card Modal */}
-      {expandedCard && (
-        <div className="fixed inset-0 z-50 bg-gray-50 flex flex-col h-screen w-screen">
-            {/* Fullscreen Header */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
-              <div className="flex items-center space-x-2">
+      {expandedCard &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[1000]"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="absolute inset-0 bg-black/40"
+              aria-hidden="true"
+              onClick={() => setExpandedCard(null)}
+            />
+            <div className="relative z-10 flex h-full w-full flex-col bg-gray-50 shadow-2xl">
+              {/* Fullscreen Header */}
+              <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
+                <div className="flex items-center space-x-2">
                 <Eye className={`w-4 h-4 ${layoutCards.find(c => c.id === expandedCard)?.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                 <span className="text-lg font-semibold text-gray-900">
                   {(() => {
@@ -1836,8 +1873,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         : 'Card';
                   })()}
                 </span>
-              </div>
-              <div className="flex items-center space-x-2">
+                </div>
+                <div className="flex items-center space-x-2">
                 <span className="text-sm text-gray-500">Exhibit the Card</span>
                 <Switch
                   checked={layoutCards.find(c => c.id === expandedCard)?.isExhibited || false}
@@ -1851,12 +1888,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                 >
                   <X className="w-5 h-5 text-gray-500" />
                 </button>
+                </div>
               </div>
-            </div>
 
-            {/* Fullscreen Content */}
-            <div className="flex-1 flex flex-col px-8 py-4 space-y-4 overflow-auto">
-              {(() => {
+              {/* Fullscreen Content */}
+              <div className="flex-1 flex flex-col px-8 py-4 space-y-4 overflow-auto">
+                {(() => {
                 const card = layoutCards.find(c => c.id === expandedCard);
                 if (!card) return null;
 
@@ -1891,7 +1928,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                             <Trash2 className="w-4 h-4 text-gray-400" />
                           </button>
                         </div>
-                        
+
                         {/* Atom Content */}
                         <div className="w-full flex-1 overflow-hidden">
                           {atom.atomId === 'text-box' ? (
@@ -1945,8 +1982,10 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                   </div>
                 );
               })()}
-            </div>
-        </div>
+              </div>
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

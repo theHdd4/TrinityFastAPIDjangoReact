@@ -21,7 +21,6 @@ from .deps import (
     get_summary_results_collection,
     get_validator_atoms_collection,
     redis_client,
-    redis_binary_client,
 )
 
 from .mongodb_saver import (
@@ -140,7 +139,17 @@ def _redis_set_bytes(key: str, value: bytes | bytearray | str, ttl: int = 3600) 
 @router.get("/column_summary")
 async def column_summary(object_name: str):
     """Return column summary statistics for a saved dataframe."""
-    object_name = unquote(object_name)
+    # Handle both URL-encoded and non-URL-encoded object_names
+    if '%' in object_name:
+        # URL-encoded, decode it
+        decoded_object_name = unquote(object_name)
+        print(f"🔧 URL-decoded object_name: {object_name} -> {decoded_object_name}")
+    else:
+        # Not URL-encoded, use as-is
+        decoded_object_name = object_name
+        print(f"🔧 Using object_name as-is: {object_name}")
+    
+    object_name = decoded_object_name
     print(f"➡️ column_summary request: {object_name}")
     parts = object_name.split("/", 3)
     client = parts[0] if len(parts) > 0 else ""
@@ -241,7 +250,17 @@ async def column_summary(object_name: str):
 async def cached_dataframe(object_name: str):
     """Return the saved dataframe as CSV text.
     Prefers Arrow Flight for the latest data, then falls back to Redis/MinIO."""
-    object_name = unquote(object_name)
+    # Handle both URL-encoded and non-URL-encoded object_names
+    if '%' in object_name:
+        # URL-encoded, decode it
+        decoded_object_name = unquote(object_name)
+        print(f"🔧 URL-decoded object_name: {object_name} -> {decoded_object_name}")
+    else:
+        # Not URL-encoded, use as-is
+        decoded_object_name = object_name
+        print(f"🔧 Using object_name as-is: {object_name}")
+    
+    object_name = decoded_object_name
     print(f"➡️ cached_dataframe request: {object_name}")
     parts = object_name.split("/", 3)
     client = parts[0] if len(parts) > 0 else ""
@@ -293,7 +312,17 @@ async def cached_dataframe(object_name: str):
 @router.get("/flight_table")
 async def flight_table(object_name: str):
     """Return the Arrow IPC file for the given object via Arrow Flight."""
-    object_name = unquote(object_name)
+    # Handle both URL-encoded and non-URL-encoded object_names
+    if '%' in object_name:
+        # URL-encoded, decode it
+        decoded_object_name = unquote(object_name)
+        print(f"🔧 URL-decoded object_name: {object_name} -> {decoded_object_name}")
+    else:
+        # Not URL-encoded, use as-is
+        decoded_object_name = object_name
+        print(f"🔧 Using object_name as-is: {object_name}")
+    
+    object_name = decoded_object_name
     parts = object_name.split("/", 3)
     client = parts[0] if len(parts) > 0 else ""
     app = parts[1] if len(parts) > 1 else ""
@@ -494,7 +523,17 @@ async def sku_stats(
     object_name: str, y_column: str, combination: str, x_column: str = "date"
 ):
     """Return time series and summary for a specific SKU combination."""
-    object_name = unquote(object_name)
+    # Handle both URL-encoded and non-URL-encoded object_names
+    if '%' in object_name:
+        # URL-encoded, decode it
+        decoded_object_name = unquote(object_name)
+        print(f"🔧 URL-decoded object_name: {object_name} -> {decoded_object_name}")
+    else:
+        # Not URL-encoded, use as-is
+        decoded_object_name = object_name
+        print(f"🔧 Using object_name as-is: {object_name}")
+    
+    object_name = decoded_object_name
     print(f"➡️ sku_stats request: {object_name}")
     parts = object_name.split("/", 3)
     client = parts[0] if len(parts) > 0 else ""

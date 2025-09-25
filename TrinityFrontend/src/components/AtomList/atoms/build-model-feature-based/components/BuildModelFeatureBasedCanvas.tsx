@@ -5,7 +5,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Play, X, Settings2, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon } from 'lucide-react';
+import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Plus, Play, X, Settings2, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Info } from 'lucide-react';
 import { BuildModelFeatureBasedData, VariableTransformation, ModelConfig } from '../BuildModelFeatureBasedAtom';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { BUILD_MODEL_API } from '@/lib/api';
@@ -43,6 +45,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
   const [scopeSectionExpanded, setScopeSectionExpanded] = useState(true);
   const [modelingSectionExpanded, setModelingSectionExpanded] = useState(true);
   const [minimizedCombinations, setMinimizedCombinations] = useState<Set<number>>(new Set());
+  const [constraintSettingsOpen, setConstraintSettingsOpen] = useState(false);
   
   // Model Performance Metrics sorting and filtering state - per combination
   const [performanceSortColumn, setPerformanceSortColumn] = useState<{ [comboIndex: number]: string }>({});
@@ -141,6 +144,45 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     // Generate run_id for progress tracking
     const tempRunId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+    // Helper function to add constraints to model configs
+    const addConstraintsToModelConfigs = (modelConfigs: ModelConfig[]) => {
+      return modelConfigs.map(config => {
+        // Regular constrained models (for individual modeling)
+        if (config.id === 'Custom Constrained Ridge' || config.id === 'Constrained Linear Regression') {
+          const updatedConfig = {
+            ...config,
+            parameters: {
+              ...config.parameters,
+              negative_constraints: finalData.negativeConstraints || [],
+              positive_constraints: finalData.positiveConstraints || []
+            }
+          };
+          console.log(`🔍 Frontend - ${config.id} constraints:`, {
+            negative: updatedConfig.parameters.negative_constraints,
+            positive: updatedConfig.parameters.positive_constraints
+          });
+          return updatedConfig;
+        }
+        // Stack constrained models (for stack modeling)
+        else if (config.id === 'Constrained Ridge' || config.id === 'Constrained Linear Regression') {
+          const updatedConfig = {
+            ...config,
+            parameters: {
+              ...config.parameters,
+              negative_constraints: finalData.negativeConstraints || [],
+              positive_constraints: finalData.positiveConstraints || []
+            }
+          };
+          console.log(`🔍 Frontend - ${config.id} stack constraints:`, {
+            negative: updatedConfig.parameters.negative_constraints,
+            positive: updatedConfig.parameters.positive_constraints
+          });
+          return updatedConfig;
+        }
+        return config;
+      });
+    };
+
     // Construct the request payload for the direct endpoint
     const requestPayload = {
       run_id: tempRunId, // Send the run_id for progress tracking
@@ -149,11 +191,26 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
       x_variables: allXVariables,
       y_variable: finalData.yVariable,
       standardization: standardization,
-      k_folds: finalData.kFolds || 5, // Use value from settings or default
-      test_size: finalData.testSize || 0.2, // Use value from settings or default
-      models_to_run: finalData.selectedModels || null, // Use selected models from settings
-      custom_model_configs: null // Can be enhanced later
+      custom_model_configs: null, // Can be enhanced later
+      // Individual modeling fields
+      individual_modeling: finalData.individualModeling ?? false,
+      individual_k_folds: finalData.individualKFolds || 5,
+      individual_test_size: finalData.individualTestSize || 0.2,
+      individual_models_to_run: finalData.individualSelectedModels || [],
+      individual_custom_model_configs: addConstraintsToModelConfigs(finalData.individualModelConfigs || []),
+      // Stack modeling fields
+      stack_modeling: finalData.stackModeling || false,
+      stack_k_folds: finalData.stackKFolds || 5,
+      stack_test_size: finalData.stackTestSize || 0.2,
+      stack_models_to_run: finalData.stackSelectedModels || [],
+      stack_custom_model_configs: addConstraintsToModelConfigs(finalData.stackModelConfigs || []),
+      pool_by_identifiers: (finalData.poolByIdentifiers || []).map(id => id.toLowerCase()),
+      numerical_columns_for_clustering: (finalData.numericalColumnsForClustering || []).map(col => col.toLowerCase()),
+      apply_interaction_terms: finalData.applyInteractionTerms || true,
+      numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map(col => col.toLowerCase())
     };
+
+ 
 
     // Model training started
 
@@ -488,6 +545,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
           } else if (filterColumn === 'BIC') {
             cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
+          } else if (filterColumn === 'Best Alpha') {
+            cellValue = model.best_alpha ? String(model.best_alpha.toFixed(6)) : 'N/A';
           }
           return filterValues.includes(cellValue);
         });
@@ -511,6 +570,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
       } else if (column === 'BIC') {
         cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
+      } else if (column === 'Best Alpha') {
+        cellValue = model.best_alpha ? String(model.best_alpha.toFixed(6)) : 'N/A';
       }
       if (cellValue && !values.includes(cellValue)) {
         values.push(cellValue);
@@ -623,6 +684,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
           } else if (column === 'BIC') {
             cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
+          } else if (column === 'Best Alpha') {
+            cellValue = model.best_alpha ? String(model.best_alpha.toFixed(6)) : 'N/A';
           }
           return filterValues.includes(cellValue);
         });
@@ -659,6 +722,9 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         } else if (currentSortColumn === 'BIC') {
           aVal = a.bic || 0;
           bVal = b.bic || 0;
+        } else if (currentSortColumn === 'Best Alpha') {
+          aVal = a.best_alpha || 0;
+          bVal = b.best_alpha || 0;
         }
         
         if (aVal === bVal) return 0;
@@ -785,26 +851,38 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
               <Target className="w-4 h-4 text-primary" />
               Modeling
             </h3>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setModelingSectionExpanded(!modelingSectionExpanded)}
-              className="h-6 w-6 p-0"
-            >
-              {modelingSectionExpanded ? (
-                <ChevronDown className="w-4 h-4" />
-              ) : (
-                <ChevronRight className="w-4 h-4" />
-              )}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setModelingSectionExpanded(!modelingSectionExpanded)}
+                className="h-6 w-6 p-0"
+              >
+                {modelingSectionExpanded ? (
+                  <ChevronDown className="w-4 h-4" />
+                ) : (
+                  <ChevronRight className="w-4 h-4" />
+                )}
+              </Button>
+              {/* Constraint Settings Toggle */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConstraintSettingsOpen(!constraintSettingsOpen)}
+                className="flex items-center gap-2"
+              >
+                <Settings2 className="w-4 h-4" />
+                Constraints
+              </Button>
+            </div>
           </div>
         </div>
         {modelingSectionExpanded && (
           <div className="p-6 space-y-6">
             {/* Header row for Y & X variable controls */}
           <div className="flex items-center mb-2">
-            <label className="text-sm font-medium text-muted-foreground w-3/12">Select Y-Variable</label>
-            <label className="text-sm font-medium text-muted-foreground w-3/12 pl-4">Select X-Variable</label>
+            <label className="text-sm font-medium text-muted-foreground w-3/16">Select Y-Variable</label>
+            <label className="text-sm font-medium text-muted-foreground w-3/16 pl-4">Select X-Variable</label>
             <div className="flex-1" />
             <Button size="sm" className="bg-orange-300 text-white hover:bg-orange-400" onClick={addXVariable}>
               <Plus className="w-4 h-4 mr-2" />
@@ -876,6 +954,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                   />
                 </div>
 
+
                 {/* Remove button */}
                 <div className="col-span-1">
                   <Button size="sm" variant="ghost" onClick={() => removeXVariable(index)}>
@@ -885,9 +964,292 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
               </div>
             ))}
           </div>
+
+          {/* Interaction Terms Controls - Only show when stack modeling is enabled */}
+          {finalData?.stackModeling && (
+            <div className="mt-4 flex items-center gap-4">
+              {/* Apply Interaction Terms Toggle */}
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="apply-interaction-terms"
+                  checked={finalData?.applyInteractionTerms || false}
+                  onCheckedChange={(checked) => handleDataChange({ applyInteractionTerms: !!checked })}
+                />
+                <Label htmlFor="apply-interaction-terms" className="text-sm font-medium">
+                  Apply Interaction Terms
+                </Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-4 w-4 p-0 hover:bg-gray-100">
+                      <Info className="h-3 w-3 text-gray-500" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80 p-4 bg-white border-gray-200 shadow-lg">
+                    <div className="space-y-3">
+                      <h4 className="font-semibold text-sm text-gray-900">Interaction Terms</h4>
+                      <div className="text-xs text-gray-600 space-y-2">
+                        <p>
+                          <strong>What are Interaction Terms?</strong><br/>
+                          Interaction terms capture the combined effect of two or more variables working together, beyond their individual effects.
+                        </p>
+                        <p>
+                          <strong>Example:</strong><br/>
+                          If you have variables "Price" and "Brand", an interaction term would be "Price × Brand" which captures how the effect of price changes depends on the brand.
+                        </p>
+                        <p>
+                          <strong>In Stack Modeling:</strong><br/>
+                          Interaction terms are created between numerical variables (like price, sales) and combinations {finalData?.selectedCombinations?.length > 0 ? `(like ${finalData.selectedCombinations.slice(0, 2).join(', ')}${finalData.selectedCombinations.length > 2 ? '...' : ''})` : '(like your selected combinations)'} to capture how the relationship between numerical variables varies across different groups.
+                        </p>
+                        <p>
+                          <strong>Benefits:</strong><br/>
+                          • Captures complex relationships between variables<br/>
+                          • Improves model accuracy by accounting for group-specific effects<br/>
+                          • Provides insights into how effects vary across different segments
+                        </p>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {/* Interaction Terms Dropdown - Only show when interaction terms are enabled */}
+              {finalData?.applyInteractionTerms && (
+                <div className="w-64">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button 
+                        variant="outline" 
+                        className="w-full justify-between"
+                        disabled={isLoadingColumns}
+                      >
+                        <span>
+                          {isLoadingColumns 
+                            ? "Loading..." 
+                            : finalData?.numericalColumnsForInteraction?.length > 0 
+                              ? `${finalData.numericalColumnsForInteraction.length} column${finalData.numericalColumnsForInteraction.length > 1 ? 's' : ''} selected`
+                              : "Select Interaction Columns"
+                            }
+                        </span>
+                        <ChevronDown className="w-4 h-4" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
+                      {isLoadingColumns ? (
+                        <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading numerical columns...</div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2 py-1 border-b mb-2">
+                            <Checkbox
+                              checked={finalData?.numericalColumnsForInteraction?.length === (finalData?.xVariables?.[0] || []).filter(col => col !== finalData?.yVariable).length}
+                              onCheckedChange={(checked) => {
+                                const availableColumns = (finalData?.xVariables?.[0] || []).filter(col => col !== finalData?.yVariable);
+                                handleDataChange({ 
+                                  numericalColumnsForInteraction: checked ? availableColumns : [] 
+                                });
+                              }}
+                            />
+                            <span className="text-sm font-medium">Select All</span>
+                          </div>
+                          {(finalData?.xVariables?.[0] || [])
+                            .filter(col => col !== finalData?.yVariable)
+                            .map(col => {
+                              const isChecked = finalData?.numericalColumnsForInteraction?.includes(col) || false;
+                              return (
+                                <div key={col} className="flex items-center gap-2 py-1">
+                                  <Checkbox
+                                    checked={isChecked}
+                                    onCheckedChange={(checked) => {
+                                      const current = finalData?.numericalColumnsForInteraction || [];
+                                      const updated = checked 
+                                        ? [...current, col]
+                                        : current.filter(c => c !== col);
+                                      handleDataChange({ numericalColumnsForInteraction: updated });
+                                    }}
+                                  />
+                                  <span className="text-sm">{col}</span>
+                                </div>
+                              );
+                            })}
+                        </>
+                      )}
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         )}
       </Card>
+
+      {/* Constraint Settings Box */}
+      {constraintSettingsOpen && (
+        <Card className="mb-6">
+          <div className="py-2 px-4 border-b bg-muted/30">
+            <h3 className="font-semibold text-foreground flex items-center gap-2">
+              <Settings2 className="w-4 h-4 text-primary" />
+              Constraint Configuration
+            </h3>
+          </div>
+          <div className="p-6 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Non-Positive Constraints */}
+              <div className="space-y-3">
+                <Label className="text-sm font-medium text-red-700">Non-Positive Constraints (≤0)</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      className="w-full justify-between"
+                    >
+                      <span>
+                        {data?.negativeConstraints?.length > 0 
+                          ? `${data.negativeConstraints.length} variable${data.negativeConstraints.length > 1 ? 's' : ''} selected`
+                          : "Select Variables"
+                        }
+                      </span>
+                      <ChevronDown className="w-4 h-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
+                    <div className="flex items-center gap-2 py-1 border-b mb-2">
+                      <Checkbox
+                        checked={(() => {
+                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.positiveConstraints?.includes(variable));
+                          return data?.negativeConstraints?.length === availableVariables.length && availableVariables.length > 0;
+                        })()}
+                        onCheckedChange={(checked) => {
+                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.positiveConstraints?.includes(variable));
+                          if (checked) {
+                            // When selecting all negative constraints, clear positive constraints
+                            handleDataChange({ 
+                              negativeConstraints: availableVariables,
+                              positiveConstraints: []
+                            });
+                          } else {
+                            handleDataChange({ 
+                              negativeConstraints: [] 
+                            });
+                          }
+                        }}
+                      />
+                      <span className="text-sm font-medium">Select All</span>
+                    </div>
+                    {(data?.xVariables?.[0] || [])
+                      .filter(variable => !data?.positiveConstraints?.includes(variable)) // Exclude variables already selected in positive constraints
+                      .map(variable => {
+                        const isChecked = data?.negativeConstraints?.includes(variable) || false;
+                        return (
+                          <div key={variable} className="flex items-center gap-2 py-1">
+                            <Checkbox
+                              checked={isChecked}
+                            onCheckedChange={(checked) => {
+                              const current = data?.negativeConstraints || [];
+                              const updated = checked 
+                                ? [...current, variable]
+                                : current.filter(v => v !== variable);
+                              
+                              // If adding to negative constraints, remove from positive constraints
+                              if (checked) {
+                                const currentPositive = data?.positiveConstraints || [];
+                                const updatedPositive = currentPositive.filter(v => v !== variable);
+                                handleDataChange({ 
+                                  negativeConstraints: updated,
+                                  positiveConstraints: updatedPositive
+                                });
+                              } else {
+                                handleDataChange({ negativeConstraints: updated });
+                              }
+                            }}
+                            />
+                            <span className="text-sm">{variable}</span>
+                          </div>
+                        );
+                      })}
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {/* Non-Negative Constraints */}
+              <div className="space-y-3">
+                <Label className="text-sm font-medium text-green-700">Non-Negative Constraints (≥0)</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      className="w-full justify-between"
+                    >
+                      <span>
+                        {data?.positiveConstraints?.length > 0 
+                          ? `${data.positiveConstraints.length} variable${data.positiveConstraints.length > 1 ? 's' : ''} selected`
+                          : "Select Variables"
+                        }
+                      </span>
+                      <ChevronDown className="w-4 h-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
+                    <div className="flex items-center gap-2 py-1 border-b mb-2">
+                      <Checkbox
+                        checked={(() => {
+                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.negativeConstraints?.includes(variable));
+                          return data?.positiveConstraints?.length === availableVariables.length && availableVariables.length > 0;
+                        })()}
+                        onCheckedChange={(checked) => {
+                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.negativeConstraints?.includes(variable));
+                          if (checked) {
+                            // When selecting all positive constraints, clear negative constraints
+                            handleDataChange({ 
+                              positiveConstraints: availableVariables,
+                              negativeConstraints: []
+                            });
+                          } else {
+                            handleDataChange({ 
+                              positiveConstraints: [] 
+                            });
+                          }
+                        }}
+                      />
+                      <span className="text-sm font-medium">Select All</span>
+                    </div>
+                    {(data?.xVariables?.[0] || [])
+                      .filter(variable => !data?.negativeConstraints?.includes(variable)) // Exclude variables already selected in negative constraints
+                      .map(variable => {
+                        const isChecked = data?.positiveConstraints?.includes(variable) || false;
+                        return (
+                          <div key={variable} className="flex items-center gap-2 py-1">
+                            <Checkbox
+                              checked={isChecked}
+                            onCheckedChange={(checked) => {
+                              const current = data?.positiveConstraints || [];
+                              const updated = checked 
+                                ? [...current, variable]
+                                : current.filter(v => v !== variable);
+                              
+                              // If adding to positive constraints, remove from negative constraints
+                              if (checked) {
+                                const currentNegative = data?.negativeConstraints || [];
+                                const updatedNegative = currentNegative.filter(v => v !== variable);
+                                handleDataChange({ 
+                                  positiveConstraints: updated,
+                                  negativeConstraints: updatedNegative
+                                });
+                              } else {
+                                handleDataChange({ positiveConstraints: updated });
+                              }
+                            }}
+                            />
+                            <span className="text-sm">{variable}</span>
+                          </div>
+                        );
+                      })}
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Run Model Button */}
       <div className="mb-6">
@@ -1328,6 +1690,50 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                         </ContextMenuContent>
                                       </ContextMenu>
                                     </TableHead>
+                                    <TableHead className="font-semibold text-gray-700">
+                                      <ContextMenu>
+                                        <ContextMenuTrigger asChild>
+                                          <div className="flex items-center gap-1 cursor-pointer">
+                                            Best Alpha
+                                            {(performanceSortColumn[comboIndex] || '') === 'Best Alpha' && (
+                                              (performanceSortDirection[comboIndex] || 'asc') === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                                            )}
+                                          </div>
+                                        </ContextMenuTrigger>
+                                        <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <ArrowUp className="w-4 h-4 mr-2" /> Sort
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('Best Alpha', comboIndex, 'asc')}>
+                                                <ArrowUp className="w-4 h-4 mr-2" /> Ascending
+                                              </ContextMenuItem>
+                                              <ContextMenuItem onClick={() => handlePerformanceSort('Best Alpha', comboIndex, 'desc')}>
+                                                <ArrowDown className="w-4 h-4 mr-2" /> Descending
+                                              </ContextMenuItem>
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          <ContextMenuSeparator />
+                                          <ContextMenuSub>
+                                            <ContextMenuSubTrigger className="flex items-center">
+                                              <FilterIcon className="w-4 h-4 mr-2" /> Filter
+                                            </ContextMenuSubTrigger>
+                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+                                              <PerformanceFilterMenu column="Best Alpha" modelResults={combination.model_results} comboIndex={comboIndex} />
+                                            </ContextMenuSubContent>
+                                          </ContextMenuSub>
+                                          {performanceColumnFilters[comboIndex]?.['Best Alpha']?.length > 0 && (
+                                            <>
+                                              <ContextMenuSeparator />
+                                              <ContextMenuItem onClick={() => clearPerformanceColumnFilter('Best Alpha', comboIndex)}>
+                                                Clear Filter
+                                              </ContextMenuItem>
+                                            </>
+                                          )}
+                                        </ContextMenuContent>
+                                      </ContextMenu>
+                                    </TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -1340,6 +1746,9 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                       <TableCell className="font-mono text-sm">{model.r2_test?.toFixed(1) || 'N/A'}</TableCell>
                                       <TableCell className="font-mono text-sm">{model.aic?.toFixed(1) || 'N/A'}</TableCell>
                                       <TableCell className="font-mono text-sm">{model.bic?.toFixed(1) || 'N/A'}</TableCell>
+                                      <TableCell className="font-mono text-sm">
+                                        {model.best_alpha ? model.best_alpha.toFixed(6) : 'N/A'}
+                                      </TableCell>
                                     </TableRow>
                                   ))}
                                 </TableBody>
@@ -1388,8 +1797,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                       <TableCell className="font-semibold text-purple-600">{variable}</TableCell>
                                       {combination.model_results.map((model, index) => (
                                         <TableCell key={index} className="font-mono text-sm">
-                                           {model.coefficients && model.coefficients[`Beta_${variable}`] !== undefined
-                                             ? model.coefficients[`Beta_${variable}`].toFixed(1) 
+                                           {model.coefficients && model.coefficients[`Beta_${variable.toLowerCase()}`] !== undefined
+                                             ? model.coefficients[`Beta_${variable.toLowerCase()}`].toFixed(1) 
                                              : 'N/A'}
                                          </TableCell>
                                        ))}
@@ -1424,8 +1833,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                        <TableCell className="font-semibold text-orange-600">{variable}</TableCell>
                                        {combination.model_results.map((model, index) => (
                                          <TableCell key={index} className="font-mono text-sm">
-                                           {model.elasticities && model.elasticities[variable] !== undefined
-                                             ? model.elasticities[variable].toFixed(1)
+                                           {model.elasticities && model.elasticities[variable.toLowerCase()] !== undefined
+                                             ? model.elasticities[variable.toLowerCase()].toFixed(1)
                                              : 'N/A'}
                                          </TableCell>
                                        ))}
@@ -1460,8 +1869,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                        <TableCell className="font-semibold text-teal-600">{variable}</TableCell>
                                        {combination.model_results.map((model, index) => (
                                          <TableCell key={index} className="font-mono text-sm">
-                                           {model.contributions && model.contributions[variable] !== undefined
-                                             ? (model.contributions[variable] * 100).toFixed(1) + '%'
+                                           {model.contributions && model.contributions[variable.toLowerCase()] !== undefined
+                                             ? (model.contributions[variable.toLowerCase()] * 100).toFixed(1) + '%'
                                             : 'N/A'}
                                         </TableCell>
                                       ))}

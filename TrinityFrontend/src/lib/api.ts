@@ -151,6 +151,7 @@ export const CLUSTERING_API =
   normalizeUrl(import.meta.env.VITE_CLUSTERING_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/clustering`;
 
+
 export const CHART_MAKER_API =
   normalizeUrl(import.meta.env.VITE_CHART_MAKER_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/chart-maker`;
@@ -165,18 +166,7 @@ export const AUTO_REGRESSIVE_API =
 export const SCENARIO_PLANNER_API =
   normalizeUrl(import.meta.env.VITE_SCENARIO_PLANNER_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/scenario`;
-
-// Debug logging for clustering API
-console.log('Clustering API Configuration:', {
-  isDevStack,
-  djangoPort,
-  fastapiPort,
-  backendOrigin,
-  clusteringApi: normalizeUrl(import.meta.env.VITE_CLUSTERING_API) ||
-    `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/clustering`
-});
-
-
+ 
 export const SELECT_API =
   normalizeUrl(import.meta.env.VITE_SELECT_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/select`;

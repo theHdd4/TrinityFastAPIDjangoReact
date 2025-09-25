@@ -293,11 +293,11 @@ class ScenarioService:
             y_scen = transf.inverse_y(contrib_scen.sum() + intercept)
 
             delta_pred = float(y_scen - y_ref)
-            pct_up_pred = float((delta_pred / y_ref) if y_ref else 0.0)  # Convert to regular float
+            pct_up_pred = float((delta_pred / y_ref * 100) if y_ref else 0.0)  # Convert to percentage and regular float
 
             delta_feat = (contrib_scen - contrib_ref).to_dict()
             pct_up_feat = {
-                f: float(((delta_feat[f] / contrib_ref[f]) if contrib_ref[f] else 0.0))  # Convert to regular float
+                f: float(((delta_feat[f] / contrib_ref[f] * 100) if contrib_ref[f] else 0.0))  # Convert to percentage and regular float
                 for f in contrib_ref.index
             }
 

@@ -26,6 +26,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { logSessionState, addNavigationItem } from "@/lib/session";
 import { useLaboratoryStore } from "@/components/LaboratoryMode/store/laboratoryStore";
 import { useToast } from "@/hooks/use-toast";
+import { csvParse } from "d3-dsv";
+import { tableFromIPC, Type } from "apache-arrow";
 
 interface ColumnInfo {
   column: string;
@@ -46,6 +48,436 @@ const filterUnattributed = (mapping: Record<string, string[]>) =>
       ([key]) => key.toLowerCase() !== "unattributed",
     ),
   );
+
+const numericTextPattern =
+  /^[\s$€£₹¥₩₽+-]*\(?[0-9.,eE%]+\)?[\s$€£₹¥₩₽+-]*$/;
+
+const parseNumericValue = (raw: string): number | null => {
+  if (raw == null) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const hasParens = trimmed.startsWith("(") && trimmed.endsWith(")");
+  let normalized = hasParens ? trimmed.slice(1, -1) : trimmed;
+
+  normalized = normalized.replace(/\s+/g, "");
+  normalized = normalized.replace(/[^0-9.,eE+-]/g, "");
+
+  const hasComma = normalized.includes(",");
+  const hasDot = normalized.includes(".");
+  if (hasComma) {
+    const commaParts = normalized.split(",");
+    if (hasDot) {
+      normalized = normalized.replace(/,/g, "");
+    } else if (commaParts.length === 2 && commaParts[1].length > 0 && commaParts[1].length !== 3) {
+      normalized = `${commaParts[0].replace(/,/g, "")}.${commaParts[1]}`;
+    } else {
+      normalized = normalized.replace(/,/g, "");
+    }
+  }
+
+  if (hasParens && normalized && !normalized.startsWith("-")) {
+    normalized = `-${normalized}`;
+  }
+
+  if (!normalized || normalized === "-" || normalized === "+") {
+    return null;
+  }
+
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : null;
+};
+
+type LoadedSkuDataset = {
+  rows: Record<string, any>[];
+  columns: string[];
+  numericColumns: string[];
+  originalNumericColumns: string[];
+};
+
+const arrowNumericTypeIds = new Set<Type>([
+  Type.Int,
+  Type.Int8,
+  Type.Int16,
+  Type.Int32,
+  Type.Int64,
+  Type.Uint8,
+  Type.Uint16,
+  Type.Uint32,
+  Type.Uint64,
+  Type.Float,
+  Type.Float16,
+  Type.Float32,
+  Type.Float64,
+  Type.Decimal,
+]);
+
+type ArrowColumnMeta = {
+  original: string;
+  lower: string;
+  vector: any;
+  isNumeric: boolean;
+  isDimension: boolean;
+};
+
+const convertDimensionValue = (value: any): string => {
+  if (value == null) {
+    return "";
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (typeof value === "number" || typeof value === "bigint") {
+    return String(value);
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  if (typeof value === "object") {
+    if (typeof value.toString === "function") {
+      const str = value.toString();
+      if (str && str !== "[object Object]") {
+        return str;
+      }
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+};
+
+const convertArrowValue = (
+  rawValue: any,
+  meta: ArrowColumnMeta,
+  numericColumns: Set<string>,
+): any => {
+  if (rawValue == null) {
+    return "";
+  }
+
+  const markNumeric = () => {
+    meta.isNumeric = true;
+    numericColumns.add(meta.lower);
+  };
+
+  if (rawValue instanceof Date) {
+    return rawValue.toISOString();
+  }
+
+  if (typeof rawValue === "number") {
+    markNumeric();
+    return rawValue;
+  }
+
+  if (typeof rawValue === "bigint") {
+    const numeric = Number(rawValue);
+    if (Number.isFinite(numeric)) {
+      markNumeric();
+      return numeric;
+    }
+    return rawValue.toString();
+  }
+
+  if (typeof rawValue === "string") {
+    const trimmed = rawValue.trim();
+    if (meta.isNumeric || numericColumns.has(meta.lower) || numericTextPattern.test(trimmed)) {
+      const parsed = parseNumericValue(trimmed);
+      if (parsed != null) {
+        markNumeric();
+        return parsed;
+      }
+    }
+    return rawValue;
+  }
+
+  if (typeof rawValue === "boolean") {
+    return rawValue ? "true" : "false";
+  }
+
+  if (typeof rawValue === "object") {
+    const toNumber = (rawValue as any).toNumber;
+    if (typeof toNumber === "function") {
+      const numeric = toNumber.call(rawValue);
+      if (typeof numeric === "number" && Number.isFinite(numeric)) {
+        markNumeric();
+        return numeric;
+      }
+    }
+
+    const valueOf = (rawValue as any).valueOf?.();
+    if (valueOf !== undefined && valueOf !== rawValue) {
+      if (typeof valueOf === "number" && Number.isFinite(valueOf)) {
+        markNumeric();
+        return valueOf;
+      }
+      if (typeof valueOf === "bigint") {
+        const numeric = Number(valueOf);
+        if (Number.isFinite(numeric)) {
+          markNumeric();
+          return numeric;
+        }
+        return valueOf.toString();
+      }
+      if (typeof valueOf === "string") {
+        const trimmed = valueOf.trim();
+        if (meta.isNumeric || numericColumns.has(meta.lower) || numericTextPattern.test(trimmed)) {
+          const parsed = parseNumericValue(trimmed);
+          if (parsed != null) {
+            markNumeric();
+            return parsed;
+          }
+        }
+        return trimmed;
+      }
+    }
+
+    const str = (rawValue as any).toString?.();
+    if (typeof str === "string" && str && str !== "[object Object]") {
+      const trimmed = str.trim();
+      if (meta.isNumeric || numericColumns.has(meta.lower) || numericTextPattern.test(trimmed)) {
+        const parsed = parseNumericValue(trimmed);
+        if (parsed != null) {
+          markNumeric();
+          return parsed;
+        }
+      }
+      return trimmed;
+    }
+
+    try {
+      return JSON.stringify(rawValue);
+    } catch {
+      return String(rawValue);
+    }
+  }
+
+  return rawValue;
+};
+
+const loadArrowDataset = async (
+  source: string,
+  numericColumns: Set<string>,
+  dimensionSet: Set<string>,
+): Promise<LoadedSkuDataset | null> => {
+  const response = await fetch(
+    `${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(source)}`,
+    {
+      cache: "no-store",
+      credentials: "include",
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to load Arrow dataset (${response.status})`);
+  }
+
+  const buffer = await response.arrayBuffer();
+  if (!buffer || buffer.byteLength === 0) {
+    return {
+      rows: [],
+      columns: [],
+      numericColumns: Array.from(numericColumns),
+      originalNumericColumns: [],
+    };
+  }
+
+  const table = tableFromIPC(new Uint8Array(buffer));
+  if (!table) {
+    return null;
+  }
+
+  const fields = table.schema?.fields ?? [];
+  if (fields.length === 0) {
+    return {
+      rows: [],
+      columns: [],
+      numericColumns: Array.from(numericColumns),
+      originalNumericColumns: [],
+    };
+  }
+
+  const columnMetas: ArrowColumnMeta[] = [];
+  const originalNumericNames = new Set<string>();
+
+  fields.forEach((field, index) => {
+    if (!field) return;
+    const originalName = `${field.name ?? ""}`.trim();
+    if (!originalName) return;
+    const lowerName = originalName.toLowerCase();
+    const vector = table.getChildAt(index);
+    const isDimension = dimensionSet.has(lowerName);
+    const numericByType =
+      !isDimension && (arrowNumericTypeIds.has(field.typeId as Type) || numericColumns.has(lowerName));
+    if (numericByType) {
+      numericColumns.add(lowerName);
+      originalNumericNames.add(originalName);
+    }
+    columnMetas.push({
+      original: originalName,
+      lower: lowerName,
+      vector,
+      isNumeric: numericByType,
+      isDimension,
+    });
+  });
+
+  if (columnMetas.length === 0) {
+    return {
+      rows: [],
+      columns: [],
+      numericColumns: Array.from(numericColumns),
+      originalNumericColumns: Array.from(originalNumericNames),
+    };
+  }
+
+  const rows: Record<string, any>[] = [];
+  const rowCount =
+    typeof (table as any).numRows === "number"
+      ? (table as any).numRows
+      : typeof (table as any).length === "number"
+      ? (table as any).length
+      : 0;
+
+  for (let rowIndex = 0; rowIndex < rowCount; rowIndex++) {
+    const normalized: Record<string, any> = {};
+    columnMetas.forEach((meta) => {
+      const vector = meta.vector;
+      const rawValue = vector ? vector.get(rowIndex) : undefined;
+      if (meta.isDimension) {
+        normalized[meta.lower] = convertDimensionValue(rawValue);
+        return;
+      }
+      const value = convertArrowValue(rawValue, meta, numericColumns);
+      normalized[meta.lower] = value;
+      if (meta.isNumeric && value !== "" && value != null) {
+        originalNumericNames.add(meta.original);
+      }
+    });
+    rows.push(normalized);
+  }
+
+  const numericLower = new Set<string>(numericColumns);
+  columnMetas.forEach((meta) => {
+    if (meta.isNumeric) {
+      numericLower.add(meta.lower);
+      originalNumericNames.add(meta.original);
+    }
+  });
+
+  return {
+    rows,
+    columns: columnMetas.map((meta) => meta.lower),
+    numericColumns: Array.from(numericLower),
+    originalNumericColumns: Array.from(originalNumericNames),
+  };
+};
+
+const loadCsvDataset = async (
+  source: string,
+  numericColumns: Set<string>,
+  dimensionSet: Set<string>,
+): Promise<LoadedSkuDataset> => {
+  const response = await fetch(
+    `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(source)}`,
+    {
+      credentials: "include",
+    },
+  );
+  if (!response.ok) {
+    throw new Error("Failed to load data");
+  }
+
+  const text = await response.text();
+  if (!text || !text.trim()) {
+    return {
+      rows: [],
+      columns: [],
+      numericColumns: Array.from(numericColumns),
+      originalNumericColumns: [],
+    };
+  }
+
+  const parsed = csvParse(text);
+  const rawColumns = (parsed.columns ?? []).filter(
+    (col): col is string => typeof col === "string" && col.trim().length > 0,
+  );
+  const columnKeys =
+    rawColumns.length > 0
+      ? rawColumns
+      : parsed.length > 0
+      ? Object.keys(parsed[0] as Record<string, any>)
+      : [];
+  const trimmedColumns = columnKeys
+    .map((col) => (typeof col === "string" ? col.trim() : col))
+    .filter((col): col is string => typeof col === "string" && col.length > 0);
+
+  const originalNameMap = new Map<string, string>();
+  const normalizedColumns = trimmedColumns
+    .map((col) => {
+      const lower = col.toLowerCase();
+      if (!originalNameMap.has(lower)) {
+        originalNameMap.set(lower, col);
+      }
+      return lower;
+    })
+    .filter((col) => col);
+
+  const normalizedRows = parsed.map((row) => {
+    const normalized: Record<string, any> = {};
+    trimmedColumns.forEach((col) => {
+      const lower = col.toLowerCase();
+      const rawValue = (row as Record<string, any>)[col];
+      if (dimensionSet.has(lower)) {
+        normalized[lower] = convertDimensionValue(rawValue);
+        return;
+      }
+
+      if (rawValue == null || rawValue === "") {
+        normalized[lower] = "";
+        return;
+      }
+
+      const stringValue = String(rawValue);
+      const trimmedValue = stringValue.trim();
+      const shouldAttemptNumeric =
+        numericColumns.has(lower) || numericTextPattern.test(trimmedValue);
+
+      if (shouldAttemptNumeric) {
+        const parsedValue = parseNumericValue(trimmedValue);
+        if (parsedValue != null) {
+          numericColumns.add(lower);
+          normalized[lower] = parsedValue;
+          return;
+        }
+      }
+
+      normalized[lower] = stringValue;
+    });
+    return normalized;
+  });
+
+  const numericColumnList = Array.from(numericColumns);
+  const originalNumericColumns = Array.from(
+    new Set(
+      numericColumnList
+        .map((lower) => originalNameMap.get(lower) ?? lower)
+        .filter((name) => typeof name === "string" && name.length > 0),
+    ),
+  );
+
+  return {
+    rows: normalizedRows,
+    columns: normalizedColumns,
+    numericColumns: numericColumnList,
+    originalNumericColumns,
+  };
+};
 
 const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   settings,
@@ -100,6 +532,39 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   // State for managing expanded views
   const [showStatsSummary, setShowStatsSummary] = useState<boolean>(false);
   const [expandedMetrics, setExpandedMetrics] = useState<Set<string>>(new Set());
+
+  const numericColumnSet = React.useMemo(() => {
+    const set = new Set<string>();
+    if (Array.isArray(settings.numericColumns)) {
+      settings.numericColumns.forEach((col) => {
+        if (typeof col === "string" && col.trim()) {
+          set.add(col.toLowerCase());
+        }
+      });
+    }
+    if (Array.isArray(settings.columnSummary)) {
+      settings.columnSummary.forEach((info: any) => {
+        const columnName = info?.column;
+        const dataType = info?.data_type;
+        if (
+          typeof columnName === "string" &&
+          columnName.trim() &&
+          typeof dataType === "string" &&
+          /int|float|double|decimal|numeric|number|currency|money/i.test(dataType)
+        ) {
+          set.add(columnName.toLowerCase());
+        }
+      });
+    }
+    Object.values(dimensionMap || {})
+      .flat()
+      .forEach((col) => {
+        if (typeof col === "string") {
+          set.delete(col.toLowerCase());
+        }
+      });
+    return set;
+  }, [settings.numericColumns, settings.columnSummary, dimensionMap]);
 
   // Get atom settings to access the input file name
   const atom = useLaboratoryStore(state => atomId ? state.getAtom(atomId) : undefined);
@@ -221,8 +686,51 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
    }, [settings.dataSource, hasMappedIdentifiers, skuRows.length, dimensionMap]);
 
   useEffect(() => {
-    setSkuRows(Array.isArray(settings.skuTable) ? settings.skuTable : []);
-  }, [settings.skuTable]);
+    if (!Array.isArray(settings.skuTable)) {
+      setSkuRows([]);
+      return;
+    }
+
+    if (settings.skuTable.length === 0 || numericColumnSet.size === 0) {
+      setSkuRows(settings.skuTable);
+      return;
+    }
+
+    let changed = false;
+    const normalized = settings.skuTable.map((row: any) => {
+      if (!row || typeof row !== "object") {
+        return row;
+      }
+
+      let updated: Record<string, any> | null = null;
+      numericColumnSet.forEach((col) => {
+        const rawValue = row[col];
+        if (typeof rawValue === "string") {
+          const parsedValue = parseNumericValue(rawValue);
+          if (parsedValue != null) {
+            if (!updated) {
+              updated = { ...row };
+            }
+            updated[col] = parsedValue;
+          }
+        }
+      });
+
+      if (updated) {
+        changed = true;
+        return updated;
+      }
+
+      return row;
+    });
+
+    if (changed) {
+      setSkuRows(normalized);
+      onUpdateSettings({ skuTable: normalized });
+    } else {
+      setSkuRows(settings.skuTable);
+    }
+  }, [settings.skuTable, numericColumnSet, onUpdateSettings]);
 
   useEffect(() => {
     setStatDataMap(settings.statDataMap || {});
@@ -560,6 +1068,150 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     }
   };
 
+  const loadSkuDataset = async (
+    dimensionColumns: string[],
+  ): Promise<LoadedSkuDataset> => {
+    const dimensionSet = new Set(
+      dimensionColumns.map((col) => col.toLowerCase()).filter((col) => col),
+    );
+
+    const baseNumericColumns = new Set<string>();
+    numericColumnSet.forEach((col) => {
+      if (!dimensionSet.has(col)) {
+        baseNumericColumns.add(col);
+      }
+    });
+
+    const source =
+      typeof settings.dataSource === "string" ? settings.dataSource.trim() : "";
+    if (!source) {
+      return {
+        rows: [],
+        columns: [],
+        numericColumns: Array.from(baseNumericColumns),
+        originalNumericColumns: [],
+      };
+    }
+
+    const lowerSource = source.toLowerCase();
+    if (lowerSource.endsWith(".arrow")) {
+      try {
+        const arrowResult = await loadArrowDataset(
+          source,
+          new Set(baseNumericColumns),
+          dimensionSet,
+        );
+        if (arrowResult) {
+          return arrowResult;
+        }
+      } catch (err) {
+        console.warn(
+          "Arrow dataset load failed in Feature Overview, falling back to cached CSV",
+          err,
+        );
+      }
+    }
+
+    return loadCsvDataset(source, baseNumericColumns, dimensionSet);
+  };
+
+  const aggregateSkuData = (
+    rows: Record<string, any>[],
+    dimensionColumns: string[],
+    numericColumns: Set<string>,
+    columnOrder: string[],
+  ): Record<string, any>[] => {
+    if (dimensionColumns.length === 0) {
+      return rows.map((row, index) => ({ id: index + 1, ...row }));
+    }
+
+    const dimensionSet = new Set(dimensionColumns);
+    const aggregates = new Map<string, { base: Record<string, any>; sums: Record<string, number> }>();
+
+    rows.forEach((row) => {
+      if (!row || typeof row !== "object") return;
+      const keyParts = dimensionColumns.map((col) => {
+        const value = row[col];
+        return value == null ? "" : value;
+      });
+      const mapKey = keyParts.join("||");
+      let entry = aggregates.get(mapKey);
+      if (!entry) {
+        const base: Record<string, any> = {};
+        dimensionColumns.forEach((col, idx) => {
+          base[col] = keyParts[idx];
+        });
+        entry = { base, sums: {} };
+        aggregates.set(mapKey, entry);
+      }
+
+      Object.entries(row).forEach(([col, rawValue]) => {
+        if (rawValue == null || rawValue === "") return;
+        if (typeof col !== "string") return;
+        const lowerCol = col.toLowerCase();
+        if (numericColumns.has(lowerCol)) {
+          let numericValue: number | null = null;
+          if (typeof rawValue === "number") {
+            numericValue = rawValue;
+          } else if (typeof rawValue === "bigint") {
+            numericValue = Number(rawValue);
+          } else if (typeof rawValue === "string") {
+            numericValue = parseNumericValue(rawValue);
+          } else {
+            const maybeNumber = Number(rawValue);
+            if (Number.isFinite(maybeNumber)) {
+              numericValue = maybeNumber;
+            }
+          }
+
+          if (numericValue != null && Number.isFinite(numericValue)) {
+            entry!.sums[lowerCol] = (entry!.sums[lowerCol] ?? 0) + numericValue;
+          }
+        } else if (!dimensionSet.has(lowerCol)) {
+          if (!(lowerCol in entry!.base) || entry!.base[lowerCol] == null || entry!.base[lowerCol] === "") {
+            entry!.base[lowerCol] = rawValue;
+          }
+        }
+      });
+    });
+
+    const order = columnOrder.length > 0 ? columnOrder : Array.from(numericColumns);
+
+    return Array.from(aggregates.values()).map((entry, index) => {
+      const result: Record<string, any> = { id: index + 1 };
+      order.forEach((col) => {
+        if (!col) return;
+        const lowerCol = col.toLowerCase();
+        if (lowerCol === "id") return;
+        if (numericColumns.has(lowerCol)) {
+          if (entry.sums[lowerCol] != null) {
+            result[lowerCol] = entry.sums[lowerCol];
+          } else if (entry.base[lowerCol] != null) {
+            result[lowerCol] = entry.base[lowerCol];
+          } else {
+            result[lowerCol] = 0;
+          }
+        } else if (entry.base[lowerCol] != null) {
+          result[lowerCol] = entry.base[lowerCol];
+        }
+      });
+
+      dimensionColumns.forEach((col) => {
+        if (!(col in result)) {
+          result[col] = entry.base[col] ?? "";
+        }
+      });
+
+      numericColumns.forEach((col) => {
+        if (!(col in result) && entry.sums[col] != null) {
+          result[col] = entry.sums[col];
+        }
+      });
+
+      return result;
+    });
+  };
+
   const displaySkus = async () => {
     if (!settings.dataSource || !hasMappedIdentifiers) {
       console.warn("displaySkus called without data source or mapped identifiers");
@@ -567,52 +1219,78 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     }
     setError(null);
     try {
-      console.log("🔎 fetching cached dataframe for", settings.dataSource);
-      const res = await fetch(
-        `${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(
-          settings.dataSource,
-        )}`,
-        { credentials: 'include' }
-      );
-      if (!res.ok) {
-        console.warn("⚠️ cached dataframe request failed", res.status);
-        throw new Error("Failed to load data");
+      console.log("🔎 loading dataset for", settings.dataSource);
+      const dimensionColumns = Object.values(dimensionMap)
+        .flat()
+        .map((col) => (typeof col === "string" ? col.toLowerCase() : ""))
+        .filter((col) => col);
+
+      const loaded = await loadSkuDataset(dimensionColumns);
+      const rows = Array.isArray(loaded.rows) ? loaded.rows : [];
+      if (rows.length === 0) {
+        setSkuRows([]);
+        onUpdateSettings({ skuTable: [] });
+        return;
       }
-      const text = await res.text();
-      const [headerLine, ...rows] = text.trim().split(/\r?\n/);
-      const headers = headerLine.split(",");
-      const rowLines = Array.isArray(rows) ? rows : [];
-      const data = rowLines.map((r) => {
-        const vals = r.split(",");
-        const obj: Record<string, string> = {};
-        headers.forEach((h, i) => {
-          obj[h.toLowerCase()] = vals[i];
+
+      const numericColumns = new Set(
+        loaded.numericColumns.map((col) => col.toLowerCase()).filter((col) => col),
+      );
+      numericColumnSet.forEach((col) => numericColumns.add(col));
+
+      const additionalOrder = rows.reduce<string[]>((acc, row) => {
+        Object.keys(row || {}).forEach((key) => {
+          if (!acc.includes(key)) acc.push(key);
         });
-        return obj;
-      });
-      const idCols = Object.values(dimensionMap).flat();
-      const combos = new Map<string, any>();
-      data.forEach((row) => {
-        const key = idCols.map((k) => row[k.toLowerCase()] || "").join("||");
-        if (!combos.has(key)) combos.set(key, row);
-      });
-      const table = Array.from(combos.values()).map((row, i) => ({
-        id: i + 1,
-        ...row,
-      }));
-    setSkuRows(table);
-    const newSettings: any = { skuTable: table };
-       if (!Array.isArray(settings.yAxes) || settings.yAxes.length === 0) {
-         const lower = Array.isArray(settings.numericColumns)
-           ? settings.numericColumns.map((c) => c.toLowerCase())
-           : [];
-         const defaults = ["salesvalue", "volume"].filter((d) =>
-           lower.includes(d),
-         );
-       if (defaults.length > 0) {
-         newSettings.yAxes = defaults;
-       }
-       }
+        return acc;
+      }, []);
+      const normalizedOrder = Array.from(
+        new Set([
+          ...dimensionColumns,
+          ...loaded.columns.map((col) => col.toLowerCase()),
+          ...additionalOrder,
+          ...Array.from(numericColumns),
+        ]),
+      ).filter((col) => col && col !== "id");
+
+      const table = aggregateSkuData(rows, dimensionColumns, numericColumns, normalizedOrder);
+
+      setSkuRows(table);
+      const newSettings: any = { skuTable: table };
+
+      if (Array.isArray(loaded.originalNumericColumns) && loaded.originalNumericColumns.length > 0) {
+        const existingNumeric = Array.isArray(settings.numericColumns)
+          ? settings.numericColumns.slice()
+          : [];
+        const existingLower = new Set(existingNumeric.map((col) => col.toLowerCase()));
+        let changed = false;
+        loaded.originalNumericColumns.forEach((col) => {
+          const lowerCol = col.toLowerCase();
+          if (!existingLower.has(lowerCol)) {
+            existingNumeric.push(col);
+            existingLower.add(lowerCol);
+            changed = true;
+          }
+        });
+        if (changed) {
+          newSettings.numericColumns = existingNumeric;
+        }
+      }
+
+      if (!Array.isArray(settings.yAxes) || settings.yAxes.length === 0) {
+        const candidateSet = new Set(
+          Array.isArray(newSettings.numericColumns)
+            ? newSettings.numericColumns.map((col: string) => col.toLowerCase())
+            : Array.isArray(settings.numericColumns)
+            ? settings.numericColumns.map((col) => col.toLowerCase())
+            : [],
+        );
+        numericColumns.forEach((col) => candidateSet.add(col));
+        const defaults = ["salesvalue", "volume"].filter((d) => candidateSet.has(d));
+        if (defaults.length > 0) {
+          newSettings.yAxes = defaults;
+        }
+      }
       onUpdateSettings(newSettings);
       addNavigationItem(user?.id, {
         atom: 'feature-overview',

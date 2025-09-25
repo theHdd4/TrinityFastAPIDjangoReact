@@ -506,6 +506,12 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
   const [resultViewMode, setResultViewMode] = useState<Record<string, 'individual' | 'aggregated'>>({});
 
+  // ✅ NEW: State for toggling between y-values and uplift in data labels
+  const [dataLabelType, setDataLabelType] = useState<Record<string, 'y-values' | 'uplift'>>({});
+  
+  // ✅ NEW: State for controlling data labels visibility
+  const [showDataLabels, setShowDataLabels] = useState<Record<string, boolean>>({});
+
 
 
   // ✅ NEW: Function to toggle result view mode for a specific view
@@ -536,7 +542,43 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
   };
 
+  // ✅ NEW: Function to toggle data label type for a specific view
 
+  const toggleDataLabelType = (viewId: string) => {
+    console.log('🔄 Toggle button clicked for viewId:', viewId);
+    
+    setDataLabelType(prev => {
+      const currentType = prev[viewId] || 'y-values';
+      const newType = currentType === 'y-values' ? 'uplift' : 'y-values';
+      console.log('🔄 Switching dataLabelType from', currentType, 'to', newType, 'for viewId:', viewId);
+      const newState = {
+        ...prev,
+        [viewId]: newType
+      };
+      return newState;
+    });
+    
+    // ✅ NEW: Automatically enable data labels when switching to uplift mode
+    setShowDataLabels(prev => {
+      console.log('🔄 Enabling data labels for viewId:', viewId);
+      const newState = {
+        ...prev,
+        [viewId]: true
+      };
+      return newState;
+    });
+  };
+
+  // ✅ NEW: Function to toggle data labels visibility
+  const toggleDataLabels = (viewId: string) => {
+    setShowDataLabels(prev => {
+      const newState = {
+        ...prev,
+        [viewId]: !prev[viewId]
+      };
+      return newState;
+    });
+  };
 
   // ✅ NEW: Context menu state
 
@@ -1102,9 +1144,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
       model_id: modelId,
       scenario_id: settings.activeScenarioId || 'scenario1',
-      start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date || '2024-01-01',
+      start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date,
 
-      end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date || '2024-12-31',
+      end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date,
 
         stat: settings.referenceMethod || 'mean',
 
@@ -1412,7 +1454,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
               modelsProcessed: result.models_processed,
 
-              yVariable: result.y_variable,
+              yVariable: result.y_variable || 'Value',
 
               flat: viewData.flat,
 
@@ -1720,10 +1762,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         model_id: modelId,
         stat: statMethod,
 
-        start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date || '2024-01-01',
+        start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date ,
 
-        end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date || '2024-12-31'
-
+        end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date 
       };
 
       
@@ -2004,10 +2045,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
         model_id: modelId,
         stat: statMethod,
 
-        start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date || '2024-01-01',
+        start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date ,
 
-        end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date || '2024-12-31'
-
+        end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date 
       };
 
       
@@ -2386,277 +2426,6 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
 
-  // Refactored function to fetch reference values for a single combination
-
-  const fetchReferenceValuesForCombination = async (combination: any) => {
-
-    try {
-
-      // ✅ NEW: Use combination_id directly instead of extracting identifiers
-      const combinationId = combination.combination_id || combination.id;
-      if (!combinationId) {
-        console.error('No combination_id found in combination:', combination);
-        return;
-      }
-
-      
-      
-      // Call the reference endpoint
-
-      // ✅ FIXED: Backend requires dates for ALL methods, not just period-based ones
-
-      const statMethod = settings.referenceMethod || 'mean';
-
-      const isPeriodBased = statMethod.startsWith('period-');
-
-      
-      
-      // Backend schema requires start_date and end_date for ALL methods
-
-      const modelId = generateModelId();
-      const requestBody: any = {
-
-        model_id: modelId,
-        stat: statMethod,
-
-        start_date: settings.referencePeriod?.from || settings.backendDateRange?.start_date || '2024-01-01',
-
-        end_date: settings.referencePeriod?.to || settings.backendDateRange?.end_date || '2024-12-31'
-
-      };
-
-      
-      
-      const response = await fetch(`${SCENARIO_PLANNER_API}/reference`, {
-
-        method: 'POST',
-
-        headers: {
-
-          'Content-Type': 'application/json',
-
-        },
-
-        body: JSON.stringify(requestBody)
-
-      });
-
-      
-      
-      if (response.ok) {
-
-        const data = await response.json();
-        
-        
-
-        // ✅ NEW: Find the combination by combination_id instead of identifier matching
-        const combinationId = combination.combination_id || combination.id;
-        const matchingCombination = data.reference_values_by_combination?.[combinationId];
-        
-        if (matchingCombination) {
-          const modelData = matchingCombination;
-          
-          
-          // Populate the Abs boxes with reference values
-
-          const newInputs = { ...combinationInputs };
-
-          if (!newInputs[combination.id]) {
-
-            newInputs[combination.id] = {};
-
-          }
-
-          
-          
-          // Map features to their reference values
-
-          const features = computedSettings?.features || [];
-
-          
-          
-          features.forEach(feature => {
-
-            if (feature.selected && (modelData as any).reference_values?.[feature.name]) {
-
-              if (!newInputs[combination.id][feature.id]) {
-
-                newInputs[combination.id][feature.id] = { input: '', change: '' };
-
-              }
-
-              
-              
-              const referenceValue = (modelData as any).reference_values[feature.name];
-
-              
-              
-              // Set both Abs (input) and Pct (change) fields
-
-              newInputs[combination.id][feature.id].input = formatToThreeDecimals(referenceValue);
-
-              newInputs[combination.id][feature.id].change = '0'; // Auto-populate percentage with 0
-
-            }
-
-          });
-
-          
-          
-          // ✅ FIXED: Update scenario-specific data in global store
-
-          const updatedScenarios = { ...settings.scenarios };
-
-          if (!updatedScenarios[currentScenario]) {
-
-            updatedScenarios[currentScenario] = { ...currentScenarioData };
-
-          }
-
-          updatedScenarios[currentScenario].combinationInputs = newInputs;
-
-          
-          
-          onSettingsChange({ 
-
-            scenarios: updatedScenarios
-
-          });
-
-          
-          
-          // Mark this combination as having reference values loaded
-
-          setLoadedReferenceCombinations(prev => new Set([...prev, combination.id]));
-
-          
-          
-          return true; // Success
-
-        } else {
-
-          console.warn('⚠️ No exact model match found for combination:', combinationId);
-          
-          
-          // Try to find the best available reference values from any model
-
-          // This ensures ALL combinations get reference values populated
-
-          const newInputs = { ...combinationInputs };
-
-          if (!newInputs[combination.id]) {
-
-            newInputs[combination.id] = {};
-
-          }
-
-          
-          
-          const features = computedSettings?.features || [];
-
-          console.log('🔄 Trying to find best available reference values for features:', (features || []).map(f => f.name));
-
-          
-          
-          features.forEach(feature => {
-
-            if (feature.selected) {
-
-              if (!newInputs[combination.id][feature.id]) {
-
-                newInputs[combination.id][feature.id] = { input: '', change: '' };
-
-              }
-
-              
-              
-              // Try to find reference value from any available model
-
-              let bestReferenceValue = null;
-              
-              
-
-              // Look through all combinations to find the best match
-              Object.entries(data.reference_values_by_combination || {}).forEach(([comboId, comboData]: [string, any]) => {
-                if (comboData.reference_values?.[feature.name]) {
-                  bestReferenceValue = comboData.reference_values[feature.name];
-                }
-
-              });
-
-              
-              
-              if (bestReferenceValue !== null) {
-
-                newInputs[combination.id][feature.id].input = formatToThreeDecimals(bestReferenceValue);
-
-                newInputs[combination.id][feature.id].change = '0'; // Auto-populate percentage with 0
-
-              } else {
-
-                // If no reference value found anywhere, use fallback
-
-                const fallbackValue = '0';
-
-                newInputs[combination.id][feature.id].input = fallbackValue;
-
-                newInputs[combination.id][feature.id].change = '0'; // Auto-populate percentage with 0
-
-              }
-
-            }
-
-          });
-
-          
-          
-          // ✅ FIXED: Update scenario-specific data in global store
-
-          const updatedScenarios = { ...settings.scenarios };
-
-          if (!updatedScenarios[currentScenario]) {
-
-            updatedScenarios[currentScenario] = { ...currentScenarioData };
-
-          }
-
-          updatedScenarios[currentScenario].combinationInputs = newInputs;
-
-          
-          
-          onSettingsChange({ 
-
-            scenarios: updatedScenarios
-
-          });
-
-          
-          
-          // Mark this combination as having reference values loaded
-
-          setLoadedReferenceCombinations(prev => new Set([...prev, combination.id]));
-
-          
-          
-          return true; // Success with best available or fallback values
-
-        }
-
-      } else {
-
-        throw new Error(`Failed to fetch reference values: ${response.statusText}`);
-
-      }
-
-    } catch (error) {
-
-      console.error('❌ Error fetching reference values:', error);
-
-      return false; // Error occurred
-
-    }
-
-  };
 
 
 
@@ -2899,7 +2668,122 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
     }
 
-  }, [combinations.length]); // Only depend on combinations length, not the full array
+  }, [combinations.length]);
+
+  // ✅ NEW: Function to initialize select_config defaults (mean and backend date range)
+  const initializeSelectConfigDefaults = async () => {
+    try {
+      console.log('🔄 Initializing select_config defaults...');
+      
+      // Use backend defaults: mean and backend date range
+      const defaultSettings = {
+        referenceMethod: 'mean',
+        referencePeriod: {
+          from: settings.backendDateRange?.start_date || null,
+          to: settings.backendDateRange?.end_date || null
+        }
+      };
+      
+      console.log('📊 Setting select_config defaults:', {
+        referenceMethod: defaultSettings.referenceMethod,
+        referencePeriod: defaultSettings.referencePeriod,
+        backendDateRange: settings.backendDateRange
+      });
+      
+      onSettingsChange(defaultSettings);
+      console.log('✅ Auto-initialized settings with select_config defaults');
+    } catch (error) {
+      console.log('⚠️ Error initializing select_config defaults:', error);
+    }
+  };
+
+  // ✅ NEW: Auto-fetch MongoDB reference values on component mount to update settings
+  useEffect(() => {
+    const initializeMongoReferenceSettings = async () => {
+      try {
+        console.log('🔄 Auto-initializing MongoDB reference settings on component mount...');
+        
+        // Extract client/app/project from localStorage
+        const envStr = localStorage.getItem('env');
+        if (!envStr) {
+          console.log('⚠️ No env found in localStorage, skipping MongoDB initialization');
+          return;
+        }
+        
+        const env = JSON.parse(envStr);
+        const client_name = env.CLIENT_NAME || 'default_client';
+        const app_name = env.APP_NAME || 'default_app';
+        const project_name = env.PROJECT_NAME || 'default_project';
+        
+        // Make GET call to retrieve reference points from MongoDB
+        const response = await fetch(
+          `${SCENARIO_PLANNER_API}/get-reference-points?client_name=${encodeURIComponent(client_name)}&app_name=${encodeURIComponent(app_name)}&project_name=${encodeURIComponent(project_name)}`,
+          {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('✅ MongoDB reference points fetched on initialization:', data);
+          
+          if (data.success && data.data) {
+            const referenceData = data.data;
+            const storedStatistics = referenceData.statistic_used;
+            const storedDateRange = referenceData.date_range;
+            
+            console.log('🔍 Auto-initializing with MongoDB values:', {
+              storedStatistics,
+              storedDateRange,
+              currentReferenceMethod: settings.referenceMethod,
+              currentReferencePeriod: settings.referencePeriod
+            });
+            
+            // Update settings with MongoDB values if they exist
+            let updatedSettings = {};
+            if (storedStatistics) {
+              updatedSettings.referenceMethod = storedStatistics;
+              console.log('📊 Auto-updating reference method to:', storedStatistics);
+            }
+            
+            if (storedDateRange && storedDateRange.start_date && storedDateRange.end_date) {
+              updatedSettings.referencePeriod = {
+                from: storedDateRange.start_date,
+                to: storedDateRange.end_date
+              };
+              console.log('📅 Auto-updating reference period to:', { 
+                from: storedDateRange.start_date, 
+                to: storedDateRange.end_date 
+              });
+            }
+            
+            // Apply updates if we have any
+            if (Object.keys(updatedSettings).length > 0) {
+              onSettingsChange(updatedSettings);
+              console.log('✅ Auto-initialized settings with MongoDB values');
+            }
+          } else {
+            // No MongoDB data found, fall back to select_config defaults
+            console.log('⚠️ No MongoDB reference points found, falling back to select_config defaults');
+            await initializeSelectConfigDefaults();
+          }
+        } else {
+          // MongoDB request failed, fall back to select_config defaults
+          console.log('⚠️ MongoDB request failed, falling back to select_config defaults');
+          await initializeSelectConfigDefaults();
+        }
+      } catch (error) {
+        console.log('⚠️ Error auto-initializing MongoDB reference settings:', error);
+        // Don't throw error, just log it - app should continue with default settings
+      }
+    };
+
+    // Only run on component mount (empty dependency array)
+    initializeMongoReferenceSettings();
+  }, []); // Empty dependency array = run only on mount // Only depend on combinations length, not the full array
 
   
   
@@ -3530,6 +3414,36 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           // Extract reference values from MongoDB response
           const referenceData = data.data;
           
+          // ✅ NEW: Extract and update reference method and period from MongoDB
+          const storedStatistics = referenceData.statistic_used;
+          const storedDateRange = referenceData.date_range;
+          
+          console.log('🔍 MongoDB stored values:', {
+            storedStatistics,
+            storedDateRange,
+            currentReferenceMethod: settings.referenceMethod,
+            currentReferencePeriod: settings.referencePeriod
+          });
+          
+          // Update reference method and period if they exist in MongoDB
+          let updatedSettings = {};
+          if (storedStatistics) {
+            updatedSettings.referenceMethod = storedStatistics;
+            console.log('📊 Updating reference method to:', storedStatistics);
+          }
+          
+          if (storedDateRange && storedDateRange.start_date && storedDateRange.end_date) {
+            // Use the stored date range object directly
+            updatedSettings.referencePeriod = {
+              from: storedDateRange.start_date,
+              to: storedDateRange.end_date
+            };
+            console.log('📅 Updating reference period to:', { 
+              from: storedDateRange.start_date, 
+              to: storedDateRange.end_date 
+            });
+          }
+          
           combinations.forEach(combination => {
             if (!newInputs[combination.id]) {
               newInputs[combination.id] = {};
@@ -3601,7 +3515,11 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
           updatedScenarios[currentScenario].combinationInputs = newInputs;
           updatedScenarios[currentScenario].originalReferenceValues = newOriginalRefs;
           
-          onSettingsChange({ scenarios: updatedScenarios });
+          // ✅ NEW: Include updated reference method and period in settings change
+          onSettingsChange({ 
+            scenarios: updatedScenarios,
+            ...updatedSettings
+          });
           
           console.log('✅ Reference values from MongoDB processed successfully');
           console.log('🔍 Updated combinationInputs:', newInputs);
@@ -4019,38 +3937,6 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
 
-
-  // Show placeholder when no data is loaded
-  if (!computedSettings?.objectName && !settings?.objectName) {
-    return (
-      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-indigo-50/30 to-indigo-50/50 overflow-y-auto relative">
-        <div className="absolute inset-0 opacity-20">
-          <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
-            <defs>
-              <pattern id="emptyGrid" width="80" height="80" patternUnits="userSpaceOnUse">
-                <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(148 163 184 / 0.15)" strokeWidth="1"/>
-              </pattern>
-            </defs>
-            <rect width="100%" height="100%" fill="url(#emptyGrid)" />
-          </svg>
-        </div>
-
-        <div className="relative z-10 flex items-center justify-center h-full">
-          <div className="text-center max-w-md">
-            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
-              <RefreshCw className="w-12 h-12 text-white drop-shadow-lg" />
-            </div>
-            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-indigo-500 to-indigo-600 bg-clip-text text-transparent">
-              Scenario Planner Operation
-            </h3>
-            <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
-              Select a data source from the properties panel to get started
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
 
@@ -4877,6 +4763,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                         const chartData = getChartDataForScenarioAndView(scenarioId, viewId);
                         const viewResults = getResultsForScenarioAndView(scenarioId, viewId);
                         const hasResults = hasResultsForScenarioAndView(scenarioId, viewId);
+                        
 
                         
                         
@@ -4902,13 +4789,15 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                                         <div className="text-right">
 
-                                          {/* ✅ NEW: Toggle button for switching between individual and aggregated results */}
+                                          {/* ✅ NEW: Toggle buttons for switching between individual/aggregated results and data label types */}
+
+                                          <div className="flex gap-2 mb-2">
 
                                           <button
 
                                             onClick={() => toggleResultViewMode(viewId)}
 
-                                            className="mb-2 px-3 py-1.5 text-xs bg-blue-100 border border-blue-400 hover:bg-blue-200 hover:border-blue-500 hover:text-blue-700 transition-all duration-200 font-medium rounded-md flex items-center gap-2"
+                                              className="px-3 py-1.5 text-xs bg-blue-100 border border-blue-400 hover:bg-blue-200 hover:border-blue-500 hover:text-blue-700 transition-all duration-200 font-medium rounded-md flex items-center gap-2"
 
                                           >
 
@@ -4926,6 +4815,30 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                                           </button>
 
+                                            <button
+
+                                              onClick={() => toggleDataLabelType(viewId)}
+
+                                              className="px-3 py-1.5 text-xs bg-green-100 border border-green-400 hover:bg-green-200 hover:border-green-500 hover:text-green-700 transition-all duration-200 font-medium rounded-md flex items-center gap-2"
+
+                                            >
+
+                                              <div className="flex flex-col gap-0.5">
+
+                                                <div className="w-3 h-0.5 bg-current rounded-full"></div>
+
+                                                <div className="w-3 h-0.5 bg-current rounded-full"></div>
+
+                                                <div className="w-3 h-0.5 bg-current rounded-full"></div>
+
+                                              </div>
+
+                                              {dataLabelType[viewId] === 'uplift' ? `Show ${viewResults.yVariable || 'Value'}` : 'Show Uplift'}
+
+                                            </button>
+
+                                          </div>
+
                                         </div>
 
                                       </div>
@@ -4942,6 +4855,25 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
                                       height={450}
 
                                       viewMode={resultViewMode[viewId] || 'individual'}
+
+                                      dataLabelType={(() => {
+                                        const type = dataLabelType[viewId] || 'y-values';
+                                        console.log('🔍 Passing dataLabelType to chart:', type, 'for viewId:', viewId);
+                                        return type;
+                                      })()}
+
+                                      showDataLabels={(() => {
+                                        const show = showDataLabels[viewId] || false;
+                                        console.log('🔍 Passing showDataLabels to chart:', show, 'for viewId:', viewId);
+                                        return show;
+                                      })()}
+
+                                      onDataLabelsToggle={(enabled) => {
+                                        setShowDataLabels(prev => ({
+                                          ...prev,
+                                          [viewId]: enabled
+                                        }));
+                                      }}
 
                                       yVariable={viewResults.yVariable}
 
