@@ -1,0 +1,51 @@
+# Trinity Atom Studio Integration Guide
+
+This project organizes the UI into modular components under `src/components`.
+Each top–level folder groups a major piece of the application and contains all
+subcomponents and styles for that section.
+
+## Components Overview
+
+- **CoreProperties** – Common layout pieces like the `Header` and (future)
+  footer or logo assets.
+- **PrimaryMenu** – Navigation links for Workflow, Laboratory and Exhibition
+  views.
+- **MyAccount** – The search bar, notifications and user profile icons shown in
+the header.
+- **WorkflowMode** – Implementation of the workflow canvas and molecule
+  library. Subcomponents live in `WorkflowMode/components` and static data in
+  `WorkflowMode/data`.
+- **LaboratoryMode** – Atom library, canvas area and settings panel.
+- **ExhibitionMode** – Components for showcasing results. Persistent store is
+  located in `ExhibitionMode/store`.
+- **MoleculeList** – Displays available molecules for the workflow canvas.
+- **AtomList** – Renders individual atoms in the laboratory mode.
+
+## Adding or Modifying Components
+
+1. Create a folder under `src/components`. Use a subfolder named `components`
+   if the feature should contain nested parts.
+2. Add any React component files and a local style sheet or config as needed.
+3. Export the primary component from an `index.ts` file so other parts of the
+   app can import it simply via `@/components/YourComponent`.
+4. If you introduce a new page or route, update the menu in
+   `src/components/PrimaryMenu/PrimaryMenu.tsx` so it is reachable from the UI.
+
+## Extending Atoms or Molecules
+
+### Atoms
+
+1. Create a folder under `src/components/AtomList/atoms` using the atom id as the folder name.
+2. Inside that folder add an `index.ts` exporting an object that matches the `Atom` interface from `AtomCategory/data/atomCategories`.
+3. Update `src/components/AtomCategory/data/atomCategories.ts` and import the newly created atom. Add the imported constant to the relevant category's `atoms` array.
+4. The atom will automatically appear in the UI via `AtomLibrary` and in any lists that use the flattened `atoms` array.
+
+### Molecules
+
+1. Define the molecule data inside `src/components/MoleculeList/data`.
+2. Export it from `molecules.ts` and ensure the `MoleculeList` component imports the new entry.
+
+Following this pattern keeps all atom and molecule definitions colocated with their implementation.
+
+All changes should be confined to the relevant component folders to keep the
+codebase modular and maintainable.
