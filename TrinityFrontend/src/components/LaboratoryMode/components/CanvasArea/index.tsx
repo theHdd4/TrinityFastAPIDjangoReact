@@ -4,7 +4,7 @@ import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStora
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon } from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
@@ -19,6 +19,7 @@ import {
 } from '@/lib/api';
 import { AIChatBot, AtomAIChatBot } from '@/components/TrinityAI';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
+import { AtomSuggestion } from '@/components/AtomSuggestion';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
 import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/FeatureOverviewAtom';
@@ -73,6 +74,7 @@ interface CanvasAreaProps {
   onCardSelect?: (cardId: string, exhibited: boolean) => void;
   selectedCardId?: string;
   onToggleSettingsPanel?: () => void;
+  onToggleHelpPanel?: () => void;
   canEdit: boolean;
 }
 
@@ -118,6 +120,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   onCardSelect,
   selectedCardId,
   onToggleSettingsPanel,
+  onToggleHelpPanel,
   canEdit,
 }) => {
   const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings } = useLaboratoryStore();
@@ -127,6 +130,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
   const [addDragTarget, setAddDragTarget] = useState<string | null>(null);
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [showAtomSuggestion, setShowAtomSuggestion] = useState<Record<string, boolean>>({});
   const [isCanvasLoading, setIsCanvasLoading] = useState(true);
   const loadingMessages = useMemo(
     () => [
@@ -1204,6 +1208,13 @@ const handleAddDragLeave = (e: React.DragEvent) => {
     }
   };
 
+  const handleAddAtomFromSuggestion = (atomId: string, atomData: any, targetCardId?: string) => {
+    const cardId = targetCardId || selectedCardId;
+    if (cardId) {
+      addAtomByName(cardId, atomId);
+    }
+  };
+
 
   const deleteCard = async (cardId: string) => {
     const arr = Array.isArray(layoutCards) ? layoutCards : [];
@@ -1640,11 +1651,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
             <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
               {card.atoms.length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mb-4">
-                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                    <Grid3X3 className="w-8 h-8 text-gray-400" />
-                  </div>
-                  <p className="text-gray-500 mb-2">No atoms in this section</p>
-                  <p className="text-sm text-gray-400">Configure this atom for your application</p>
+                  <AtomSuggestion
+                    cardId={card.id}
+                    isVisible={true}
+                    onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
+                    onAddAtom={handleAddAtomFromSuggestion}
+                  />
                 </div>
               ) : (
                 <div
@@ -1677,6 +1689,19 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                             title="Atom Settings"
                           >
                             <Settings className="w-4 h-4 text-gray-400" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onAtomSelect) {
+                                onAtomSelect(atom.id);
+                              }
+                              onToggleHelpPanel?.();
+                            }}
+                            className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                            title="Help"
+                          >
+                            <span className="w-4 h-4 text-gray-400 text-base font-bold flex items-center justify-center">?</span>
                           </button>
                         </div>
                         <button

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Database, ChevronRight, ChevronDown, Trash2, Pencil, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -597,13 +598,15 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
         confirmButtonClass="bg-red-500 hover:bg-red-600"
       />
       
-      {/* Context Menu */}
-      {contextMenu && (
+      {/* Context Menu - Using Portal */}
+      {contextMenu && createPortal(
         <div
-          className="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-50"
+          className="fixed bg-white border border-gray-200 rounded-lg shadow-lg py-1"
           style={{
             left: contextMenu.x,
             top: contextMenu.y,
+            zIndex: 9999,
+            minWidth: '120px'
           }}
           onMouseLeave={() => setContextMenu(null)}
         >
@@ -621,7 +624,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             <Trash2 className="w-4 h-4" />
             <span>Delete</span>
           </button>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
+import { CheckboxTemplate } from '@/templates/checkbox';
 import { Button } from '@/components/ui/button';
 
 import GroupByInputFiles from '../GroupByInputFiles';
@@ -240,24 +240,8 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
           <Card className="border-l-4 border-l-blue-500"
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDrop(e, 'identifiers')}>
-            <CardHeader className="flex flex-row justify-between items-center">
+            <CardHeader>
               <CardTitle className="text-lg">Identifiers Selection</CardTitle>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="text-xs h-7"
-                onClick={() => {
-                  // Get identifiers with unique_count > 1
-                  const uniqueIdentifiers = identifierList.filter(identifier => {
-                    const colInfo = (settings.allColumns || []).find((col: any) => col.column === identifier);
-                    return colInfo && colInfo.unique_count > 1;
-                  });
-                  // Select these identifiers
-                  updateSettings(atomId, { selectedIdentifiers: [...new Set([...selectedIdentifiers, ...uniqueIdentifiers])] });
-                }}
-              >
-                Unique &gt; 1
-              </Button>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-2">
@@ -267,20 +251,17 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                     <div
                        key={identifier}
                        title={identifier}
-                       className={`flex items-center gap-2 p-2 rounded-lg transition-colors cursor-pointer select-none ${isSelected ? 'bg-blue-100 text-blue-900' : 'hover:bg-indigo-50 bg-white text-gray-900'}`}
+                       className="cursor-pointer select-none"
                        onClick={() => toggleIdentifier(identifier)}
                        draggable
                        onDragStart={(e) => handleDragStart(e, { item: identifier, source: 'identifiers' })}
                      >
-                      <Checkbox
+                      <CheckboxTemplate
                         id={identifier}
+                        label={identifier}
                         checked={isSelected}
                         onCheckedChange={() => toggleIdentifier(identifier)}
-                        className="border-gray-300"
                       />
-                      <Label htmlFor={identifier} className={`text-sm font-medium cursor-pointer truncate ${isSelected ? 'text-blue-900' : 'text-gray-900'}`}>
-                        {identifier}
-                      </Label>
                     </div>
                   );
                 })}
@@ -301,15 +282,17 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                     <div
                        key={measure}
                        title={measure}
-                       className={`flex items-center gap-2 p-2 rounded-lg transition-colors cursor-pointer select-none ${isSelected ? 'bg-green-100 text-green-900' : 'hover:bg-green-50 bg-white text-gray-900'}`}
+                       className="cursor-pointer select-none"
                        onClick={() => toggleMeasure(measure)}
                        draggable
                        onDragStart={(e) => handleDragStart(e, { item: measure, source: 'measures' })}
                      >
-                      <Checkbox id={measure} checked={isSelected} onCheckedChange={() => toggleMeasure(measure)} />
-                      <Label htmlFor={measure} className={`text-sm font-medium cursor-pointer truncate ${isSelected ? 'text-green-900' : 'text-gray-900'}`}>
-                        {measure}
-                      </Label>
+                      <CheckboxTemplate
+                        id={measure}
+                        label={measure}
+                        checked={isSelected}
+                        onCheckedChange={() => toggleMeasure(measure)}
+                      />
                     </div>
                   );
                 })}
@@ -325,11 +308,15 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                 {['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'].map((agg) => {
                   const isSelected = selectedAggregationMethods.includes(agg);
                   return (
-                    <div key={agg} title={agg} className={`flex items-center gap-2 p-2 rounded-lg transition-colors cursor-pointer select-none ${isSelected ? 'bg-orange-100 text-orange-900' : 'hover:bg-orange-50 bg-white text-gray-900'}`}
+                    <div key={agg} title={agg} className="cursor-pointer select-none"
                        onClick={() => toggleAggregationMethod(agg)}
                      >
-                      <Checkbox id={agg} checked={isSelected} onCheckedChange={() => toggleAggregationMethod(agg)} />
-                      <Label htmlFor={agg} className={`text-sm font-medium cursor-pointer truncate ${isSelected ? 'text-orange-900' : 'text-gray-900'}`}>{agg}</Label>
+                      <CheckboxTemplate
+                        id={agg}
+                        label={agg}
+                        checked={isSelected}
+                        onCheckedChange={() => toggleAggregationMethod(agg)}
+                      />
                     </div>
                   );
                 })}

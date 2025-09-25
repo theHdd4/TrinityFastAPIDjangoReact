@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Calendar, X } from 'lucide-react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { CheckboxTemplate } from '@/templates/checkbox';
 import { CLUSTERING_API } from '@/lib/api';
 
 interface Props {
@@ -704,21 +705,13 @@ const ClusteringSelections: React.FC<Props> = ({ atomId }) => {
           ) : (
             // Show filtered identifiers
             filteredIdentifiers.map((identifier) => (
-              <div key={identifier} className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id={`identifier-${identifier}`}
-                  checked={selectedIdentifiers.includes(identifier)}
-                  onChange={(e) => handleIdentifierToggle(identifier, e.target.checked)}
-                  className="rounded border-gray-300"
-                />
-                <Label htmlFor={`identifier-${identifier}`} className="text-xs flex-1">
-                  {identifier}
-                  <span className="text-gray-400 ml-2">
-                    ({uniqueValues[identifier]?.length || 0} unique values)
-                  </span>
-                </Label>
-              </div>
+              <CheckboxTemplate
+                key={identifier}
+                id={`identifier-${identifier}`}
+                label={`${identifier} (${uniqueValues[identifier]?.length || 0} unique values)`}
+                checked={selectedIdentifiers.includes(identifier)}
+                onCheckedChange={(checked) => handleIdentifierToggle(identifier, checked)}
+              />
             ))
           )}
         </div>
@@ -741,18 +734,13 @@ const ClusteringSelections: React.FC<Props> = ({ atomId }) => {
         <div className="max-h-40 overflow-y-auto space-y-2 border rounded-lg p-3 bg-gray-50">
           {/* Individual measures with checkboxes */}
           {clusteringData.availableMeasures?.map((measure) => (
-            <div key={measure} className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id={`measure-${measure}`}
-                checked={selectedMeasures.includes(measure)}
-                onChange={(e) => handleMeasureToggle(measure, e.target.checked)}
-                className="rounded border-gray-300"
-              />
-              <Label htmlFor={`measure-${measure}`} className="text-xs flex-1 text-gray-700">
-                {measure}
-              </Label>
-            </div>
+            <CheckboxTemplate
+              key={measure}
+              id={`measure-${measure}`}
+              label={measure}
+              checked={selectedMeasures.includes(measure)}
+              onCheckedChange={(checked) => handleMeasureToggle(measure, checked)}
+            />
           ))}
         </div>
       </Card>
