@@ -17,6 +17,7 @@ const AuxiliaryMenuLeft: React.FC<Props> = ({ onAtomDragStart }) => {
             onClick={() => setOpen(true)}
             className="inline-flex items-center justify-center p-1 h-8 w-8 rounded-md hover:bg-accent hover:text-accent-foreground"
             title="Open Atom List"
+            data-atom-sidebar-toggle="true"
           >
             <Grid3X3 className="w-4 h-4" />
           </button>

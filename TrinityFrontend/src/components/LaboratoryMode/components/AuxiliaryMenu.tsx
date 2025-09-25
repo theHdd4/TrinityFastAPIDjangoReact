@@ -70,6 +70,8 @@ const AuxiliaryMenu: React.FC<Props> = ({
             className={`inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground rounded-md p-1 h-8 w-8 ${
               active === 'settings' ? 'bg-accent text-accent-foreground' : ''
             }`}
+            title="Settings"
+            data-settings="true"
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -80,6 +82,8 @@ const AuxiliaryMenu: React.FC<Props> = ({
             className={`inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground rounded-md p-1 h-8 w-8 ${
               active === 'frames' ? 'bg-accent text-accent-foreground' : ''
             }`}
+            title="Saved DataFrames"
+            data-saved-dataframes="true"
           >
             <Database className="w-4 h-4" />
           </button>

@@ -1075,6 +1075,17 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     ]);
   }
   setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
+  
+  // Scroll to the newly created card after a short delay to ensure it's rendered
+  setTimeout(() => {
+    const cardElement = document.querySelector(`[data-card-id="${newCard.id}"]`);
+    if (cardElement) {
+      cardElement.scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'center' 
+      });
+    }
+  }, 100);
 };
 
 const addNewCardWithAtom = (

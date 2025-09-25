@@ -22,36 +22,45 @@ export const useSearchShortcut = () => {
         
         console.log('Ctrl+Q pressed, focusing atom search...');
         
-        // Single Q: Focus atom list search bar
-        // Try data attribute first
+        // First, try to find the atom search input
         let atomSearchInput = document.querySelector('input[data-atom-search="true"]') as HTMLInputElement;
         
-        if (!atomSearchInput) {
-          // Try multiple selectors for the atom search
-          atomSearchInput = document.querySelector('input[placeholder*="Search atoms..."]') as HTMLInputElement;
-        }
-        if (!atomSearchInput) {
-          atomSearchInput = document.querySelector('input[placeholder*="Search atoms"]') as HTMLInputElement;
-        }
-        if (!atomSearchInput) {
-          // Try finding by the search icon or container
-          const searchContainer = document.querySelector('[data-lab-sidebar] input') as HTMLInputElement;
-          if (searchContainer) {
-            atomSearchInput = searchContainer;
-          }
-        }
-        
-        console.log('Atom search input found:', !!atomSearchInput);
         if (atomSearchInput) {
+          // If found, focus it
           atomSearchInput.focus();
           atomSearchInput.select();
+          console.log('Atom search input focused');
         } else {
-          console.log('Could not find atom search input, trying all inputs...');
-          const allInputs = document.querySelectorAll('input[type="text"]');
-          console.log('All text inputs found:', allInputs.length);
-          allInputs.forEach((input, index) => {
-            console.log(`Input ${index}:`, input.placeholder, input);
-          });
+          // If not found, try to open the atom list sidebar first
+          console.log('Atom search input not found, trying to open atom list sidebar...');
+          
+          // Look for the atom list sidebar toggle button
+          const atomSidebarToggle = document.querySelector('[data-lab-sidebar] button[data-atom-sidebar-toggle="true"]') as HTMLButtonElement;
+          
+          if (atomSidebarToggle) {
+            console.log('Found atom sidebar toggle button, clicking it...');
+            atomSidebarToggle.click();
+            
+            // Wait a bit for the sidebar to open, then try to focus the search input
+            setTimeout(() => {
+              const searchInput = document.querySelector('input[data-atom-search="true"]') as HTMLInputElement;
+              if (searchInput) {
+                searchInput.focus();
+                searchInput.select();
+                console.log('Atom search input focused after opening sidebar');
+              } else {
+                console.log('Still could not find atom search input after opening sidebar');
+              }
+            }, 100);
+          } else {
+            console.log('Could not find atom sidebar toggle button');
+            // Fallback: try other selectors
+            atomSearchInput = document.querySelector('input[placeholder*="Search atoms..."]') as HTMLInputElement;
+            if (atomSearchInput) {
+              atomSearchInput.focus();
+              atomSearchInput.select();
+            }
+          }
         }
       }
       
@@ -112,20 +121,38 @@ export const useSearchShortcut = () => {
         
         console.log('Ctrl+D pressed, looking for saved dataframe button...');
         
-        // Try to find and click the saved dataframes button
-        let dataframesButton = document.querySelector('button[data-saved-dataframes="true"]') as HTMLButtonElement;
+        // Try to find the saved dataframes button in the auxiliary menu
+        // Look for the Database icon button in the auxiliary menu
+        let dataframesButton = document.querySelector('[data-lab-settings] button[data-saved-dataframes="true"]') as HTMLButtonElement;
         
         if (!dataframesButton) {
-          // Try finding by Database icon or title
-          dataframesButton = document.querySelector('button[title*="Saved DataFrames"]') as HTMLButtonElement;
+          // Try finding by looking for Database icon in the auxiliary menu area
+          const auxiliaryMenu = document.querySelector('[data-lab-settings]');
+          if (auxiliaryMenu) {
+            const databaseIcon = auxiliaryMenu.querySelector('svg[data-lucide="database"]') as SVGElement;
+            if (databaseIcon) {
+              dataframesButton = databaseIcon.closest('button') as HTMLButtonElement;
+            }
+          }
         }
         
         if (!dataframesButton) {
-          // Try finding by the Database icon
-          const databaseButtons = document.querySelectorAll('button');
-          for (const button of databaseButtons) {
-            const icon = button.querySelector('svg');
-            if (icon && button.textContent?.includes('Database')) {
+          // Try finding by the Database icon in any button
+          const allButtons = document.querySelectorAll('button');
+          for (const button of allButtons) {
+            const icon = button.querySelector('svg[data-lucide="database"]');
+            if (icon) {
+              dataframesButton = button as HTMLButtonElement;
+              break;
+            }
+          }
+        }
+        
+        if (!dataframesButton) {
+          // Try finding by text content that includes "Database" or "Saved DataFrames"
+          const allButtons = document.querySelectorAll('button');
+          for (const button of allButtons) {
+            if (button.textContent?.includes('Database') || button.textContent?.includes('Saved DataFrames')) {
               dataframesButton = button as HTMLButtonElement;
               break;
             }
@@ -138,10 +165,19 @@ export const useSearchShortcut = () => {
           console.log('Saved DataFrames button clicked');
         } else {
           console.log('Saved DataFrames button not found or disabled');
+          // Debug: log all buttons in the auxiliary menu area
+          const auxiliaryMenu = document.querySelector('[data-lab-settings]');
+          if (auxiliaryMenu) {
+            const buttons = auxiliaryMenu.querySelectorAll('button');
+            console.log('Available buttons in auxiliary menu:', buttons.length);
+            buttons.forEach((btn, index) => {
+              console.log(`Button ${index}:`, btn.title, btn.textContent, btn);
+            });
+          }
         }
       }
       
-      // Check for Ctrl+P (or Cmd+P on Mac) for properties
+      // Check for Ctrl+P (or Cmd+P on Mac) for properties/settings
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') {
         // Don't trigger if user is typing in an input field
         const target = event.target as HTMLElement;
@@ -156,33 +192,61 @@ export const useSearchShortcut = () => {
 
         event.preventDefault();
         
-        console.log('Ctrl+P pressed, looking for properties...');
+        console.log('Ctrl+P pressed, looking for settings button...');
         
-        // Try to find and click the properties/settings button
-        let propertiesButton = document.querySelector('button[data-lab-settings]') as HTMLButtonElement;
+        // Try to find the settings button in the auxiliary menu
+        // Look for the Settings icon button in the auxiliary menu
+        let settingsButton = document.querySelector('[data-lab-settings] button[data-settings="true"]') as HTMLButtonElement;
         
-        if (!propertiesButton) {
-          // Try finding by text content
+        if (!settingsButton) {
+          // Try finding by looking for Settings icon in the auxiliary menu area
+          const auxiliaryMenu = document.querySelector('[data-lab-settings]');
+          if (auxiliaryMenu) {
+            const settingsIcon = auxiliaryMenu.querySelector('svg[data-lucide="settings"]') as SVGElement;
+            if (settingsIcon) {
+              settingsButton = settingsIcon.closest('button') as HTMLButtonElement;
+            }
+          }
+        }
+        
+        if (!settingsButton) {
+          // Try finding by the Settings icon in any button
           const allButtons = document.querySelectorAll('button');
           for (const button of allButtons) {
-            if (button.textContent?.includes('Settings') || button.textContent?.includes('Properties')) {
-              propertiesButton = button as HTMLButtonElement;
+            const icon = button.querySelector('svg[data-lucide="settings"]');
+            if (icon) {
+              settingsButton = button as HTMLButtonElement;
               break;
             }
           }
         }
         
-        if (!propertiesButton) {
-          // Try finding by title or aria-label
-          propertiesButton = document.querySelector('button[title*="Settings"], button[title*="Properties"]') as HTMLButtonElement;
+        if (!settingsButton) {
+          // Try finding by text content that includes "Settings" or "Properties"
+          const allButtons = document.querySelectorAll('button');
+          for (const button of allButtons) {
+            if (button.textContent?.includes('Settings') || button.textContent?.includes('Properties')) {
+              settingsButton = button as HTMLButtonElement;
+              break;
+            }
+          }
         }
         
-        console.log('Properties button found:', !!propertiesButton);
-        if (propertiesButton && !propertiesButton.disabled) {
-          propertiesButton.click();
-          console.log('Properties button clicked');
+        console.log('Settings button found:', !!settingsButton);
+        if (settingsButton && !settingsButton.disabled) {
+          settingsButton.click();
+          console.log('Settings button clicked');
         } else {
-          console.log('Properties button not found or disabled');
+          console.log('Settings button not found or disabled');
+          // Debug: log all buttons in the auxiliary menu area
+          const auxiliaryMenu = document.querySelector('[data-lab-settings]');
+          if (auxiliaryMenu) {
+            const buttons = auxiliaryMenu.querySelectorAll('button');
+            console.log('Available buttons in auxiliary menu:', buttons.length);
+            buttons.forEach((btn, index) => {
+              console.log(`Button ${index}:`, btn.title, btn.textContent, btn);
+            });
+          }
         }
       }
     };
