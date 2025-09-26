@@ -56,6 +56,10 @@ export function deleteRow(dfId: string, index: number) {
   return postJSON(`${DATAFRAME_OPERATIONS_API}/delete_row`, { df_id: dfId, index });
 }
 
+export function deleteRowsBulk(dfId: string, indices: number[]) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/delete_rows_bulk`, { df_id: dfId, indices });
+}
+
 export function duplicateRow(dfId: string, index: number) {
   return postJSON(`${DATAFRAME_OPERATIONS_API}/duplicate_row`, { df_id: dfId, index });
 }
@@ -97,5 +101,12 @@ export function applyFormula(dfId: string, target_column: string, formula: strin
     df_id: dfId,
     target_column,
     formula,
+  });
+}
+
+export function describeColumn(dfId: string, column: string) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/describe_column`, {
+    df_id: dfId,
+    column,
   });
 }

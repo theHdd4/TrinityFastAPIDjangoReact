@@ -560,7 +560,17 @@ async def perform_operation(request: PerformRequest):
         logger.error(f"PERFORM OPERATION FAILED: {e}")
         raise HTTPException(status_code=500, detail=f"Operation failed: {str(e)}")
 
+# Enable CORS for browser-based clients
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Expose the concat and merge agent APIs alongside the chat endpoints
+# IMPORTANT: Include agent routers BEFORE the main chat endpoints to avoid routing conflicts
 api_router.include_router(merge_router)
 api_router.include_router(concat_router)
 api_router.include_router(create_transform_router)
@@ -578,8 +588,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@api_router.post("")
-@api_router.post("/")
 @api_router.post("/chat")
 async def chat_endpoint(request: QueryRequest):
     """

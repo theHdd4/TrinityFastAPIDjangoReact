@@ -27,6 +27,7 @@ import {
   editCell as apiEditCell,
   insertRow as apiInsertRow,
   deleteRow as apiDeleteRow,
+  deleteRowsBulk as apiDeleteRowsBulk,
   insertColumn as apiInsertColumn,
   deleteColumn as apiDeleteColumn,
   sortDataframe as apiSort,
@@ -38,6 +39,7 @@ import {
   retypeColumn as apiRetypeColumn,
   applyFormula as apiApplyFormula,
   loadDataframeByKey,
+  describeColumn as apiDescribeColumn,
 } from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
 import '@/templates/tables/table.css';
@@ -143,8 +145,33 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     col: string;
     colIdx: number;
   } | null>(null);
+  const [describeModal, setDescribeModal] = useState<{
+    isOpen: boolean;
+    column: string;
+    data: any;
+  }>({
+    isOpen: false,
+    column: '',
+    data: null,
+  });
+  const [multiSelectedColumns, setMultiSelectedColumns] = useState<Set<string>>(new Set());
+  const [multiSelectedRows, setMultiSelectedRows] = useState<Set<number>>(new Set());
   const [insertMenuOpen, setInsertMenuOpen] = useState(false);
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
+  const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
+    isOpen: boolean;
+    columnsToDelete: string[];
+  }>({
+    isOpen: false,
+    columnsToDelete: [],
+  });
+  const [rowDeleteConfirmModal, setRowDeleteConfirmModal] = useState<{
+    isOpen: boolean;
+    rowsToDelete: number[];
+  }>({
+    isOpen: false,
+    rowsToDelete: [],
+  });
   // 1. Add a ref to track the currently editing cell/header
   const editingCellRef = useRef<{ row: number; col: string } | null>(null);
   const editingHeaderRef = useRef<string | null>(null);
@@ -1126,21 +1153,39 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     resetSaveSuccess();
     if (!data || !fileId) return;
     if (colIdx < 0 || colIdx >= data.headers.length) return;
-    const col = data.headers[colIdx];
-    try {
-      const resp = await apiDeleteColumn(fileId, col);
-      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
-      onDataChange({
-        headers: resp.headers,
-        rows: resp.rows,
-        fileName: data.fileName,
-        columnTypes,
-        pinnedColumns: data.pinnedColumns,
-        frozenColumns: data.frozenColumns,
-        cellColors: data.cellColors,
+    
+    // Check if there are multiple selected columns
+    if (multiSelectedColumns.size > 1) {
+      // Show confirmation modal for multiple columns
+      const columnsToDelete = Array.from(multiSelectedColumns);
+      setDeleteConfirmModal({
+        isOpen: true,
+        columnsToDelete,
       });
-    } catch (err) {
-      handleApiError('Delete column failed', err);
+    } else {
+      // Delete single column (original behavior)
+      const col = data.headers[colIdx];
+      try {
+        const resp = await apiDeleteColumn(fileId, col);
+        const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+        onDataChange({
+          headers: resp.headers,
+          rows: resp.rows,
+          fileName: data.fileName,
+          columnTypes,
+          pinnedColumns: data.pinnedColumns,
+          frozenColumns: data.frozenColumns,
+          cellColors: data.cellColors,
+        });
+        // Clear selection if this column was selected
+        setMultiSelectedColumns(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(col);
+          return newSet;
+        });
+      } catch (err) {
+        handleApiError('Delete column failed', err);
+      }
     }
   };
 
@@ -1231,9 +1276,167 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
   const handleDeleteRow = async (rowIdx: number) => {
     if (!data || !fileId) return;
+    
+    // Check if there are multiple selected rows
+    if (multiSelectedRows.size > 1) {
+      // Show confirmation modal for multiple rows
+      const rowsToDelete = Array.from(multiSelectedRows);
+      setRowDeleteConfirmModal({
+        isOpen: true,
+        rowsToDelete,
+      });
+    } else {
+      // Delete single row (original behavior)
+      try {
+        const resp = await apiDeleteRow(fileId, rowIdx);
+        const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+        onDataChange({
+          headers: resp.headers,
+          rows: resp.rows,
+          fileName: data.fileName,
+          columnTypes,
+          pinnedColumns: data.pinnedColumns,
+          frozenColumns: data.frozenColumns,
+          cellColors: data.cellColors,
+        });
+        // Clear selection if this row was selected
+        setMultiSelectedRows(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(rowIdx);
+          return newSet;
+        });
+      } catch (err) {
+        handleApiError('Delete row failed', err);
+      }
+    }
+  };
+
+  const handleDescribeColumn = async (column: string) => {
+    if (!data || !fileId) return;
     try {
-      const resp = await apiDeleteRow(fileId, rowIdx);
+      const describeData = await apiDescribeColumn(fileId, column);
+      setDescribeModal({
+        isOpen: true,
+        column,
+        data: describeData,
+      });
+    } catch (err) {
+      handleApiError('Describe column failed', err);
+    }
+  };
+
+  const handleColumnMultiSelect = (header: string, event: React.MouseEvent) => {
+    if (event.ctrlKey || event.metaKey) {
+      // Multi-select mode
+      setMultiSelectedColumns(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(header)) {
+          newSet.delete(header);
+        } else {
+          newSet.add(header);
+        }
+        return newSet;
+      });
+    } else {
+      // Single select mode
+      setMultiSelectedColumns(new Set([header]));
+    }
+  };
+
+  const handleRowMultiSelect = (rowIndex: number, event: React.MouseEvent) => {
+    const globalRowIndex = startIndex + rowIndex;
+    
+    if (event.ctrlKey || event.metaKey) {
+      // Multi-select mode
+      setMultiSelectedRows(prev => {
+        const newSet = new Set(prev);
+        if (newSet.has(globalRowIndex)) {
+          newSet.delete(globalRowIndex);
+        } else {
+          newSet.add(globalRowIndex);
+        }
+        return newSet;
+      });
+    } else if (event.shiftKey && multiSelectedRows.size > 0) {
+      // Range select mode
+      const selectedRows = Array.from(multiSelectedRows).sort((a, b) => a - b);
+      const lastSelected = selectedRows[selectedRows.length - 1];
+      const start = Math.min(lastSelected, globalRowIndex);
+      const end = Math.max(lastSelected, globalRowIndex);
+      
+      setMultiSelectedRows(prev => {
+        const newSet = new Set(prev);
+        for (let i = start; i <= end; i++) {
+          newSet.add(i);
+        }
+        return newSet;
+      });
+    } else {
+      // Single select mode
+      setMultiSelectedRows(new Set([globalRowIndex]));
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!data || !fileId || deleteConfirmModal.columnsToDelete.length === 0) return;
+    
+    try {
+      let deletedCount = 0;
+      
+      // Delete columns one by one by name
+      for (const column of deleteConfirmModal.columnsToDelete) {
+        try {
+          await apiDeleteColumn(fileId, column);
+          deletedCount++;
+        } catch (err) {
+          console.error(`Failed to delete column ${column}:`, err);
+        }
+      }
+      
+      // Clear selection after deletion
+      setMultiSelectedColumns(new Set());
+      
+      if (deletedCount > 0) {
+        // Refresh the data after successful deletions
+        const updatedData = {
+          ...data,
+          headers: data.headers.filter(h => !deleteConfirmModal.columnsToDelete.includes(h)),
+          rows: data.rows.map(row => {
+            const newRow = { ...row };
+            deleteConfirmModal.columnsToDelete.forEach(col => delete newRow[col]);
+            return newRow;
+          }),
+          columnTypes: Object.fromEntries(
+            Object.entries(data.columnTypes).filter(([key]) => !deleteConfirmModal.columnsToDelete.includes(key))
+          ),
+        };
+        
+        onDataChange(updatedData);
+        
+        toast({
+          title: "Success",
+          description: `${deletedCount} column(s) deleted successfully`,
+        });
+      }
+    } catch (err) {
+      handleApiError('Bulk delete failed', err);
+    } finally {
+      setDeleteConfirmModal({ isOpen: false, columnsToDelete: [] });
+    }
+  };
+
+  const handleConfirmRowDelete = async () => {
+    if (!data || !fileId || rowDeleteConfirmModal.rowsToDelete.length === 0) return;
+    
+    try {
+      // Use bulk delete API for better performance
+      const resp = await apiDeleteRowsBulk(fileId, rowDeleteConfirmModal.rowsToDelete);
       const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+      
+      // Clear selection after deletion
+      setMultiSelectedRows(new Set());
+      
+      // Update data with the response from backend
       onDataChange({
         headers: resp.headers,
         rows: resp.rows,
@@ -1243,11 +1446,17 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
+      
+      toast({
+        title: "Success",
+        description: `${rowDeleteConfirmModal.rowsToDelete.length} row(s) deleted successfully`,
+      });
     } catch (err) {
-      handleApiError('Delete row failed', err);
+      handleApiError('Bulk row delete failed', err);
+    } finally {
+      setRowDeleteConfirmModal({ isOpen: false, rowsToDelete: [] });
     }
   };
-
 
   useLayoutEffect(() => {
     if (!data) return;
@@ -1257,6 +1466,30 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       el.scrollTop = 0;
     }
   }, [data]);
+
+  // Keyboard shortcuts for multi-select
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'a' && data?.headers) {
+          e.preventDefault();
+          setMultiSelectedColumns(new Set(data.headers));
+          // Also select all rows
+          if (data?.rows) {
+            const allRowIndices = data.rows.map((_, index) => index);
+            setMultiSelectedRows(new Set(allRowIndices));
+          }
+        }
+      }
+      if (e.key === 'Escape') {
+        setMultiSelectedColumns(new Set());
+        setMultiSelectedRows(new Set());
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [data?.headers, data?.rows]);
 
   return (
     <>
@@ -1284,7 +1517,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
         )}
         {/* Controls section */}
-        <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
+            <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
           <div className="flex items-center space-x-4">
               <div className="relative">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -1371,7 +1604,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     <TableHead
                       key={header + '-' + colIdx}
                       data-col={header}
-                      className={`table-header-cell text-center bg-white border-r border-gray-200 relative ${selectedColumn === header ? 'border-2 border-black' : ''}`}
+                      className={`table-header-cell text-center bg-white border-r border-gray-200 relative ${
+                        selectedColumn === header ? 'border-2 border-black' : ''
+                      } ${
+                        multiSelectedColumns.has(header) ? 'bg-blue-100 border-blue-300' : ''
+                      }`}
                       style={settings.columnWidths?.[header] ? { width: settings.columnWidths[header], minWidth: settings.columnWidths[header] } : undefined}
                       draggable
                       onDragStart={() => handleDragStart(header)}
@@ -1390,7 +1627,10 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         });
                         setRowContextMenu(null);
                       }}
-                      onClick={() => handleHeaderClick(header)}
+                      onClick={(e) => {
+                        handleColumnMultiSelect(header, e);
+                        handleHeaderClick(header);
+                      }}
                       onDoubleClick={() => {
                         // Always allow header editing regardless of enableEditing setting
                         setEditingHeader(colIdx);
@@ -1424,7 +1664,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                             setEditingHeader(colIdx);
                             setEditingHeaderValue(header);
                           }}
-                          title="Double-click to edit column name"
+                          title="Click to select • Ctrl+Click for multi-select • Double-click to edit • Delete key to delete selected"
                           style={{ width: '100%', height: '100%' }}
                         >
                           {headerDisplayNames[header] ?? header}
@@ -1440,32 +1680,37 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {paginatedRows.map((row, rowIndex) => (
-                  <TableRow
-                    key={rowIndex}
-                    className="table-row relative"
-                    ref={el => { if (rowRefs.current) rowRefs.current[startIndex + rowIndex] = el; }}
-                    style={{ height: settings.rowHeights?.[startIndex + rowIndex] }}
-                  >
-                    {settings.showRowNumbers && (
-                      <TableCell
-                        className="table-cell w-16 text-center text-xs font-medium"
-                      onContextMenu={e => {
-                        e.preventDefault();
-                        const { clientX, clientY } = e;
-                        setRowContextMenu({
-                          pointerX: clientX,
-                          pointerY: clientY,
-                          x: clientX,
-                          y: clientY,
-                          rowIdx: startIndex + rowIndex
-                        });
-                        setContextMenu(null);
-                      }}
-                      >
-                        {startIndex + rowIndex + 1}
-                      </TableCell>
-                    )}
+                {paginatedRows.map((row, rowIndex) => {
+                  const globalRowIndex = startIndex + rowIndex;
+                  const isRowSelected = multiSelectedRows.has(globalRowIndex);
+                  
+                  return (
+                    <TableRow
+                      key={rowIndex}
+                      className={`table-row relative ${isRowSelected ? 'bg-blue-50 border-blue-300' : ''}`}
+                      ref={el => { if (rowRefs.current) rowRefs.current[globalRowIndex] = el; }}
+                      style={{ height: settings.rowHeights?.[globalRowIndex] }}
+                      onClick={(e) => handleRowMultiSelect(rowIndex, e)}
+                    >
+                      {settings.showRowNumbers && (
+                        <TableCell
+                          className={`table-cell w-16 text-center text-xs font-medium ${isRowSelected ? 'bg-blue-100' : ''}`}
+                          onContextMenu={e => {
+                            e.preventDefault();
+                            const { clientX, clientY } = e;
+                            setRowContextMenu({
+                              pointerX: clientX,
+                              pointerY: clientY,
+                              x: clientX,
+                              y: clientY,
+                              rowIdx: globalRowIndex
+                            });
+                            setContextMenu(null);
+                          }}
+                        >
+                          {globalRowIndex + 1}
+                        </TableCell>
+                      )}
                     {(data.headers || []).map((column, colIdx) => {
                       const cellValue = row[column];
                       const isEditing = editingCell?.row === rowIndex && editingCell?.col === column;
@@ -1511,14 +1756,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         </TableCell>
                       );
                     })}
-                    <TableCell className="table-cell w-8">
-                    </TableCell>
-                    <div
-                      className="absolute bottom-0 left-0 w-full h-1 cursor-row-resize"
-                      onMouseDown={e => startRowResize(startIndex + rowIndex, e)}
-                    />
-                  </TableRow>
-                ))}
+                      <TableCell className="table-cell w-8">
+                      </TableCell>
+                      <div
+                        className="absolute bottom-0 left-0 w-full h-1 cursor-row-resize"
+                        onMouseDown={e => startRowResize(globalRowIndex, e)}
+                      />
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
                 </div>
@@ -1769,6 +2015,16 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               </div>
             )}
           </div>
+          {/* Describe */}
+          <button
+            className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
+            onClick={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleDescribeColumn(contextMenu.col);
+              setContextMenu(null);
+            }}
+          >Describe</button>
           {/* Insert */}
           <button
             className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
@@ -1825,6 +2081,239 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>,
           portalTarget
         )}
+      
+      {/* Describe Modal */}
+      {describeModal.isOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setDescribeModal({ isOpen: false, column: '', data: null })}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="p-3 border-b border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-900">
+                Column Description: {describeModal.column}
+              </h3>
+            </div>
+            <div className="p-3">
+              {describeModal.data && (
+                <div className="space-y-3">
+                  {/* Basic Info */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-gray-50 p-2 rounded">
+                      <div className="text-xs font-medium text-gray-700">Data Type</div>
+                      <div className="text-xs text-gray-900">{describeModal.data.dtype}</div>
+                    </div>
+                    <div className="bg-gray-50 p-2 rounded">
+                      <div className="text-xs font-medium text-gray-700">Total Count</div>
+                      <div className="text-xs text-gray-900">{describeModal.data.total_count}</div>
+                    </div>
+                    <div className="bg-gray-50 p-2 rounded">
+                      <div className="text-xs font-medium text-gray-700">Non-Null Count</div>
+                      <div className="text-xs text-gray-900">{describeModal.data.non_null_count}</div>
+                    </div>
+                    <div className="bg-gray-50 p-2 rounded">
+                      <div className="text-xs font-medium text-gray-700">Unique Count</div>
+                      <div className="text-xs text-gray-900">{describeModal.data.unique_count}</div>
+                    </div>
+                    <div className="bg-gray-50 p-2 rounded">
+                      <div className="text-xs font-medium text-gray-700">Null Count</div>
+                      <div className="text-xs text-gray-900">{describeModal.data.null_count}</div>
+                    </div>
+                    <div className="bg-gray-50 p-2 rounded">
+                      <div className="text-xs font-medium text-gray-700">Null Percentage</div>
+                      <div className="text-xs text-gray-900">{describeModal.data.null_percentage}%</div>
+                    </div>
+                  </div>
+
+                  {/* Numeric Statistics - Only show for numeric columns */}
+                  {describeModal.data.is_numeric && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-900 mb-2">Numeric Statistics</h4>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-blue-50 p-2 rounded">
+                          <div className="text-xs font-medium text-gray-700">Mean</div>
+                          <div className="text-xs text-gray-900">
+                            {describeModal.data.mean !== null ? describeModal.data.mean.toFixed(4) : 'N/A'}
+                          </div>
+                        </div>
+                        <div className="bg-blue-50 p-2 rounded">
+                          <div className="text-xs font-medium text-gray-700">Median</div>
+                          <div className="text-xs text-gray-900">
+                            {describeModal.data.median !== null ? describeModal.data.median.toFixed(4) : 'N/A'}
+                          </div>
+                        </div>
+                        <div className="bg-blue-50 p-2 rounded">
+                          <div className="text-xs font-medium text-gray-700">Standard Deviation</div>
+                          <div className="text-xs text-gray-900">
+                            {describeModal.data.std !== null ? describeModal.data.std.toFixed(4) : 'N/A'}
+                          </div>
+                        </div>
+                        <div className="bg-blue-50 p-2 rounded">
+                          <div className="text-xs font-medium text-gray-700">Min</div>
+                          <div className="text-xs text-gray-900">
+                            {describeModal.data.min !== null ? describeModal.data.min.toFixed(4) : 'N/A'}
+                          </div>
+                        </div>
+                        <div className="bg-blue-50 p-2 rounded">
+                          <div className="text-xs font-medium text-gray-700">Max</div>
+                          <div className="text-xs text-gray-900">
+                            {describeModal.data.max !== null ? describeModal.data.max.toFixed(4) : 'N/A'}
+                          </div>
+                        </div>
+                        <div className="bg-blue-50 p-2 rounded">
+                          <div className="text-xs font-medium text-gray-700">Sum</div>
+                          <div className="text-xs text-gray-900">
+                            {describeModal.data.sum !== null ? describeModal.data.sum.toFixed(4) : 'N/A'}
+                          </div>
+                        </div>
+                        <div className="bg-blue-50 p-2 rounded">
+                          <div className="text-xs font-medium text-gray-700">Q25 (25th Percentile)</div>
+                          <div className="text-xs text-gray-900">
+                            {describeModal.data.q25 !== null ? describeModal.data.q25.toFixed(4) : 'N/A'}
+                          </div>
+                        </div>
+                        <div className="bg-blue-50 p-2 rounded">
+                          <div className="text-xs font-medium text-gray-700">Q75 (75th Percentile)</div>
+                          <div className="text-xs text-gray-900">
+                            {describeModal.data.q75 !== null ? describeModal.data.q75.toFixed(4) : 'N/A'}
+                          </div>
+                        </div>
+                        <div className="bg-blue-50 p-2 rounded col-span-2">
+                          <div className="text-xs font-medium text-gray-700">Range</div>
+                          <div className="text-xs text-gray-900">
+                            {describeModal.data.range !== null ? describeModal.data.range.toFixed(4) : 'N/A'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Top Values - Show for categorical columns */}
+                  {!describeModal.data.is_numeric && describeModal.data.top_values && describeModal.data.top_values.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-gray-900 mb-2">Top Values</h4>
+                      <div className="space-y-1">
+                        {describeModal.data.top_values.map((item: any, index: number) => (
+                          <div key={index} className="flex justify-between items-center bg-green-50 p-2 rounded">
+                            <span className="text-xs text-gray-900">{item.value}</span>
+                            <span className="text-xs font-medium text-gray-700">{item.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmModal.isOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setDeleteConfirmModal({ isOpen: false, columnsToDelete: [] })}
+        >
+          <div 
+            className="bg-white rounded-lg p-6 max-w-md w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center mb-4">
+              <div className="flex-shrink-0 w-10 h-10 mx-auto bg-red-100 rounded-full flex items-center justify-center">
+                <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+            </div>
+            
+            <div className="text-center">
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                Delete Columns
+              </h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Are you sure you want to delete {deleteConfirmModal.columnsToDelete.length} column{deleteConfirmModal.columnsToDelete.length > 1 ? 's' : ''}? This action cannot be undone.
+              </p>
+              
+              <div className="text-xs text-gray-400 mb-4">
+                Columns to be deleted: {deleteConfirmModal.columnsToDelete.join(', ')}
+              </div>
+            </div>
+            
+            <div className="flex space-x-3 justify-end">
+              <button
+                onClick={() => setDeleteConfirmModal({ isOpen: false, columnsToDelete: [] })}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+              >
+                Delete {deleteConfirmModal.columnsToDelete.length} Column{deleteConfirmModal.columnsToDelete.length > 1 ? 's' : ''}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Row Delete Confirmation Modal */}
+      {rowDeleteConfirmModal.isOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setRowDeleteConfirmModal({ isOpen: false, rowsToDelete: [] })}
+        >
+          <div 
+            className="bg-white rounded-lg p-6 max-w-md w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center mb-4">
+              <div className="flex-shrink-0 w-10 h-10 mx-auto bg-red-100 rounded-full flex items-center justify-center">
+                <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+            </div>
+            
+            <div className="text-center">
+              <h3 className="text-lg font-medium text-gray-900 mb-2">
+                Delete Rows
+              </h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Are you sure you want to delete {rowDeleteConfirmModal.rowsToDelete.length} row{rowDeleteConfirmModal.rowsToDelete.length > 1 ? 's' : ''}? This action cannot be undone.
+              </p>
+              
+              <div className="text-xs text-gray-400 mb-4">
+                {rowDeleteConfirmModal.rowsToDelete.length <= 10 ? (
+                  `Rows to be deleted: ${rowDeleteConfirmModal.rowsToDelete.map(row => `Row ${row + 1}`).join(', ')}`
+                ) : (
+                  `All ${rowDeleteConfirmModal.rowsToDelete.length} rows will be deleted`
+                )}
+              </div>
+            </div>
+            
+            <div className="flex space-x-3 justify-end">
+              <button
+                onClick={() => setRowDeleteConfirmModal({ isOpen: false, rowsToDelete: [] })}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmRowDelete}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md transition-colors"
+              >
+                Delete {rowDeleteConfirmModal.rowsToDelete.length} Row{rowDeleteConfirmModal.rowsToDelete.length > 1 ? 's' : ''}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

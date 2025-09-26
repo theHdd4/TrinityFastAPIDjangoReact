@@ -9,58 +9,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router, text_router
 import os
-from typing import List
 from DataStorageRetrieval.arrow_client import load_env_from_redis
-
-
-def _default_cors_origins() -> List[str]:
-    """Build the default list of CORS origins.
-
-    The list keeps existing explicit hosts while automatically appending the
-    ``HOST_IP`` address exposed to the container when available.
-    """
-
-    host_ip = os.getenv("HOST_IP", "").strip()
-    defaults = [
-        "http://10.95.49.220:8080",
-        "http://10.2.4.48:8080",
-        "http://127.0.0.1:8080",
-        "http://10.2.1.207:8080",
-        "http://172.22.64.1:8080",
-        "http://10.2.3.55:8080",
-        "https://trinity.quantmatrixai.com",
-        "https://trinity-dev.quantmatrixai.com",
-    ]
-
-    if host_ip:
-        defaults.extend(
-            [
-                f"http://{host_ip}:8080",
-                f"http://{host_ip}:8081",
-                f"https://{host_ip}",
-            ]
-        )
-
-    # Preserve order while removing duplicates
-    return list(dict.fromkeys(defaults))
-
-
-def _load_cors_origins() -> List[str]:
-    configured = os.getenv("FASTAPI_CORS_ORIGINS")
-    if configured:
-        return [origin.strip() for origin in configured.split(",") if origin.strip()]
-    return _default_cors_origins()
-
 
 app = FastAPI()
 
 origins = os.getenv(
     "FASTAPI_CORS_ORIGINS",
-    "http://10.95.49.220:8080,http://10.2.1.207:8080,http://127.0.0.1:8080,http://172.22.64.1:8080,http://10.2.2.12:8080,http://172.22.64.1:8080,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com,http://10.2.65:8080"
+    "http://10.2.1.207:8080,http://127.0.0.1:8080,http://10.2.2.131:8080,http://10.2.3.55:8080,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com,http://10.2.4.48:8080"
 )
 allowed_origins = [o.strip() for o in origins.split(",") if o.strip()]
 
 # Allow requests from the frontend hosts configured in FASTAPI_CORS_ORIGINS.
+# Fallback to a sensible default list if the variable is not set.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -91,4 +51,3 @@ async def log_env():
             prefix,
         )
     )
-

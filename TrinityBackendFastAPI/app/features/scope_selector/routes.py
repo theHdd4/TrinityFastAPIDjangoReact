@@ -575,7 +575,7 @@ async def get_row_count(request: ScopeFilterRequest):
 #             },
 #             "missing_collections": missing_collections,
 #             "connection_details": {
-#                 "host": "10.2.1.65:9005",
+#                 "host": "10.2.4.48:9005",
 #                 "auth_source": "admin"
 #             }
 #         }
@@ -584,19 +584,19 @@ async def get_row_count(request: ScopeFilterRequest):
 #         return {
 #             "status": "timeout",
 #             "error": "MongoDB server selection timeout - server may be down",
-#             "host": "10.2.1.65:9005"
+#             "host": "10.2.4.48:9005"
 #         }
 #     except ConnectionFailure as e:
 #         return {
 #             "status": "connection_failed",
 #             "error": f"MongoDB connection failed: {str(e)}",
-#             "host": "10.2.1.65:9005"
+#             "host": "10.2.4.48:9005"
 #         }
 #     except Exception as e:
 #         return {
 #             "status": "error",
 #             "error": f"MongoDB error: {str(e)}",
-#             "host": "10.2.1.65:9005"
+#             "host": "10.2.4.48:9005"
 #         }
 
 # # =============================================================================
@@ -776,7 +776,7 @@ async def get_row_count(request: ScopeFilterRequest):
 #         },
 #         "infrastructure": {
 #             "mongodb": {
-#                 "host": "10.2.1.65:9005",
+#                 "host": "10.2.4.48:9005",
 #                 "source_database": settings.mongo_source_database,
 #                 "scope_database": settings.mongo_scope_database
 #             },
