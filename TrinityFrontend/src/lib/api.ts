@@ -5,11 +5,11 @@ const hostIp = import.meta.env.VITE_HOST_IP;
 // no explicit environment variables are provided.
 // Also detect development environment by hostname, port, or environment variable
 const isDevStack =
-  (typeof window !== 'undefined' && window.location.port === '8081') ||
-  import.meta.env.VITE_FRONTEND_PORT === '8081' ||
-  (typeof window !== 'undefined' && window.location.hostname === '172.19.128.1') ||
-  (typeof window !== 'undefined' && window.location.port === '8080') ||
-  import.meta.env.VITE_ENVIRONMENT === 'development';
+  (typeof window !== 'undefined' && window.location.port === '8081') ; //||
+  // import.meta.env.VITE_FRONTEND_PORT === '8081' ||
+  // (typeof window !== 'undefined' && window.location.hostname === '172.19.128.1') ||
+  // (typeof window !== 'undefined' && window.location.port === '8080') ||
+  // import.meta.env.VITE_ENVIRONMENT === 'development';
 
 const djangoPort =
   import.meta.env.VITE_DJANGO_PORT || (isDevStack ? '8003' : '8000');
@@ -49,18 +49,18 @@ const djangoPrefix = usesProxy ? '/admin/api' : '/api';
 
 // Set `VITE_BACKEND_ORIGIN` if the APIs live on a different domain.
 
-console.log('🔧 API Configuration Debug:', {
-  hostIp,
-  isDevStack,
-  djangoPort,
-  fastapiPort,
-  aiPort,
-  frontendPort,
-  backendOrigin,
-  windowLocation: typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port}` : 'server-side',
-  buildModelApi: `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-model-feature-based`
-});
-console.log('Using backend origin', backendOrigin);
+// console.log('🔧 API Configuration Debug:', {
+//   hostIp,
+//   isDevStack,
+//   djangoPort,
+//   fastapiPort,
+//   aiPort,
+//   frontendPort,
+//   backendOrigin,
+//   windowLocation: typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port}` : 'server-side',
+//   buildModelApi: `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-model-feature-based`
+// });
+// console.log('Using backend origin', backendOrigin);
 
 const normalizeUrl = (url?: string) => {
   if (!url) return undefined;
