@@ -5,7 +5,7 @@ const hostIp = import.meta.env.VITE_HOST_IP;
 // no explicit environment variables are provided.
 // Also detect development environment by hostname, port, or environment variable
 const isDevStack =
-  (typeof window !== 'undefined' && window.location.port === '8081') ||
+  (typeof window !== 'undefined' && window.location.port === '8081') ; //||
   // import.meta.env.VITE_FRONTEND_PORT === '8081' ||
   // (typeof window !== 'undefined' && window.location.hostname === '172.19.128.1') ||
   // (typeof window !== 'undefined' && window.location.port === '8080') ||
