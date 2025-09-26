@@ -31,10 +31,19 @@ pipeline {
                         if (fileExists(composeExample)) {
                             def composeContent = readFile(composeExample)
                             def updatedCompose = composeContent
-                                // Replace template defaults
-                                .replaceAll(/\$\{HOST_IP:-[^}]+\}/, "\${HOST_IP:-${env.EXPECTED_HOST_IP}}")
-                                .replaceAll(/\$\{OLLAMA_IP:-[^}]+\}/, "\${OLLAMA_IP:-${env.EXPECTED_HOST_IP}}")
-                                // Replace plain placeholders
+                                // Replace patterns that provide defaults like ${HOST_IP:-...}
+                                // Use closure form when replacement must include literal ${...}
+                                .replaceAll(/\$\{HOST_IP:-[^}]+\}/) { ->
+                                    // Return literal: ${HOST_IP:-<IP>}
+                                    return "\${HOST_IP:-${env.EXPECTED_HOST_IP}}"
+                                }
+                                .replaceAll(/\$\{OLLAMA_IP:-[^}]+\}/) { ->
+                                    return "\${OLLAMA_IP:-${env.EXPECTED_HOST_IP}}"
+                                }
+                                // Replace plain placeholders without defaults with actual IP
+                                .replaceAll(/\$\{HOST_IP\}/, env.EXPECTED_HOST_IP)
+                                .replaceAll(/\$\{OLLAMA_IP\}/, env.EXPECTED_HOST_IP)
+                                // Also safe replace plain literal occurrences (if present)
                                 .replace('${HOST_IP}', env.EXPECTED_HOST_IP)
                                 .replace('${OLLAMA_IP}', env.EXPECTED_HOST_IP)
 
@@ -54,17 +63,22 @@ pipeline {
                             def envFinal = envExample.replace(".env.example", ".env")
                             if (fileExists(envExample)) {
                                 def envContent = readFile(envExample)
+
+                                // Start with content and apply safe replacements.
+                                // For replacements that must produce literal ${...}, use closure form.
                                 def updatedEnv = envContent
-                                    // Replace template defaults
+                                    // Replace template defaults like ${HOST_IP:-...} with a simple literal IP in .env files
+                                    // (we don't need to preserve the ${...:-...} form here)
                                     .replaceAll(/\$\{HOST_IP:-[^}]+\}/, env.EXPECTED_HOST_IP)
                                     .replaceAll(/\$\{OLLAMA_IP:-[^}]+\}/, env.EXPECTED_HOST_IP)
+                                    // Replace plain placeholders
                                     .replace('${HOST_IP}', env.EXPECTED_HOST_IP)
                                     .replace('${OLLAMA_IP}', env.EXPECTED_HOST_IP)
-                                    // Fix specific variable assignments (multiline regex)
+                                    // Fix specific variable assignments (multiline)
                                     .replaceAll(/(?m)^HOST_IP\s*=\s*.*$/, "HOST_IP=${env.EXPECTED_HOST_IP}")
                                     .replaceAll(/(?m)^VITE_HOST_IP\s*=\s*.*$/, "VITE_HOST_IP=${env.EXPECTED_HOST_IP}")
                                     .replaceAll(/(?m)^OLLAMA_IP\s*=\s*.*$/, "OLLAMA_IP=${env.EXPECTED_HOST_IP}")
-                                    // Replace ${HOST_IP} references (no /g in Groovy — replaceAll handles global)
+                                    // Replace any remaining ${HOST_IP} references (safe — replacement contains no $)
                                     .replaceAll(/\$\{HOST_IP\}/, env.EXPECTED_HOST_IP)
 
                                 writeFile file: envFinal, text: updatedEnv
