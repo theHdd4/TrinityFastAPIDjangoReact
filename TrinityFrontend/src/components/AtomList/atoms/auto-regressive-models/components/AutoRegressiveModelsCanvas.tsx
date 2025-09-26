@@ -47,8 +47,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   atomId,
   onDataChange
 }) => {
-  console.log('🔧 AutoRegressiveModelsCanvas: Component rendered with atomId:', atomId, 'data:', data);
-  
   const { toast } = useToast();
   
   const [scopeSectionExpanded, setScopeSectionExpanded] = useState(true);
@@ -146,21 +144,18 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   // Interactive Legend Functions - Single Selection Model
   const handleLegendClick = (entry: any, combinationIndex: number) => {
     const { dataKey } = entry;
-    console.log('🔧 Legend clicked:', dataKey, 'for combination:', combinationIndex);
     
     setSelectedLegend(prev => {
       const currentSelected = prev[combinationIndex];
       
       // If clicking the same legend item, deselect it (show all lines)
       if (currentSelected === dataKey) {
-        console.log('🔧 Deselecting legend:', dataKey, '- showing all lines');
         const newState = { ...prev };
         delete newState[combinationIndex];
         return newState;
       }
       
       // Otherwise, select this legend item (hide all other lines)
-      console.log('🔧 Selecting legend:', dataKey, '- hiding other lines');
       return {
         ...prev,
         [combinationIndex]: dataKey
@@ -171,21 +166,18 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   // Growth Rates Legend Click Handler
   const handleGrowthLegendClick = (entry: any, combinationId: string) => {
     const { dataKey } = entry;
-    console.log('🔧 Growth Legend clicked:', dataKey, 'for combination:', combinationId);
     
     setSelectedGrowthLegend(prev => {
       const currentSelected = prev[combinationId];
       
       // If clicking the same legend item, deselect it (show all bars)
       if (currentSelected === dataKey) {
-        console.log('🔧 Deselecting growth legend:', dataKey, '- showing all bars');
         const newState = { ...prev };
         delete newState[combinationId];
         return newState;
       }
       
       // Otherwise, select this legend item (hide all other bars)
-      console.log('🔧 Selecting growth legend:', dataKey, '- hiding other bars');
       return {
         ...prev,
         [combinationId]: dataKey
@@ -251,7 +243,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    console.log('🔧 Context menu triggered at:', e.clientX, e.clientY);
     setContextMenuPosition({ x: e.clientX, y: e.clientY });
     setShowContextMenu(true);
     setShowColorSubmenu(false);
@@ -452,7 +443,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       if (isBarChartArea && e.button === 2) {
         e.preventDefault();
         e.stopPropagation();
-        console.log('🔧 Global context menu triggered at:', e.clientX, e.clientY);
         setContextMenuPosition({ x: e.clientX, y: e.clientY });
         setShowContextMenu(true);
         setShowColorSubmenu(false);
@@ -467,18 +457,15 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       
       // Don't close context menu if clicking inside the fullscreen modal
       if (isFullscreenMode && target.closest('[role="dialog"]')) {
-        console.log('🔧 Click inside fullscreen modal - not closing context menu');
         return;
       }
-      
+
       // Check if click is on context menu itself
       if (target.closest('.context-menu') || target.closest('.color-submenu')) {
-        console.log('🔧 Click on context menu - not closing');
         return;
       }
       
       // Close context menu when clicking anywhere else, including within chart area
-      console.log('🔧 Closing context menus due to click anywhere');
       setShowContextMenu(false);
       setShowColorSubmenu(false);
       setShowSortSubmenu(false);
@@ -486,7 +473,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
 
     // Close context menus when scrolling
     const handleScroll = () => {
-      console.log('🔧 Closing context menus due to scroll');
       setShowContextMenu(false);
       setShowColorSubmenu(false);
       setShowSortSubmenu(false);
@@ -537,27 +523,20 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       
       // Don't close context menu if clicking inside the fullscreen modal
       if (isFullscreenMode && target.closest('[role="dialog"]')) {
-        console.log('🔧 Click inside fullscreen modal - not closing');
         return;
       }
-      
+
       // Check if click is on context menu itself
       if (target.closest('.context-menu') || target.closest('.color-submenu')) {
-        console.log('🔧 Click on context menu - not closing');
         return;
       }
-      
+
       // Check if click is on bar chart area (don't close if clicking on bar chart)
       if (target.closest('[data-chart-type="bar"]')) {
-        console.log('🔧 Click on bar chart area - not closing');
         return;
       }
       
       // If we get here, it's a click outside - close context menus
-      console.log('🔧 Global click outside - closing context menus');
-      console.log('🔧 Click target:', target);
-      console.log('🔧 Click target classes:', target.className);
-      console.log('🔧 Click target tag:', target.tagName);
       
       // Force close all context menus
       setShowContextMenu(false);
@@ -575,27 +554,20 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       
       // Don't close context menu if clicking inside the fullscreen modal
       if (isFullscreenMode && target.closest('[role="dialog"]')) {
-        console.log('🔧 Mousedown inside fullscreen modal - not closing');
         return;
       }
-      
+
       // Check if click is on context menu itself
       if (target.closest('.context-menu') || target.closest('.color-submenu')) {
-        console.log('🔧 Mousedown on context menu - not closing');
         return;
       }
-      
+
       // Check if click is on bar chart area (don't close if clicking on bar chart)
       if (target.closest('[data-chart-type="bar"]')) {
-        console.log('🔧 Mousedown on bar chart area - not closing');
         return;
       }
       
       // If we get here, it's a click outside - close context menus
-      console.log('🔧 Global mousedown outside - closing context menus');
-      console.log('🔧 Mousedown target:', target);
-      console.log('🔧 Mousedown target classes:', target.className);
-      console.log('🔧 Mousedown target tag:', target.tagName);
       
       // Force close all context menus
       setShowContextMenu(false);
@@ -610,7 +582,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
     // Also add a direct body click listener as backup
     const handleBodyClick = (e: Event) => {
       if (showContextMenu || showColorSubmenu || showSortSubmenu) {
-        console.log('🔧 Body click detected - closing context menus');
         setShowContextMenu(false);
         setShowColorSubmenu(false);
         setShowSortSubmenu(false);
@@ -645,13 +616,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                         Array.isArray(storeData);
       
       if (hasResults) {
-        console.log('🔧 AutoRegressiveModelsCanvas: Found results in store data, syncing to local state');
-        console.log('🔧 AutoRegressiveModelsCanvas: Store data structure:', {
-          hasResultsProperty: !!(storeData as any).results,
-          hasCombinationResultsProperty: !!(storeData as any).combination_results,
-          isArray: Array.isArray(storeData),
-          storeDataKeys: Object.keys(storeData || {})
-        });
         setLocalModelResults(storeData);
         
         // Minimize all combinations by default when loading from store
@@ -666,7 +630,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   // Restore complete state from store data when component loads
   useEffect(() => {
     if (storeData) {
-      console.log('🔧 AutoRegressiveModelsCanvas: Restoring complete state from store data');
       
       // Restore model results
       if ((storeData as any).modelResults) {
@@ -731,29 +694,16 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       if ((storeData as any).hasFreshCombinationSaveStatus !== undefined) {
         setHasFreshCombinationSaveStatus((storeData as any).hasFreshCombinationSaveStatus);
       }
-      
-      console.log('🔧 AutoRegressiveModelsCanvas: Complete state restored from store data');
     }
   }, [storeData]);
 
   // Debug logging for localModelResults and auto-expand functionality
   useEffect(() => {
-    console.log('🔧 AutoRegressiveModelsCanvas: localModelResults changed:', localModelResults);
     if (localModelResults) {
       const resultsArray = getResultsArray();
-      console.log('🔧 AutoRegressiveModelsCanvas: Results structure:', {
-        hasResults: !!localModelResults.results,
-        resultsLength: localModelResults.results?.length,
-        resultsType: typeof localModelResults.results,
-        status: localModelResults.status,
-        message: localModelResults.message,
-        resolvedResultsArray: resultsArray,
-        resolvedResultsLength: resultsArray?.length
-      });
       
       // Auto-expand the first result when results are loaded
       if (resultsArray && resultsArray.length > 0 && minimizedCombinations.size === 0) {
-        console.log('🔧 Auto-expanding first result for better user experience');
         // Don't minimize the first result
       }
     }
@@ -792,7 +742,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
     // Don't auto-populate growth models from settings
     // They should only be selected after running models and seeing results
     setSelectedGrowthModels([]);
-    console.log('🔧 Initialized selectedGrowthModels as empty (no auto-selection)');
   }, []);
 
   // Don't auto-populate combinationGrowthModels - let users select models manually
@@ -800,12 +749,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
 
   // Fetch combination save status when results are available (like select models feature)
   useEffect(() => {
-    console.log('🔧 DEBUG: useEffect triggered for fetchCombinationSaveStatus with:', {
-      hasLocalModelResults: !!localModelResults,
-      atomId: atomId,
-      isFetchingCombinationStatus: isFetchingCombinationStatus,
-      hasCombinationSaveStatus: !!combinationSaveStatus
-    });
     if (localModelResults && atomId && !isFetchingCombinationStatus) {
       // Only fetch if we don't already have combination save status
       if (!combinationSaveStatus) {
@@ -854,7 +797,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         project_id: envParams.PROJECT_ID || ''
       };
 
-      console.log('🔧 DEBUG: Saving combination with request:', saveRequest);
 
       const response = await fetch(baseUrl, {
         method: 'POST',
@@ -870,7 +812,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       }
 
       const saveResult = await response.json();
-      console.log('🔧 DEBUG: Save result:', saveResult);
       
       // Show success message
       toast({
@@ -880,9 +821,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       });
       
       // Refresh combination status after saving
-      console.log('🔧 DEBUG: About to call fetchCombinationSaveStatus after saving');
       await fetchCombinationSaveStatus();
-      console.log('🔧 DEBUG: fetchCombinationSaveStatus completed after saving');
       
       // Save complete state after saving a combination
       setTimeout(() => {
@@ -1950,10 +1889,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
 
   // Context Menu Components
   const ContextMenu = () => {
-    console.log('🔧 ContextMenu render - showContextMenu:', showContextMenu, 'position:', contextMenuPosition);
     if (!showContextMenu) return null;
-
-    console.log('🔧 Rendering context menu at:', contextMenuPosition);
 
     return (
       <div 
@@ -2612,33 +2548,10 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
               const resultsArray = getResultsArray();
               const hasResults = resultsArray && resultsArray.length > 0;
               
-              console.log('🔧 AutoRegressiveModelsCanvas: Rendering results section:', {
-                hasLocalModelResults: !!localModelResults,
-                hasResultsProperty: !!localModelResults?.results,
-                isResultsArray: Array.isArray(localModelResults?.results),
-                resultsLength: localModelResults?.results?.length,
-                resultsArrayLength: resultsArray?.length,
-                hasResults,
-                resultsArrayType: typeof resultsArray,
-                resultsArrayKeys: resultsArray ? Object.keys(resultsArray[0] || {}) : null
-              });
-              
               return hasResults;
             })() ? (
               <div className="space-y-4">
                 {getResultsArray()?.map((result: any, index: number) => {
-                  // Debug the result structure
-                  console.log(`🔧 Rendering result ${index}:`, {
-                    result,
-                    resultKeys: Object.keys(result || {}),
-                    hasCombinationId: !!result?.combination_id,
-                    hasCombination: !!result?.combination,
-                    hasId: !!result?.id,
-                    status: result?.status,
-                    resultData: result?.result,
-                    minimizedCombinations: Array.from(minimizedCombinations),
-                    isMinimized: minimizedCombinations.has(index)
-                  });
                   
                   // Try to get the combination name from multiple possible fields
                   const combinationName = result?.combination_id || 
@@ -2954,8 +2867,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                          }}
                                          iconType="line"
                                          onClick={(entry) => {
-                                           console.log('🔧 Legend clicked via Recharts:', entry);
-                                           console.log('🔧 index value:', index);
                                            handleLegendClick(entry, index);
                                          }}
                                          className="interactive-legend"
@@ -3799,7 +3710,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                     }}
                                                     iconType="rect"
                                                     onClick={(entry: any) => {
-                                                      console.log('🔧 Growth Legend clicked via Recharts:', entry);
                                                       handleGrowthLegendClick(entry, result.combination_id);
                                                     }}
                                                   />
@@ -3887,11 +3797,8 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                       displayName = fiscalYear.replace(/_/g, ' ');
                                                     }
                                                     
-                                                    console.log(`🔧 Rendering bar for fiscal year ${fiscalYear} with dataKey: ${dataKey}`);
-                                                    
                                                     // Check if this bar should be visible based on legend selection
                                                     const isVisible = isGrowthBarVisible(dataKey, result.combination_id);
-                                                    console.log(`🔧 Bar visibility for ${dataKey}:`, isVisible);
                                                     
                                                     if (!isVisible) {
                                                       return null; // Don't render this bar
@@ -4325,13 +4232,10 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
 
       {/* Fullscreen Chart Modal */}
       <Dialog open={!!fullscreenChart} onOpenChange={(open) => {
-        console.log('🔧 Dialog onOpenChange:', { open, showContextMenu, showColorSubmenu, isFullscreenMode });
         // Only close the modal if it's explicitly being closed (not when context menu is open)
         if (!open && !showContextMenu && !showColorSubmenu) {
-          console.log('🔧 Closing fullscreen modal');
           setFullscreenChart(null);
         } else if (!open) {
-          console.log('🔧 Preventing modal close due to active context menu');
         }
       }}>
         <DialogContent 
@@ -4363,13 +4267,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
             {fullscreenChart && (() => {
               // Use the stored result data directly (like Chart Maker does)
               const result = fullscreenChart.result;
-              
-              console.log('🔧 Fullscreen chart debug:', {
-                fullscreenChart,
-                hasResult: !!result,
-                resultCombinationId: result?.combination_id,
-                searchCombinationId: fullscreenChart.combinationId
-              });
               
               if (!result) {
                 return (
@@ -4405,12 +4302,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
 
                   const chartData = generateRealForecastData(result, parseInt(forecastHorizon));
                   const models = result.result?.models_run || [];
-                  
-                  console.log('🔧 Fullscreen forecast chart data:', {
-                    chartDataLength: chartData?.length,
-                    models: models,
-                    result: result
-                  });
                   
                   if (!chartData || chartData.length === 0) {
                     return (
@@ -4580,8 +4471,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                            }}
                            iconType="line"
                            onClick={(entry) => {
-                             console.log('🔧 Fullscreen Legend clicked via Recharts:', entry);
-                             console.log('🔧 fullscreenChart.combinationId:', fullscreenChart.combinationId);
                              // For fullscreen charts, we'll use a default index since we don't have the combination index
                              handleLegendClick(entry, 0);
                            }}
@@ -4737,8 +4626,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                     return 0;
                   });
                   
-                  console.log('🔧 Fullscreen chart - All fiscal years found:', sortedFiscalYears);
-                  
                   // Group by model and create chart data with fiscal years as legends
                   let groupedData: { [key: string]: any } = {};
                   
@@ -4797,7 +4684,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                       const dataKey = `${fiscalYear.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '')}_growth_rate`;
                       ensembleData[dataKey] = ensembleData[dataKey] / modelCount;
                     });
-                    console.log(`🔧 Fullscreen chart - Ensemble data calculated for ${modelCount} models`);
                   }
                   
                   // Add ensemble as a separate model at the front
@@ -4909,7 +4795,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                             }}
                             iconType="rect"
                             onClick={(entry: any) => {
-                              console.log('🔧 Growth Legend clicked via Recharts:', entry);
                               if (fullscreenChart?.combinationId) {
                                 handleGrowthLegendClick(entry, fullscreenChart.combinationId);
                               }
@@ -4969,8 +4854,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                             return 0;
                           });
                           
-                          console.log('🔧 Fullscreen chart - Fiscal years for legends (sorted):', fiscalYears);
-                          
                           return fiscalYears.map((fiscalYear, fiscalIndex) => {
                             const dataKey = `${fiscalYear}_growth_rate`;
                             
@@ -4981,7 +4864,6 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                               return value !== 0 && value !== null && value !== undefined;
                             });
                             if (!hasNonZeroFullscreenValue) {
-                              console.log(`🔧 Fullscreen chart - Filtering out fiscal year entry with all 0 growth rates: ${fiscalYear}`);
                               return null; // Don't render this legend item
                             }
                             
@@ -4996,11 +4878,8 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                               displayName = fiscalYear.replace(/_/g, ' ');
                             }
                             
-                            console.log(`🔧 Fullscreen chart - Rendering bar for fiscal year ${fiscalYear} with dataKey: ${dataKey}`);
-                            
                             // Check if this bar should be visible based on legend selection
                             const isVisible = isGrowthBarVisible(dataKey, fullscreenChart.combinationId);
-                            console.log(`🔧 Fullscreen bar visibility for ${dataKey}:`, isVisible);
                             
                             if (!isVisible) {
                               return null; // Don't render this bar

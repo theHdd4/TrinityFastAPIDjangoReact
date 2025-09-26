@@ -110,15 +110,6 @@ const AutoRegressiveModelsProperties: React.FC<Props> = (props) => {
           : defaultData.selectedModels
       };
 
-      // Debug logging for data processing
-      console.log('🔧 AutoRegressiveModelsProperties: Processing data:', {
-        originalData: data,
-        selectedModels: data.selectedModels,
-        isUndefined: data.selectedModels === undefined,
-        isArray: Array.isArray(data.selectedModels),
-        length: data.selectedModels?.length,
-        finalSelectedModels: result.selectedModels
-      });
 
       return result;
     }, [data, defaultData]);
@@ -130,12 +121,8 @@ const AutoRegressiveModelsProperties: React.FC<Props> = (props) => {
 
     // Memoize the onDataChange callback to prevent unnecessary re-renders
     const handleDataChange = useCallback((newData: Partial<AutoRegressiveModelsData>) => {
-      console.log('🔧 AutoRegressiveModelsProperties: onDataChange called with:', newData);
-      console.log('🔧 AutoRegressiveModelsProperties: Current completeData:', completeData);
       const updatedData = { ...completeData, ...newData };
-      console.log('🔧 AutoRegressiveModelsProperties: Updated data:', updatedData);
       updateSettings(atomId, { data: updatedData });
-      console.log('🔧 AutoRegressiveModelsProperties: updateSettings called');
     }, [completeData, updateSettings, atomId]);
 
     return (
@@ -149,7 +136,6 @@ const AutoRegressiveModelsProperties: React.FC<Props> = (props) => {
         }, [completeSettings, updateSettings, atomId])}
         onDataUpload={(file, fileId) => {
           // Handle file upload if needed
-          console.log('File upload:', file, fileId);
         }}
         atomId={atomId}
       />
