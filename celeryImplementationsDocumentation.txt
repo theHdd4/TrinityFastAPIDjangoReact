@@ -1,0 +1,197 @@
+# Celery Implementation Guide for Atom Execution
+
+This guide explains how to wire Celery into the Trinity stack so that "atoms" – the building blocks that power user workflows – can run heavyweight or long-lived functions in the background. It covers the relevant code locations in this repository, step-by-step setup instructions, and best practices for using Celery efficiently across the Django and FastAPI services that orchestrate atoms.
+
+---
+
+## 1. Architectural overview
+
+| Layer | Role | Celery touchpoint |
+| --- | --- | --- |
+| **TrinityFrontend** | React/TypeScript experience where users configure and launch atoms. | Initiates HTTP calls that ultimately enqueue Celery tasks. |
+| **TrinityBackendDjango** | Multitenant orchestrator (apps/orchestration) responsible for persisting workflow state and dispatching atom executions. | Hosts the canonical Celery application (`config/celery.py`) and exposes Celery tasks such as `apps.orchestration.tasks.execute_task`. |
+| **TrinityBackendFastAPI** | Feature-specific microservices (e.g. data upload validation, auto-regressive models). | Calls Celery via shared broker to offload expensive routines and report progress back to Django/Mongo/MinIO. |
+| **Infrastructure** | Redis, PostgreSQL, MongoDB, MinIO. | Redis is the message broker / result backend for Celery workers. |
+
+Within this repo Celery is already bootstrapped for the Django side:
+
+* `TrinityBackendDjango/config/celery.py` instantiates the app and autodiscovers tasks.
+* `TrinityBackendDjango/apps/orchestration/tasks.py` contains the baseline worker entry point (`execute_task`).
+* `TrinityBackendDjango/config/settings.py` wires Celery to Redis (`CELERY_BROKER_URL = REDIS_URL`).
+* Docker compose definitions (`docker-compose*.yml`) include a `celery` service running `celery -A config.celery worker` alongside Redis.
+
+You can extend this foundation to execute any atom function asynchronously.
+
+---
+
+## 2. Prerequisites
+
+1. **Python dependencies** – `celery>=5.2,<6.0` is already listed in `TrinityBackendDjango/requirements.txt`. Add additional extras (e.g. `flower`, `celery[redis]`) if you need monitoring or TLS.
+2. **Broker and backend** – Celery is configured to use Redis for both transport and result storage. Ensure Redis is reachable via `REDIS_URL` in your environment or `.env` file.
+3. **Shared environment variables** – at minimum set:
+   ```ini
+   REDIS_URL=redis://redis:6379/0
+   CELERY_BROKER_URL=${REDIS_URL}
+   CELERY_RESULT_BACKEND=${REDIS_URL}
+   ```
+   Add optional Celery settings (prefetch, visibility timeout, task time limits, etc.) in the Django settings file under the `CELERY_` namespace.
+4. **Worker runtime** – Workers can run locally (`celery -A config.celery worker --loglevel=info`) or via Docker (see Section 6). Each worker needs access to the Django project code plus any FastAPI modules that submit tasks.
+
+---
+
+## 3. Core setup (Django orchestrator)
+
+Follow these steps when creating or updating the central Celery configuration.
+
+1. **Expose the Celery app**
+   * The module `TrinityBackendDjango/config/celery.py` should remain the single source of truth for the Celery instance:
+     ```python
+     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+     celery_app = Celery("TrinityBackendDjango")
+     celery_app.config_from_object("django.conf:settings", namespace="CELERY")
+     celery_app.autodiscover_tasks()
+     ```
+   * Keep the `celery_app` importable in `config/__init__.py` so `celery` CLI and Django auto-discovery work (`from .celery import celery_app`).
+2. **Ensure Django loads Celery on startup** – import `celery_app` in `TrinityBackendDjango/config/__init__.py` and reference the module in `INSTALLED_APPS` that house tasks.
+3. **Declare Celery settings** – use the Redis URL defined elsewhere in `settings.py`. Add project-specific defaults such as:
+   ```python
+   CELERY_TASK_TIME_LIMIT = 60 * 15          # 15 minutes
+   CELERY_TASK_SOFT_TIME_LIMIT = 60 * 12     # warn before hard kill
+   CELERY_ACKS_LATE = True                   # requeue on worker crash
+   CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+   ```
+4. **Create task modules** – For each app that needs asynchronous work, add a `tasks.py` and decorate callables with `@celery_app.task`. Example for the orchestration layer:
+   ```python
+   @celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=True)
+   def execute_task(self, task_run_id: int):
+       task_run = TaskRun.objects.select_related("workflow_run").get(id=task_run_id)
+       OrchestratorService.run_task(task_run)
+   ```
+   Use `bind=True` to access `self.request.id`, context, and Celery retry helpers. Wrap business logic in services (e.g. `OrchestratorService`) so tasks stay thin.
+5. **Trigger tasks** – enqueue with `.delay(...)` or `.apply_async(...)` from your Django views, DRF viewsets, or FastAPI endpoints that import the same Celery app. Capture the task ID and persist it on the atom run model to support progress polling.
+
+---
+
+## 4. Extending Celery to atom-specific services
+
+Atoms span multiple backends. Use these patterns to integrate Celery wherever an atom runs heavy computation:
+
+### 4.1 Django-only atoms
+
+1. Inside the relevant Django app (e.g. `apps.orchestration`, `apps.registry`, etc.) add a `tasks.py`.
+2. Import models/services and implement the business logic under a Celery task wrapper (see Section 3).
+3. From controllers (REST endpoints, GraphQL resolvers, admin actions) trigger the task using `.delay` or `.apply_async`.
+4. Persist the task ID plus any progress metadata (percentage, log path, result location). The frontend can poll an atom status endpoint that reads this data.
+
+### 4.2 FastAPI-powered atoms
+
+FastAPI services live under `TrinityBackendFastAPI/app/features/...`. They can submit jobs to the same Celery broker using either of two approaches:
+
+* **Import the Django Celery app** – Mount the Django project on the worker PYTHONPATH (already done in Docker). Then do `from config.celery import celery_app` inside the FastAPI service and call `celery_app.send_task(...)` or import Django tasks directly.
+* **Define a thin Celery proxy** if you prefer to keep FastAPI decoupled:
+  ```python
+  from celery import Celery
+  from .settings import CELERY_BROKER_URL, CELERY_RESULT_BACKEND
+
+  atom_celery = Celery("trinity_fastapi", broker=CELERY_BROKER_URL, backend=CELERY_RESULT_BACKEND)
+  atom_celery.conf.task_default_queue = "atoms"
+  ```
+  You can then `.send_task("apps.orchestration.tasks.execute_task", args=[task_run_id])` or register feature-specific tasks that live inside the FastAPI package.
+
+When FastAPI code starts a Celery job, return a lightweight response containing the task ID plus any immediate metadata (e.g. a URL for polling). Update MongoDB or MinIO inside the task to communicate progress back to the UI.
+
+### 4.3 Cross-service considerations
+
+* **Serialization** – only pass JSON-serializable payloads (lists, dicts, primitives). Large files should be stored in MinIO/S3 and referenced by key.
+* **Context propagation** – include tenant/client identifiers, atom IDs, and user IDs in the task arguments so workers can reconstruct database context.
+* **Database connections** – when tasks run outside Django request/response cycle ensure you call `django.setup()` (if you create ad-hoc Celery apps) or rely on the existing configuration in `config/celery.py`.
+
+---
+
+## 5. Running and managing workers
+
+### 5.1 Local commands
+
+```bash
+# Start Redis if not already running (Docker example)
+docker compose up redis
+
+# Run the worker from the Django project root
+celery -A config.celery worker --loglevel=info --concurrency=4
+
+# Optionally run Celery Beat for scheduled atom maintenance tasks
+celery -A config.celery beat --loglevel=info
+```
+
+Use `--queues` to bind workers to dedicated atom queues (e.g. `--queues=heavy_atoms`) and `--autoscale` to scale concurrency dynamically.
+
+### 5.2 Docker setup
+
+`docker-compose.example.yml` and `docker-compose-dev.example.yml` already define a `celery` service:
+
+```yaml
+celery:
+  build: ./TrinityBackendDjango
+  command: celery -A config.celery worker --loglevel=info
+  volumes:
+    - ./TrinityBackendDjango:/code
+    - ./TrinityBackendFastAPI:/code/TrinityBackendFastAPI
+  env_file:
+    - ./TrinityBackendDjango/.env
+  depends_on:
+    - redis
+    - postgres
+    - mongo
+```
+
+Start it with `docker compose up celery` (along with Redis) or include it in your global `docker compose up` command.
+
+### 5.3 Monitoring
+
+* Add [Flower](https://flower.readthedocs.io/) for web-based task monitoring (`celery -A config.celery flower`).
+* Log task lifecycle events and persist them to MongoDB for front-end dashboards.
+* Use Celery events or custom WebSocket signals to push status updates to the UI when atoms finish.
+
+---
+
+## 6. Example: executing an atom via Celery
+
+1. **User action** – The React frontend calls a Django endpoint to run an atom (e.g. `/api/atoms/{atom_id}/run`).
+2. **Django view** persists a `TaskRun` record and enqueues the Celery job:
+   ```python
+   task_run = TaskRun.objects.create(atom_slug=atom_slug, created_by=request.user)
+   async_result = execute_task.delay(task_run.id)
+   task_run.celery_task_id = async_result.id
+   task_run.save(update_fields=["celery_task_id"])
+   ```
+3. **Worker** fetches domain-specific settings, invokes `OrchestratorService.run_task(task_run)` and writes progress/responses to MongoDB or MinIO.
+4. **Frontend** polls a status endpoint that reads `TaskRun` (or Mongo) and surfaces live updates in the atom UI.
+5. **Completion** – mark `TaskRun.status` as `success`/`failed`, store outputs (files, JSON) in MinIO, and deliver download URLs back to the React component.
+
+Adapt this skeleton for FastAPI-triggered atoms by replacing the Django view with a FastAPI route and using whichever persistence store the feature relies on (MongoDB collections, MinIO buckets, etc.).
+
+---
+
+## 7. Best practices for efficient Celery usage
+
+* **Queue design** – Segment atoms by workload (e.g. `default`, `io_bound`, `ml_training`). Start dedicated workers for long-running models so they do not block quick validation tasks.
+* **Idempotency & retries** – Design atom functions to be idempotent; enable `autoretry_for` on transient exceptions, and guard side effects with transactional saves or S3 object versioning.
+* **Result storage** – Avoid returning massive payloads via Celery results. Persist to MongoDB/MinIO and return references.
+* **Timeouts** – Set `CELERY_TASK_TIME_LIMIT` / `CELERY_TASK_SOFT_TIME_LIMIT` to prevent runaway atoms. Consider chunking work for large datasets.
+* **Resource isolation** – Use Celery routing to target GPU/CPU workers depending on the atom type.
+* **Observability** – Emit structured logs and metrics (task duration, retries) to whichever logging stack you use. Tag logs with tenant, atom ID, and task ID for correlation.
+* **Security** – Validate all task arguments, especially when atoms are triggered by user input. Never execute raw code shipped from clients.
+
+---
+
+## 8. Implementation checklist
+
+1. [ ] Confirm Redis connection strings in `.env` and `settings.py`.
+2. [ ] Verify Celery app bootstrap (`config/celery.py`) and ensure new Django/FastAPI packages are importable.
+3. [ ] Create/extend `tasks.py` modules for each atom that needs background execution.
+4. [ ] Persist Celery task IDs on the corresponding workflow or atom models.
+5. [ ] Update API endpoints to enqueue tasks and expose status endpoints for the frontend.
+6. [ ] Start workers locally or via Docker and confirm they connect to the correct queues.
+7. [ ] Add monitoring/alerting for failed atom tasks and configure retry strategies.
+
+Following this checklist will let you offload atom execution to Celery, keeping the UI responsive while complex analytics and machine-learning routines run reliably in the background.
