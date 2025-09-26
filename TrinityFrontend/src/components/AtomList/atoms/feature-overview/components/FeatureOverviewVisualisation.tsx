@@ -1,6 +1,6 @@
 import React from 'react';
 import { Card } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
+import { CheckboxTemplate } from '@/templates/checkbox';
 import { Button } from '@/components/ui/button';
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -42,10 +42,12 @@ const FeatureOverviewVisualisation: React.FC<Props> = ({
         <label className="text-sm font-medium text-gray-700 block mb-2">Select Dependant Variables for SKU Analysis</label>
         <div className="grid grid-cols-2 gap-2">
           {numericList.map(c => (
-            <label key={c} className="flex items-center space-x-2 text-xs">
-              <Checkbox checked={yValues.includes(c)} onCheckedChange={val => toggle(c, val)} />
-              <span>{c}</span>
-            </label>
+            <CheckboxTemplate
+              key={c}
+              label={c}
+              checked={yValues.includes(c)}
+              onCheckedChange={val => toggle(c, val)}
+            />
           ))}
         </div>
       </Card>

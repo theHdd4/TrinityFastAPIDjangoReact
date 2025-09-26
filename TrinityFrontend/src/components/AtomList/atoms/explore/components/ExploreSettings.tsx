@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Checkbox } from '@/components/ui/checkbox';
+import { CheckboxTemplate } from '@/templates/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { DateRange } from 'react-day-picker';
 import { EXPLORE_API } from '@/lib/api';
@@ -316,18 +316,17 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
             <div className="space-y-2">
               <div className="max-h-40 overflow-y-auto space-y-2">
                 {categoricalColumns.map(col => (
-                  <div key={col} className="flex items-center space-x-2">
-                    <Checkbox
-                      id={`col-${col}`}
-                      checked={selectedFilterColumns.includes(col)}
-                      onCheckedChange={(checked) => {
-                        setSelectedFilterColumns(prev =>
-                          checked ? [...prev, col] : prev.filter(c => c !== col)
-                        );
-                      }}
-                    />
-                    <Label htmlFor={`col-${col}`}>{col}</Label>
-                  </div>
+                  <CheckboxTemplate
+                    key={col}
+                    id={`col-${col}`}
+                    label={col}
+                    checked={selectedFilterColumns.includes(col)}
+                    onCheckedChange={(checked) => {
+                      setSelectedFilterColumns(prev =>
+                        checked ? [...prev, col] : prev.filter(c => c !== col)
+                      );
+                    }}
+                  />
                 ))}
               </div>
               <Button size="sm" onClick={handleAddFilters}>Add Filter</Button>

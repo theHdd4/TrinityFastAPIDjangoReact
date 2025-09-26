@@ -4,7 +4,7 @@ pipeline {
     environment {
         DEV_PROJECT     = 'trinity-dev'
         PROD_PROJECT    = 'trinity-prod'
-        EXPECTED_HOST_IP = '10.2.1.65'
+        EXPECTED_HOST_IP = '10.2.4.48'
     }
 
     stages {

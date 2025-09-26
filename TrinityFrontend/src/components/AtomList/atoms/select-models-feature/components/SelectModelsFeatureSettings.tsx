@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
+import { CheckboxTemplate } from '@/templates/checkbox';
 import { Card } from '@/components/ui/card';
 import { VALIDATE_API, SELECT_API } from '@/lib/api';
 import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
@@ -187,19 +187,12 @@ const SelectModelsFeatureSettings: React.FC<SelectModelsFeatureSettingsProps> = 
         <h4 className="text-md font-medium text-foreground mb-4">Model Configuration</h4>
         
         <div className="space-y-4">
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="ensemble-method"
-              checked={data.ensembleMethod}
-              onCheckedChange={(checked) => onDataChange({ ensembleMethod: Boolean(checked) })}
-            />
-            <Label 
-              htmlFor="ensemble-method" 
-              className="text-sm font-medium text-foreground cursor-pointer"
-            >
-              Ensemble Method
-            </Label>
-          </div>
+          <CheckboxTemplate
+            id="ensemble-method"
+            label="Ensemble Method"
+            checked={data.ensembleMethod}
+            onCheckedChange={(checked) => onDataChange({ ensembleMethod: Boolean(checked) })}
+          />
         </div>
       </Card>
 
