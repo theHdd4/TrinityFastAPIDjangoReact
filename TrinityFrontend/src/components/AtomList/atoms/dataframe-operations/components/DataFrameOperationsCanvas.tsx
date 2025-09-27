@@ -158,6 +158,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [multiSelectedRows, setMultiSelectedRows] = useState<Set<number>>(new Set());
   const [insertMenuOpen, setInsertMenuOpen] = useState(false);
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
+  // Track permanently deleted rows across filter changes
+  const [permanentlyDeletedRows, setPermanentlyDeletedRows] = useState<Set<number>>(new Set());
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{
     isOpen: boolean;
     columnsToDelete: string[];
@@ -305,7 +307,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
       Object.entries(prev).forEach(([col, formula]) => {
         if (allowed.has(col)) {
-          next[col] = formula;
+          next[col] = formula as string;
         } else {
           changed = true;
         }
@@ -358,7 +360,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const saveSuccessTimeout = useRef<NodeJS.Timeout | null>(null);
+  const saveSuccessTimeout = useRef<number | null>(null);
   const [savedFiles, setSavedFiles] = useState<any[]>([]);
 
   // Add local state for editing value
@@ -374,11 +376,12 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [operationLoading, setOperationLoading] = useState(false);
 
 
-  // Helper to convert current table to CSV
+  // Helper to convert current table to CSV (includes filtered and deleted state)
   const toCSV = () => {
     if (!data) return '';
     const headers = data.headers;
-    const rows = data.rows;
+    // Use processed data that excludes permanently deleted rows
+    const rows = data.rows.filter((_, index) => !permanentlyDeletedRows.has(index));
     const csvRows = [headers.join(',')];
     for (const row of rows) {
       csvRows.push(headers.map(h => JSON.stringify(row[h] ?? '')).join(','));
@@ -423,10 +426,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       const baseName = data.fileName ? data.fileName.replace(/\.[^/.]+$/, '') : `dataframe_${Date.now()}`;
       const filename = `DF_OPS_${nextSerial}_${baseName}.arrow`;
 
+      // Always use CSV data to ensure processed state is saved
       const payload: Record<string, unknown> = { csv_data, filename };
-      if (fileId) {
-        payload.df_id = fileId;
-      }
+      // Don't include df_id to force backend to use the CSV data instead of original DataFrame
       const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -440,12 +442,25 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       if (saveSuccessTimeout.current) clearTimeout(saveSuccessTimeout.current);
       saveSuccessTimeout.current = setTimeout(() => setSaveSuccess(false), 2000);
       fetchSavedDataFrames(); // Refresh the saved dataframes list in the UI
+      // Update the data to reflect the current state (without deleted rows)
+      const currentData = {
+        ...data,
+        rows: data.rows.filter((_, index) => !permanentlyDeletedRows.has(index)),
+        fileName: filename
+      };
+      
+      // Update settings with new file info
       onSettingsChange({
-        tableData: { ...data, fileName: filename },
         columnWidths: settings.columnWidths,
         rowHeights: settings.rowHeights,
         fileId: (result?.df_id as string | undefined) ?? fileId ?? settings.fileId ?? null,
       });
+      
+      // Update the actual data with the processed state
+      onDataChange(currentData);
+      
+      // Clear the permanently deleted rows since they're now saved
+      setPermanentlyDeletedRows(new Set());
       toast({
         title: 'DataFrame Saved',
         description: result?.message ?? `${filename} saved successfully.`,
@@ -653,7 +668,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       return { filteredRows: [], totalRows: 0, uniqueValues: {} };
     }
 
-    let filteredRows = [...data.rows];
+    // First, exclude permanently deleted rows
+    let filteredRows = data.rows.filter((_, index) => !permanentlyDeletedRows.has(index));
 
     // Apply search filter locally
     if (settings?.searchTerm?.trim()) {
@@ -677,11 +693,40 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         .map(item => item.row);
     }
 
+    // Apply column filters locally to preserve all columns
+    const appliedFilters = settings.filters || {};
+    for (const [column, filterValue] of Object.entries(appliedFilters)) {
+      if (!filterValue || (Array.isArray(filterValue) && filterValue.length === 0)) {
+        continue;
+      }
+
+      filteredRows = filteredRows.filter(row => {
+        const cellValue = row[column];
+        
+        if (Array.isArray(filterValue)) {
+          if (typeof filterValue[0] === 'number') {
+            // Range filter for numbers
+            const num = Number(cellValue);
+            return num >= filterValue[0] && num <= filterValue[1];
+          } else {
+            // Multi-select filter for strings
+            return filterValue.includes(safeToString(cellValue));
+          }
+        } else if (filterValue && typeof filterValue === 'object' && 'min' in filterValue && 'max' in filterValue) {
+          // Range filter object
+          const num = Number(cellValue);
+          return num >= filterValue.min && num <= filterValue.max;
+        } else {
+          // Single value filter
+          return safeToString(cellValue) === safeToString(filterValue);
+        }
+      });
+    }
+
     // Unique values for filter UI (support hierarchical filtering and duplicated columns)
     const uniqueValues: { [key: string]: string[] } = {};
-    const appliedFilters = settings.filters || {};
     const originalHeaders = new Set(originalData?.headers || []);
-    const currentRows = data.rows || [];
+    const currentRows = data.rows.filter((_, index) => !permanentlyDeletedRows.has(index));
 
     data.headers.forEach(header => {
       const sourceCol = duplicateMap[header] || header;
@@ -695,7 +740,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
       let rowsForHeader = needsCurrentRows
         ? [...currentRows]
-        : [...(originalData?.rows || currentRows)];
+        : [...(originalData?.rows.filter((_, index) => !permanentlyDeletedRows.has(index)) || currentRows)];
 
       filtersToApply.forEach(([col, val]) => {
         const filterCol = duplicateMap[col] || col;
@@ -706,19 +751,21 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
           }
           if (val && typeof val === 'object' && 'min' in val && 'max' in val) {
             const num = Number(cell);
-            return num >= val.min && num <= val.max;
+            const minVal = Number(val.min);
+            const maxVal = Number(val.max);
+            return num >= minVal && num <= maxVal;
           }
           return safeToString(cell) === safeToString(val);
         });
       });
 
       let values = Array.from(new Set(rowsForHeader.map(row => safeToString(row[sourceCol]))))
-        .filter(v => v !== '')
+        .filter((v): v is string => v !== '')
         .sort();
 
       if (values.length === 0 && !needsCurrentRows) {
         values = Array.from(new Set(currentRows.map(row => safeToString(row[sourceCol]))))
-          .filter(v => v !== '')
+          .filter((v): v is string => v !== '')
           .sort();
       }
 
@@ -726,7 +773,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     });
 
     return { filteredRows, totalRows: filteredRows.length, uniqueValues };
-  }, [data, originalData, settings.searchTerm, settings.filters, duplicateMap]);
+  }, [data, originalData, settings.searchTerm, settings.filters, duplicateMap, permanentlyDeletedRows]);
 
   // Pagination
   const totalPages = Math.ceil(processedData.totalRows / (settings.rowsPerPage || 15));
@@ -756,6 +803,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         cellColors: {}
       };
       setUploadError(null);
+      setPermanentlyDeletedRows(new Set()); // Clear deleted rows for new data
       onDataUpload(newData, resp.df_id);
       setCurrentPage(1);
     } catch {/* empty */
@@ -769,9 +817,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0 && fileInputRef.current) {
       const dt = new DataTransfer();
-      files.forEach(file => dt.items.add(file));
+      files.forEach(file => dt.items.add(file as File));
       fileInputRef.current.files = dt.files;
-      handleFileUpload({ target: { files: dt.files } } as any);
+      handleFileUpload({ target: { files: dt.files } } as React.ChangeEvent<HTMLInputElement>);
     }
   }, [handleFileUpload]);
 
@@ -818,48 +866,14 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       return;
     }
 
+    // Use local filtering to preserve all columns and deletions
     const updatedFilters = {
       ...(settings.filters || {}),
       [column]: selectedValues,
     } as Record<string, any>;
 
-    const rebuilt = await rebuildDataWithFilters(updatedFilters);
-    if (rebuilt) {
-      return;
-    }
-
-    if (!fileId) {
-      onSettingsChange({ filters: { ...updatedFilters } });
-      setCurrentPage(1);
-      return;
-    }
-
-    setOperationLoading(true);
-    let value: any = selectedValues;
-    if (Array.isArray(selectedValues) && typeof selectedValues[0] === 'number') {
-      value = { min: selectedValues[0], max: selectedValues[1] };
-    }
-
-    try {
-      console.log('[DataFrameOperations] filter', column, value);
-      const resp = await apiFilter(fileId, column, value);
-      const columnTypes: Record<string, 'text' | 'number' | 'date'> = normalizeBackendColumnTypes(resp.types, resp.headers);
-      onDataChange({
-        headers: resp.headers,
-        rows: resp.rows,
-        fileName: data.fileName,
-        columnTypes,
-        pinnedColumns: data.pinnedColumns,
-        frozenColumns: data.frozenColumns,
-        cellColors: data.cellColors,
-      });
-      onSettingsChange({ filters: { ...updatedFilters }, fileId: resp.df_id });
-      setCurrentPage(1);
-    } catch (err) {
-      handleApiError('Filter failed', err);
-    } finally {
-      setOperationLoading(false);
-    }
+    onSettingsChange({ filters: { ...updatedFilters } });
+    setCurrentPage(1);
   };
 
 // Helper to commit a cell edit after user finishes editing
@@ -1065,10 +1079,8 @@ const handleClearFilter = async (col: string) => {
   const newFilters = { ...existingFilters } as Record<string, any>;
   delete newFilters[col];
 
-  const rebuilt = await rebuildDataWithFilters(newFilters);
-  if (!rebuilt) {
-    onSettingsChange({ filters: { ...newFilters } });
-  }
+  // Use local filtering to preserve all columns and deletions
+  onSettingsChange({ filters: { ...newFilters } });
 
   setFilterRange(null);
   setCurrentPage(1);
@@ -1275,7 +1287,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   };
 
   const handleDeleteRow = async (rowIdx: number) => {
-    if (!data || !fileId) return;
+    if (!data) return;
     
     // Check if there are multiple selected rows
     if (multiSelectedRows.size > 1) {
@@ -1286,28 +1298,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         rowsToDelete,
       });
     } else {
-      // Delete single row (original behavior)
-      try {
-        const resp = await apiDeleteRow(fileId, rowIdx);
-        const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
-        onDataChange({
-          headers: resp.headers,
-          rows: resp.rows,
-          fileName: data.fileName,
-          columnTypes,
-          pinnedColumns: data.pinnedColumns,
-          frozenColumns: data.frozenColumns,
-          cellColors: data.cellColors,
-        });
-        // Clear selection if this row was selected
-        setMultiSelectedRows(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(rowIdx);
-          return newSet;
-        });
-      } catch (err) {
-        handleApiError('Delete row failed', err);
-      }
+      // Mark row as permanently deleted (local only)
+      setPermanentlyDeletedRows(prev => new Set([...prev, rowIdx]));
+      
+      // Clear selection if this row was selected
+      setMultiSelectedRows(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(rowIdx);
+        return newSet;
+      });
     }
   };
 
@@ -1344,36 +1343,45 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   };
 
   const handleRowMultiSelect = (rowIndex: number, event: React.MouseEvent) => {
-    const globalRowIndex = startIndex + rowIndex;
+    // Calculate the original row index in the unfiltered data
+    const originalRowIndex = data?.rows.findIndex((_, idx) => {
+      if (permanentlyDeletedRows.has(idx)) return false;
+      const filteredIndex = data.rows.slice(0, idx).filter((_, i) => !permanentlyDeletedRows.has(i)).length;
+      return filteredIndex === startIndex + rowIndex;
+    }) ?? -1;
+    
+    if (originalRowIndex === -1) return;
     
     if (event.ctrlKey || event.metaKey) {
       // Multi-select mode
       setMultiSelectedRows(prev => {
         const newSet = new Set(prev);
-        if (newSet.has(globalRowIndex)) {
-          newSet.delete(globalRowIndex);
+        if (newSet.has(originalRowIndex)) {
+          newSet.delete(originalRowIndex);
         } else {
-          newSet.add(globalRowIndex);
+          newSet.add(originalRowIndex);
         }
         return newSet;
       });
     } else if (event.shiftKey && multiSelectedRows.size > 0) {
       // Range select mode
       const selectedRows = Array.from(multiSelectedRows).sort((a, b) => a - b);
-      const lastSelected = selectedRows[selectedRows.length - 1];
-      const start = Math.min(lastSelected, globalRowIndex);
-      const end = Math.max(lastSelected, globalRowIndex);
+      const lastSelected = selectedRows[selectedRows.length - 1] ?? 0;
+      const start = Math.min(lastSelected, originalRowIndex);
+      const end = Math.max(lastSelected, originalRowIndex);
       
       setMultiSelectedRows(prev => {
         const newSet = new Set(prev);
         for (let i = start; i <= end; i++) {
-          newSet.add(i);
+          if (!permanentlyDeletedRows.has(i)) {
+            newSet.add(i);
+          }
         }
         return newSet;
       });
     } else {
       // Single select mode
-      setMultiSelectedRows(new Set([globalRowIndex]));
+      setMultiSelectedRows(new Set([originalRowIndex]));
     }
   };
 
@@ -1426,26 +1434,18 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   };
 
   const handleConfirmRowDelete = async () => {
-    if (!data || !fileId || rowDeleteConfirmModal.rowsToDelete.length === 0) return;
+    if (!data || rowDeleteConfirmModal.rowsToDelete.length === 0) return;
     
     try {
-      // Use bulk delete API for better performance
-      const resp = await apiDeleteRowsBulk(fileId, rowDeleteConfirmModal.rowsToDelete);
-      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+      // Mark rows as permanently deleted (local only)
+      setPermanentlyDeletedRows(prev => {
+        const newSet = new Set(prev);
+        rowDeleteConfirmModal.rowsToDelete.forEach(rowIdx => newSet.add(rowIdx));
+        return newSet;
+      });
       
       // Clear selection after deletion
       setMultiSelectedRows(new Set());
-      
-      // Update data with the response from backend
-      onDataChange({
-        headers: resp.headers,
-        rows: resp.rows,
-        fileName: data.fileName,
-        columnTypes,
-        pinnedColumns: data.pinnedColumns,
-        frozenColumns: data.frozenColumns,
-        cellColors: data.cellColors,
-      });
       
       toast({
         title: "Success",
@@ -1474,11 +1474,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         if (e.key === 'a' && data?.headers) {
           e.preventDefault();
           setMultiSelectedColumns(new Set(data.headers));
-          // Also select all rows
-          if (data?.rows) {
-            const allRowIndices = data.rows.map((_, index) => index);
-            setMultiSelectedRows(new Set(allRowIndices));
-          }
+          // Select all filtered rows (not just visible ones)
+          const filteredIndices = processedData.filteredRows.map(filteredRow => {
+            return data.rows.findIndex((row, origIndex) => {
+              if (permanentlyDeletedRows.has(origIndex)) return false;
+              return row === filteredRow;
+            });
+          }).filter(index => index !== -1);
+          
+          setMultiSelectedRows(new Set(filteredIndices));
         }
       }
       if (e.key === 'Escape') {
@@ -1489,7 +1493,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [data?.headers, data?.rows]);
+  }, [data?.headers, data?.rows, permanentlyDeletedRows, processedData.filteredRows]);
 
   return (
     <>
@@ -1535,6 +1539,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   size="sm"
                   onClick={() => {
                     setFormulaValidationError(null);
+                    setPermanentlyDeletedRows(new Set());
                     onClearAll();
                   }}
                 >
@@ -1605,9 +1610,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       key={header + '-' + colIdx}
                       data-col={header}
                       className={`table-header-cell text-center bg-white border-r border-gray-200 relative ${
-                        selectedColumn === header ? 'border-2 border-black' : ''
+                        selectedColumn === header ? 'border-2 border-blue-500 bg-blue-100' : ''
                       } ${
-                        multiSelectedColumns.has(header) ? 'bg-blue-100 border-blue-300' : ''
+                        multiSelectedColumns.has(header) ? 'bg-blue-100 border-blue-500' : ''
                       }`}
                       style={settings.columnWidths?.[header] ? { width: settings.columnWidths[header], minWidth: settings.columnWidths[header] } : undefined}
                       draggable
@@ -1681,20 +1686,26 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               </TableHeader>
               <TableBody>
                 {paginatedRows.map((row, rowIndex) => {
-                  const globalRowIndex = startIndex + rowIndex;
-                  const isRowSelected = multiSelectedRows.has(globalRowIndex);
+                  // Calculate the original row index in the unfiltered data
+                  const globalFilteredIndex = startIndex + rowIndex;
+                  const originalRowIndex = data?.rows.findIndex((originalRow, idx) => {
+                    if (permanentlyDeletedRows.has(idx)) return false;
+                    // Check if this original row matches the current paginated row
+                    return originalRow === row;
+                  }) ?? -1;
+                  const isRowSelected = originalRowIndex !== -1 && multiSelectedRows.has(originalRowIndex);
                   
                   return (
                     <TableRow
                       key={rowIndex}
-                      className={`table-row relative ${isRowSelected ? 'bg-blue-50 border-blue-300' : ''}`}
-                      ref={el => { if (rowRefs.current) rowRefs.current[globalRowIndex] = el; }}
-                      style={{ height: settings.rowHeights?.[globalRowIndex] }}
+                      className={`table-row relative ${isRowSelected ? 'bg-blue-100 border-blue-500' : ''}`}
+                      ref={el => { if (rowRefs.current && originalRowIndex !== -1) rowRefs.current[originalRowIndex] = el; }}
+                      style={{ height: originalRowIndex !== -1 ? settings.rowHeights?.[originalRowIndex] : undefined }}
                       onClick={(e) => handleRowMultiSelect(rowIndex, e)}
                     >
                       {settings.showRowNumbers && (
                         <TableCell
-                          className={`table-cell w-16 text-center text-xs font-medium ${isRowSelected ? 'bg-blue-100' : ''}`}
+                          className={`table-cell w-16 text-center text-xs font-medium ${isRowSelected ? 'bg-blue-200' : ''}`}
                           onContextMenu={e => {
                             e.preventDefault();
                             const { clientX, clientY } = e;
@@ -1703,12 +1714,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                               pointerY: clientY,
                               x: clientX,
                               y: clientY,
-                              rowIdx: globalRowIndex
+                              rowIdx: originalRowIndex
                             });
                             setContextMenu(null);
                           }}
                         >
-                          {globalRowIndex + 1}
+                          {originalRowIndex !== -1 ? originalRowIndex + 1 : globalFilteredIndex + 1}
                         </TableCell>
                       )}
                     {(data.headers || []).map((column, colIdx) => {
@@ -1718,7 +1729,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           <TableCell
                             key={colIdx}
                             data-col={column}
-                            className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-400' : selectedColumn === column ? 'border border-black' : ''}`}
+                            className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-500 bg-blue-50' : selectedColumn === column ? 'border border-blue-500 bg-blue-50' : ''} ${isRowSelected ? 'bg-blue-100' : ''}`}
                             style={settings.columnWidths?.[column] ? { width: settings.columnWidths[column], minWidth: settings.columnWidths[column] } : undefined}
                             onClick={() => handleCellClick(rowIndex, column)}
                             onDoubleClick={() => {
@@ -1760,7 +1771,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       </TableCell>
                       <div
                         className="absolute bottom-0 left-0 w-full h-1 cursor-row-resize"
-                        onMouseDown={e => startRowResize(globalRowIndex, e)}
+                        onMouseDown={e => originalRowIndex !== -1 && startRowResize(originalRowIndex, e)}
                       />
                     </TableRow>
                   );

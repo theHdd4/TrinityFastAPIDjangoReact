@@ -70,6 +70,13 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
       setOriginalData(JSON.parse(JSON.stringify(data)));
     }
   }, [data, originalData]);
+  
+  // Update originalData when data changes (e.g., after save with deletions)
+  useEffect(() => {
+    if (data && originalData && data.rows.length !== originalData.rows.length) {
+      setOriginalData(JSON.parse(JSON.stringify(data)));
+    }
+  }, [data, originalData]);
   const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
   const [chartConfig, setChartConfig] = useState<any>(null);
 
