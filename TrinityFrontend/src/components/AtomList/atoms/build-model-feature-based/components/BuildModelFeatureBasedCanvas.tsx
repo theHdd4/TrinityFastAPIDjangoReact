@@ -193,13 +193,14 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     
     if (isMMM) {
       // Construct variable_configs from transformations for MMM
+      // Apply the same transformation to ALL X variables (use first transformation)
       const variableConfigs: { [key: string]: any } = {};
-      allXVariables.forEach((variable, index) => {
-        const transformation = finalData.transformations?.[index] || 'none';
+      const transformation = finalData.transformations?.[0] || 'none'; // Use first transformation for all variables
+      
+      allXVariables.forEach((variable) => {
         if (transformation === 'media') {
           variableConfigs[variable] = {
             type: 'media'
-            // Parameters are hardcoded in backend as requested
           };
         } else if (transformation === 'standardize') {
           variableConfigs[variable] = {
