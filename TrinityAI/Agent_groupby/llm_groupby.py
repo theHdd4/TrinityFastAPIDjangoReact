@@ -4,16 +4,11 @@ import uuid
 import logging
 import os
 from typing import Dict, Any, List, Optional
-import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
-import pyarrow.feather as pf
-from io import BytesIO
-from minio import Minio
 from langchain_core.messages import HumanMessage
 from langchain.memory import ConversationBufferWindowMemory
 
 from .ai_logic import build_prompt_group_by, call_llm_group_by, extract_json_group_by
+from file_loader import FileLoader
 
 logger = logging.getLogger("agent.group_by")
 
@@ -48,7 +43,7 @@ SUPPORTED_AGGREGATIONS = {
     "rank_pct": {"requires_weight": False, "description": "Computes the rank of a column as a percentile."}
 }
 
-ALLOWED_KEYS = {"success", "message", "groupby_json", "session_id", "suggestions"}
+ALLOWED_KEYS = {"success", "message", "groupby_json", "session_id", "suggestions", "reasoning", "used_memory", "next_steps", "error", "processing_time"}
 
 class SmartGroupByAgent:
     def __init__(self, api_url, model_name, bearer_token,
@@ -59,101 +54,40 @@ class SmartGroupByAgent:
         self.bearer_token = bearer_token
         self.bucket = bucket
         self.prefix = prefix
-        try:
-            self.minio_client = Minio(minio_endpoint, access_key=access_key, secret_key=secret_key, secure=False)
-        except Exception as e:
-            logger.critical(f"MinIO init failed: {e}")
-            self.minio_client = None
-        self.files_with_columns: Dict[str, List[str]] = {}
         self.sessions: Dict[str, Dict[str, Any]] = {}
-        self._load_files()
         self.history_window_size = history_window_size
+        
+        # Initialize FileLoader for standardized file handling
+        self.file_loader = FileLoader(
+            minio_endpoint=minio_endpoint,
+            minio_access_key=access_key,
+            minio_secret_key=secret_key,
+            minio_bucket=bucket,
+            object_prefix=prefix
+        )
+        
+        # Load files on initialization
+        self.files_with_columns = self.file_loader.load_files()
+    
+    def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
+        """
+        Set environment context for dynamic path resolution.
+        This ensures the API call will fetch the correct path for the current project.
+        """
+        if client_name or app_name or project_name:
+            if client_name:
+                os.environ["CLIENT_NAME"] = client_name
+            if app_name:
+                os.environ["APP_NAME"] = app_name
+            if project_name:
+                os.environ["PROJECT_NAME"] = project_name
+            logger.info(f"🔧 Environment context set for dynamic path resolution: {client_name}/{app_name}/{project_name}")
+        else:
+            logger.info("🔧 Using existing environment context for dynamic path resolution")
 
     def _load_files(self):
-        """Loads files from MinIO, intelligently reading various Arrow formats."""
-        logger.info(f"Loading files from MinIO bucket '{self.bucket}' with prefix '{self.prefix}'...")
-        self.files_with_columns.clear()
-        
-        if not self.minio_client:
-            return
-            
-        try:
-            objects = self.minio_client.list_objects(self.bucket, prefix=self.prefix, recursive=True)
-            
-            files_loaded = 0
-            for obj in objects:
-                # We are primarily interested in files with the .arrow extension
-                if not obj.object_name.endswith('.arrow'):
-                    continue
-
-                filename = os.path.basename(obj.object_name)
-                full_object_path = obj.object_name
-                logger.info(f"Processing file: {filename}")
-                logger.info(f"Full MinIO object path: {full_object_path}")
-                logger.info(f"Bucket: {self.bucket}, Prefix: {self.prefix}")
-
-                try:
-                    # Use the full object path, not just the filename
-                    response = self.minio_client.get_object(self.bucket, full_object_path)
-                    file_data = response.read()
-                    logger.info(f"Successfully read file from MinIO path: {full_object_path}")
-                finally:
-                    response.close()
-                    response.release_conn()
-
-                table = None
-                # --- Simplified Reading Logic ---
-                # Define a list of reading functions to try in order of likelihood.
-                # Each function takes a bytes buffer and returns a PyArrow Table.
-                readers = [
-                    ("Parquet", lambda buffer: pq.read_table(buffer)),
-                    ("Feather", lambda buffer: pf.read_table(buffer)),
-                    ("Arrow IPC", lambda buffer: pa.ipc.open_stream(buffer).read_all())
-                ]
-
-                for format_name, reader_func in readers:
-                    try:
-                        # Use a BytesIO buffer to read the in-memory file data
-                        buffer = BytesIO(file_data)
-                        table = reader_func(buffer)
-                        logger.info(f"Successfully read '{filename}' as {format_name} format.")
-                        break  # Stop on the first successful read
-                    except Exception as e:
-                        logger.debug(f"Could not read '{filename}' as {format_name}: {e}")
-
-                # --- Column Extraction ---
-                if table is not None:
-                    columns = table.column_names
-                    self.files_with_columns[filename] = columns
-                    files_loaded += 1
-                    
-                    # Enhanced column printing for better visibility
-                    logger.info(f"=== COLUMN EXTRACTION FOR '{filename}' ===")
-                    logger.info(f"Total columns: {len(columns)}")
-                    logger.info(f"Columns: {columns}")
-                    logger.info(f"Column types: {[table.schema.field(col).type for col in columns]}")
-                    logger.info(f"Row count: {table.num_rows}")
-                    logger.info(f"File size: {len(file_data)} bytes")
-                    logger.info("=" * 50)
-                    
-                    # Also print to console for immediate visibility
-                    print(f"\n📁 File: {filename}")
-                    print(f"📊 Columns ({len(columns)}): {columns}")
-                    print(f"📈 Rows: {table.num_rows}")
-                    print(f"💾 Size: {len(file_data)} bytes")
-                    print("-" * 40)
-                    
-                else:
-                    logger.warning(f"Could not read '{filename}' in any supported format.")
-                    
-            logger.info(f"Finished loading. Found and processed {files_loaded} files.")
-            print(f"\n🎯 SUMMARY: Loaded {files_loaded} files with columns:")
-            for filename, columns in self.files_with_columns.items():
-                print(f"  • {filename}: {len(columns)} columns")
-            print("=" * 50)
-            
-        except Exception as e:
-            logger.error(f"MinIO listing error: {e}")
+        """Load files using the standardized FileLoader."""
+        self.files_with_columns = self.file_loader.load_files()
 
     def _history_str(self, session_id: str) -> str:
         hist = self.sessions[session_id]["memory"].load_memory_variables({}).get("history", [])
@@ -222,7 +156,10 @@ class SmartGroupByAgent:
         filtered.setdefault("message", "")
         return filtered
 
-    def process_request(self, user_prompt: str, session_id: Optional[str] = None):
+    def process_request(self, user_prompt: str, session_id: Optional[str] = None, client_name: str = "", app_name: str = "", project_name: str = ""):
+        # Set environment context for dynamic path resolution (like explore agent)
+        self.set_context(client_name, app_name, project_name)
+        
         if not user_prompt.strip():
             return {"success": False, "message": "Empty prompt.", "session_id": session_id or str(uuid.uuid4()),
                     "suggestions": ["Please describe the aggregation you want."]}

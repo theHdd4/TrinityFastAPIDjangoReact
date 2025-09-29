@@ -369,12 +369,14 @@ CREATE_TRANSFORM_PATH = Path(__file__).resolve().parent / "Agent_create_transfor
 GROUPBY_PATH = Path(__file__).resolve().parent / "Agent_groupby"
 CHARTMAKER_PATH = Path(__file__).resolve().parent / "Agent_chartmaker"
 EXPLORE_PATH = Path(__file__).resolve().parent / "Agent_explore"
+DATAFRAME_OPERATIONS_PATH = Path(__file__).resolve().parent / "Agent_dataframe_operations"
 sys.path.append(str(MERGE_PATH))
 sys.path.append(str(CONCAT_PATH))
 sys.path.append(str(CREATE_TRANSFORM_PATH))
 sys.path.append(str(GROUPBY_PATH))
 sys.path.append(str(CHARTMAKER_PATH))
 sys.path.append(str(EXPLORE_PATH))
+sys.path.append(str(DATAFRAME_OPERATIONS_PATH))
 
 from single_llm_processor import SingleLLMProcessor
 from Agent_Merge.main_app import router as merge_router
@@ -383,6 +385,7 @@ from Agent_create_transform.main_app import router as create_transform_router
 from Agent_groupby.main_app import router as groupby_router
 from Agent_chartmaker.main_app import router as chartmaker_router
 from Agent_explore.main_app import router as explore_router
+from Agent_dataframe_operations.main_app import router as dataframe_operations_router
 from insight import router as insight_router
 
 def convert_numpy(obj):
@@ -418,6 +421,7 @@ processor = initialize_single_llm_system()
 
 class QueryRequest(BaseModel):
     query: str
+    session_id: Optional[str] = None
 
 app = FastAPI(
     title="Single LLM Atom Detection API",
@@ -464,10 +468,10 @@ async def perform_operation(request: PerformRequest):
             # Call the backend concat API
             concat_url = os.getenv(
                 "CONCAT_PERFORM_URL",
-                f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8004')}/api/concat/perform",
+                f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8001')}/api/concat/perform",
             )
             
-            resp = requests.post(concat_url, json=payload, timeout=60)
+            resp = requests.post(concat_url, json=payload, timeout=300)
             resp.raise_for_status()
             result = resp.json()
             
@@ -519,7 +523,7 @@ async def perform_operation(request: PerformRequest):
                     f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8001')}/api/create/perform",
                 )
                 
-                resp = requests.post(create_url, data=payload, timeout=60)
+                resp = requests.post(create_url, data=payload, timeout=300)
                 resp.raise_for_status()
                 result = resp.json()
                 
@@ -546,7 +550,7 @@ async def perform_operation(request: PerformRequest):
                 f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8001')}/api/groupby/run",
             )
             
-            resp = requests.post(groupby_url, data=payload, timeout=60)
+            resp = requests.post(groupby_url, data=payload, timeout=300)
             resp.raise_for_status()
             result = resp.json()
             
@@ -577,6 +581,7 @@ api_router.include_router(create_transform_router)
 api_router.include_router(groupby_router)
 api_router.include_router(chartmaker_router)
 api_router.include_router(explore_router)
+api_router.include_router(dataframe_operations_router)
 api_router.include_router(insight_router)
 
 # Enable CORS for browser-based clients
@@ -612,7 +617,7 @@ async def chat_endpoint(request: QueryRequest):
                 "error": "Processor not available"
             })
         
-        # Single LLM processing
+        # Single LLM processing - only for atom detection, no session management needed
         result = processor.process_query(request.query)
         
         logger.info(

@@ -52,6 +52,9 @@ agent = SmartConcatAgent(
 class ConcatRequest(BaseModel):
     prompt: str
     session_id: Optional[str] = None
+    client_name: str = ""
+    app_name: str = ""
+    project_name: str = ""
 
 @router.post("/concat")
 def concatenate_files(request: ConcatRequest):
@@ -64,7 +67,8 @@ def concatenate_files(request: ConcatRequest):
     
     try:
         # Process with complete memory context
-        result = agent.process_request(request.prompt, request.session_id)
+        result = agent.process_request(request.prompt, request.session_id, 
+                                     request.client_name, request.app_name, request.project_name)
 
         # Add timing
         processing_time = round(time.time() - start_time, 2)
@@ -74,6 +78,28 @@ def concatenate_files(request: ConcatRequest):
         logger.info(f"Success: {result.get('success', False)}")
         logger.info(f"Used Memory: {result.get('used_memory', False)}")
         logger.info(f"Processing Time: {processing_time}s")
+
+        # 🔧 SMART RESPONSE FALLBACK: Ensure smart_response is always present
+        if "smart_response" not in result or not result["smart_response"]:
+            if result.get("success") and result.get("concat_json"):
+                # Concat configuration success - create smart response
+                cfg = result["concat_json"]
+                file1 = cfg.get("file1", "")
+                file2 = cfg.get("file2", "")
+                concat_direction = cfg.get("concat_direction", "vertical")
+                
+                if isinstance(file1, list):
+                    file1 = file1[0] if file1 else ""
+                if isinstance(file2, list):
+                    file2 = file2[0] if file2 else ""
+                
+                result["smart_response"] = f"I've configured the concatenation operation for you. The files '{file1}' and '{file2}' will be combined using {concat_direction} direction. You can now proceed with the concatenation or make adjustments as needed."
+            else:
+                # Suggestions or error - create smart response
+                if result.get("suggestions"):
+                    result["smart_response"] = "I can help you concatenate your data files! Based on your available files, I can suggest the best file combinations and concatenation strategies. What files would you like to combine?"
+                else:
+                    result["smart_response"] = "I'm here to help you concatenate your data files. Please describe what files you'd like to combine or ask me for suggestions."
 
         if result.get("success") and result.get("concat_json"):
             cfg = result["concat_json"]

@@ -5,18 +5,16 @@ import json
 import re
 from .ai_logic import build_prompt, call_llm, extract_json
 from pathlib import Path
-from minio import Minio
-from minio.error import S3Error
-
 from datetime import datetime
 import uuid
 import os
 import logging
+from file_loader import FileLoader
 
 logger = logging.getLogger("trinity.concat")
 
 
-def _describe_endpoint(client: Minio) -> str:
+def _describe_endpoint(client) -> str:
     """Return a human readable endpoint for the given MinIO client."""
     ep = getattr(client, "_endpoint_url", None)
     if ep:
@@ -33,73 +31,57 @@ class SmartConcatAgent:
         self.api_url = api_url
         self.model_name = model_name
         self.bearer_token = bearer_token
-        
-        # MinIO connection
-        self.minio_client = Minio(minio_endpoint, access_key=access_key, secret_key=secret_key, secure=False)
         self.bucket = bucket
         self.prefix = prefix
-        logger.debug(
-            "SmartConcatAgent init minio_endpoint=%s bucket=%s prefix=%s",
-            minio_endpoint,
-            bucket,
-            prefix,
-        )
         
         # Memory system
         self.sessions = {}
-        self.available_files = []
         
-        # Load files once
-        self._load_files()
+        # Initialize FileLoader for standardized file handling
+        self.file_loader = FileLoader(
+            minio_endpoint=minio_endpoint,
+            minio_access_key=access_key,
+            minio_secret_key=secret_key,
+            minio_bucket=bucket,
+            object_prefix=prefix
+        )
+        
+        # Load files on initialization
+        self.available_files = self._load_files()
+    
+    def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
+        """
+        Set environment context for dynamic path resolution.
+        This ensures the API call will fetch the correct path for the current project.
+        """
+        if client_name or app_name or project_name:
+            if client_name:
+                os.environ["CLIENT_NAME"] = client_name
+            if app_name:
+                os.environ["APP_NAME"] = app_name
+            if project_name:
+                os.environ["PROJECT_NAME"] = project_name
+            logger.info(f"🔧 Environment context set for dynamic path resolution: {client_name}/{app_name}/{project_name}")
+        else:
+            logger.info("🔧 Using existing environment context for dynamic path resolution")
 
     def _maybe_update_prefix(self) -> None:
-        """Dynamically updates the MinIO prefix using the same system as data_upload_validate."""
+        """Dynamically updates the MinIO prefix and reloads files."""
         try:
-            # Import the dynamic path function from data_upload_validate
-            import sys
-            import os
-            sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'TrinityBackendFastAPI', 'app', 'features'))
-            
-            from data_upload_validate.app.routes import get_object_prefix
-            import asyncio
-            
-            # Get the current dynamic path (this is what data_upload_validate uses)
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                current = loop.run_until_complete(get_object_prefix())
-            finally:
-                loop.close()
-            
-            if os.getenv("MINIO_PREFIX") != current:
-                os.environ["MINIO_PREFIX"] = current
-
-            if current != self.prefix:
-                logger.info("minio prefix updated from %s to %s", self.prefix, current)
-                self.prefix = current
-                
+            # Use FileLoader's prefix update method
+            self.file_loader._maybe_update_prefix()
+            if self.file_loader.object_prefix != self.prefix:
+                logger.info("MinIO prefix updated from '%s' to '%s'", self.prefix, self.file_loader.object_prefix)
+                self.prefix = self.file_loader.object_prefix
+                # Reload files with new prefix
+                self.available_files = self._load_files()
         except Exception as e:
-            logger.warning(f"Failed to get dynamic path, using fallback: {e}")
-            # Fallback to environment variables
-            client = os.getenv("CLIENT_NAME", "").strip()
-            app = os.getenv("APP_NAME", "").strip()
-            project = os.getenv("PROJECT_NAME", "").strip()
-
-            current = f"{client}/{app}/{project}/" if any([client, app, project]) else ""
-            current = current.lstrip("/")
-            if current and not current.endswith("/"):
-                current += "/"
-
-            if os.getenv("MINIO_PREFIX") != current:
-                os.environ["MINIO_PREFIX"] = current
-
-            if current != self.prefix:
-                logger.info("minio prefix updated from %s to %s", self.prefix, current)
-                self.prefix = current
+            logger.warning(f"Failed to update prefix: {e}")
     
     def _load_files(self):
-        """Load available Arrow files from registry or MinIO."""
+        """Load available files using the standardized FileLoader."""
         try:
+            # First try to load from registry (legacy support)
             from DataStorageRetrieval.flight_registry import (
                 ARROW_TO_ORIGINAL,
                 REGISTRY_PATH,
@@ -111,38 +93,25 @@ class SmartConcatAgent:
                     data = json.load(f)
                     arrow_objects = list(data.get("arrow_to_original", {}).keys())
             if arrow_objects:
-                self.available_files = [Path(a).name for a in arrow_objects]
-                logger.info(
-                    "loaded %d arrow files from registry",
-                    len(self.available_files),
-                )
-                return
+                available_files = [Path(a).name for a in arrow_objects]
+                logger.info("loaded %d arrow files from registry", len(available_files))
+                return available_files
         except Exception as e:
             logger.warning("failed to read arrow registry: %s", e)
 
-        try:
-            self._maybe_update_prefix()
-            prefix = self.prefix.lstrip("/")
-            endpoint = _describe_endpoint(self.minio_client)
-            logger.debug(
-                "listing objects from %s bucket=%s prefix=%s",
-                endpoint,
-                self.bucket,
-                prefix,
-            )
-            objects = self.minio_client.list_objects(
-                self.bucket, prefix=prefix, recursive=True
-            )
-            self.available_files = [
-                obj.object_name.split("/")[-1]
-                for obj in objects
-                if obj.object_name.endswith(".arrow")
-            ]
-            logger.info("loaded %d arrow files from MinIO under prefix %s", len(self.available_files), self.prefix)
-        except Exception as e:
-            logger.warning("MinIO connection failed, using empty file list: %s", e)
-            self.available_files = []
-            # Don't fail the entire agent initialization
+        # Fallback to FileLoader for MinIO files
+        files_with_columns = self.file_loader.load_files()
+        available_files = []
+        
+        for file_path, file_data in files_with_columns.items():
+            if isinstance(file_data, dict):
+                file_name = file_data.get('file_name', os.path.basename(file_path))
+            else:
+                file_name = os.path.basename(file_path)
+            available_files.append(file_name)
+        
+        logger.info("loaded %d files from MinIO under prefix %s", len(available_files), self.prefix)
+        return available_files
     
     def create_session(self, session_id=None):
         """Create new session"""
@@ -168,8 +137,11 @@ class SmartConcatAgent:
             self.create_session(session_id)
         return self.sessions[session_id]
     
-    def process_request(self, user_prompt, session_id=None):
+    def process_request(self, user_prompt, session_id=None, client_name="", app_name="", project_name=""):
         """Main processing method - everything handled by LLM with complete history"""
+        
+        # Set environment context for dynamic path resolution (like explore agent)
+        self.set_context(client_name, app_name, project_name)
         
         if session_id is None:
             session_id = self.create_session()

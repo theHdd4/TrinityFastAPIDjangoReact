@@ -156,6 +156,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   });
   const [multiSelectedColumns, setMultiSelectedColumns] = useState<Set<string>>(new Set());
   const [multiSelectedRows, setMultiSelectedRows] = useState<Set<number>>(new Set());
+  const [selectAllRows, setSelectAllRows] = useState(false);
   const [insertMenuOpen, setInsertMenuOpen] = useState(false);
   const [deleteMenuOpen, setDeleteMenuOpen] = useState(false);
   // Track permanently deleted rows across filter changes
@@ -371,6 +372,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // Add local state for raw min/max input in the component
   const [filterMinInput, setFilterMinInput] = useState<string | number>('');
   const [filterMaxInput, setFilterMaxInput] = useState<string | number>('');
+
+  // State for tracking filter selections before applying
+  const [filterSelections, setFilterSelections] = useState<Record<string, string[]>>({});
 
   // Loading indicator for server-side operations
   const [operationLoading, setOperationLoading] = useState(false);
@@ -588,6 +592,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     }
   }, [settings.filters]);
 
+
   // 2. Add effect to close dropdowns on outside click or right-click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -596,9 +601,11 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       if (cm?.contains(e.target as Node) || rcm?.contains(e.target as Node)) {
         return;
       }
-      setOpenDropdown(null);
-      setContextMenu(null);
-      setRowContextMenu(null);
+       setOpenDropdown(null);
+       setContextMenu(null);
+       setRowContextMenu(null);
+       // Clear filter selections when closing context menu
+       setFilterSelections({});
     };
     const handleContextMenu = (e: MouseEvent) => {
       const cm = document.getElementById('df-ops-context-menu');
@@ -715,7 +722,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         } else if (filterValue && typeof filterValue === 'object' && 'min' in filterValue && 'max' in filterValue) {
           // Range filter object
           const num = Number(cellValue);
-          return num >= filterValue.min && num <= filterValue.max;
+          const minVal = Number((filterValue as any).min);
+          const maxVal = Number((filterValue as any).max);
+          return num >= minVal && num <= maxVal;
         } else {
           // Single value filter
           return safeToString(cellValue) === safeToString(filterValue);
@@ -786,6 +795,32 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   }, [totalPages]);
   const startIndex = (currentPage - 1) * (settings.rowsPerPage || 15);
   const paginatedRows = processedData.filteredRows.slice(startIndex, startIndex + (settings.rowsPerPage || 15));
+
+  // Effect: update select all checkbox state based on individual row selections
+  useEffect(() => {
+    if (!data || processedData.filteredRows.length === 0) {
+      setSelectAllRows(false);
+      return;
+    }
+
+    const visibleRowIndices = processedData.filteredRows.map((_, rowIndex) => {
+      const originalRowIndex = data.rows.findIndex((originalRow, idx) => {
+        if (permanentlyDeletedRows.has(idx)) return false;
+        return originalRow === processedData.filteredRows[rowIndex];
+      });
+      return originalRowIndex;
+    }).filter(index => index !== -1);
+
+    const allVisibleSelected = visibleRowIndices.every(index => multiSelectedRows.has(index));
+    const someVisibleSelected = visibleRowIndices.some(index => multiSelectedRows.has(index));
+    
+    if (allVisibleSelected && visibleRowIndices.length > 0) {
+      setSelectAllRows(true);
+    } else if (!someVisibleSelected) {
+      setSelectAllRows(false);
+    }
+    // For partial selection, we don't change the selectAllRows state to maintain the indeterminate state
+  }, [multiSelectedRows, processedData.filteredRows, data, permanentlyDeletedRows]);
 
   const handleFileUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1365,10 +1400,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       });
     } else if (event.shiftKey && multiSelectedRows.size > 0) {
       // Range select mode
-      const selectedRows = Array.from(multiSelectedRows).sort((a, b) => a - b);
-      const lastSelected = selectedRows[selectedRows.length - 1] ?? 0;
-      const start = Math.min(lastSelected, originalRowIndex);
-      const end = Math.max(lastSelected, originalRowIndex);
+      const selectedRows = Array.from(multiSelectedRows).sort((a, b) => (a as number) - (b as number));
+      const lastSelected = selectedRows[selectedRows.length - 1];
+      if (lastSelected === undefined) return;
+      const start = Math.min(lastSelected as number, originalRowIndex);
+      const end = Math.max(lastSelected as number, originalRowIndex);
       
       setMultiSelectedRows(prev => {
         const newSet = new Set(prev);
@@ -1382,6 +1418,77 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     } else {
       // Single select mode
       setMultiSelectedRows(new Set([originalRowIndex]));
+    }
+  };
+
+  const handleRowCheckboxChange = (rowIndex: number, checked: boolean) => {
+    // Calculate the original row index in the unfiltered data
+    const originalRowIndex = data?.rows.findIndex((_, idx) => {
+      if (permanentlyDeletedRows.has(idx)) return false;
+      const filteredIndex = data.rows.slice(0, idx).filter((_, i) => !permanentlyDeletedRows.has(i)).length;
+      return filteredIndex === startIndex + rowIndex;
+    }) ?? -1;
+    
+    if (originalRowIndex === -1) return;
+    
+    setMultiSelectedRows(prev => {
+      const newSet = new Set(prev);
+      if (checked) {
+        newSet.add(originalRowIndex);
+      } else {
+        newSet.delete(originalRowIndex);
+      }
+      return newSet;
+    });
+  };
+
+  const handleCheckboxClick = (rowIndex: number, event: React.MouseEvent) => {
+    // Calculate the original row index in the unfiltered data
+    const originalRowIndex = data?.rows.findIndex((_, idx) => {
+      if (permanentlyDeletedRows.has(idx)) return false;
+      const filteredIndex = data.rows.slice(0, idx).filter((_, i) => !permanentlyDeletedRows.has(i)).length;
+      return filteredIndex === startIndex + rowIndex;
+    }) ?? -1;
+    
+    if (originalRowIndex === -1) return;
+    
+    // Prevent the row click event from firing when clicking checkbox
+    event.stopPropagation();
+    
+    const isCurrentlySelected = multiSelectedRows.has(originalRowIndex);
+    const newCheckedState = !isCurrentlySelected;
+    
+    setMultiSelectedRows(prev => {
+      const newSet = new Set(prev);
+      
+      // Default behavior: multi-select mode (like filter checkboxes)
+      // Toggle this row without clearing others
+      if (newCheckedState) {
+        newSet.add(originalRowIndex);
+      } else {
+        newSet.delete(originalRowIndex);
+      }
+      
+      return newSet;
+    });
+  };
+
+  const handleSelectAllRows = (checked: boolean) => {
+    setSelectAllRows(checked);
+    if (checked) {
+      // Select all visible rows
+      const allVisibleRowIndices = processedData.filteredRows.map((_, rowIndex) => {
+        const originalRowIndex = data?.rows.findIndex((originalRow, idx) => {
+          if (permanentlyDeletedRows.has(idx)) return false;
+          return originalRow === processedData.filteredRows[rowIndex];
+        }) ?? -1;
+        return originalRowIndex;
+      }).filter(index => index !== -1);
+      
+      setMultiSelectedRows(new Set(allVisibleRowIndices));
+    } else {
+      // Deselect all rows
+      setMultiSelectedRows(new Set());
     }
   };
 
@@ -1483,11 +1590,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           }).filter(index => index !== -1);
           
           setMultiSelectedRows(new Set(filteredIndices));
+          setSelectAllRows(true);
         }
       }
       if (e.key === 'Escape') {
         setMultiSelectedColumns(new Set());
         setMultiSelectedRows(new Set());
+        setSelectAllRows(false);
       }
     };
 
@@ -1603,17 +1712,28 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               <TableHeader className="table-header">
                 <TableRow className="table-header-row">
                   {settings.showRowNumbers && (
-                    <TableHead className="table-header-cell w-16 text-center">#</TableHead>
+                    <TableHead className="table-header-cell w-16 text-center">
+                      <div className="flex items-center justify-center">
+                        <Checkbox
+                          checked={selectAllRows}
+                          onCheckedChange={handleSelectAllRows}
+                          className="mr-2"
+                        />
+                        #
+                      </div>
+                    </TableHead>
                   )}
                   {Array.isArray(data?.headers) && data.headers.map((header, colIdx) => (
                     <TableHead
                       key={header + '-' + colIdx}
                       data-col={header}
-                      className={`table-header-cell text-center bg-white border-r border-gray-200 relative ${
-                        selectedColumn === header ? 'border-2 border-blue-500 bg-blue-100' : ''
-                      } ${
-                        multiSelectedColumns.has(header) ? 'bg-blue-100 border-blue-500' : ''
-                      }`}
+                       className={`table-header-cell text-center bg-white border-r border-gray-200 relative ${
+                         selectedColumn === header ? 'border-2 border-blue-500 bg-blue-100' : ''
+                       } ${
+                         multiSelectedColumns.has(header) ? 'bg-blue-100 border-blue-500' : ''
+                       } ${
+                         filters[header] ? 'bg-yellow-50' : ''
+                       }`}
                       style={settings.columnWidths?.[header] ? { width: settings.columnWidths[header], minWidth: settings.columnWidths[header] } : undefined}
                       draggable
                       onDragStart={() => handleDragStart(header)}
@@ -1662,18 +1782,23 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           onBlur={e => commitHeaderEdit(colIdx, (e.target as HTMLInputElement).value)}
                         />
                       ) : (
-                        <div
-                          className="flex items-center justify-center cursor-pointer w-full h-full"
-                          onDoubleClick={() => {
-                            // Always allow header editing regardless of enableEditing setting
-                            setEditingHeader(colIdx);
-                            setEditingHeaderValue(header);
-                          }}
-                          title="Click to select • Ctrl+Click for multi-select • Double-click to edit • Delete key to delete selected"
-                          style={{ width: '100%', height: '100%' }}
-                        >
-                          {headerDisplayNames[header] ?? header}
-                        </div>
+                         <div
+                           className="flex items-center justify-center cursor-pointer w-full h-full"
+                           onDoubleClick={() => {
+                             // Always allow header editing regardless of enableEditing setting
+                             setEditingHeader(colIdx);
+                             setEditingHeaderValue(header);
+                           }}
+                           title="Click to select • Ctrl+Click for multi-select • Double-click to edit • Delete key to delete selected"
+                           style={{ width: '100%', height: '100%' }}
+                         >
+                           <span className="flex items-center gap-1">
+                             {headerDisplayNames[header] ?? header}
+                             {filters[header] && (
+                               <Filter className="w-3 h-3 text-blue-600" />
+                             )}
+                           </span>
+                         </div>
                       )}
                       <div
                         className="absolute top-0 right-0 h-full w-1 cursor-col-resize"
@@ -1719,7 +1844,16 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                             setContextMenu(null);
                           }}
                         >
-                          {originalRowIndex !== -1 ? originalRowIndex + 1 : globalFilteredIndex + 1}
+                           <div className="flex items-center justify-center">
+                             <Checkbox
+                               checked={isRowSelected}
+                               onCheckedChange={(checked) => handleRowCheckboxChange(rowIndex, checked as boolean)}
+                               onClick={(event) => handleCheckboxClick(rowIndex, event)}
+                               className="mr-2"
+                               title="Click to toggle selection (multi-select enabled)"
+                             />
+                             <span>{originalRowIndex !== -1 ? originalRowIndex + 1 : globalFilteredIndex + 1}</span>
+                           </div>
                         </TableCell>
                       )}
                     {(data.headers || []).map((column, colIdx) => {
@@ -1857,9 +1991,19 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
           {/* Filter */}
           <div className="relative group">
-            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.stopPropagation(); setOpenDropdown(openDropdown === 'filter' ? null : 'filter'); }}>
-              Filter <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
-            </button>
+             <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { 
+               e.stopPropagation(); 
+               // Initialize filter selections with current filter state
+               if (openDropdown !== 'filter') {
+                 setFilterSelections(prev => ({
+                   ...prev,
+                   [contextMenu.col]: Array.isArray(filters[contextMenu.col]) ? filters[contextMenu.col] : []
+                 }));
+               }
+               setOpenDropdown(openDropdown === 'filter' ? null : 'filter'); 
+             }}>
+               Filter <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
+             </button>
             {openDropdown === 'filter' && (
               <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md min-w-[180px] z-50 p-2">
                 {/* Filter UI (same as before) */}
@@ -1989,40 +2133,95 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       </div>
                     );
                   })()
-                ) : (
-                  <div className="max-h-48 overflow-y-auto space-y-1">
-                    {processedData.uniqueValues[contextMenu.col]?.map((value) => (
-                      <label key={value} className="flex items-center space-x-2 text-xs cursor-pointer" style={{userSelect:'none'}} onMouseDown={e => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={Array.isArray(filters[contextMenu.col]) && filters[contextMenu.col].includes(value)}
-                          onMouseDown={e => e.stopPropagation()}
-                          onChange={e => {
-                            const currentFilters = Array.isArray(filters[contextMenu.col]) ? filters[contextMenu.col] : [];
-                            const newFilters = e.target.checked
-                              ? [...currentFilters, value]
-                              : currentFilters.filter(v => v !== value);
-                            handleColumnFilter(contextMenu.col, newFilters);
-                          }}
-                          style={{ accentColor: '#222' }}
-                        />
-                        <span className="truncate">{value}</span>
-                      </label>
-                    ))}
-                    <div className="mt-2">
-                      <button
-                        className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white"
-                        onClick={e => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleClearFilter(contextMenu.col);
-                          setContextMenu(null);
-                          setOpenDropdown(null);
-                        }}
-                      >Clear Filter</button>
-                    </div>
-                  </div>
-                )}
+                 ) : (
+                   <div className="max-h-48 overflow-y-auto space-y-1">
+                     {/* Select All / Deselect All */}
+                     <div className="border-b border-gray-200 pb-2 mb-2">
+                       <label className="flex items-center space-x-2 text-xs cursor-pointer font-medium" style={{userSelect:'none'}} onMouseDown={e => e.stopPropagation()}>
+                         <input
+                           type="checkbox"
+                           checked={Array.isArray(filterSelections[contextMenu.col]) && processedData.uniqueValues[contextMenu.col]?.every(value => 
+                             Array.isArray(filterSelections[contextMenu.col]) && filterSelections[contextMenu.col].includes(value)
+                           )}
+                           onMouseDown={e => e.stopPropagation()}
+                           onChange={e => {
+                             const allValues = processedData.uniqueValues[contextMenu.col] || [];
+                             if (e.target.checked) {
+                               setFilterSelections(prev => ({
+                                 ...prev,
+                                 [contextMenu.col]: allValues
+                               }));
+                             } else {
+                               setFilterSelections(prev => ({
+                                 ...prev,
+                                 [contextMenu.col]: []
+                               }));
+                             }
+                           }}
+                           style={{ accentColor: '#222' }}
+                         />
+                         <span className="truncate font-semibold">
+                           {Array.isArray(filterSelections[contextMenu.col]) && processedData.uniqueValues[contextMenu.col]?.every(value => 
+                             Array.isArray(filterSelections[contextMenu.col]) && filterSelections[contextMenu.col].includes(value)
+                           ) ? 'Deselect All' : 'Select All'}
+                         </span>
+                       </label>
+                     </div>
+                     
+                     {/* Individual filter options */}
+                     {processedData.uniqueValues[contextMenu.col]?.map((value) => (
+                       <label key={value} className="flex items-center space-x-2 text-xs cursor-pointer" style={{userSelect:'none'}} onMouseDown={e => e.stopPropagation()}>
+                         <input
+                           type="checkbox"
+                           checked={Array.isArray(filterSelections[contextMenu.col]) && filterSelections[contextMenu.col].includes(value)}
+                           onMouseDown={e => e.stopPropagation()}
+                           onChange={e => {
+                             const currentSelections = Array.isArray(filterSelections[contextMenu.col]) ? filterSelections[contextMenu.col] : [];
+                             const newSelections = e.target.checked
+                               ? [...currentSelections, value]
+                               : currentSelections.filter(v => v !== value);
+                             // Update local selections without applying
+                             setFilterSelections(prev => ({
+                               ...prev,
+                               [contextMenu.col]: newSelections
+                             }));
+                           }}
+                           style={{ accentColor: '#222' }}
+                         />
+                         <span className="truncate">{value}</span>
+                       </label>
+                     ))}
+                     
+                     {/* Action buttons */}
+                     <div className="mt-3 flex gap-2">
+                       <button
+                         className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white flex-1"
+                         onClick={e => {
+                           e.preventDefault();
+                           e.stopPropagation();
+                           const currentSelections = filterSelections[contextMenu.col] || [];
+                           handleColumnFilter(contextMenu.col, currentSelections);
+                           setContextMenu(null);
+                           setOpenDropdown(null);
+                         }}
+                       >Apply</button>
+                       <button
+                         className="px-2 py-1 text-xs rounded bg-blue-500 hover:bg-blue-600 text-white flex-1"
+                         onClick={e => {
+                           e.preventDefault();
+                           e.stopPropagation();
+                           handleClearFilter(contextMenu.col);
+                           setFilterSelections(prev => ({
+                             ...prev,
+                             [contextMenu.col]: []
+                           }));
+                           setContextMenu(null);
+                           setOpenDropdown(null);
+                         }}
+                       >Clear</button>
+                     </div>
+                   </div>
+                 )}
               </div>
             )}
           </div>

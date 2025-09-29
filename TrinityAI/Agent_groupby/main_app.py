@@ -49,6 +49,9 @@ agent = SmartGroupByAgent(
 class GroupByRequest(BaseModel):
     prompt: str
     session_id: Optional[str] = None
+    client_name: str = ""
+    app_name: str = ""
+    project_name: str = ""
 
 @router.post("/groupby")
 def groupby_files(request: GroupByRequest):
@@ -61,7 +64,8 @@ def groupby_files(request: GroupByRequest):
     
     try:
         # Process with complete memory context
-        result = agent.process_request(request.prompt, request.session_id)
+        result = agent.process_request(request.prompt, request.session_id, 
+                                     request.client_name, request.app_name, request.project_name)
 
         # Add timing
         processing_time = round(time.time() - start_time, 2)
@@ -70,6 +74,22 @@ def groupby_files(request: GroupByRequest):
         logger.info(f"GROUPBY REQUEST COMPLETED:")
         logger.info(f"Success: {result.get('success', False)}")
         logger.info(f"Processing Time: {processing_time}s")
+
+        # 🔧 SMART RESPONSE FALLBACK: Ensure smart_response is always present
+        if "smart_response" not in result or not result["smart_response"]:
+            if result.get("success") and result.get("groupby_json"):
+                # GroupBy configuration success - create smart response
+                cfg = result["groupby_json"]
+                identifiers = cfg.get("identifiers", [])
+                aggregations = cfg.get("aggregations", {})
+                
+                result["smart_response"] = f"I've configured the groupby operation for you. The data will be grouped by {identifiers} and aggregated using {list(aggregations.keys()) if aggregations else 'the specified functions'}. You can now proceed with the operation or make adjustments as needed."
+            else:
+                # Suggestions or error - create smart response
+                if result.get("suggestions"):
+                    result["smart_response"] = "I can help you perform groupby operations on your data! Based on your available files, I can suggest the best grouping strategies and aggregation functions. What would you like to group and aggregate?"
+                else:
+                    result["smart_response"] = "I'm here to help you perform groupby operations on your data. Please describe what you'd like to group and aggregate or ask me for suggestions."
 
         if result.get("success") and result.get("groupby_json"):
             cfg = result["groupby_json"]

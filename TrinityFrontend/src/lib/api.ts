@@ -134,9 +134,7 @@ export const TRINITY_AI_API = normalizedAiBase.endsWith('/trinityai')
   ? normalizedAiBase
   : `${normalizedAiBase}/trinityai`;
 
-
 export const INSIGHT_API = `${TRINITY_AI_API}/insights`;
-
 
 export const LAB_ACTIONS_API = `${REGISTRY_API}/laboratory-actions`;
 
