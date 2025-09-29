@@ -1055,25 +1055,7 @@ class DataPooler:
             logger.info(f"🔍 Processing model: {model_name}")
             
             # Check if this is a constraint model
-            if model_name in ["Constrained Ridge", "Constrained Linear Regression"]:
-                print(f"🔍 This is a constraint model: {model_name}")
-                logger.info(f"🔍 This is a constraint model: {model_name}")
-                print(f"  - X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
-                print(f"  - X_test shape: {X_test.shape}, y_test shape: {y_test.shape}")
-                print(f"  - Feature names: {x_variables}")
-                print(f"  - Data types: X_train={X_train.dtype}, y_train={y_train.dtype}")
-                print(f"  - X_train contains NaN: {np.isnan(X_train).any()}")
-                print(f"  - y_train contains NaN: {np.isnan(y_train).any()}")
-                print(f"  - X_train contains Inf: {np.isinf(X_train).any()}")
-                print(f"  - y_train contains Inf: {np.isinf(y_train).any()}")
-                logger.info(f"  - X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
-                logger.info(f"  - X_test shape: {X_test.shape}, y_test shape: {y_test.shape}")
-                logger.info(f"  - Feature names: {x_variables}")
-                logger.info(f"  - Data types: X_train={X_train.dtype}, y_train={y_train.dtype}")
-                logger.info(f"  - X_train contains NaN: {np.isnan(X_train).any()}")
-                logger.info(f"  - y_train contains NaN: {np.isnan(y_train).any()}")
-                logger.info(f"  - X_train contains Inf: {np.isinf(X_train).any()}")
-                logger.info(f"  - y_train contains Inf: {np.isinf(y_train).any()}")
+
             
             model = clone(model)
             print(f"🔍 Model cloned successfully for: {model_name}")
@@ -1098,7 +1080,7 @@ class DataPooler:
                         print(f"🎯 Constrained Ridge - Optimal l2_penalty from RidgeCV: {optimal_l2_penalty:.6f}")
                         logger.info(f"🎯 Constrained Ridge - Optimal l2_penalty from RidgeCV: {optimal_l2_penalty:.6f}")
                         
-                        # Update the model's l2_penalty
+                        # Update the model's l2_penalty (only for Constrained Ridge)
                         model.l2_penalty = optimal_l2_penalty
                         
                         # Store the best alpha for later display

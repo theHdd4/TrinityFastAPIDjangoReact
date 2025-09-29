@@ -657,7 +657,6 @@ async def train_models_for_combination_enhanced(
                         print(f"🔍 Constrained Linear Regression - Negative constraints: {negative_constraints}")
                         print(f"🔍 Constrained Linear Regression - Positive constraints: {positive_constraints}")
                         models_dict[model_name] = ConstrainedLinearRegression(
-                             l2_penalty=parameters.get('l2_penalty', 0.1),
                             learning_rate=parameters.get('learning_rate', 0.001),
                             iterations=parameters.get('iterations', 10000),
                             adam=parameters.get('adam', False),

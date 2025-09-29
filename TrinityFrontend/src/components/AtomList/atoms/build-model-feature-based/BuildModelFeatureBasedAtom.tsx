@@ -32,6 +32,8 @@ export interface BuildModelFeatureBasedData {
   outputFileName: string;
   kFolds?: number;
   testSize?: number;
+  // Model Type Selection
+  modelType: 'general' | 'mmm';
   // Individual modeling fields
   individualModeling: boolean;
   individualKFolds?: number;
@@ -51,6 +53,24 @@ export interface BuildModelFeatureBasedData {
   // Constraint configuration
   negativeConstraints: string[];
   positiveConstraints: string[];
+  // MMM-specific fields (only used when modelType === 'mmm')
+  variableConfigs?: {
+    [variableName: string]: {
+      type: 'media' | 'standard' | 'minmax' | 'none';
+      adstock_decay?: number;
+      logistic_growth?: number;
+      logistic_midpoint?: number;
+      logistic_carryover?: number;
+    }
+  };
+  variableConstraints?: Array<{
+    variable: string;
+    constraint_type: 'positive' | 'negative' | 'range';
+    value?: number;
+    min?: number;
+    max?: number;
+  }>;
+  priceColumn?: string;
 }
 
 export interface BuildModelFeatureBasedSettings {
@@ -75,6 +95,7 @@ const BuildModelFeatureBasedAtom: React.FC<Props> = ({ atomId }) => {
       selectedScope: '',
       selectedCombinations: [],
       selectedModels: ['Linear Regression', 'Ridge Regression', 'Lasso Regression', 'ElasticNet Regression', 'Bayesian Ridge Regression', 'Custom Constrained Ridge', 'Constrained Linear Regression'],
+      modelType: 'general' as const,
       modelConfigs: [
         { id: 'Linear Regression', name: 'Linear Regression', parameters: {} },
         { id: 'Ridge Regression', name: 'Ridge Regression', parameters: { 'Alpha': '1.0' } },

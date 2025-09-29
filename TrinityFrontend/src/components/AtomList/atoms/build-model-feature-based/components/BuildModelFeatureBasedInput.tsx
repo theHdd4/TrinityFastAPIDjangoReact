@@ -138,6 +138,22 @@ const BuildModelFeatureBasedInput: React.FC<BuildModelFeatureBasedInputProps> = 
             </Select>
           </div>
           
+          <div>
+            <Label>Model Type</Label>
+            <Select 
+              value={data.modelType || 'general'} 
+              onValueChange={(value) => onDataChange({ modelType: value })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select model type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="general">General Models (Individual & Stack)</SelectItem>
+                <SelectItem value="mmm">MMM Models (Marketing Mix Modeling)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
           {/* Separator line between scope and combination sections */}
           <div className="border-t border-gray-200 my-4"></div>
           

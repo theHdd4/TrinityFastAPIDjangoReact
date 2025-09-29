@@ -33,6 +33,7 @@ from .mongodb_saver import save_build_config, get_build_config_from_mongo, get_s
 
 # Import stack model training
 from .stack_model_training import StackModelTrainer
+from .mmm_stack_training import MMMStackModelDataProcessor
 
 
 
@@ -96,21 +97,6 @@ from .schemas import (
     MarketingModelType,
     TransformationType,
     StandardizationMethod
-)
-
-# Marketing helper functions
-from .marketing_helpers import (
-    apply_transformations_by_region,
-    calculate_media_elasticity,
-    calculate_contributions,
-    save_dataframe_to_minio,
-    save_transformation_metadata,
-    get_transformation_metadata,
-    get_file_from_source,
-    calculate_model_metrics,
-    adstock_function,
-    logistic_function,
-    power_function
 )
 from .stack_model_data import StackModelDataProcessor
 
@@ -1091,29 +1077,34 @@ async def train_models_direct(request: dict):
                     # Add average values for each variable (before any transformation)
                     for x_var in x_variables:
                         avg_key = f"{x_var}_avg"
-                        summary_row[avg_key] = variable_averages.get(x_var, 0)
+                        # Use lowercase variable name for average lookup to match how averages are generated
+                        summary_row[avg_key] = variable_averages.get(x_var.lower(), 0)
                     
                     # Add Y variable average
                     y_avg_key = f"{y_variable}_avg"
-                    summary_row[y_avg_key] = variable_averages.get(y_variable, 0)
+                    # Use lowercase variable name for Y variable average lookup to match how averages are generated
+                    summary_row[y_avg_key] = variable_averages.get(y_variable.lower(), 0)
                     
                     # Add beta coefficients for each X-variable
                     coefficients = model_result.get('coefficients', {})
                     for x_var in x_variables:
                         beta_key = f"{x_var}_beta"
-                        summary_row[beta_key] = coefficients.get(f"Beta_{x_var}", 0)
+                        # Use lowercase variable name for coefficient lookup to match how coefficients are generated
+                        summary_row[beta_key] = coefficients.get(f"Beta_{x_var.lower()}", 0)
                     
                     # Add elasticity values for each X-variable
                     elasticities = model_result.get('elasticities', {})
                     for x_var in x_variables:
                         elasticity_key = f"{x_var}_elasticity"
-                        summary_row[elasticity_key] = elasticities.get(x_var, 0)
+                        # Use lowercase variable name for elasticity lookup to match how elasticities are generated
+                        summary_row[elasticity_key] = elasticities.get(x_var.lower(), 0)
                     
                     # Add contribution values for each X-variable
                     contributions = model_result.get('contributions', {})
                     for x_var in x_variables:
                         contribution_key = f"{x_var}_contribution"
-                        summary_row[contribution_key] = contributions.get(x_var, 0)
+                        # Use lowercase variable name for contribution lookup to match how contributions are generated
+                        summary_row[contribution_key] = contributions.get(x_var.lower(), 0)
                     
                     summary_data.append(summary_row)
             
@@ -1699,579 +1690,7 @@ async def list_csv_exports(
 
 
 
-##########################################################################
-
-@router.post("/marketing/prepare-data", response_model=MarketingDataPreparationResponse, tags=["Marketing Mix Modeling"])
-async def prepare_marketing_data(request: MarketingDataPreparationRequest):
-    """Prepare data for marketing mix modeling using scope system."""
-    run_id = str(uuid.uuid4())
-    logger.info(f"Starting data preparation with run_id: {run_id}")
-    
-    try:
-        # Get scope combinations
-        scope_data = await get_scope_set_with_columns(request.scope_id, request.set_name)
-        if not scope_data:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Scope {request.scope_id} with set {request.set_name} not found"
-            )
-        
-        # Process each combination
-        all_prepared_files = []
-        total_rows = 0
-        columns_removed_summary = {}
-        last_df = None  # Keep track of last DataFrame for column count
-        
-        for combination in scope_data['combinations']:
-            logger.info(f"Processing combination: {combination['combination_id']}")
-            
-            # Load data from combination file
-            file_data = get_file_from_source(combination['file_key'])
-            
-            # Read file based on extension
-            if combination['file_key'].endswith(('.xlsx', '.xls')):
-                df = pd.read_excel(file_data)
-            else:
-                df = pd.read_csv(file_data)
-            
-            logger.info(f"Loaded {combination['combination_id']} with shape: {df.shape}")
-            
-            # Filter by fiscal years
-            if "Fiscal Year" in df.columns:
-                df = df[df["Fiscal Year"].isin(request.fiscal_years)]
-                logger.info(f"Filtered to fiscal years: {request.fiscal_years}")
-            
-            # Remove zero columns
-            columns_removed = []
-            if request.remove_zero_columns:
-                initial_cols = df.columns.tolist()
-                df = df.loc[:, (df != 0).any(axis=0)]
-                columns_removed = list(set(initial_cols) - set(df.columns.tolist()))
-                if columns_removed:
-                    columns_removed_summary[combination['combination_id']] = columns_removed
-            
-            # Save prepared data for this combination
-            combo_id = combination['combination_id']
-            prepared_key = f"marketing-prepared/{run_id}/{combo_id}/data.xlsx"
-            save_dataframe_to_minio(df, prepared_key, format="excel")
-            
-            all_prepared_files.append({
-                "combination_id": combo_id,
-                "file_key": prepared_key,
-                "rows": len(df),
-                "columns": len(df.columns)
-            })
-            
-            total_rows += len(df)
-            last_df = df  # Keep reference to last processed DataFrame
-        
-        # ⚡ CRITICAL FIX: Save metadata using marketing_helpers function
-        metadata = {
-            "run_id": run_id,
-            "scope_id": request.scope_id,
-            "set_name": request.set_name,
-            "combinations": all_prepared_files,
-            "fiscal_years": request.fiscal_years,
-            "columns_removed_summary": columns_removed_summary
-        }
-        
-        # Import the function if not already imported
-        from marketing_helpers import save_transformation_metadata
-        
-        # Save the metadata
-        await save_transformation_metadata(run_id, metadata)
-        logger.info(f"✅ Metadata saved for run_id: {run_id}")
-        
-        return MarketingDataPreparationResponse(
-            run_id=run_id,
-            status="success",
-            rows=total_rows,
-            columns=len(last_df.columns) if last_df is not None else 0,
-            prepared_data_key=f"marketing-prepared/{run_id}/",
-            fiscal_years_included=request.fiscal_years,
-            columns_removed=None
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in data preparation: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-@router.post("/marketing/transform-variables", response_model=MarketingTransformationResponse, tags=["Marketing Mix Modeling"])
-async def transform_marketing_variables(request: MarketingTransformationRequest):
-    """Apply transformations to marketing variables for all combinations."""
-    transform_id = str(uuid.uuid4())
-    logger.info(f"Starting variable transformation with transform_id: {transform_id}")
-    
-    try:
-        # Get preparation metadata
-        prep_metadata = await get_transformation_metadata(request.run_id)
-        combinations = prep_metadata.get("combinations", [])
-        
-        if not combinations:
-            raise HTTPException(status_code=404, detail="No prepared data found")
-        
-        all_transformed_files = []
-        all_variable_stats = {}
-        all_regions = set()
-        
-        # Process each combination
-        for combo_info in combinations:
-            combo_id = combo_info["combination_id"]
-            file_key = combo_info["file_key"]
-            
-            logger.info(f"Transforming variables for combination: {combo_id}")
-            
-            # Load prepared data
-            file_data = get_file_from_source(file_key)
-            df = pd.read_excel(file_data)
-            
-            # Get unique regions in this combination's data
-            regions = df["Region"].unique().tolist() if "Region" in df.columns else []
-            all_regions.update(regions)
-            
-            # Apply transformations
-            df_transformed = apply_transformations_by_region(
-                df=df,
-                media_variables=request.media_variables,
-                other_variables=request.other_variables,
-                non_scaled_variables=request.non_scaled_variables,
-                transformation_params=request.transformation_params,
-                standardization_method=request.standardization_method.value,
-                transformation_type=request.transformation_type.value
-            )
-            
-            # Calculate statistics for this combination
-            variable_stats = {}
-            for col in df_transformed.columns:
-                if col.endswith("_transformed") or col.endswith("_scaled"):
-                    stats_by_region = {}
-                    for region in regions:
-                        if region in df_transformed["Region"].unique():
-                            region_data = df_transformed[df_transformed["Region"] == region][col]
-                            stats_by_region[region] = {
-                                "mean": float(region_data.mean()),
-                                "std": float(region_data.std()),
-                                "min": float(region_data.min()),
-                                "max": float(region_data.max())
-                            }
-                    variable_stats[col] = stats_by_region
-            
-            # Save transformed data
-            transform_key = f"marketing-transformed/{transform_id}/{combo_id}/data.xlsx"
-            save_dataframe_to_minio(df_transformed, transform_key, format="excel")
-            
-            all_transformed_files.append({
-                "combination_id": combo_id,
-                "file_key": transform_key,
-                "regions": regions
-            })
-            
-            all_variable_stats[combo_id] = variable_stats
-        
-        # Save transformation metadata
-        metadata = {
-            "run_id": request.run_id,
-            "transform_id": transform_id,
-            "transformation_type": request.transformation_type.value,
-            "standardization_method": request.standardization_method.value,
-            "transformation_params": request.transformation_params,
-            "media_variables": request.media_variables,
-            "other_variables": request.other_variables,
-            "non_scaled_variables": request.non_scaled_variables,
-            "combinations": all_transformed_files,
-            "variable_stats": all_variable_stats
-        }
-        
-        await save_transformation_metadata(transform_id, metadata)
-        
-        return MarketingTransformationResponse(
-            transform_id=transform_id,
-            status="success",
-            transformed_data_key=f"marketing-transformed/{transform_id}/",
-            variable_statistics=all_variable_stats,
-            regions_processed=list(all_regions),
-            media_variables_transformed=request.media_variables
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in variable transformation: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/marketing/train-models", response_model=MarketingModelTrainingResponse, tags=["Marketing Mix Modeling"])
-async def train_marketing_models(request: MarketingModelTrainingRequest):
-    """Train marketing mix models for all combinations with optional constraints."""
-    training_id = str(uuid.uuid4())
-    start_time = datetime.now()
-    logger.info(f"Starting model training with training_id: {training_id}")
-    
-    try:
-        # Get transformation metadata
-        transform_metadata = await get_transformation_metadata(request.run_id)
-        combinations = transform_metadata.get("combinations", [])
-        
-        if not combinations:
-            raise HTTPException(status_code=404, detail="No transformed data found")
-        
-        all_results = []
-        model_counter = 0
-        combinations_processed = 0
-        
-        # Process each combination
-        for combo_info in combinations:
-            combo_id = combo_info["combination_id"]
-            file_key = combo_info["file_key"]
-            
-            logger.info(f"Training models for combination: {combo_id}")
-            
-            # Load transformed data
-            file_data = get_file_from_source(file_key)
-            df = pd.read_excel(file_data)
-            
-            # Extract brand, market, region from combination ID or data
-            if "Brand" in df.columns:
-                brands = df["Brand"].unique().tolist()
-            else:
-                brands = ["Unknown"]
-            
-            if "Market" in df.columns:
-                markets = df["Market"].unique().tolist()
-            else:
-                markets = ["Unknown"]
-            
-            if "Region" in df.columns:
-                regions = df["Region"].unique().tolist()
-            else:
-                regions = ["Unknown"]
-            
-            # Train models for this combination
-            for model_type in request.model_types:
-                for y_variable in request.y_variables:
-                    if y_variable not in df.columns:
-                        logger.warning(f"Y variable {y_variable} not found in {combo_id}")
-                        continue
-                    
-                    # Prepare features
-                    x_columns = []
-                    
-                    # Add scaled other variables
-                    for var in transform_metadata.get("other_variables", []):
-                        col_name = f"scaled_{var}"
-                        if col_name in df.columns:
-                            x_columns.append(col_name)
-                    
-                    # Add transformed media variables
-                    for var in transform_metadata.get("media_variables", []):
-                        col_name = f"{var}_transformed"
-                        if col_name in df.columns:
-                            x_columns.append(col_name)
-                    
-                    # Add non-scaled variables
-                    for var in transform_metadata.get("non_scaled_variables", []):
-                        col_name = f"non_scaled_{var}"
-                        if col_name in df.columns:
-                            x_columns.append(col_name)
-                    
-                    if not x_columns:
-                        logger.warning(f"No feature columns found for {combo_id}")
-                        continue
-                    
-                    # Prepare data
-                    X = df[x_columns].values
-                    y = df[y_variable].values
-                    
-                    if len(y) < 10:  # Skip if too few samples
-                        logger.warning(f"Too few samples ({len(y)}) for {combo_id}")
-                        continue
-                    
-                    # Split data
-                    split_index = int(len(y) * request.train_test_split)
-                    if split_index < 5 or (len(y) - split_index) < 2:
-                        logger.warning(f"Insufficient data for train/test split in {combo_id}")
-                        continue
-                    
-                    X_train, X_test = X[:split_index], X[split_index:]
-                    y_train, y_test = y[:split_index], y[split_index:]
-                    
-                    # Prepare constraint information
-                    constraint_dict = []
-                    if request.use_constraints and request.variable_constraints:
-                        constraint_dict = [
-                            {
-                                "variable_name": vc.variable_name,
-                                "constraint_type": vc.constraint_type.value
-                            }
-                            for vc in request.variable_constraints
-                        ]
-                    
-                    # Model selection with constraint support
-                    if request.use_constraints and constraint_dict:
-                        # Import the function if not already imported
-                        from marketing_helpers import create_constrained_model
-                        
-                        # Use custom constrained model
-                        model = create_constrained_model(
-                            model_type=model_type.value,
-                            variable_constraints=constraint_dict,
-                            x_columns=x_columns,
-                            learning_rate=request.constraint_learning_rate,
-                            iterations=request.constraint_iterations,
-                            l2_penalty=0.1 if "Ridge" in model_type.value else 0.0
-                        )
-                        
-                        # Special fit method for constrained models
-                        try:
-                            model.fit(X_train, y_train, x_columns)
-                        except Exception as e:
-                            logger.error(f"Error fitting constrained model for {combo_id}: {e}")
-                            continue
-                    else:
-                        # Use standard models (existing logic)
-                        if model_type == MarketingModelType.RIDGE:
-                            model = Ridge(alpha=0.1)
-                        elif model_type == MarketingModelType.LASSO:
-                            model = Lasso(alpha=0.1, max_iter=2000)
-                        elif model_type == MarketingModelType.LINEAR:
-                            model = LinearRegression()
-                        elif model_type == MarketingModelType.ELASTIC_NET:
-                            model = ElasticNet(alpha=0.1, l1_ratio=0.5)
-                        else:
-                            model = Ridge(alpha=0.1)
-                        
-                        # Standard fit
-                        try:
-                            model.fit(X_train, y_train)
-                        except Exception as e:
-                            logger.error(f"Error fitting standard model for {combo_id}: {e}")
-                            continue
-                    
-                    # Evaluate model
-                    try:
-                        # Calculate metrics
-                        y_train_pred = model.predict(X_train)
-                        y_test_pred = model.predict(X_test)
-                        
-                        metrics = calculate_model_metrics(y_train, y_train_pred, len(x_columns))
-                        test_metrics = calculate_model_metrics(y_test, y_test_pred, len(x_columns))
-                        
-                        # Extract coefficients
-                        coefficients = {
-                            "intercept": float(model.intercept_),
-                            **{x_columns[i]: float(model.coef_[i]) for i in range(len(x_columns))}
-                        }
-                        
-                        # Store result with constraint info
-                        result = {
-                            "model_id": model_counter,
-                            "combination_id": combo_id,
-                            "model_type": model_type.value,
-                            "brand": brands[0] if brands else "Unknown",
-                            "markets": markets,
-                            "regions": regions,
-                            "y_variable": y_variable,
-                            "mape_train": metrics["mape"],
-                            "mape_test": test_metrics["mape"],
-                            "r2": metrics["r2"],
-                            "adjusted_r2": metrics["adjusted_r2"],
-                            "aic": metrics["aic"],
-                            "bic": metrics["bic"],
-                            "coefficients": coefficients,
-                            "transformation_params": transform_metadata.get("transformation_params", {}),
-                            "y_mean": float(y.mean()),
-                            "n_samples_train": len(y_train),
-                            "n_samples_test": len(y_test),
-                            # Add constraint information
-                            "constraints_applied": request.use_constraints,
-                            "variable_constraints": constraint_dict if request.use_constraints else [],
-                            "constraint_learning_rate": request.constraint_learning_rate if request.use_constraints else None,
-                            "constraint_iterations": request.constraint_iterations if request.use_constraints else None
-                        }
-                        
-                        all_results.append(result)
-                        model_counter += 1
-                        
-                        # Log constraint enforcement
-                        if request.use_constraints:
-                            logger.info(f"Model {model_counter-1} trained with constraints for {combo_id}")
-                            # Log which constraints were applied
-                            for constraint in constraint_dict:
-                                var_name = constraint["variable_name"]
-                                constraint_type = constraint["constraint_type"]
-                                if var_name in coefficients:
-                                    coef_value = coefficients[var_name]
-                                    if constraint_type == "positive" and coef_value >= 0:
-                                        logger.info(f"✓ Constraint satisfied: {var_name} >= 0 (value: {coef_value:.4f})")
-                                    elif constraint_type == "negative" and coef_value <= 0:
-                                        logger.info(f"✓ Constraint satisfied: {var_name} <= 0 (value: {coef_value:.4f})")
-                                    else:
-                                        logger.warning(f"⚠ Constraint violated: {var_name} {constraint_type} (value: {coef_value:.4f})")
-                        
-                    except Exception as e:
-                        logger.error(f"Error evaluating model for {combo_id}: {e}")
-                        continue
-            
-            combinations_processed += 1
-        
-        # Save results
-        if all_results:
-            saved_ids = await save_marketing_model_results(
-                training_id,
-                all_results,
-                {
-                    "transform_id": request.run_id,
-                    "training_params": request.dict(),
-                    "total_models": len(all_results),
-                    "scope_id": transform_metadata.get("scope_id"),
-                    "set_name": transform_metadata.get("set_name"),
-                    "constraints_used": request.use_constraints
-                }
-            )
-        else:
-            saved_ids = []
-        
-        # Calculate best models
-        best_models = {}
-        if all_results:
-            best_models["by_mape"] = min(all_results, key=lambda x: x["mape_test"])["model_id"]
-            best_models["by_r2"] = max(all_results, key=lambda x: x["r2"])["model_id"]
-            best_models["by_aic"] = min(all_results, key=lambda x: x["aic"])["model_id"]
-        
-        execution_time = (datetime.now() - start_time).total_seconds()
-        
-        return MarketingModelTrainingResponse(
-            training_id=training_id,
-            status="success",
-            models_trained=len(all_results),
-            summary={
-                "combinations_processed": combinations_processed,
-                "model_types": [mt.value for mt in request.model_types],
-                "y_variables": request.y_variables,
-                "constraints_applied": request.use_constraints,
-                "total_constraints": len(request.variable_constraints) if request.use_constraints else 0
-            },
-            best_models=best_models,
-            execution_time_seconds=execution_time
-        )
-        
-    except Exception as e:
-        logger.error(f"Error in model training: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-
-@router.post("/marketing/calculate-elasticity", response_model=MarketingElasticityResponse, tags=["Marketing Mix Modeling"])
-async def calculate_marketing_elasticity(request: MarketingElasticityRequest):
-    """Calculate elasticities for marketing models."""
-    try:
-        # Get model results
-        results = await get_marketing_results(request.run_id)
-        
-        if not results:
-            raise HTTPException(status_code=404, detail=f"No results found for run_id: {request.run_id}")
-        
-        # Filter by model IDs if specified
-        if request.model_ids:
-            results = [r for r in results if r.get("model_id") in request.model_ids]
-        
-        # Get transformation metadata from first result
-        transform_id = results[0].get("transform_id")
-        if not transform_id:
-            raise HTTPException(status_code=400, detail="No transform_id found in results")
-            
-        transform_metadata = await get_transformation_metadata(transform_id)
-        
-        updated_results = []
-        elasticity_summary = {}
-        contribution_summary = {}
-        
-        for result in results:
-            elasticities = {}
-            contributions = {}
-            
-            # Calculate elasticity for each media variable
-            for media_var in transform_metadata.get("media_variables", []):
-                beta_col = f"{media_var}_transformed"
-                if beta_col in result.get("coefficients", {}):
-                    beta = result["coefficients"][beta_col]
-                    
-                    # Get transformation parameters
-                    params = transform_metadata.get("transformation_params", {}).get(media_var, [])
-                    
-                    if transform_metadata["transformation_type"] == "logistic" and len(params) >= 3:
-                        growth_rate = params[0]
-                        carryover = params[1]
-                        midpoint = params[2]
-                        
-                        # Calculate sensitivity at midpoint
-                        sensitivity = midpoint * (1 - midpoint)
-                        
-                        # Get y_mean from stored result
-                        y_mean = result.get("y_mean", 1)
-                        
-                        # Calculate elasticity
-                        elasticity = calculate_media_elasticity(
-                            beta, growth_rate, sensitivity, carryover, y_mean
-                        )
-                        
-                        elasticities[media_var] = float(elasticity) if not np.isnan(elasticity) else None
-            
-            # Calculate contributions if requested
-            if request.include_contributions:
-                # Get variable means from transform metadata
-                variable_means = {}
-                for var, stats in transform_metadata.get("variable_stats", {}).items():
-                    # Get mean for the specific region
-                    region = result.get("region")
-                    if region and region in stats:
-                        variable_means[var] = stats[region].get("mean", 0)
-                
-                # Calculate contributions
-                contributions = calculate_contributions(
-                    result.get("coefficients", {}),
-                    variable_means
-                )
-            
-            # Update result with elasticities
-            result["elasticities"] = elasticities
-            if contributions:
-                result["contributions"] = contributions
-            
-            # Update summaries
-            elasticity_summary[result["model_id"]] = elasticities
-            if contributions:
-                contribution_summary[result["model_id"]] = {
-                    k: v for k, v in contributions.items() 
-                    if not k.endswith("_pct")
-                }
-            
-            updated_results.append(result)
-        
-        # Update MongoDB with elasticities and contributions
-        for result in updated_results:
-            await build_collection.update_one(
-                {"_id": f"marketing_{request.run_id}_{result['model_id']}"},
-                {"$set": {
-                    "elasticities": result.get("elasticities", {}),
-                    "contributions": result.get("contributions", {})
-                }}
-            )
-        
-        return MarketingElasticityResponse(
-            status="success",
-            models_updated=len(updated_results),
-            elasticity_summary=elasticity_summary,
-            contribution_summary=contribution_summary if request.include_contributions else None
-        )
-        
-    except Exception as e:
-        logger.error(f"Error calculating elasticities: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    
-    
-
+########################################################################
 
 @router.post("/get_columns", tags=["Columns"])
 async def get_columns(
@@ -2952,15 +2371,7 @@ async def get_combination_betas(request: dict):
 
 @router.post("/stack-model/individual-combination-metrics", tags=["Stack Modeling"])
 async def calculate_individual_combination_metrics(request: dict):
-    """
-    Calculate MAPE, AIC, and BIC for individual combinations using betas from stack modeling.
-    
-    This endpoint:
-    1. Trains stack models to get betas
-    2. Applies those betas to individual combination data
-    3. Calculates predictions and metrics for each combination
-    4. Uses stack modeling MAPE as train MAPE, individual combination MAPE as test MAPE
-    """
+
     try:  
         # Extract parameters from request
         scope_number = request.get('scope_number')
@@ -3044,4 +2455,663 @@ async def calculate_individual_combination_metrics(request: dict):
     except Exception as e:
         logger.error(f"Error in individual combination metrics calculation: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.post("/mmm-train-models", response_model=ModelTrainingResponse, tags=["MMM Training"])
+async def train_mmm_models(request: dict):
+
+    try:
+        # Generate unique run ID or use provided one
+        run_id = request.get('run_id') or str(uuid.uuid4())
+        logger.info(f"Starting MMM model training with run_id: {run_id}")
+        
+        # Extract parameters from request
+        scope_number = request.get('scope_number')
+        combinations = request.get('combinations', [])
+        x_variables = request.get('x_variables', [])
+        y_variable = request.get('y_variable')
+        variable_configs = request.get('variable_configs', {})
+        models_to_run = request.get('models_to_run', [])
+        custom_model_configs = request.get('custom_model_configs', {})  # Updated to use same constraint approach
+        # Convert list to dictionary for model configs (same as general models endpoint)
+        if isinstance(custom_model_configs, list):
+            custom_model_configs = {config.get('id', ''): config for config in custom_model_configs if config.get('id')}
+        k_folds = request.get('k_folds', 5)
+        test_size = request.get('test_size', 0.2)
+        price_column = request.get('price_column')
+        
+        # Validation
+        if not scope_number or not combinations or not x_variables or not y_variable:
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required parameters: scope_number, combinations, x_variables, or y_variable"
+            )
+        
+        if not variable_configs:
+            raise HTTPException(
+                status_code=400,
+                detail="variable_configs is required for MMM training"
+            )
+        
+        if not models_to_run:
+            raise HTTPException(
+                status_code=400,
+                detail="models_to_run is required for MMM training"
+            )
+        
+        # Validate variable configurations
+        for var in x_variables:
+            if var not in variable_configs:
+                logger.warning(f"No transformation config found for variable {var}, using 'none'")
+                variable_configs[var] = {"type": "none"}
+        
+        # Import MMM trainer
+        from .mmm_training import mmm_trainer
+        
+        # Get MinIO client and bucket
+        minio_client = get_minio_client()
+        
+        try:
+            from ..scope_selector.config import get_settings
+            scope_settings = get_settings()
+            bucket_name = scope_settings.minio_bucket
+            object_prefix = await get_object_prefix()
+        except Exception as e:
+            bucket_name = "Quant_Matrix_AI_Schema"
+            object_prefix = "blank/blank project/"
+        
+        # Initialize progress tracking
+        total_combinations = len(combinations)
+        total_models = len(models_to_run)
+        total_tasks = total_combinations * total_models
+        
+        training_progress[run_id] = {
+            "run_id": run_id,
+            "current": 0,
+            "total": total_tasks,
+            "percentage": 0,
+            "status": "running",
+            "current_combination": "",
+            "current_model": "",
+            "completed_combinations": 0,
+            "total_combinations": total_combinations
+        }
+        
+        combination_results = []
+        total_saved = 0
+        all_variable_stats = {}
+        
+        # Process each combination
+        for combination_index, combination in enumerate(combinations):
+            # Update progress
+            training_progress[run_id]["current_combination"] = combination
+            training_progress[run_id]["current"] = combination_index * total_models
+            training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
+            
+            # Search for the file in MinIO
+            target_file_key = None
+            try:
+                # Search for files containing both Scope_X and the combination
+                all_objects = list(minio_client.list_objects(bucket_name, recursive=True))
+                matching_objects = []
+                
+                for obj in all_objects:
+                    obj_name = obj.object_name
+                    scope_pattern = f"Scope_{scope_number}"
+                    has_scope = scope_pattern in obj_name
+                    has_combination = combination in obj_name
+                    
+                    if has_scope and has_combination:
+                        matching_objects.append(obj_name)
+                
+                if matching_objects:
+                    target_file_key = matching_objects[0]
+                    logger.info(f"Found file for combination {combination}: {target_file_key}")
+                    
+                    # Update progress - reading file
+                    training_progress[run_id]["current_model"] = "Reading data file..."
+                    await asyncio.sleep(0.3)
+                    
+                    # Train MMM models for this combination
+                    training_progress[run_id]["current_model"] = "Training MMM models..."
+                    await asyncio.sleep(0.5)
+                    
+                    try:
+                        logger.info(f"Starting MMM training for combination: {combination}")
+                        # Convert x_variables to lowercase for consistency
+                        x_variables_lower = [var.lower() for var in x_variables]
+                        y_variable_lower = y_variable.lower()
+                        
+                        # Convert variable_configs keys to lowercase
+                        variable_configs_lower = {}
+                        for var, config in variable_configs.items():
+                            variable_configs_lower[var.lower()] = config
+                        
+                        # Train MMM models
+                        model_results, variable_data = await mmm_trainer.train_mmm_models_for_combination(
+                            file_key=target_file_key,
+                            x_variables=x_variables_lower,
+                            y_variable=y_variable_lower,
+                            variable_configs=variable_configs_lower,
+                            models_to_run=models_to_run,
+                            custom_configs=custom_model_configs,  # Use same constraint approach as general models
+                            k_folds=k_folds,
+                            test_size=test_size,
+                            bucket_name=bucket_name,
+                            price_column=price_column.lower() if price_column else None
+                        )
+                        
+                        logger.info(f"MMM training completed for {combination}. Generated {len(model_results)} model results")
+                        
+                        # Update progress
+                        training_progress[run_id]["current"] += total_models
+                        training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
+                        
+                        # Store variable statistics
+                        all_variable_stats[combination] = variable_data
+                        
+                        # Save results to MongoDB
+                        try:
+                            saved_ids = await save_model_results_enhanced(
+                                scope_id=f"scope_{scope_number}",
+                                scope_name=f"Scope_{scope_number}",
+                                set_name=f"Scope_{scope_number}",
+                                combination={
+                                    "combination_id": combination,
+                                    "file_key": target_file_key,
+                                    "filename": target_file_key.split('/')[-1],
+                                    "set_name": f"Scope_{scope_number}",
+                                    "record_count": variable_data.get("original_data_shape", [0, 0])[0]
+                                },
+                                model_results=model_results,
+                                x_variables=x_variables_lower,
+                                y_variable=y_variable_lower,
+                                price_column=price_column.lower() if price_column else None,
+                                standardization="mmm_per_variable",  # Special marker for MMM
+                                test_size=test_size,
+                                run_id=run_id,
+                                variable_data=variable_data
+                            )
+                            
+                            total_saved += len(saved_ids)
+                            logger.info(f"Saved {len(saved_ids)} MMM model results for combination {combination}")
+                            
+                        except Exception as e:
+                            logger.error(f"Failed to save MMM results for {combination}: {e}")
+                        
+                        # Save MMM results to MinIO as Arrow file
+                        try:
+                            import pandas as pd
+                            import pyarrow as pa
+                            import pyarrow.feather as feather
+                            from io import BytesIO
+                            
+                            # Prepare summary data for MinIO
+                            summary_data = []
+                            logger.info(f"Preparing summary data for {len(model_results)} model results")
+                            for model_result in model_results:
+                                # Extract parameter combination info
+                                param_combo = model_result.get("parameter_combination", {})
+                                combo_index = model_result.get("combination_index", 0)
+                                
+                                # Extract actual parameters used
+                                actual_params = model_result.get('actual_parameters_used', {})
+                                
+                                # Create summary row
+                                summary_row = {
+                                    'run_id': run_id,
+                                    'scope_id': f"scope_{scope_number}",
+                                    'scope_name': f"Scope_{scope_number}",
+                                    'set_name': f"Scope_{scope_number}",
+                                    'combination_id': combination,
+                                    'file_key': target_file_key,
+                                    'model_name': model_result['model_name'],
+                                    'model_type': 'mmm_regression',
+                                    'combination_index': combo_index,
+                                    'total_records': variable_data.get("original_data_shape", [0, 0])[0],
+                                    'training_date': datetime.now().isoformat(),
+                                    
+                                    # Performance metrics
+                                    'mape_train': model_result['mape_train'],
+                                    'mape_test': model_result['mape_test'],
+                                    'r2_train': model_result['r2_train'],
+                                    'r2_test': model_result['r2_test'],
+                                    
+                                    # Model selection criteria
+                                    'aic': model_result.get('aic', float('inf')),
+                                    'bic': model_result.get('bic', float('inf')),
+                                    'n_parameters': model_result.get('n_parameters', len(x_variables_lower) + 1),
+                                    
+                                    # Price elasticity
+                                    'price_column': price_column.lower() if price_column else None,
+                                    'price_elasticity': model_result.get('price_elasticity'),
+                                    
+                                    # Training configuration
+                                    'standardization': 'mmm_per_variable',
+                                    'k_folds': k_folds,
+                                    'test_size': test_size,
+                                    'x_variables': ','.join(x_variables_lower),
+                                    'y_variable': y_variable_lower,
+                                    
+                                    # MMM-specific fields
+                                    'transformation_types': ','.join([config.get('type', 'none') for config in actual_params.values()]),
+                                    'parameter_combination': str(param_combo),
+                                    'actual_parameters_used': str(actual_params),
+                                    
+                                    # Individual parameter details for each variable
+                                    'adstock_decay_params': str({var: config.get('adstock_decay', 'N/A') for var, config in actual_params.items() if config.get('type') == 'media'}),
+                                    'logistic_growth_params': str({var: config.get('logistic_growth', 'N/A') for var, config in actual_params.items() if config.get('type') == 'media'}),
+                                    'logistic_midpoint_params': str({var: config.get('logistic_midpoint', 'N/A') for var, config in actual_params.items() if config.get('type') == 'media'}),
+                                    'logistic_carryover_params': str({var: config.get('logistic_carryover', 'N/A') for var, config in actual_params.items() if config.get('type') == 'media'})
+                                }
+                                
+                                # Add variable averages (same as train-models-direct)
+                                variable_averages = variable_data.get("combination_results", [{}])[0].get("variable_averages", {})
+                                for x_var in x_variables_lower:
+                                    avg_key = f"{x_var}_avg"
+                                    summary_row[avg_key] = variable_averages.get(x_var, 0)
+                                
+                                # Add Y variable average
+                                y_avg_key = f"{y_variable_lower}_avg"
+                                summary_row[y_avg_key] = variable_averages.get(y_variable_lower, 0)
+                                
+                                # Add coefficients
+                                coefficients = model_result.get('coefficients', {})
+                                for coef_name, coef_value in coefficients.items():
+                                    summary_row[coef_name] = coef_value
+                                
+                                # Add unstandardized intercept
+                                summary_row['unstandardized_intercept'] = model_result.get('unstandardized_intercept', 0.0)
+                                
+                                # Add elasticities as individual columns (same as train-models-direct)
+                                elasticities = model_result.get('elasticities', {})
+                                for var_name, elasticity_value in elasticities.items():
+                                    summary_row[f"{var_name}_elasticity"] = elasticity_value
+                                
+                                # Add contributions as individual columns (same as train-models-direct)
+                                contributions = model_result.get('contributions', {})
+                                for var_name, contribution_value in contributions.items():
+                                    summary_row[f"{var_name}_contribution"] = contribution_value
+                                
+                                summary_data.append(summary_row)
+                            
+                            if summary_data:
+                                logger.info(f"Preparing to save {len(summary_data)} MMM results to MinIO for combination {combination}")
+                                
+                                # Convert to DataFrame and save as Arrow file
+                                summary_df = pd.DataFrame(summary_data)
+                                logger.info(f"Created DataFrame with shape: {summary_df.shape}")
+                                logger.info(f"DataFrame columns: {list(summary_df.columns)}")
+                                
+                                arrow_buffer = BytesIO()
+                                table = pa.Table.from_pandas(summary_df)
+                                feather.write_feather(table, arrow_buffer)
+                                arrow_buffer.seek(0)
+                                
+                                # Create MinIO file key for MMM results
+                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                model_results_file_key = f"mmm-results/{run_id}/{combination}_mmm_results_{timestamp}.arrow"
+                                logger.info(f"Saving to MinIO with key: {model_results_file_key}")
+                                
+                                # Save to MinIO
+                                # Encode combination name for MinIO metadata (only supports US-ASCII)
+                                combination_encoded = combination.encode('ascii', 'ignore').decode('ascii')
+                                
+                                minio_client.put_object(
+                                    bucket_name,
+                                    model_results_file_key,
+                                    arrow_buffer,
+                                    length=arrow_buffer.getbuffer().nbytes,
+                                    content_type='application/vnd.apache.arrow.file',
+                                    metadata={
+                                        "run_id": run_id,
+                                        "scope_number": str(scope_number),
+                                        "combination": combination_encoded,
+                                        "model_type": "mmm",
+                                        "total_models": str(len(model_results)),
+                                        "parameter_combinations": str(len(set(mr.get("combination_index", 0) for mr in model_results))),
+                                        "export_date": timestamp
+                                    }
+                                )
+                                
+                                logger.info(f"Successfully saved MMM results to MinIO: {model_results_file_key}")
+                                
+                        except Exception as e:
+                            logger.warning(f"Failed to save MMM results to MinIO: {e}")
+                            # Don't fail the entire request if MinIO save fails
+                        
+                        # Add to results
+                        combination_results.append({
+                            "combination_id": combination,
+                            "file_key": target_file_key,
+                            "total_records": variable_data.get("original_data_shape", [0, 0])[0],
+                            "model_results": model_results
+                        })
+                        
+                        # Update progress - combination completed
+                        training_progress[run_id]["completed_combinations"] += 1
+                        
+                    except Exception as e:
+                        logger.error(f"Error training MMM models for combination {combination}: {e}")
+                        continue
+                        
+                else:
+                    logger.warning(f"Could not find file for combination: {combination}")
+                    continue
+                    
+            except Exception as e:
+                logger.error(f"Error processing combination {combination}: {e}")
+                continue
+        
+        # Mark training as completed
+        training_progress[run_id]["status"] = "completed"
+        training_progress[run_id]["percentage"] = 100
+        
+        # Prepare summary
+        summary = {
+            "run_id": run_id,
+            "total_models_saved": total_saved,
+            "total_combinations_processed": len(combination_results),
+            "variable_transformations_applied": len(variable_configs),
+            "business_constraints_applied": len(custom_model_configs),
+            "transformation_types_used": list(set(config.get("type", "none") for config in variable_configs.values())),
+            "best_model_by_mape": {},
+            "best_model_by_r2": {}
+        }
+        
+        # Find best models
+        for combo_result in combination_results:
+            combo_id = combo_result["combination_id"]
+            best_mape_model = None
+            best_r2_model = None
+            best_mape = float('inf')
+            best_r2 = -float('inf')
+            
+            for model_result in combo_result["model_results"]:
+                if model_result["mape_test"] < best_mape:
+                    best_mape = model_result["mape_test"]
+                    best_mape_model = model_result["model_name"]
+                
+                if model_result["r2_test"] > best_r2:
+                    best_r2 = model_result["r2_test"]
+                    best_r2_model = model_result["model_name"]
+            
+            if best_mape_model:
+                summary["best_model_by_mape"][combo_id] = {
+                    "model": best_mape_model,
+                    "mape_test": best_mape
+                }
+            
+            if best_r2_model:
+                summary["best_model_by_r2"][combo_id] = {
+                    "model": best_r2_model,
+                    "r2_test": best_r2
+                }
+        
+        logger.info(f"MMM training completed successfully: {len(combination_results)} combinations processed, {total_saved} models saved")
+        
+        return {
+            "scope_id": f"scope_{scope_number}",
+            "set_name": f"Scope_{scope_number}",
+            "x_variables": x_variables,
+            "y_variable": y_variable,
+            "standardization": "mmm_per_variable",
+            "k_folds": k_folds,
+            "total_combinations": len(combination_results),
+            "combination_results": combination_results,
+            "summary": summary
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in MMM model training: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.post("/mmm-stack-train-models", response_model=MarketingModelTrainingResponse, tags=["MMM Stack Training"])
+async def train_mmm_stack_models(request: dict):
+    """
+    Train Marketing Mix Models on stack/clustered data with per-variable transformations.
+    
+    This endpoint combines the clustering approach with sophisticated MMM transformations:
+    1. Uses split clustered data from prepare_stack_model_data
+    2. Applies MMM transformations to each combination within clusters
+    3. Creates interaction terms between combinations and variables
+    4. Trains models on transformed data with parameter combinations
+    
+    Request body should include:
+    - scope_number: Scope number for file search
+    - combinations: List of combination strings
+    - pool_by_identifiers: List of identifiers for pooling (e.g., ['Channel', 'Brand'])
+    - x_variables: List of feature variables
+    - y_variable: Target variable
+    - variable_configs: Per-variable transformation configurations
+    - models_to_run: List of model names to train
+    - n_clusters: Number of clusters for K-means (optional)
+    - clustering_columns: List of columns to use for clustering (subset of x_variables + y_variable, optional)
+    - apply_interaction_terms: Whether to create interaction terms (default: True)
+    - numerical_columns_for_interaction: Columns for interaction terms (optional)
+    - variable_constraints: Business constraints (optional)
+    """
+    try:
+        # Generate unique run ID or use provided one
+        run_id = request.get('run_id') or str(uuid.uuid4())
+        logger.info(f"Starting MMM stack model training with run_id: {run_id}")
+        
+        # Extract parameters from request
+        scope_number = request.get('scope_number')
+        combinations = request.get('combinations', [])
+        pool_by_identifiers = request.get('pool_by_identifiers', [])
+        x_variables = request.get('x_variables', [])
+        y_variable = request.get('y_variable')
+        variable_configs = request.get('variable_configs', {})
+        models_to_run = request.get('models_to_run', [])
+        n_clusters = request.get('n_clusters')
+        clustering_columns = request.get('clustering_columns')
+        apply_interaction_terms = request.get('apply_interaction_terms', True)
+        numerical_columns_for_interaction = request.get('numerical_columns_for_interaction', [])
+        variable_constraints = request.get('variable_constraints', [])
+        test_size = request.get('test_size', 0.2)
+        price_column = request.get('price_column')
+        
+        # Validation
+        if not scope_number or not combinations or not pool_by_identifiers or not x_variables or not y_variable:
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required parameters: scope_number, combinations, pool_by_identifiers, x_variables, or y_variable"
+            )
+        
+        if not variable_configs:
+            raise HTTPException(
+                status_code=400,
+                detail="variable_configs is required for MMM stack training"
+            )
+        
+        if not models_to_run:
+            raise HTTPException(
+                status_code=400,
+                detail="models_to_run is required for MMM stack training"
+            )
+        
+        # Convert to lowercase for consistency
+        x_variables_lower = [var.lower() for var in x_variables]
+        y_variable_lower = y_variable.lower()
+        pool_by_identifiers_lower = [id.lower() for id in pool_by_identifiers]
+        
+        # Get MinIO client and bucket
+        minio_client = get_minio_client()
+        bucket_name = "trinity-data"
+        
+        # Initialize MMM Stack Data Processor
+        from .mmm_stack_training import MMMStackModelDataProcessor
+        processor = MMMStackModelDataProcessor()
+        
+        # Step 1: Prepare stack model data (get split clustered data)
+        logger.info("Preparing stack model data...")
+        stack_data_result = await processor.prepare_stack_model_data(
+            scope_number=scope_number,
+            combinations=combinations,
+            pool_by_identifiers=pool_by_identifiers,
+            x_variables=x_variables,
+            y_variable=y_variable,
+            minio_client=minio_client,
+            bucket_name=bucket_name,
+            n_clusters=n_clusters,
+            clustering_columns=clustering_columns
+        )
+        
+        if stack_data_result['status'] != 'success':
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to prepare stack model data: {stack_data_result.get('error', 'Unknown error')}"
+            )
+        
+        split_clustered_data = stack_data_result['split_clustered_data']
+        logger.info(f"Successfully prepared {len(split_clustered_data)} split clusters")
+        
+        # Step 2: Train MMM models on split clustered data
+        logger.info("Starting MMM model training on split clustered data...")
+        training_start_time = datetime.now()
+        
+        training_result = await processor.train_mmm_models_for_stack_data(
+            split_clustered_data=split_clustered_data,
+            x_variables=x_variables,
+            y_variable=y_variable,
+            variable_configs=variable_configs,
+            models_to_run=models_to_run,
+            apply_interaction_terms=apply_interaction_terms,
+            numerical_columns_for_interaction=numerical_columns_for_interaction,
+            test_size=test_size,
+            price_column=price_column,
+            variable_constraints=variable_constraints
+        )
+        
+        training_end_time = datetime.now()
+        execution_time = (training_end_time - training_start_time).total_seconds()
+        
+        if training_result['status'] != 'success':
+            raise HTTPException(
+                status_code=500,
+                detail=f"MMM stack model training failed: {training_result.get('error', 'Unknown error')}"
+            )
+        
+        # Process results
+        total_models_trained = training_result['total_models_trained']
+        split_cluster_results = training_result['split_cluster_results']
+        
+        # Find best models across all clusters
+        best_models = {}
+        overall_best_mape = float('inf')
+        overall_best_model = None
+        overall_best_cluster = None
+        
+        for cluster_key, cluster_result in split_cluster_results.items():
+            if cluster_result['status'] == 'success' and cluster_result['model_results']:
+                # Find best model in this cluster
+                cluster_best_mape = float('inf')
+                cluster_best_model = None
+                
+                for model_result in cluster_result['model_results']:
+                    if model_result['mape_test'] < cluster_best_mape:
+                        cluster_best_mape = model_result['mape_test']
+                        cluster_best_model = model_result['model_name']
+                
+                best_models[cluster_key] = {
+                    'best_model': cluster_best_model,
+                    'best_mape': cluster_best_mape,
+                    'models_trained': cluster_result['models_trained']
+                }
+                
+                # Track overall best
+                if cluster_best_mape < overall_best_mape:
+                    overall_best_mape = cluster_best_mape
+                    overall_best_model = cluster_best_model
+                    overall_best_cluster = cluster_key
+        
+        # Create summary
+        summary = {
+            'total_split_clusters': training_result['total_split_clusters'],
+            'total_parameter_combinations': training_result['total_parameter_combinations'],
+            'total_models_trained': total_models_trained,
+            'overall_best_model': overall_best_model,
+            'overall_best_mape': overall_best_mape,
+            'overall_best_cluster': overall_best_cluster,
+            'cluster_summaries': best_models,
+            'variable_configs': variable_configs,
+            'models_tested': models_to_run,
+            'execution_time_seconds': execution_time
+        }
+        
+        # Save results to MongoDB (optional)
+        try:
+            from .mongodb_saver import save_marketing_model_results
+            save_marketing_model_results(
+                run_id=run_id,
+                scope_number=scope_number,
+                training_type="mmm_stack",
+                results=training_result,
+                summary=summary
+            )
+            logger.info(f"Saved MMM stack training results to MongoDB with run_id: {run_id}")
+        except Exception as e:
+            logger.warning(f"Failed to save results to MongoDB: {e}")
+        
+        logger.info(f"Completed MMM stack model training: {total_models_trained} models trained across {training_result['total_split_clusters']} split clusters")
+        
+        return MarketingModelTrainingResponse(
+            training_id=run_id,
+            status="success",
+            models_trained=total_models_trained,
+            summary=summary,
+            best_models=best_models,
+            execution_time_seconds=execution_time
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in MMM stack model training: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/get-column-classifier-metadata")
+async def get_column_classifier_metadata():
+    """
+    Get column classifier metadata for the hardcoded project ID.
+    This endpoint fetches the column classifier configuration from MongoDB.
+    """
+    try:
+        from .mongodb_saver import get_column_classifier_config_from_mongo
+        
+        # Hardcoded _id for testing
+        hardcoded_id = "Quant_Matrix_AI_Schema/marketing-mix/New Marketing Mix Modeling Project"
+        
+        # Fetch the metadata
+        metadata = await get_column_classifier_config_from_mongo(hardcoded_id)
+        
+        if metadata:
+            logger.info(f"✅ Successfully retrieved column classifier metadata for: {hardcoded_id}")
+            return {
+                "status": "success",
+                "message": "Column classifier metadata retrieved successfully",
+                "project_id": hardcoded_id,
+                "metadata": metadata
+            }
+        else:
+            logger.warning(f"⚠️ No column classifier metadata found for: {hardcoded_id}")
+            return {
+                "status": "not_found",
+                "message": f"No column classifier metadata found for project: {hardcoded_id}",
+                "project_id": hardcoded_id,
+                "metadata": None
+            }
+            
+    except Exception as e:
+        logger.error(f"❌ Error fetching column classifier metadata: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error fetching column classifier metadata: {str(e)}"
+        )
+
 

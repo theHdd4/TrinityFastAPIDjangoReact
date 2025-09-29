@@ -124,6 +124,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
           return 'minmax';
         case 'standardize':
           return 'standard';
+        case 'media':
+          return 'media'; // MMM media transformation pipeline
         case 'none':
         case 'log':
         case 'sqrt':
@@ -183,32 +185,79 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
       });
     };
 
-    // Construct the request payload for the direct endpoint
-    const requestPayload = {
-      run_id: tempRunId, // Send the run_id for progress tracking
-      scope_number: finalData.selectedScope, // Send the scope number directly
-      combinations: finalData.selectedCombinations, // Send the combination strings directly
-      x_variables: allXVariables,
-      y_variable: finalData.yVariable,
-      standardization: standardization,
-      custom_model_configs: null, // Can be enhanced later
-      // Individual modeling fields
-      individual_modeling: finalData.individualModeling ?? false,
-      individual_k_folds: finalData.individualKFolds || 5,
-      individual_test_size: finalData.individualTestSize || 0.2,
-      individual_models_to_run: finalData.individualSelectedModels || [],
-      individual_custom_model_configs: addConstraintsToModelConfigs(finalData.individualModelConfigs || []),
-      // Stack modeling fields
-      stack_modeling: finalData.stackModeling || false,
-      stack_k_folds: finalData.stackKFolds || 5,
-      stack_test_size: finalData.stackTestSize || 0.2,
-      stack_models_to_run: finalData.stackSelectedModels || [],
-      stack_custom_model_configs: addConstraintsToModelConfigs(finalData.stackModelConfigs || []),
-      pool_by_identifiers: (finalData.poolByIdentifiers || []).map(id => id.toLowerCase()),
-      numerical_columns_for_clustering: (finalData.numericalColumnsForClustering || []).map(col => col.toLowerCase()),
-      apply_interaction_terms: finalData.applyInteractionTerms || true,
-      numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map(col => col.toLowerCase())
-    };
+    // Determine endpoint and payload based on model type
+    const isMMM = finalData?.modelType === 'mmm';
+    const endpoint = isMMM ? '/mmm-train-models' : '/train-models-direct';
+    
+    let requestPayload;
+    
+    if (isMMM) {
+      // Construct variable_configs from transformations for MMM
+      const variableConfigs: { [key: string]: any } = {};
+      allXVariables.forEach((variable, index) => {
+        const transformation = finalData.transformations?.[index] || 'none';
+        if (transformation === 'media') {
+          variableConfigs[variable] = {
+            type: 'media'
+            // Parameters are hardcoded in backend as requested
+          };
+        } else if (transformation === 'standardize') {
+          variableConfigs[variable] = {
+            type: 'standard'
+          };
+        } else if (transformation === 'normalize') {
+          variableConfigs[variable] = {
+            type: 'minmax'
+          };
+        } else {
+          variableConfigs[variable] = {
+            type: 'none'
+          };
+        }
+      });
+      
+      // MMM payload
+      requestPayload = {
+        run_id: tempRunId,
+        scope_number: finalData.selectedScope,
+        combinations: finalData.selectedCombinations,
+        x_variables: allXVariables,
+        y_variable: finalData.yVariable,
+        variable_configs: variableConfigs,
+        models_to_run: finalData.individualSelectedModels || [], // Use same models as individual
+        custom_model_configs: addConstraintsToModelConfigs(finalData.individualModelConfigs || []), // Use same constraint approach as general models
+        k_folds: finalData.individualKFolds || 5, // Use same k_folds as individual
+        test_size: finalData.individualTestSize || 0.2, // Use same test_size as individual
+        price_column: finalData.priceColumn
+      };
+    } else {
+      // General models payload (existing logic)
+      requestPayload = {
+        run_id: tempRunId, // Send the run_id for progress tracking
+        scope_number: finalData.selectedScope, // Send the scope number directly
+        combinations: finalData.selectedCombinations, // Send the combination strings directly
+        x_variables: allXVariables,
+        y_variable: finalData.yVariable,
+        standardization: standardization,
+        custom_model_configs: null, // Can be enhanced later
+        // Individual modeling fields
+        individual_modeling: finalData.individualModeling ?? false,
+        individual_k_folds: finalData.individualKFolds || 5,
+        individual_test_size: finalData.individualTestSize || 0.2,
+        individual_models_to_run: finalData.individualSelectedModels || [],
+        individual_custom_model_configs: addConstraintsToModelConfigs(finalData.individualModelConfigs || []),
+        // Stack modeling fields
+        stack_modeling: finalData.stackModeling || false,
+        stack_k_folds: finalData.stackKFolds || 5,
+        stack_test_size: finalData.stackTestSize || 0.2,
+        stack_models_to_run: finalData.stackSelectedModels || [],
+        stack_custom_model_configs: addConstraintsToModelConfigs(finalData.stackModelConfigs || []),
+        pool_by_identifiers: (finalData.poolByIdentifiers || []).map(id => id.toLowerCase()),
+        numerical_columns_for_clustering: (finalData.numericalColumnsForClustering || []).map(col => col.toLowerCase()),
+        apply_interaction_terms: finalData.applyInteractionTerms || true,
+        numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map(col => col.toLowerCase())
+      };
+    }
 
  
 
@@ -250,7 +299,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         }
       }, 1000); // Poll every second
       
-      const response = await fetch(`${BUILD_MODEL_API}/train-models-direct`, {
+      const response = await fetch(`${BUILD_MODEL_API}${endpoint}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -852,6 +901,16 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
               Modeling
             </h3>
             <div className="flex items-center gap-2">
+              {/* Constraint Settings Toggle */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConstraintSettingsOpen(!constraintSettingsOpen)}
+                className="flex items-center gap-2"
+              >
+                <Settings2 className="w-4 h-4" />
+                Constraints
+              </Button>
               <Button
                 variant="ghost"
                 size="sm"
@@ -864,99 +923,106 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                   <ChevronRight className="w-4 h-4" />
                 )}
               </Button>
-              {/* Constraint Settings Toggle */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setConstraintSettingsOpen(!constraintSettingsOpen)}
-                className="flex items-center gap-2"
-              >
-                <Settings2 className="w-4 h-4" />
-                Constraints
-              </Button>
             </div>
           </div>
         </div>
         {modelingSectionExpanded && (
           <div className="p-6 space-y-6">
             {/* Header row for Y & X variable controls */}
-          <div className="flex items-center mb-2">
-            <label className="text-sm font-medium text-muted-foreground w-3/16">Select Y-Variable</label>
-            <label className="text-sm font-medium text-muted-foreground w-3/16 pl-4">Select X-Variable</label>
-            <div className="flex-1" />
-            <Button size="sm" className="bg-orange-300 text-white hover:bg-orange-400" onClick={addXVariable}>
-              <Plus className="w-4 h-4 mr-2" />
-              Add Variable
-            </Button>
+          <div className="flex items-center gap-4 mb-2">
+            <div className="flex-1">
+              <label className="text-sm font-medium text-muted-foreground text-right">Select Y-Variable</label>
+            </div>
+            <div className="flex-1">
+              <label className="text-sm font-medium text-muted-foreground text-right">Select X-Variable</label>
+            </div>
+            <div className="flex-1">
+              {/* Empty space for standardization column */}
+            </div>
+            <div className="flex-shrink-0">
+              <Button size="sm" className="bg-orange-300 text-white hover:bg-orange-400" onClick={addXVariable}>
+                <Plus className="w-4 h-4 mr-2" />
+                Add Variable
+              </Button>
+            </div>
           </div>
 
           {/* Combined Y & X-Variables Selection list */}
           <div className="space-y-3">
             {(finalData?.xVariables || []).map((variable, index) => (
-              <div key={`x-variable-${index}`} className={`grid grid-cols-12 gap-4 items-center p-3 rounded-lg shadow-sm ${index % 2 === 0 ? 'bg-white border-l-4 border-indigo-300' : 'bg-gray-50 border-l-4 border-teal-300'}`}>
+              <div key={`x-variable-${index}`} className={`flex items-center gap-4 p-3 rounded-lg shadow-sm ${index % 2 === 0 ? 'bg-white border-l-4 border-indigo-300' : 'bg-gray-50 border-l-4 border-teal-300'}`}>
                 {/* Y-variable column only for first row */}
                 {index === 0 ? (
-                  <div className="col-span-3 flex items-center">
-                    <SingleSelectDropdown
-                      label=""
-                      placeholder={isLoadingColumns ? "Loading..." : "Select Y-Variable"}
-                      value={finalData?.yVariable || ''}
-                      onValueChange={(value) => handleDataChange({ yVariable: value })}
-                      options={isLoadingColumns ? [] : numericalColumns
-                        .filter(col => {
-                          // Exclude any X-variables that are selected (either as strings or arrays)
-                          const isSelectedAsXVariable = finalData?.xVariables?.some(xVar => 
-                            Array.isArray(xVar) ? xVar.includes(col) : xVar === col
-                          );
-                          return !isSelectedAsXVariable;
-                        })
-                        .map(col => ({ value: col, label: col }))
-                      }
-                      disabled={isLoadingColumns}
-                      className="w-full"
-                    />
+                  <div className="flex-1 flex items-center">
+                    <div className="w-full self-center">
+                      <SingleSelectDropdown
+                        label=""
+                        placeholder={isLoadingColumns ? "Loading..." : "Select Y-Variable"}
+                        value={finalData?.yVariable || ''}
+                        onValueChange={(value) => handleDataChange({ yVariable: value })}
+                        options={isLoadingColumns ? [] : numericalColumns
+                          .filter(col => {
+                            // Exclude any X-variables that are selected (either as strings or arrays)
+                            const isSelectedAsXVariable = finalData?.xVariables?.some(xVar => 
+                              Array.isArray(xVar) ? xVar.includes(col) : xVar === col
+                            );
+                            return !isSelectedAsXVariable;
+                          })
+                          .map(col => ({ value: col, label: col }))
+                        }
+                        disabled={isLoadingColumns}
+                        className="w-full space-y-0"
+                      />
+                    </div>
                   </div>
                 ) : (
-                  <div className="col-span-3" />
+                  <div className="flex-1" />
                 )}
 
                 {/* X-variable select */}
-                <div className="col-span-3 flex items-center">
-                  <MultiSelectDropdown
-                    label=""
-                    placeholder={isLoadingColumns ? "Loading..." : "Select X-Variables"}
-                    selectedValues={Array.isArray(variable) ? variable : variable ? [variable] : []}
-                    onSelectionChange={(selectedValues) => updateXVariable(index, selectedValues)}
-                    options={isLoadingColumns ? [] : numericalColumns
-                      .filter(col => col !== finalData?.yVariable)
-                      .map(col => ({ value: col, label: col }))
-                    }
-                    showSelectAll={true}
-                    showTrigger={true}
-                    disabled={isLoadingColumns}
-                    className="w-full"
-                  />
+                <div className="flex-1 flex items-center">
+                  <div className="w-full self-center">
+                    <MultiSelectDropdown
+                      label=""
+                      placeholder={isLoadingColumns ? "Loading..." : "Select X-Variables"}
+                      selectedValues={Array.isArray(variable) ? variable : variable ? [variable] : []}
+                      onSelectionChange={(selectedValues) => updateXVariable(index, selectedValues)}
+                      options={isLoadingColumns ? [] : numericalColumns
+                        .filter(col => col !== finalData?.yVariable)
+                        .map(col => ({ value: col, label: col }))
+                      }
+                      showSelectAll={true}
+                      showTrigger={true}
+                      disabled={isLoadingColumns}
+                      className="w-full"
+                      triggerClassName="w-full max-w-none h-10"
+                    />
+                  </div>
                 </div>
 
                 {/* Standardization select */}
-                <div className="col-span-3 flex items-center">
-                  <SingleSelectDropdown
-                    label=""
-                    placeholder="Standardization"
-                    value={finalData?.transformations?.[index] || ''}
-                    onValueChange={(val) => updateTransformation(index, val)}
-                    options={[
-                      { value: "none", label: "None" },
-                      { value: "normalize", label: "Normalize (Min-Max)" },
-                      { value: "standardize", label: "Standardize (Z-Score)" }
-                    ]}
-                    className="w-full"
-                  />
+                <div className="flex-1 flex items-center">
+                  <div className="w-full self-center">
+                    <SingleSelectDropdown
+                      label=""
+                      placeholder="Transformation"
+                      value={finalData?.transformations?.[index] || ''}
+                      onValueChange={(val) => updateTransformation(index, val)}
+                      options={[
+                        { value: "none", label: "None" },
+                        { value: "normalize", label: "Normalize (Min-Max)" },
+                        { value: "standardize", label: "Standardize (Z-Score)" },
+                        ...(finalData?.modelType === 'mmm' ? [
+                          { value: "media", label: "Media (Adstock → Standard → Logistic → MinMax)" }
+                        ] : [])
+                      ]}
+                      className="w-full space-y-0"
+                    />
+                  </div>
                 </div>
 
-
                 {/* Remove button */}
-                <div className="col-span-1">
+                <div className="flex-shrink-0">
                   <Button size="sm" variant="ghost" onClick={() => removeXVariable(index)}>
                     <X className="w-4 h-4" />
                   </Button>

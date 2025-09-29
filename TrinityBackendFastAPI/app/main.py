@@ -22,7 +22,7 @@ def _default_cors_origins() -> List[str]:
 
     host_ip = os.getenv("HOST_IP", "").strip()
     defaults = [
-        "http://10.95.49.220:8080",
+        "http://10.82.63.220:8080",
         "http://10.2.4.48:8080",
         "http://127.0.0.1:8080",
         "http://10.2.1.207:8080",
@@ -56,7 +56,7 @@ app = FastAPI()
 
 origins = os.getenv(
     "FASTAPI_CORS_ORIGINS",
-    "http://10.95.49.220:8080,http://10.2.1.207:8080,http://127.0.0.1:8080,http://172.22.64.1:8080,http://10.2.2.12:8080,http://172.22.64.1:8080,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com,http://10.2.65:8080"
+    "http://10.82.63.220:8080,http://10.2.1.207:8080,http://127.0.0.1:8080,http://172.22.64.1:8080,http://10.2.2.12:8080,http://172.22.64.1:8080,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com,http://10.2.65:8080"
 )
 allowed_origins = [o.strip() for o in origins.split(",") if o.strip()]
 
