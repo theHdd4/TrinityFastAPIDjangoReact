@@ -95,12 +95,12 @@ class MMMTransformationEngine:
             if config.get("type") == "media":
                 # Auto-generate default parameter ranges based on data frequency
                 if data_frequency == "weekly":
-                    adstock_decay = config.get("adstock_decay", [0.70, 0.75, 0.80])  # Weekly decay values
+                    adstock_decay = config.get("adstock_decay", [0.70])  # Weekly decay values
                 else:  # monthly
-                    adstock_decay = config.get("adstock_decay", [0.4, 0.5, 0.6])  # Monthly decay values
+                    adstock_decay = config.get("adstock_decay", [0.4])  # Monthly decay values
                 
-                logistic_growth = config.get("logistic_growth", [1.5, 2.0, 2.5])  # Default range
-                logistic_midpoint = config.get("logistic_midpoint", [-0.5, 0.0, 0.5])  # Default range
+                logistic_growth = config.get("logistic_growth", [3.5])  # Default range
+                logistic_midpoint = config.get("logistic_midpoint", [0.0])  # Default range
                 logistic_carryover = config.get("logistic_carryover", [0.0])  # Single value since it's not used
                 
                 # Ensure parameters are lists
@@ -545,6 +545,151 @@ class MMMModelTrainer:
     def __init__(self):
         self.transformation_engine = MMMTransformationEngine()
     
+    def calculate_roi_for_features(
+        self,
+        roi_config: Optional[Dict[str, Any]],
+        x_variables: List[str],
+        unstandardized_coefficients: Dict[str, float],
+        transformed_df: pd.DataFrame,
+        X_original: pd.DataFrame,
+        full_original_df: pd.DataFrame,  # Add full original dataframe for price column
+        combination_name: str,
+        price_column: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Calculate ROI for selected features using the formula:
+        roi_for_feature_i = (sigma_j(beta * transformed(xij)) / sigma_j(cprp * xij)) * avg_price_column
+        
+        Args:
+            roi_config: ROI configuration containing selected features and CPRP values
+            x_variables: List of feature variables
+            unstandardized_coefficients: Model coefficients
+            transformed_df: Transformed data for beta * transformed(xij) calculation
+            X_original: Original data for x_variables only (for cprp * xij calculation)
+            full_original_df: Full original dataframe (for price column access)
+            combination_name: Name of the combination being processed
+            price_column: Price column name for average calculation
+            
+        Returns:
+            Dict containing ROI calculations for each selected feature
+        """
+        roi_results = {}
+        
+        if not roi_config or not roi_config.get('enabled', False):
+            return roi_results
+        
+        features_config = roi_config.get('features', {})
+        per_combination_cprp = roi_config.get('perCombinationCPRP', False)
+        combination_cprp_values = roi_config.get('combinationCPRPValues', {})
+        
+        # Find matching combination name (case-insensitive and partial matching)
+        matched_combination_name = None
+        if per_combination_cprp and combination_cprp_values:
+            # Try exact match first
+            if combination_name in combination_cprp_values:
+                matched_combination_name = combination_name
+            else:
+                # Try case-insensitive match
+                for config_combination in combination_cprp_values.keys():
+                    if config_combination.lower() == combination_name.lower():
+                        matched_combination_name = config_combination
+                        break
+                
+                # If still no match, try partial matching
+                if not matched_combination_name:
+                    for config_combination in combination_cprp_values.keys():
+                        if (combination_name.lower() in config_combination.lower() or 
+                            config_combination.lower() in combination_name.lower()):
+                            matched_combination_name = config_combination
+                            logger.info(f"Partial match found: '{combination_name}' -> '{matched_combination_name}'")
+                            break
+        
+        # Log combination matching results
+        if per_combination_cprp:
+            if matched_combination_name:
+                logger.info(f"✓ Combination match found: '{combination_name}' -> '{matched_combination_name}'")
+            else:
+                logger.warning(f"⚠ No combination match found for '{combination_name}'")
+                logger.warning(f"Available combinations: {list(combination_cprp_values.keys())}")
+                logger.warning(f"Will use global CPRP values instead")
+        
+        # Get average price column value from full original dataframe
+        avg_price_column = 1.0  # Default to 1 if no price column
+        if price_column and price_column.lower() in full_original_df.columns:
+            avg_price_column = float(full_original_df[price_column.lower()].mean())
+            logger.info(f"Price column '{price_column}' found. Average value: {avg_price_column}")
+        else:
+            logger.warning(f"Price column '{price_column}' not found in dataframe columns: {list(full_original_df.columns)}")
+            logger.warning(f"Using default avg_price_column = {avg_price_column}")
+        
+        # Calculate ROI for each selected feature
+        for feature_name, feature_config in features_config.items():
+            if feature_config.get('type') != 'CPRP':
+                continue  # Skip non-CPRP features
+                
+            # Get CPRP value for this combination
+            if per_combination_cprp and matched_combination_name:
+                # Use matched combination name to get CPRP values
+                combination_values = combination_cprp_values[matched_combination_name]
+                cprp_value = combination_values.get(feature_name, 0)
+                logger.info(f"Using per-combination CPRP for '{feature_name}' in '{matched_combination_name}': {cprp_value}")
+            else:
+                # Use global CPRP value (either perCombinationCPRP is false or no match found)
+                cprp_value = feature_config.get('value', 0)
+                if per_combination_cprp:
+                    logger.info(f"Using global CPRP for '{feature_name}' (no combination match): {cprp_value}")
+                else:
+                    logger.info(f"Using global CPRP for '{feature_name}': {cprp_value}")
+            
+            # Check if feature exists in variables
+            feature_lower = feature_name.lower()
+            if feature_lower not in x_variables:
+                logger.warning(f"ROI feature {feature_name} not found in x_variables: {x_variables}")
+                continue
+            
+            # Get coefficient for this feature
+            beta_key = f"Beta_{feature_lower}"
+            beta = unstandardized_coefficients.get(beta_key, 0)
+            
+            # Calculate sigma_j(beta * transformed(xij)) - sum of beta * transformed values
+            if feature_lower in transformed_df.columns:
+                transformed_values = transformed_df[feature_lower].values
+                beta_transformed_sum = np.sum(beta * transformed_values)
+            else:
+                logger.warning(f"Feature {feature_lower} not found in transformed_df")
+                beta_transformed_sum = 0
+            
+            # Calculate sigma_j(cprp * xij) - sum of cprp * original values
+            if feature_lower in X_original.columns:
+                original_values = X_original[feature_lower].values
+                cprp_original_sum = np.sum(cprp_value * original_values)
+            else:
+                logger.warning(f"Feature {feature_lower} not found in X_original")
+                cprp_original_sum = 0
+            
+            # Calculate ROI using the formula
+            if cprp_original_sum != 0:
+                roi = (beta_transformed_sum / cprp_original_sum) * avg_price_column
+            else:
+                roi = 0
+                logger.warning(f"CPRP original sum is 0 for feature {feature_name}, ROI set to 0")
+            
+            roi_results[feature_name] = {
+                'cprp_value': float(cprp_value),
+                'beta_coefficient': float(beta),
+                'beta_transformed_sum': float(beta_transformed_sum),
+                'cprp_original_sum': float(cprp_original_sum),
+                'avg_price_column': float(avg_price_column),
+                'roi': float(roi)
+            }
+            
+            logger.info(f"ROI for {feature_name}: beta={beta:.6f}, cprp={cprp_value:.6f}, "
+                       f"beta_transformed_sum={beta_transformed_sum:.6f}, "
+                       f"cprp_original_sum={cprp_original_sum:.6f}, "
+                       f"avg_price={avg_price_column:.6f}, roi={roi:.6f}")
+        
+        return roi_results
+
     async def train_mmm_models_for_combination(
         self,
         file_key: str,
@@ -556,7 +701,9 @@ class MMMModelTrainer:
         k_folds: int = 5,
         test_size: float = 0.2,
         bucket_name: str = None,
-        price_column: Optional[str] = None
+        price_column: Optional[str] = None,
+        roi_config: Optional[Dict[str, Any]] = None,
+        combination_name: Optional[str] = None
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         
         logger.info(f"Starting MMM model training for file: {file_key}")
@@ -938,6 +1085,49 @@ class MMMModelTrainer:
                     
                     logger.info(f"Extracted actual_params for {model_name}: {actual_params}")
                     
+                    # Calculate ROI for selected features if ROI config is provided
+                    roi_results = {}
+                    if roi_config and combination_name:
+                        # Use the combination name passed from routes
+                        logger.info(f"Calculating ROI for combination: {combination_name}")
+                        logger.info(f"Price column passed to ROI calculation: '{price_column}'")
+                        logger.info(f"Full original dataframe columns: {list(df.columns)}")
+                        logger.info(f"Full original dataframe shape: {df.shape}")
+                        
+                        roi_results = self.calculate_roi_for_features(
+                            roi_config=roi_config,
+                            x_variables=x_variables_lower,
+                            unstandardized_coefficients=unstandardized_coefficients,
+                            transformed_df=transformed_df,
+                            X_original=X_original,
+                            full_original_df=df,  # Pass the full original dataframe
+                            combination_name=combination_name,
+                            price_column=price_column
+                        )
+                        
+                        logger.info(f"ROI calculation completed for {model_name} in combination {combination_name}: {len(roi_results)} features processed")
+                        
+                        # Log ROI results for verification
+                        if roi_results:
+                            logger.info("=" * 80)
+                            logger.info(f"🎯 ROI RESULTS FOR {model_name} - {combination_name}")
+                            logger.info("=" * 80)
+                            for feature_name, roi_data in roi_results.items():
+                                logger.info(f"📊 {feature_name}:")
+                                logger.info(f"   CPRP Value: {roi_data['cprp_value']:.6f}")
+                                logger.info(f"   Beta Coefficient: {roi_data['beta_coefficient']:.6f}")
+                                logger.info(f"   Beta Transformed Sum: {roi_data['beta_transformed_sum']:.6f}")
+                                logger.info(f"   CPRP Original Sum: {roi_data['cprp_original_sum']:.6f}")
+                                logger.info(f"   Avg Price Column: {roi_data['avg_price_column']:.6f}")
+                                logger.info(f"   🎯 FINAL ROI: {roi_data['roi']:.6f}")
+                                logger.info("-" * 40)
+                            logger.info("=" * 80)
+                        else:
+                            logger.warning(f"⚠️ No ROI results generated for {model_name} in {combination_name}")
+                            
+                    elif roi_config:
+                        logger.warning("ROI config provided but combination_name is missing. Skipping ROI calculation.")
+                    
                     # Store model result with combination info
                     model_result = {
                         "model_name": model_name,
@@ -958,6 +1148,7 @@ class MMMModelTrainer:
                         "price_elasticity": price_elasticity,
                         "elasticities": elasticities,
                         "contributions": contributions,
+                        "roi_results": roi_results,  # Add ROI results
                         "transformation_metadata": transformation_metadata,
                         "variable_configs": combo_config
                     }
@@ -1005,3 +1196,4 @@ class MMMModelTrainer:
 
 # Global instance
 mmm_trainer = MMMModelTrainer()
+    

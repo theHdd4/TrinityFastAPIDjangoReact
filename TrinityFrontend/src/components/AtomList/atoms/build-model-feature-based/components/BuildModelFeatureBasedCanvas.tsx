@@ -7,12 +7,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Plus, Play, X, Settings2, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Info } from 'lucide-react';
+import { Plus, Play, X, Settings2, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Info, DollarSign } from 'lucide-react';
 import { BuildModelFeatureBasedData, VariableTransformation, ModelConfig } from '../BuildModelFeatureBasedAtom';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { BUILD_MODEL_API } from '@/lib/api';
 import { MultiSelectDropdown } from '@/templates/dropdown/multiselect';
 import { SingleSelectDropdown } from '@/templates/dropdown/single-select';
+import ROIConfiguration, { ROIConfig } from './ROIConfiguration';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -46,6 +47,14 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
   const [modelingSectionExpanded, setModelingSectionExpanded] = useState(true);
   const [minimizedCombinations, setMinimizedCombinations] = useState<Set<number>>(new Set());
   const [constraintSettingsOpen, setConstraintSettingsOpen] = useState(false);
+  const [roiSettingsOpen, setRoiSettingsOpen] = useState(false);
+  const [roiConfig, setRoiConfig] = useState<ROIConfig>({
+    enabled: true,  // Always enabled
+    features: {},
+    priceColumn: '',
+    perCombinationCPRP: false,
+    combinationCPRPValues: {}
+  });
   
   // Model Performance Metrics sorting and filtering state - per combination
   const [performanceSortColumn, setPerformanceSortColumn] = useState<{ [comboIndex: number]: string }>({});
@@ -259,7 +268,9 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         numerical_columns_for_clustering: (finalData.numericalColumnsForClustering || []).map((col) => col.toLowerCase()),
         apply_interaction_terms: finalData.applyInteractionTerms || true,
         numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map((col) => col.toLowerCase()),
-        price_column: finalData.priceColumn?.toLowerCase()
+        price_column: finalData.priceColumn?.toLowerCase(),
+        // ROI configuration
+        roi_config: roiConfig
       };
     } else {
       // General models payload (existing logic)
@@ -286,7 +297,9 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         pool_by_identifiers: (finalData.poolByIdentifiers || []).map((id) => id.toLowerCase()),
         numerical_columns_for_clustering: (finalData.numericalColumnsForClustering || []).map((col) => col.toLowerCase()),
         apply_interaction_terms: finalData.applyInteractionTerms || true,
-        numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map(col => col.toLowerCase())
+        numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map(col => col.toLowerCase()),
+        // ROI configuration
+        roi_config: roiConfig
       };
     }
 
@@ -329,6 +342,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
           clearInterval(progressPollingInterval);
         }
       }, 1000); // Poll every second
+      
       
       const response = await fetch(`${BUILD_MODEL_API}${endpoint}`, {
         method: 'POST',
@@ -545,10 +559,12 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             // Use the numerical_columns directly from the backend response
             const numericalCols = data.numerical_columns || [];
             
+            
             if (numericalCols.length > 0) {
             setNumericalColumns(numericalCols);
             } else {
               // Fallback to default columns if no numerical columns found
+              console.log('⚠️ No numerical columns found, using fallback');
               setNumericalColumns(['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6', 'Feature 7', 'Feature 8']);
             }
           } else {
@@ -941,6 +957,22 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
               >
                 <Settings2 className="w-4 h-4" />
                 Constraints
+              </Button>
+              
+              {/* ROI Settings Toggle */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setRoiSettingsOpen(!roiSettingsOpen)}
+                className="flex items-center gap-2"
+              >
+                <DollarSign className="w-4 h-4" />
+                ROI Configuration
+                {Object.keys(roiConfig.features).length > 0 && (
+                  <Badge variant="secondary" className="ml-2">
+                    {Object.keys(roiConfig.features).length} features
+                  </Badge>
+                )}
               </Button>
               <Button
                 variant="ghost"
@@ -1343,6 +1375,28 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                 </Popover>
               </div>
             </div>
+          </div>
+        </Card>
+      )}
+
+      {/* ROI Settings Box */}
+      {roiSettingsOpen && (
+        <Card className="mb-6">
+          <div className="py-2 px-4 border-b bg-muted/30">
+            <h3 className="font-semibold text-foreground flex items-center gap-2">
+              <DollarSign className="w-4 h-4 text-primary" />
+              ROI Configuration
+            </h3>
+          </div>
+          <div className="p-6 space-y-6">
+            <ROIConfiguration
+              availableFeatures={data?.xVariables?.flat() || []}
+              availableColumns={numericalColumns || []}
+              availableCombinations={data?.selectedCombinations || []}
+              roiConfig={roiConfig}
+              onROIConfigChange={setRoiConfig}
+            />
+            
           </div>
         </Card>
       )}
@@ -1974,6 +2028,78 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                    ))}
             </TableBody>
           </Table>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* ROI Table */}
+                        {combination.model_results && combination.model_results.length > 0 && (
+                          <div className="bg-gray-50 rounded-lg p-4">
+                            <h5 className="font-semibold text-lg text-gray-700 mb-4 flex items-center gap-2">
+                              <DollarSign className="w-5 h-5 text-green-600" />
+                              ROI Results
+                            </h5>
+                            <div className="overflow-x-auto">
+                              <Table className="bg-white rounded-lg border border-gray-200">
+                                <TableHeader>
+                                  <TableRow className="bg-gradient-to-r from-green-50 to-emerald-50 hover:bg-gradient-to-r hover:from-green-100 hover:to-emerald-100">
+                                    <TableHead className="font-semibold text-gray-700 bg-green-50">Feature</TableHead>
+                                    {combination.model_results.map((model, index) => (
+                                      <TableHead key={index} className="font-semibold text-gray-700">{model.model_name}</TableHead>
+                                    ))}
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {(() => {
+                                    // Get all variables that have ROI results in at least one model
+                                    const variablesWithROI = new Set<string>();
+                                    combination.model_results.forEach(model => {
+                                      if (model.roi_results) {
+                                        Object.keys(model.roi_results).forEach(variable => {
+                                          variablesWithROI.add(variable);
+                                        });
+                                      }
+                                    });
+                                    
+                                    // Convert to array and sort
+                                    const roiVariables = Array.from(variablesWithROI).sort();
+                                    
+                                    console.log('ROI Variables found:', roiVariables);
+                                    
+                                    // If no ROI variables found, show a message
+                                    if (roiVariables.length === 0) {
+                                      return (
+                                        <TableRow>
+                                          <TableCell colSpan={combination.model_results.length + 1} className="text-center text-gray-500 py-4">
+                                            No ROI results available. Make sure to select features in ROI configuration.
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    }
+                                    
+                                    return roiVariables.map((variable) => (
+                                      <TableRow key={variable} className="hover:bg-green-50/50 transition-colors duration-150">
+                                        <TableCell className="font-semibold text-green-600">{variable}</TableCell>
+                                        {combination.model_results.map((model, index) => {
+                                          const roiData = model.roi_results && model.roi_results[variable];
+                                          const roiValue = roiData ? roiData.roi : null;
+                                          
+                                          // Debug logging for each cell
+                                          console.log(`ROI Cell Debug - Model: ${model.model_name}, Variable: ${variable}, ROI Data:`, roiData, 'ROI Value:', roiValue);
+                                          
+                                          return (
+                                            <TableCell key={index} className="font-mono text-sm">
+                                              {roiValue !== null && roiValue !== undefined
+                                                ? roiValue.toFixed(2)
+                                                : 'N/A'}
+                                            </TableCell>
+                                          );
+                                        })}
+                                      </TableRow>
+                                    ));
+                                  })()}
+                                </TableBody>
+                              </Table>
                             </div>
                           </div>
                         )}

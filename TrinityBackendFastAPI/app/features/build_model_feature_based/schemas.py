@@ -81,6 +81,15 @@ class CustomModelConfig(BaseModel):
     adam: Optional[bool] = False
     constraints: Optional[List[ModelConstraint]] = []
 
+class ROIFeatureResult(BaseModel):
+    """ROI calculation result for a single feature."""
+    cprp_value: float = Field(..., description="CPRP value used for calculation")
+    beta_coefficient: float = Field(..., description="Model coefficient (beta) for the feature")
+    beta_transformed_sum: float = Field(..., description="Sum of beta * transformed values (numerator)")
+    cprp_original_sum: float = Field(..., description="Sum of cprp * original values (denominator)")
+    avg_price_column: float = Field(..., description="Average price column value")
+    roi: float = Field(..., description="Final ROI calculation result")
+
 class ModelTrainingRequest(BaseModel):
     """Request for model training endpoint."""
     scope_id: str
@@ -132,6 +141,9 @@ class ModelResult(BaseModel):
     contributions: Optional[Dict[str, float]] = Field(None, description="Contribution values for each variable")
     elasticity_details: Optional[Dict[str, Any]] = Field(None, description="Details about elasticity calculation")
     contribution_details: Optional[Dict[str, Any]] = Field(None, description="Details about contribution calculation")
+    
+    # ROI Results fields
+    roi_results: Optional[Dict[str, ROIFeatureResult]] = Field(None, description="ROI calculation results for selected features")
 
 
 class StackModelResult(BaseModel):
@@ -161,6 +173,9 @@ class StackModelResult(BaseModel):
     fold_results: List[Dict[str, Any]] = Field(default_factory=list, description="Individual fold results")
     train_size: int = Field(0, description="Number of training samples")
     test_size: int = Field(0, description="Number of test samples")
+    
+    # ROI Results fields
+    roi_results: Optional[Dict[str, ROIFeatureResult]] = Field(None, description="ROI calculation results for selected features")
 
 
 class CombinationModelResults(BaseModel):
@@ -284,6 +299,9 @@ class ModelResultDocument(BaseModel):
     fold_results: List[Dict[str, Any]] = Field(default_factory=list, description="Detailed results for each fold")
     is_fold_result: bool = Field(False, description="False for aggregated, True for individual fold")
     fold_index: Optional[int] = Field(None, description="Only set if is_fold_result is True")
+    
+    # ROI Results fields
+    roi_results: Optional[Dict[str, ROIFeatureResult]] = Field(None, description="ROI calculation results for selected features")
     
     # Metadata
     created_at: datetime = Field(default_factory=datetime.now)
