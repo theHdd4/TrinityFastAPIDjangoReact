@@ -779,8 +779,11 @@ class MMMModelTrainer:
                     if hasattr(model, 'coef_'):
                         # For MMM, coefficients represent relationships with transformed variables
                         # We'll store both transformed and attempt to back-transform
+                        logger.info(f"Model {model_name} coefficients: {model.coef_}")
+                        logger.info(f"X variables for coefficients: {x_variables_lower}")
                         for i, var in enumerate(x_variables_lower):
                             coefficients[f"Beta_{var}"] = float(model.coef_[i])
+                            logger.info(f"Stored coefficient Beta_{var} = {float(model.coef_[i])}")
                             
                             # Attempt back-transformation based on transformation type
                             var_config = combo_config.get(var, {})
@@ -958,6 +961,10 @@ class MMMModelTrainer:
                         "transformation_metadata": transformation_metadata,
                         "variable_configs": combo_config
                     }
+                    
+                    # Debug: Log final coefficients being returned
+                    logger.info(f"Final coefficients for {model_name}: {coefficients}")
+                    logger.info(f"Final unstandardized coefficients for {model_name}: {unstandardized_coefficients}")
                     
                     model_results.append(model_result)
                     logger.info(f"Completed training {model_name} (combo {combo_idx + 1}): MAPE={mape_test:.4f}, R²={r2_test:.4f}")

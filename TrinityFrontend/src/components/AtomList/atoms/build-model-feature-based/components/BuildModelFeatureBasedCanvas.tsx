@@ -193,43 +193,73 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     
     if (isMMM) {
       // Construct variable_configs from transformations for MMM
-      // Apply the same transformation to ALL X variables (use first transformation)
+      // Map each variable to its specific transformation based on the UI structure
       const variableConfigs: { [key: string]: any } = {};
-      const transformation = finalData.transformations?.[0] || 'none'; // Use first transformation for all variables
       
-      allXVariables.forEach((variable) => {
-        if (transformation === 'media') {
-          variableConfigs[variable] = {
-            type: 'media'
-          };
-        } else if (transformation === 'standardize') {
-          variableConfigs[variable] = {
-            type: 'standard'
-          };
-        } else if (transformation === 'normalize') {
-          variableConfigs[variable] = {
-            type: 'minmax'
-          };
-        } else {
-          variableConfigs[variable] = {
-            type: 'none'
-          };
+      // Create a mapping of variables to their transformations
+      finalData.xVariables?.forEach((xVar, xVarIndex) => {
+        const transformation = finalData.transformations?.[xVarIndex] || 'none';
+        
+        if (Array.isArray(xVar)) {
+          // Handle array variables (multiple selections in one row)
+          xVar.forEach((variable) => {
+            if (variable) {
+              variableConfigs[variable] = getTransformationConfig(transformation);
+            }
+          });
+        } else if (xVar) {
+          // Handle single variable
+          variableConfigs[xVar] = getTransformationConfig(transformation);
         }
       });
       
-      // MMM payload
+      // Helper function to get transformation config
+      function getTransformationConfig(transformation: string) {
+        if (transformation === 'media') {
+          return {
+            type: 'media'
+            // Parameters are hardcoded in backend as requested
+          };
+        } else if (transformation === 'standardize') {
+          return {
+            type: 'standard'
+          };
+        } else if (transformation === 'normalize') {
+          return {
+            type: 'minmax'
+          };
+        } else {
+          return {
+            type: 'none'
+          };
+        }
+      }
+      
+      // MMM payload with stack modeling support
       requestPayload = {
         run_id: tempRunId,
         scope_number: finalData.selectedScope,
         combinations: finalData.selectedCombinations,
-        x_variables: allXVariables,
-        y_variable: finalData.yVariable,
+        x_variables: allXVariables.map((variable) => variable.toLowerCase()),
+        y_variable: finalData.yVariable?.toLowerCase(),
         variable_configs: variableConfigs,
-        models_to_run: finalData.individualSelectedModels || [], // Use same models as individual
-        custom_model_configs: addConstraintsToModelConfigs(finalData.individualModelConfigs || []), // Use same constraint approach as general models
-        k_folds: finalData.individualKFolds || 5, // Use same k_folds as individual
-        test_size: finalData.individualTestSize || 0.2, // Use same test_size as individual
-        price_column: finalData.priceColumn
+        // Individual modeling fields
+        individual_modeling: finalData.individualModeling ?? true, // Default to true for backward compatibility
+        individual_models_to_run: finalData.individualSelectedModels || [],
+        individual_custom_model_configs: addConstraintsToModelConfigs(finalData.individualModelConfigs || []),
+        individual_k_folds: finalData.individualKFolds || 5,
+        individual_test_size: finalData.individualTestSize || 0.2,
+        // Stack modeling fields
+        stack_modeling: finalData.stackModeling || false,
+        stack_k_folds: finalData.stackKFolds || 5,
+        stack_test_size: finalData.stackTestSize || 0.2,
+        stack_models_to_run: finalData.stackSelectedModels || [],
+        stack_custom_model_configs: addConstraintsToModelConfigs(finalData.stackModelConfigs || []),
+        pool_by_identifiers: (finalData.poolByIdentifiers || []).map((id) => id.toLowerCase()),
+        numerical_columns_for_clustering: (finalData.numericalColumnsForClustering || []).map((col) => col.toLowerCase()),
+        apply_interaction_terms: finalData.applyInteractionTerms || true,
+        numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map((col) => col.toLowerCase()),
+        price_column: finalData.priceColumn?.toLowerCase()
       };
     } else {
       // General models payload (existing logic)
@@ -237,8 +267,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         run_id: tempRunId, // Send the run_id for progress tracking
         scope_number: finalData.selectedScope, // Send the scope number directly
         combinations: finalData.selectedCombinations, // Send the combination strings directly
-        x_variables: allXVariables,
-        y_variable: finalData.yVariable,
+        x_variables: allXVariables.map((variable) => variable.toLowerCase()),
+        y_variable: finalData.yVariable?.toLowerCase(),
         standardization: standardization,
         custom_model_configs: null, // Can be enhanced later
         // Individual modeling fields
@@ -253,8 +283,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         stack_test_size: finalData.stackTestSize || 0.2,
         stack_models_to_run: finalData.stackSelectedModels || [],
         stack_custom_model_configs: addConstraintsToModelConfigs(finalData.stackModelConfigs || []),
-        pool_by_identifiers: (finalData.poolByIdentifiers || []).map(id => id.toLowerCase()),
-        numerical_columns_for_clustering: (finalData.numericalColumnsForClustering || []).map(col => col.toLowerCase()),
+        pool_by_identifiers: (finalData.poolByIdentifiers || []).map((id) => id.toLowerCase()),
+        numerical_columns_for_clustering: (finalData.numericalColumnsForClustering || []).map((col) => col.toLowerCase()),
         apply_interaction_terms: finalData.applyInteractionTerms || true,
         numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map(col => col.toLowerCase())
       };
@@ -1107,9 +1137,9 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                         <>
                           <div className="flex items-center gap-2 py-1 border-b mb-2">
                             <Checkbox
-                              checked={finalData?.numericalColumnsForInteraction?.length === (finalData?.xVariables?.[0] || []).filter(col => col !== finalData?.yVariable).length}
+                              checked={finalData?.numericalColumnsForInteraction?.length === (finalData?.xVariables?.flat() || []).filter(col => col !== finalData?.yVariable).length}
                               onCheckedChange={(checked) => {
-                                const availableColumns = (finalData?.xVariables?.[0] || []).filter(col => col !== finalData?.yVariable);
+                                const availableColumns = (finalData?.xVariables?.flat() || []).filter(col => col !== finalData?.yVariable);
                                 handleDataChange({ 
                                   numericalColumnsForInteraction: checked ? availableColumns : [] 
                                 });
@@ -1117,7 +1147,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                             />
                             <span className="text-sm font-medium">Select All</span>
                           </div>
-                          {(finalData?.xVariables?.[0] || [])
+                          {(finalData?.xVariables?.flat() || [])
                             .filter(col => col !== finalData?.yVariable)
                             .map(col => {
                               const isChecked = finalData?.numericalColumnsForInteraction?.includes(col) || false;
@@ -1182,11 +1212,11 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                     <div className="flex items-center gap-2 py-1 border-b mb-2">
                       <Checkbox
                         checked={(() => {
-                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.positiveConstraints?.includes(variable));
+                          const availableVariables = (data?.xVariables?.flat() || []).filter(variable => !data?.positiveConstraints?.includes(variable));
                           return data?.negativeConstraints?.length === availableVariables.length && availableVariables.length > 0;
                         })()}
                         onCheckedChange={(checked) => {
-                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.positiveConstraints?.includes(variable));
+                          const availableVariables = (data?.xVariables?.flat() || []).filter(variable => !data?.positiveConstraints?.includes(variable));
                           if (checked) {
                             // When selecting all negative constraints, clear positive constraints
                             handleDataChange({ 
@@ -1202,7 +1232,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                       />
                       <span className="text-sm font-medium">Select All</span>
                     </div>
-                    {(data?.xVariables?.[0] || [])
+                    {(data?.xVariables?.flat() || [])
                       .filter(variable => !data?.positiveConstraints?.includes(variable)) // Exclude variables already selected in positive constraints
                       .map(variable => {
                         const isChecked = data?.negativeConstraints?.includes(variable) || false;
@@ -1259,11 +1289,11 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                     <div className="flex items-center gap-2 py-1 border-b mb-2">
                       <Checkbox
                         checked={(() => {
-                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.negativeConstraints?.includes(variable));
+                          const availableVariables = (data?.xVariables?.flat() || []).filter(variable => !data?.negativeConstraints?.includes(variable));
                           return data?.positiveConstraints?.length === availableVariables.length && availableVariables.length > 0;
                         })()}
                         onCheckedChange={(checked) => {
-                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.negativeConstraints?.includes(variable));
+                          const availableVariables = (data?.xVariables?.flat() || []).filter(variable => !data?.negativeConstraints?.includes(variable));
                           if (checked) {
                             // When selecting all positive constraints, clear negative constraints
                             handleDataChange({ 
@@ -1279,7 +1309,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                       />
                       <span className="text-sm font-medium">Select All</span>
                     </div>
-                    {(data?.xVariables?.[0] || [])
+                    {(data?.xVariables?.flat() || [])
                       .filter(variable => !data?.negativeConstraints?.includes(variable)) // Exclude variables already selected in negative constraints
                       .map(variable => {
                         const isChecked = data?.positiveConstraints?.includes(variable) || false;
@@ -1293,7 +1323,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                 ? [...current, variable]
                                 : current.filter(v => v !== variable);
                               
-                              // If adding to positive constraints, remove from negative constraints
                               if (checked) {
                                 const currentNegative = data?.negativeConstraints || [];
                                 const updatedNegative = currentNegative.filter(v => v !== variable);
@@ -1859,7 +1888,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                     ))}
                                   </TableRow>
                                   {/* X-variables rows */}
-                                   {finalData?.xVariables?.[0]?.map((variable) => (
+                                   {finalData?.xVariables?.flat()?.map((variable) => (
                                     <TableRow key={variable} className="hover:bg-purple-50/50 transition-colors duration-150">
                                       <TableCell className="font-semibold text-purple-600">{variable}</TableCell>
                                       {combination.model_results.map((model, index) => (
@@ -1895,7 +1924,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                    </TableRow>
                                  </TableHeader>
                                  <TableBody>
-                                   {finalData?.xVariables?.[0]?.map((variable) => (
+                                   {finalData?.xVariables?.flat()?.map((variable) => (
                                      <TableRow key={variable} className="hover:bg-orange-50/50 transition-colors duration-150">
                                        <TableCell className="font-semibold text-orange-600">{variable}</TableCell>
                                        {combination.model_results.map((model, index) => (
@@ -1931,18 +1960,18 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                    </TableRow>
                                  </TableHeader>
                                  <TableBody>
-                                   {finalData?.xVariables?.[0]?.map((variable) => (
+                                   {finalData?.xVariables?.flat()?.map((variable) => (
                                      <TableRow key={variable} className="hover:bg-teal-50/50 transition-colors duration-150">
                                        <TableCell className="font-semibold text-teal-600">{variable}</TableCell>
                                        {combination.model_results.map((model, index) => (
                                          <TableCell key={index} className="font-mono text-sm">
                                            {model.contributions && model.contributions[variable.toLowerCase()] !== undefined
                                              ? (model.contributions[variable.toLowerCase()] * 100).toFixed(1) + '%'
-                                            : 'N/A'}
-                                        </TableCell>
-                                      ))}
-                </TableRow>
-              ))}
+                                             : 'N/A'}
+                                         </TableCell>
+                                       ))}
+                                     </TableRow>
+                                   ))}
             </TableBody>
           </Table>
                             </div>
