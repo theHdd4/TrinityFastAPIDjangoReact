@@ -50,7 +50,7 @@ GENERAL RESPONSE (for questions, file info, suggestions):
     "Or say 'yes' to use my suggestions"
   ],
   "message": "Here's what I can help you with",
-  "smart_response": "I can help you merge your data files! Based on your available files, I can suggest the best file combinations and join strategies. What would you like to merge?",
+  "smart_response": "I'd be happy to help you with Merge operations! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you merge your data files using various join strategies. What files would you like to merge?",
   "reasoning": "Providing helpful information and guidance",
   "file_analysis": {{
     "total_files": "number",
@@ -76,6 +76,13 @@ INTELLIGENCE RULES:
 6. AUTOMATIC COLUMN DETECTION: When files are selected, automatically find common columns between them
 7. SMART JOIN TYPE: Use "outer" as default if no join type specified, otherwise use user preference
 8. FILE VALIDATION: Always ensure suggested files exist in the AVAILABLE FILES AND COLUMNS section
+
+### FILE DISPLAY RULES:
+When user asks to "show files", "show all files", "show file names", "show columns", or similar:
+- ALWAYS use GENERAL RESPONSE format (success: false)
+- Include detailed file information in smart_response
+- Format: **filename.arrow** (X columns) - column1, column2, column3, etc.
+- List ALL available files with their column counts and sample columns
 
 COLUMN HANDLING INSTRUCTIONS:
 - CRITICAL: Use ONLY the columns provided in the COLUMN ANALYSIS section and join_columns are common columns in files that has been choosen .
@@ -118,6 +125,10 @@ Return ONLY the JSON response:"""
     logger.info(f"Available Files: {list(available_files_with_columns.keys())}")
     logger.info(f"Context Length: {len(context)}")
     logger.info(f"Generated Prompt Length: {len(prompt)}")
+    logger.info(f"🔍 FULL PROMPT TO AI:")
+    logger.info(f"{'='*80}")
+    logger.info(f"{prompt}")
+    logger.info(f"{'='*80}")
     
     return prompt
 
@@ -146,18 +157,27 @@ def call_merge_llm(api_url: str, model_name: str, bearer_token: str, prompt: str
         "Content-Type": "application/json"
     }
     
+    logger.info(f"🔍 API REQUEST PAYLOAD:")
+    logger.info(f"{'='*80}")
+    logger.info(f"URL: {api_url}")
+    logger.info(f"Headers: {headers}")
+    logger.info(f"Payload: {json.dumps(payload, indent=2)}")
+    logger.info(f"{'='*80}")
+    
     try:
         logger.info(f"Sending request to LLM...")
-        response = requests.post(api_url, json=payload, headers=headers, timeout=120)
+        response = requests.post(api_url, json=payload, headers=headers, timeout=300)
         response.raise_for_status()
         
         response_data = response.json()
         logger.info(f"LLM Response Status: {response.status_code}")
         logger.info(f"LLM Response Data Keys: {list(response_data.keys()) if isinstance(response_data, dict) else 'Not a dict'}")
+        logger.info(f"🔍 FULL LLM RESPONSE DATA: {json.dumps(response_data, indent=2)}")
         
         content = response_data.get('message', {}).get('content', '')
         logger.info(f"LLM Content Length: {len(content)}")
         logger.info(f"LLM Content Preview: {content[:200]}...")
+        logger.info(f"🔍 FULL LLM CONTENT: {content}")
         
         return content
         
@@ -177,7 +197,10 @@ def extract_json(response: str):
         logger.warning("Empty response received")
         return None
 
-    cleaned = re.sub(r"```", "", response)
+    # 🔧 FIX: Handle <think> and <reasoning> tags like concat agent
+    cleaned = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
+    cleaned = re.sub(r"<reasoning>.*?</reasoning>", "", cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r"```json\s*", "", cleaned)
     cleaned = re.sub(r"```\s*", "", cleaned)
     
     logger.info(f"Cleaned Response Preview: {cleaned[:300]}...")
@@ -197,7 +220,11 @@ def extract_json(response: str):
                 parsed = json.loads(match)
                 if isinstance(parsed, dict) and ("success" in parsed or "suggestions" in parsed):
                     logger.info(f"Successfully parsed JSON with pattern {i+1}, match {j+1}")
-                    logger.info(f"Parsed JSON: {json.dumps(parsed, indent=2)}")
+                    logger.info(f"🔍 PARSED JSON: {json.dumps(parsed, indent=2)}")
+                    logger.info(f"🔍 PARSED JSON KEYS: {list(parsed.keys())}")
+                    logger.info(f"🔍 SMART_RESPONSE IN PARSED: {'smart_response' in parsed}")
+                    if 'smart_response' in parsed:
+                        logger.info(f"🔍 SMART_RESPONSE VALUE: '{parsed['smart_response']}'")
                     return parsed
             except json.JSONDecodeError as e:
                 logger.debug(f"JSON decode failed for pattern {i+1}, match {j+1}: {e}")
@@ -226,6 +253,18 @@ def extract_json(response: str):
                 return result
     except Exception as e:
         logger.error(f"Brace balancing failed: {e}")
+
+    # 🔧 ADDITIONAL FALLBACK: Try to fix common JSON issues like concat agent
+    try:
+        fixed = re.sub(r",\s*}", "}", cleaned)
+        fixed = re.sub(r",\s*]", "]", cleaned)
+        match = re.search(r"\{.*\}", fixed, re.DOTALL)
+        if match:
+            result = json.loads(match.group())
+            logger.info(f"Fixed JSON successful: {json.dumps(result, indent=2)}")
+            return result
+    except Exception as e:
+        logger.error(f"Fixed JSON fallback failed: {e}")
 
     logger.warning("No valid JSON could be extracted")
     return None

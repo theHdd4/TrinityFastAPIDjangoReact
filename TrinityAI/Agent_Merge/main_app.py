@@ -1,4 +1,5 @@
 # main_merge.py
+import json
 import logging
 import os
 import time
@@ -61,6 +62,15 @@ def merge_files(request: MergeRequest):
     logger.info(f"MERGE REQUEST RECEIVED:")
     logger.info(f"Prompt: {request.prompt}")
     logger.info(f"Session ID: {request.session_id}")
+    logger.info(f"Client: {request.client_name}")
+    logger.info(f"App: {request.app_name}")
+    logger.info(f"Project: {request.project_name}")
+    logger.info(f"🔍 FULL REQUEST TO MERGE AGENT:")
+    logger.info(f"{'='*80}")
+    logger.info(f"User Prompt: {request.prompt}")
+    logger.info(f"Session ID: {request.session_id}")
+    logger.info(f"Context: {request.client_name}/{request.app_name}/{request.project_name}")
+    logger.info(f"{'='*80}")
     
     try:
         # Process with complete memory context and dynamic path resolution
@@ -79,9 +89,17 @@ def merge_files(request: MergeRequest):
         logger.info(f"MERGE REQUEST COMPLETED:")
         logger.info(f"Success: {result.get('success', False)}")
         logger.info(f"Processing Time: {processing_time}s")
+        logger.info(f"🔍 RESULT BEFORE FALLBACK: {json.dumps(result, indent=2)}")
+        logger.info(f"🔍 SMART_RESPONSE BEFORE FALLBACK: {'smart_response' in result}")
+        if 'smart_response' in result:
+            logger.info(f"🔍 SMART_RESPONSE VALUE BEFORE FALLBACK: '{result['smart_response']}'")
 
-        # 🔧 SMART RESPONSE FALLBACK: Ensure smart_response is always present
-        if "smart_response" not in result or not result["smart_response"]:
+        # 🔧 CONSISTENCY FIX: Always ensure merge_json is present (like concat does)
+        if "merge_json" not in result:
+            result["merge_json"] = None
+        
+        # 🔧 SMART RESPONSE FALLBACK: Only add fallback if smart_response is completely missing
+        if "smart_response" not in result:
             if result.get("success") and result.get("merge_json"):
                 # Merge configuration success - create smart response
                 cfg = result["merge_json"]
@@ -131,6 +149,11 @@ def merge_files(request: MergeRequest):
             
             # Update message to indicate configuration is ready
             result["message"] = f"Merge configuration ready: {file1} + {file2} using {join_columns} columns with {join_type} join"
+
+        logger.info(f"🔍 FINAL RESULT TO FRONTEND: {json.dumps(result, indent=2)}")
+        logger.info(f"🔍 FINAL SMART_RESPONSE: {'smart_response' in result}")
+        if 'smart_response' in result:
+            logger.info(f"🔍 FINAL SMART_RESPONSE VALUE: '{result['smart_response']}'")
 
         return result
         

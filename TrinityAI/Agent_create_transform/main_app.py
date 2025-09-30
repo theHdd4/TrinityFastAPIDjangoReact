@@ -117,39 +117,20 @@ def create_transform_files(request: CreateTransformRequest):
         logger.info(f"Success: {result.get('success', False)}")
         logger.info(f"Processing Time: {processing_time}s")
 
-        # 🔧 SMART RESPONSE FALLBACK: Ensure smart_response is always present
-        if "smart_response" not in result or not result["smart_response"]:
-            if result.get("success") and (result.get("create_transform_json") or result.get("json")):
-                # Create/Transform configuration success - create smart response
-                cfg = result.get("create_transform_json") or result.get("json", {})
-                
-                # Extract operation details for smart response
-                operations = []
-                if isinstance(cfg, list) and cfg:
-                    cfg = cfg[0]  # Get first config
-                
-                for key, value in cfg.items():
-                    if key.endswith('_rename') and value:
-                        operations.append(value)
-                
-                if operations:
-                    result["smart_response"] = f"I've configured the data transformation for you. The following new columns will be created: {', '.join(operations)}. You can now proceed with the transformation or make adjustments as needed."
-                else:
-                    result["smart_response"] = "I've configured the data transformation for you. The specified operations will be applied to create new columns. You can now proceed with the transformation or make adjustments as needed."
-            else:
-                # Suggestions or error - create smart response
-                if result.get("suggestions"):
-                    result["smart_response"] = "I can help you create and transform data columns! Based on your available files, I can suggest the best transformation operations. What specific transformations would you like to perform?"
-                else:
-                    result["smart_response"] = "I'm here to help you create and transform data columns. Please describe what specific transformations you'd like to perform or ask me for suggestions."
+        # 🔧 PRESERVE LLM SMART RESPONSE: Don't override the smart_response from LLM
+        # The LLM already provides detailed smart_response with file information
 
         if result.get("success") and (result.get("create_transform_json") or result.get("json")):
-            cfg = result["create_transform_json"]
+            # 🔧 FIX: Get config from whichever key exists
+            cfg = result.get("create_transform_json") or result.get("json")
             
             # Return the configuration for frontend to handle
             result["create_transform_config"] = cfg
             # Also keep the original key for frontend compatibility
             result["create_transform_json"] = cfg
+            # Keep json key as well for frontend handlers
+            if "json" not in result:
+                result["json"] = cfg
             
             # Add session ID for consistency
             if request.session_id:
@@ -157,6 +138,8 @@ def create_transform_files(request: CreateTransformRequest):
             
             # Update message to indicate configuration is ready
             result["message"] = f"Create/Transform configuration ready"
+            
+            logger.info(f"✅ Configuration extracted successfully from {'create_transform_json' if result.get('create_transform_json') else 'json'} key")
 
         return result
 

@@ -13,7 +13,31 @@ import {
 
 export const createColumnHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
+    console.log('🚀🚀🚀 CREATE COLUMN HANDLER - handleSuccess START');
+    console.log('📥 Data received:', JSON.stringify(data, null, 2));
+    console.log('🆔 AtomId:', context.atomId);
+    console.log('🔢 SessionId:', context.sessionId);
+    
     const { atomId, updateAtomSettings, setMessages, sessionId } = context;
+    
+    // 🔧 CRITICAL FIX: Show smart_response FIRST (like concat/merge)
+    // This displays the AI's clean, user-friendly message immediately
+    const smartResponseText = processSmartResponse(data);
+    console.log('💬 Smart response text:', smartResponseText);
+    
+    if (smartResponseText) {
+      const smartMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        content: smartResponseText,
+        sender: 'ai',
+        timestamp: new Date(),
+      };
+      console.log('📤 Sending smart response message to chat...');
+      setMessages(prev => [...prev, smartMsg]);
+      console.log('✅ Displayed smart_response to user:', smartResponseText);
+    } else {
+      console.warn('⚠️ No smart response text found!');
+    }
     
     if (!data.json) {
       return { success: false, error: 'No create column configuration found in AI response' };
@@ -92,17 +116,82 @@ export const createColumnHandler: AtomHandler = {
     const envContext = getEnvironmentContext();
     console.log('🔍 Environment context loaded:', envContext);
     
+    // Map AI file paths to correct file paths for UI compatibility (similar to concat)
+    let mappedDataSource = cfg.object_name || '';
+    
+    try {
+      console.log('🔄 Fetching frames to map AI file paths for create-column...');
+      const framesResponse = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+      if (framesResponse.ok) {
+        const framesData = await framesResponse.json();
+        const frames = Array.isArray(framesData.files) ? framesData.files : [];
+        
+        console.log('📋 Available frames for create-column:', frames.map(f => ({ object_name: f.object_name, csv_name: f.csv_name })));
+        
+        // Map AI file path to correct file path for create-column UI (same logic as concat)
+        const mapFilePathToObjectName = (aiFilePath: string) => {
+          if (!aiFilePath) return aiFilePath;
+          
+          // Try exact match first
+          let exactMatch = frames.find(f => f.object_name === aiFilePath);
+          if (exactMatch) {
+            console.log(`✅ Exact match found for create-column ${aiFilePath}: ${exactMatch.object_name}`);
+            return exactMatch.object_name;
+          }
+          
+          // Try matching by filename
+          const aiFileName = aiFilePath.includes('/') ? aiFilePath.split('/').pop() : aiFilePath;
+          let filenameMatch = frames.find(f => {
+            const frameFileName = f.csv_name.split('/').pop() || f.csv_name;
+            return frameFileName === aiFileName;
+          });
+          
+          if (filenameMatch) {
+            console.log(`✅ Filename match found for create-column ${aiFilePath} -> ${filenameMatch.object_name}`);
+            return filenameMatch.object_name;
+          }
+          
+          // Try partial match
+          let partialMatch = frames.find(f => 
+            f.object_name.includes(aiFileName) || 
+            f.csv_name.includes(aiFileName) ||
+            aiFilePath.includes(f.object_name) ||
+            aiFilePath.includes(f.csv_name)
+          );
+          
+          if (partialMatch) {
+            console.log(`✅ Partial match found for create-column ${aiFilePath} -> ${partialMatch.object_name}`);
+            return partialMatch.object_name;
+          }
+          
+          console.log(`⚠️ No match found for create-column ${aiFilePath}, using original value`);
+          return aiFilePath;
+        };
+        
+        mappedDataSource = mapFilePathToObjectName(cfg.object_name || '');
+        
+        console.log('🔧 Create-column file path mapping results:', {
+          original_dataSource: cfg.object_name,
+          mapped_dataSource: mappedDataSource
+        });
+      } else {
+        console.warn('⚠️ Failed to fetch frames for create-column mapping, using original file path');
+      }
+    } catch (error) {
+      console.error('❌ Error fetching frames for create-column mapping:', error);
+    }
+    
     // 🔧 CRITICAL FIX: Set dataSource first to trigger column loading, then load columns
-    updateAtomSettings(atomId, { 
+    const settingsToUpdate = { 
       aiConfig: cfg,
       aiMessage: data.message,
       operationCompleted: false,
       // Auto-populate the CreateColumn interface - EXACTLY like GroupBy
-      dataSource: cfg.object_name || '', // Note: AI uses object_name (singular)
+      dataSource: mappedDataSource, // Use mapped value for UI
       bucketName: cfg.bucket_name || 'trinity',
       selectedIdentifiers: cfg.identifiers || [],
       // 🔧 CRITICAL FIX: Set the file key for column loading
-      file_key: cfg.object_name || '',
+      file_key: mappedDataSource, // Use mapped value for file operations
       // 🔧 CRITICAL FIX: Set operations in the format expected by CreateColumnCanvas
       // This ensures the UI automatically displays the AI-configured operations
       operations: operations.map((op, index) => ({
@@ -117,15 +206,25 @@ export const createColumnHandler: AtomHandler = {
       // Include environment context
       envContext,
       lastUpdateTime: Date.now()
+    };
+    
+    console.log('🔧 Updating atom settings with:', {
+      atomId,
+      dataSource: mappedDataSource,
+      operationsCount: operations.length,
+      operations: operations,
+      fullSettings: settingsToUpdate
     });
     
+    updateAtomSettings(atomId, settingsToUpdate);
+    
     // 🔧 CRITICAL FIX: Load columns directly after setting dataSource
-    if (cfg.object_name) {
+    if (mappedDataSource) {
       try {
-        console.log('🔄 Loading columns for AI-selected data source:', cfg.object_name);
+        console.log('🔄 Loading columns for AI-selected data source:', mappedDataSource);
         
         // 🔧 CRITICAL FIX: Get the current prefix and construct full object name
-        let fullObjectName = cfg.object_name;
+        let fullObjectName = mappedDataSource;
         try {
           const prefixRes = await fetch(`${VALIDATE_API}/get_object_prefix`);
           if (prefixRes.ok) {
@@ -134,8 +233,8 @@ export const createColumnHandler: AtomHandler = {
             console.log('🔧 Current prefix:', prefix);
             
             // Construct full object name if we have a prefix
-            if (prefix && !cfg.object_name.startsWith(prefix)) {
-              fullObjectName = `${prefix}${cfg.object_name}`;
+            if (prefix && !mappedDataSource.startsWith(prefix)) {
+              fullObjectName = `${prefix}${mappedDataSource}`;
               console.log('🔧 Constructed full object name:', fullObjectName);
             }
           }
@@ -155,13 +254,13 @@ export const createColumnHandler: AtomHandler = {
           updateAtomSettings(atomId, {
             allColumns: allColumns,
             // Also set the CSV display name
-            csvDisplay: cfg.object_name.split('/').pop() || cfg.object_name
+            csvDisplay: mappedDataSource.split('/').pop() || mappedDataSource
           });
           
           // 🔧 CRITICAL FIX: Also trigger the handleFrameChange logic to set up identifiers
           try {
             // Try to fetch identifiers from backend classification
-            const resp = await fetch(`${CREATECOLUMN_API}/classification?validator_atom_id=${encodeURIComponent(atomId)}&file_key=${encodeURIComponent(cfg.object_name)}`);
+            const resp = await fetch(`${CREATECOLUMN_API}/classification?validator_atom_id=${encodeURIComponent(atomId)}&file_key=${encodeURIComponent(mappedDataSource)}`);
             console.log('🔍 Classification response status:', resp.status);
             if (resp.ok) {
               const classificationData = await resp.json();
@@ -204,167 +303,197 @@ export const createColumnHandler: AtomHandler = {
           }
           
         } else {
-          console.warn('⚠️ Failed to load columns for data source:', cfg.object_name);
+          console.warn('⚠️ Failed to load columns for data source:', mappedDataSource);
         }
       } catch (error) {
         console.error('❌ Error loading columns for data source:', error);
       }
     }
     
-    // Add AI success message with operation completion
-    const successDetails = {
-      'File': cfg.object_name || 'N/A',
-      'Operations': operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', '),
-      'Session': sessionId
-    };
-    const successMsg = createSuccessMessage('AI create column configuration completed', successDetails);
-    successMsg.content += '\n\n🔄 Now executing the Create Column operations...';
-    setMessages(prev => [...prev, successMsg]);
+    // 🔧 FIX: No need for duplicate success message - smart_response already shown at the top
+    console.log('📋 Create Column configuration:', {
+      file: mappedDataSource,
+      operations: operations.map(op => `${op.type}(${op.columns.join(', ')})`),
+      session: sessionId
+    });
 
-    // 🔧 CRITICAL FIX: Automatically execute the operations (like GroupBy)
-    // Wait a bit for the UI to update, then automatically perform the operations
-    setTimeout(async () => {
-      try {
-        console.log('🚀 Auto-executing Create Column operations with AI config');
-        
-        // 🔧 CRITICAL FIX: Convert to FormData format that CreateColumn backend expects
-        const formData = new FormData();
-        formData.append('object_names', getFilename(cfg.object_name || ''));
-        formData.append('bucket_name', cfg.bucket_name || 'trinity');
-        
-        // Add operations in the format backend expects
-        operations.forEach((op, index) => {
-          if (op.columns && op.columns.filter(Boolean).length > 0) {
-            const colString = op.columns.filter(Boolean).join(',');
-            const rename = op.rename && op.rename.trim() ? op.rename.trim() : '';
-            const key = `${op.type}_${index}`;
-            
-            // Add the operation
-            formData.append(key, colString);
-            
-            // Add rename if specified
-            if (rename) {
-              formData.append(`${key}_rename`, rename);
-            }
-            
-            // Add parameters if specified
-            if (op.param) {
-              if (['detrend', 'deseasonalize', 'detrend_deseasonalize'].includes(op.type)) {
-                formData.append(`${key}_period`, String(op.param));
-              } else if (op.type === 'power') {
-                formData.append(`${key}_param`, String(op.param));
-              } else if (op.type === 'logistic') {
-                formData.append(`${key}_param`, JSON.stringify(op.param));
-              }
+    // 🔧 CRITICAL FIX: Call perform endpoint immediately (like concat - NO setTimeout)
+    try {
+      console.log('🚀 Calling Create Column perform endpoint immediately (like concat)');
+      console.log('📋 Operations to execute:', operations);
+      
+      // Extract just the filename if it's a full path
+      const getFilename = (filePath: string) => {
+        if (!filePath) return "";
+        return filePath.includes("/") ? filePath.split("/").pop() || filePath : filePath;
+      };
+      
+      // 🔧 CRITICAL FIX: Convert to FormData format that CreateColumn backend expects
+      const formData = new FormData();
+      formData.append('object_names', getFilename(cfg.object_name || ''));
+      formData.append('bucket_name', cfg.bucket_name || 'trinity');
+      
+      // Add operations in the format backend expects
+      operations.forEach((op, index) => {
+        if (op.columns && op.columns.filter(Boolean).length > 0) {
+          const colString = op.columns.filter(Boolean).join(',');
+          const rename = op.rename && op.rename.trim() ? op.rename.trim() : '';
+          const key = `${op.type}_${index}`;
+          
+          // Add the operation
+          formData.append(key, colString);
+          
+          // Add rename if specified
+          if (rename) {
+            formData.append(`${key}_rename`, rename);
+          }
+          
+          // Add parameters if specified
+          if (op.param) {
+            if (['detrend', 'deseasonalize', 'detrend_deseasonalize'].includes(op.type)) {
+              formData.append(`${key}_period`, String(op.param));
+            } else if (op.type === 'power') {
+              formData.append(`${key}_param`, String(op.param));
+            } else if (op.type === 'logistic') {
+              formData.append(`${key}_param`, JSON.stringify(op.param));
             }
           }
-        });
-        
-        // Add identifiers
-        const identifiers = cfg.identifiers || [];
-        formData.append('identifiers', identifiers.join(','));
-        
-        // Add session context for tracking
-        formData.append('session_id', sessionId);
-        
-        console.log('📁 Auto-executing with form data:', {
-          object_names: getFilename(cfg.object_name || ''),
-          bucket_name: cfg.bucket_name || 'trinity',
-          operations: operations.map((op, index) => ({
-            index,
-            type: op.type,
-            columns: op.columns,
-            rename: op.rename,
-            param: op.param
-          })),
-          identifiers: identifiers,
-          session_id: sessionId
-        });
-        
-        const performEndpoint = `${CREATECOLUMN_API}/perform`;
-        const result = await executePerformOperation(performEndpoint, formData, {
-          method: 'POST',
-          isFormData: true
-        });
-        
-        if (result.success && result.data) {
-          console.log('✅ Auto-execution successful:', result.data);
-          
-          // 🔧 CRITICAL FIX: Update atom settings with results
-          updateAtomSettings(atomId, {
-            operationCompleted: true,
-            createColumnResults: result.data,
-            lastUpdateTime: Date.now()
-          });
-          
-          // Add success message
-          const completionDetails = {
-            'File': cfg.object_name || 'N/A',
-            'Operations': operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', '),
-            'Result': 'New columns created successfully'
-          };
-          const completionMsg = createSuccessMessage('Create Column operations', completionDetails);
-          completionMsg.content += '\n\n📊 Results are ready! New columns have been created.\n\n💡 You can now view the results in the Create Column interface.';
-          setMessages(prev => [...prev, completionMsg]);
-          
-        } else {
-          console.error('❌ Auto-execution failed:', result.error);
-          
-          const errorMsg = createErrorMessage(
-            'Create Column auto-execution',
-            result.error || 'Unknown error',
-            `File: ${cfg.object_name || 'N/A'}, Operations: ${operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', ')}`
-          );
-          errorMsg.content += '\n\n💡 Please try clicking the Perform button manually.';
-          setMessages(prev => [...prev, errorMsg]);
-          
-          updateAtomSettings(atomId, {
-            operationCompleted: false,
-            lastError: result.error
-          });
         }
+      });
+      
+      // Add identifiers
+      const identifiers = cfg.identifiers || [];
+      formData.append('identifiers', identifiers.join(','));
+      
+      console.log('📁 Auto-executing with form data:', {
+        object_names: getFilename(cfg.object_name || ''),
+        bucket_name: cfg.bucket_name || 'trinity',
+        operations: operations.map((op, index) => ({
+          index,
+          type: op.type,
+          columns: op.columns,
+          rename: op.rename,
+          param: op.param
+        })),
+        identifiers: identifiers
+      });
+      
+      const performEndpoint = `${CREATECOLUMN_API}/perform`;
+      console.log('📡 Calling perform endpoint:', performEndpoint);
+      console.log('📦 FormData payload (converted to object for logging):');
+      const formDataObj: any = {};
+      formData.forEach((value, key) => {
+        formDataObj[key] = value;
+      });
+      console.log(formDataObj);
+      
+      const res2 = await fetch(performEndpoint, {
+        method: 'POST',
+        body: formData,
+      });
+      
+      console.log('📨 Perform endpoint response status:', res2.status);
+      
+      if (res2.ok) {
+        const result = await res2.json();
+        console.log('✅ Auto-execution successful:', result);
         
-      } catch (error) {
-        console.error('❌ Error during auto-execution:', error);
+        // 🔧 CRITICAL FIX: Update atom settings with results
+        updateAtomSettings(atomId, {
+          operationCompleted: true,
+          createColumnResults: result,
+          lastUpdateTime: Date.now()
+        });
+        
+        // Add success message
+        const completionDetails = {
+          'File': mappedDataSource || 'N/A',
+          'Operations': operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', '),
+          'Result': 'New columns created successfully'
+        };
+        const completionMsg = createSuccessMessage('Create Column operations', completionDetails);
+        completionMsg.content += '\n\n📊 Results are ready! New columns have been created.\n\n💡 You can now view the results in the Create Column interface.';
+        setMessages(prev => [...prev, completionMsg]);
+        
+      } else {
+        console.error('❌ Auto-execution failed:', res2.status, res2.statusText);
+        
+        // Try to get detailed error message
+        let errorDetail = res2.statusText;
+        try {
+          const errorData = await res2.json();
+          errorDetail = errorData.detail || errorData.message || res2.statusText;
+        } catch (e) {
+          // If we can't parse error response, use status text
+        }
         
         const errorMsg = createErrorMessage(
           'Create Column auto-execution',
-          error,
-          `File: ${cfg.object_name || 'N/A'}, Operations: ${operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', ')}`
+          errorDetail,
+          `File: ${mappedDataSource || 'N/A'}, Operations: ${operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', ')}`
         );
         errorMsg.content += '\n\n💡 Please try clicking the Perform button manually.';
         setMessages(prev => [...prev, errorMsg]);
         
         updateAtomSettings(atomId, {
           operationCompleted: false,
-          lastError: (error as Error).message
+          lastError: errorDetail
         });
       }
-    }, 1000); // Wait 1 second for UI to update
-
+    } catch (error) {
+      console.error('❌ Error during perform operation:', error);
+      
+      const errorMsg = createErrorMessage(
+        'Create Column auto-execution',
+        error,
+        `File: ${mappedDataSource || 'N/A'}, Operations: ${operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', ')}`
+      );
+      errorMsg.content += '\n\n💡 Please try clicking the Perform button manually.';
+      setMessages(prev => [...prev, errorMsg]);
+      
+      updateAtomSettings(atomId, {
+        operationCompleted: false,
+        lastError: (error as Error).message
+      });
+    }
+    
+    console.log('🏁 CREATE COLUMN HANDLER - handleSuccess COMPLETE');
     return { success: true };
   },
 
   handleFailure: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
-    const { setMessages, updateAtomSettings, atomId } = context;
+    const { setMessages } = context;
     
-    // Process smart response with enhanced logic
-    const aiText = processSmartResponse(data);
-    
-    // Create and add AI message
-    const aiMsg = createMessage(aiText);
-    setMessages(prev => [...prev, aiMsg]);
-    
-    // Store suggestions for potential use
-    if (data.suggestions || data.next_steps || data.file_analysis) {
-      updateAtomSettings(atomId, {
-        aiSuggestions: data.suggestions || [],
-        aiNextSteps: data.next_steps || [],
-        recommendedOperations: data.recommended_operations || [],
-        fileAnalysis: data.file_analysis || null,
-        lastInteractionTime: Date.now()
-      });
+    let aiText = '';
+    if (data.smart_response) {
+      aiText = data.smart_response;
+    } else if (data.suggestions && Array.isArray(data.suggestions)) {
+      aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
+      
+      if (data.file_analysis) {
+        aiText += `\n\n📊 File Analysis:\n`;
+        if (data.file_analysis.total_files) {
+          aiText += `• Total files available: ${data.file_analysis.total_files}\n`;
+        }
+        if (data.file_analysis.create_transform_tips && data.file_analysis.create_transform_tips.length > 0) {
+          aiText += `• Tips: ${data.file_analysis.create_transform_tips.join(', ')}\n`;
+        }
+      }
+      
+      if (data.next_steps && data.next_steps.length > 0) {
+        aiText += `\n\n🎯 Next Steps:\n${data.next_steps.map((step: string, idx: number) => `${idx + 1}. ${step}`).join('\n')}`;
+      }
+    } else {
+      aiText = data.smart_response || data.message || 'AI response received';
     }
+    
+    const aiMsg: Message = {
+      id: (Date.now() + 1).toString(),
+      content: aiText,
+      sender: 'ai',
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, aiMsg]);
     
     return { success: true };
   }

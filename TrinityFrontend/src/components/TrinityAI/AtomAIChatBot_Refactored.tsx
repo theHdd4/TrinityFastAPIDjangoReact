@@ -177,6 +177,16 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
 
         // Check if we have a specific handler for this atom type
         const handler = atomHandlers[atomType];
+        console.log(`🔍 Handler check for ${atomType}:`, {
+          hasHandler: !!handler,
+          hasAtomData: hasAtomData(atomType, data),
+          dataSuccess: data.success,
+          dataKeys: Object.keys(data),
+          hasJson: !!data.json,
+          hasConcatJson: !!data.concat_json,
+          hasMergeJson: !!data.merge_json
+        });
+        
         if (handler && hasAtomData(atomType, data)) {
           // Use specific handler for success case
           console.log(`🎯 Using specific handler for ${atomType} success case`);
@@ -187,7 +197,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           await handler.handleFailure(data, handlerContext);
         } else {
           // Fallback to generic handling
-          console.log(`🔍 Using generic handler for ${atomType}`);
+          console.log(`🔍 Using generic handler for ${atomType} - Handler: ${!!handler}, hasAtomData: ${hasAtomData(atomType, data)}, success: ${data.success}`);
           let aiText = '';
           if (data.success) {
             aiText = data.smart_response || `I've successfully completed the operation for you. ${data.message || 'The configuration is ready and you can now proceed with the current settings or make further adjustments as needed.'}`;

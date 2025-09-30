@@ -345,10 +345,17 @@ class ExploreAgent:
     def _load_available_files(self):
         """Load available files from MinIO with their columns using dynamic paths"""
         try:
-            from minio import Minio
-            from minio.error import S3Error
-            import pyarrow as pa
-            import pyarrow.ipc as ipc
+            try:
+                from minio import Minio
+                from minio.error import S3Error
+                import pyarrow as pa
+                import pyarrow.ipc as ipc
+                import pandas as pd
+                import io
+            except ImportError as ie:
+                logger.error(f"Failed to import required libraries: {ie}")
+                self.files_with_columns = {}
+                return
             
             # Update prefix to current path before loading files
             self._maybe_update_prefix()
@@ -369,9 +376,9 @@ class ExploreAgent:
             files_with_columns = {}
             
             for obj in objects:
-                if obj.object_name.endswith('.arrow'):
-                    try:
-                        # Get object data
+                try:
+                    if obj.object_name.endswith('.arrow'):
+                        # Get Arrow file data
                         response = minio_client.get_object(self.minio_bucket, obj.object_name)
                         data = response.read()
                         
@@ -381,18 +388,34 @@ class ExploreAgent:
                             columns = table.column_names
                             files_with_columns[obj.object_name] = {"columns": columns}
                             
-                        logger.info(f"Loaded file {obj.object_name} with {len(columns)} columns")
+                        logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
+                    
+                    elif obj.object_name.endswith(('.csv', '.xlsx', '.xls')):
+                        # For CSV/Excel files, try to read headers
+                        response = minio_client.get_object(self.minio_bucket, obj.object_name)
+                        data = response.read()
                         
-                    except Exception as e:
-                        logger.warning(f"Failed to load file {obj.object_name}: {e}")
-                        continue
+                        if obj.object_name.endswith('.csv'):
+                            # Read CSV headers
+                            df_sample = pd.read_csv(io.BytesIO(data), nrows=0)  # Just headers
+                            columns = list(df_sample.columns)
+                        else:
+                            # Read Excel headers
+                            df_sample = pd.read_excel(io.BytesIO(data), nrows=0)  # Just headers
+                            columns = list(df_sample.columns)
+                        
+                        files_with_columns[obj.object_name] = {"columns": columns}
+                        logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to load file {obj.object_name}: {e}")
+                    continue
             
             self.files_with_columns = files_with_columns
             logger.info(f"Loaded {len(files_with_columns)} files from MinIO")
             
         except Exception as e:
             logger.error(f"Error loading files from MinIO: {e}")
-            # Set empty dict on error
             self.files_with_columns = {}
     
     def _build_conversation_context(self, session_id: str) -> str:

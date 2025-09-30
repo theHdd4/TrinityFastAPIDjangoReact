@@ -49,7 +49,7 @@ GENERAL RESPONSE (for questions, file info, suggestions):
     "Or say 'yes' to use my suggestions"
   ],
   "message": "Here's what I can help you with",
-  "smart_response": "I can help you perform groupby operations on your data! Based on your available files, I can suggest the best grouping strategies and aggregation functions. What would you like to group and aggregate?",
+  "smart_response": "I'd be happy to help you with GroupBy operations! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you group and aggregate your data. What would you like to group and aggregate?",
   "reasoning": "Providing helpful information and guidance",
   "file_analysis": {{
     "total_files": "number",
@@ -74,6 +74,13 @@ Only success=true when:
 - if agg = weighted_mean → weight_by required
 - ⚠️ ALL COLUMN NAMES MUST BE LOWERCASE (e.g., "volume", "channel", "year")
 Keep/merge previous ops unless user explicitly says remove/reset.
+
+### FILE DISPLAY RULES:
+When user asks to "show files", "show all files", "show file names", "show columns", or similar:
+- ALWAYS use GENERAL RESPONSE format (success: false)
+- Include detailed file information in smart_response
+- Format: **filename.arrow** (X columns) - column1, column2, column3, etc.
+- List ALL available files with their column counts and sample columns
 
 ### Final JSON output format:
 {operation_format}
@@ -106,7 +113,7 @@ def call_llm_group_by(api_url: str, model_name: str, bearer_token: str, prompt: 
     }
     for attempt in range(retry):
         try:
-            r = requests.post(api_url, json=payload, headers=headers, timeout=120)
+            r = requests.post(api_url, json=payload, headers=headers, timeout=300)
             r.raise_for_status()
             return r.json().get("message", {}).get("content", "")
         except Exception as e:

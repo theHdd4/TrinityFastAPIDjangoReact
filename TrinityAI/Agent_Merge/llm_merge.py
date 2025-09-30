@@ -37,25 +37,148 @@ class SmartMergeAgent:
             object_prefix=prefix
         )
         
-        # Load files on initialization
-        self.files_with_columns = self.file_loader.load_files()
+        # Load files on initialization using standardized method
+        self._load_files()
 
     def _maybe_update_prefix(self) -> None:
-        """Dynamically updates the MinIO prefix and reloads files."""
+        """Dynamically updates the MinIO prefix using the data_upload_validate API endpoint."""
         try:
-            # Use FileLoader's prefix update method
-            self.file_loader._maybe_update_prefix()
-            if self.file_loader.object_prefix != self.prefix:
-                logger.info("MinIO prefix updated from '%s' to '%s'", self.prefix, self.file_loader.object_prefix)
-                self.prefix = self.file_loader.object_prefix
-                # Reload files with new prefix
-                self.files_with_columns = self.file_loader.load_files()
+            # Method 1: Call the data_upload_validate API endpoint
+            try:
+                import requests
+                import os
+                
+                client_name = os.getenv("CLIENT_NAME", "")
+                app_name = os.getenv("APP_NAME", "")
+                project_name = os.getenv("PROJECT_NAME", "")
+                
+                validate_api_url = os.getenv("VALIDATE_API_URL", "http://fastapi:8001")
+                if not validate_api_url.startswith("http"):
+                    validate_api_url = f"http://{validate_api_url}"
+                
+                url = f"{validate_api_url}/api/data-upload-validate/get_object_prefix"
+                params = {
+                    "client_name": client_name,
+                    "app_name": app_name,
+                    "project_name": project_name
+                }
+                
+                logger.info(f"🔍 Fetching dynamic path from: {url}")
+                logger.info(f"🔍 With params: {params}")
+                
+                response = requests.get(url, params=params, timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    current = data.get("prefix", "")
+                    if current and current != self.prefix:
+                        logger.info(f"✅ Dynamic path fetched successfully: {current}")
+                        logger.info("MinIO prefix updated from '%s' to '%s'", self.prefix, current)
+                        self.prefix = current
+                        self._load_files()
+                        return
+                    elif current:
+                        logger.info(f"✅ Dynamic path fetched: {current} (no change needed)")
+                        return
+                    else:
+                        logger.warning(f"API returned empty prefix: {data}")
+                else:
+                    logger.warning(f"API call failed with status {response.status_code}: {response.text}")
+                        
+            except Exception as e:
+                logger.warning(f"Failed to fetch dynamic path from API: {e}")
+            
+            # Method 2: Fallback to environment variables
+            import os
+            client_name = os.getenv("CLIENT_NAME", "default_client")
+            app_name = os.getenv("APP_NAME", "default_app")
+            project_name = os.getenv("PROJECT_NAME", "default_project")
+            current = f"{client_name}/{app_name}/{project_name}/"
+            
+            if self.prefix != current:
+                logger.info("MinIO prefix updated from '%s' to '%s' (env fallback)", self.prefix, current)
+                self.prefix = current
+                self._load_files()
+            else:
+                logger.info(f"Using current prefix: {current}")
+                
         except Exception as e:
-            logger.warning(f"Failed to update prefix: {e}")
+            logger.error(f"Failed to update prefix: {e}")
 
     def _load_files(self) -> None:
-        """Load files using the standardized FileLoader."""
-        self.files_with_columns = self.file_loader.load_files()
+        """Load available files from MinIO with their columns using dynamic paths"""
+        try:
+            try:
+                from minio import Minio
+                from minio.error import S3Error
+                import pyarrow as pa
+                import pyarrow.ipc as ipc
+                import pandas as pd
+                import io
+            except ImportError as ie:
+                logger.error(f"Failed to import required libraries: {ie}")
+                self.files_with_columns = {}
+                return
+            
+            # Update prefix to current path before loading files
+            self._maybe_update_prefix()
+            
+            logger.info(f"Loading files with prefix: {self.prefix}")
+            
+            # Initialize MinIO client
+            minio_client = Minio(
+                self.file_loader.minio_endpoint,
+                access_key=self.file_loader.minio_access_key,
+                secret_key=self.file_loader.minio_secret_key,
+                secure=False
+            )
+            
+            # List objects in bucket with current prefix
+            objects = minio_client.list_objects(self.file_loader.minio_bucket, prefix=self.prefix, recursive=True)
+            
+            files_with_columns = {}
+            
+            for obj in objects:
+                try:
+                    if obj.object_name.endswith('.arrow'):
+                        # Get Arrow file data
+                        response = minio_client.get_object(self.file_loader.minio_bucket, obj.object_name)
+                        data = response.read()
+                        
+                        # Read Arrow file
+                        with pa.ipc.open_file(pa.BufferReader(data)) as reader:
+                            table = reader.read_all()
+                            columns = table.column_names
+                            files_with_columns[obj.object_name] = {"columns": columns}
+                            
+                        logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
+                    
+                    elif obj.object_name.endswith(('.csv', '.xlsx', '.xls')):
+                        # For CSV/Excel files, try to read headers
+                        response = minio_client.get_object(self.file_loader.minio_bucket, obj.object_name)
+                        data = response.read()
+                        
+                        if obj.object_name.endswith('.csv'):
+                            # Read CSV headers
+                            df_sample = pd.read_csv(io.BytesIO(data), nrows=0)  # Just headers
+                            columns = list(df_sample.columns)
+                        else:
+                            # Read Excel headers
+                            df_sample = pd.read_excel(io.BytesIO(data), nrows=0)  # Just headers
+                            columns = list(df_sample.columns)
+                        
+                        files_with_columns[obj.object_name] = {"columns": columns}
+                        logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to load file {obj.object_name}: {e}")
+                    continue
+            
+            self.files_with_columns = files_with_columns
+            logger.info(f"Loaded {len(files_with_columns)} files from MinIO")
+            
+        except Exception as e:
+            logger.error(f"Error loading files from MinIO: {e}")
+            self.files_with_columns = {}
 
 
 
@@ -144,6 +267,12 @@ class SmartMergeAgent:
             if not result:
                 raise ValueError("LLM response did not contain valid JSON.")
 
+            logger.info(f"🔍 EXTRACTED RESULT: {json.dumps(result, indent=2)}")
+            logger.info(f"🔍 RESULT KEYS: {list(result.keys())}")
+            logger.info(f"🔍 SMART_RESPONSE IN RESULT: {'smart_response' in result}")
+            if 'smart_response' in result:
+                logger.info(f"🔍 SMART_RESPONSE VALUE: '{result['smart_response']}'")
+
             # Store interaction in session history
             interaction = {
                 "user_prompt": user_prompt,
@@ -154,6 +283,7 @@ class SmartMergeAgent:
             result["session_id"] = session_id
 
             logger.info(f"Request processed successfully. Success: {result.get('success', False)}")
+            logger.info(f"🔍 FINAL RESULT TO RETURN: {json.dumps(result, indent=2)}")
             return result
             
         except Exception as e:

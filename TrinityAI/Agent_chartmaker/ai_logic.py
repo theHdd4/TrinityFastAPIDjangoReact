@@ -176,7 +176,7 @@ def call_chart_llm(api_url: str, model_name: str, bearer_token: str, prompt: str
     }
 
     logger.info(f"Payload prepared (len={len(json.dumps(payload))})")
-    resp = requests.post(api_url, headers=headers, json=payload, timeout=120)
+    resp = requests.post(api_url, headers=headers, json=payload, timeout=300)
     resp.raise_for_status()
     result = resp.json()
     content = result.get("message", {}).get("content", "")

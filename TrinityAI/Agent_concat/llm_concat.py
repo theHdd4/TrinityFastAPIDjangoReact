@@ -8,6 +8,7 @@ from pathlib import Path
 from datetime import datetime
 import uuid
 import os
+from typing import Dict, Any, Optional, List
 import logging
 from file_loader import FileLoader
 
@@ -47,7 +48,8 @@ class SmartConcatAgent:
         )
         
         # Load files on initialization
-        self.available_files = self._load_files()
+        self.files_with_columns = {}
+        self._load_files()
     
     def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
         """
@@ -66,52 +68,141 @@ class SmartConcatAgent:
             logger.info("🔧 Using existing environment context for dynamic path resolution")
 
     def _maybe_update_prefix(self) -> None:
-        """Dynamically updates the MinIO prefix and reloads files."""
+        """Dynamically updates the MinIO prefix using the data_upload_validate API endpoint."""
         try:
-            # Use FileLoader's prefix update method
-            self.file_loader._maybe_update_prefix()
-            if self.file_loader.object_prefix != self.prefix:
-                logger.info("MinIO prefix updated from '%s' to '%s'", self.prefix, self.file_loader.object_prefix)
-                self.prefix = self.file_loader.object_prefix
-                # Reload files with new prefix
-                self.available_files = self._load_files()
+            # Method 1: Call the data_upload_validate API endpoint
+            try:
+                import requests
+                import os
+                
+                client_name = os.getenv("CLIENT_NAME", "")
+                app_name = os.getenv("APP_NAME", "")
+                project_name = os.getenv("PROJECT_NAME", "")
+                
+                validate_api_url = os.getenv("VALIDATE_API_URL", "http://fastapi:8001")
+                if not validate_api_url.startswith("http"):
+                    validate_api_url = f"http://{validate_api_url}"
+                
+                url = f"{validate_api_url}/api/data-upload-validate/get_object_prefix"
+                params = {
+                    "client_name": client_name,
+                    "app_name": app_name,
+                    "project_name": project_name
+                }
+                
+                logger.info(f"🔍 Fetching dynamic path from: {url}")
+                logger.info(f"🔍 With params: {params}")
+                
+                response = requests.get(url, params=params, timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    current = data.get("prefix", "")
+                    if current and current != self.prefix:
+                        logger.info(f"✅ Dynamic path fetched successfully: {current}")
+                        logger.info("MinIO prefix updated from '%s' to '%s'", self.prefix, current)
+                        self.prefix = current
+                        self._load_files()
+                        return
+                    elif current:
+                        logger.info(f"✅ Dynamic path fetched: {current} (no change needed)")
+                        return
+                    else:
+                        logger.warning(f"API returned empty prefix: {data}")
+                else:
+                    logger.warning(f"API call failed with status {response.status_code}: {response.text}")
+                        
+            except Exception as e:
+                logger.warning(f"Failed to fetch dynamic path from API: {e}")
+            
+            # Method 2: Fallback to environment variables
+            import os
+            client_name = os.getenv("CLIENT_NAME", "default_client")
+            app_name = os.getenv("APP_NAME", "default_app")
+            project_name = os.getenv("PROJECT_NAME", "default_project")
+            current = f"{client_name}/{app_name}/{project_name}/"
+            
+            if self.prefix != current:
+                logger.info("MinIO prefix updated from '%s' to '%s' (env fallback)", self.prefix, current)
+                self.prefix = current
+                self._load_files()
+            else:
+                logger.info(f"Using current prefix: {current}")
+                
         except Exception as e:
-            logger.warning(f"Failed to update prefix: {e}")
+            logger.error(f"Failed to update prefix: {e}")
     
     def _load_files(self):
-        """Load available files using the standardized FileLoader."""
+        """Load available files from MinIO with their columns using dynamic paths"""
         try:
-            # First try to load from registry (legacy support)
-            from DataStorageRetrieval.flight_registry import (
-                ARROW_TO_ORIGINAL,
-                REGISTRY_PATH,
+            try:
+                from minio import Minio
+                from minio.error import S3Error
+                import pyarrow as pa
+                import pyarrow.ipc as ipc
+                import pandas as pd
+                import io
+            except ImportError as ie:
+                logger.error(f"Failed to import required libraries: {ie}")
+                self.files_with_columns = {}
+                return
+            
+            logger.info(f"Loading files with prefix: {self.prefix}")
+            
+            # Initialize MinIO client
+            minio_client = Minio(
+                self.file_loader.minio_endpoint,
+                access_key=self.file_loader.minio_access_key,
+                secret_key=self.file_loader.minio_secret_key,
+                secure=False
             )
-
-            arrow_objects = list(ARROW_TO_ORIGINAL.keys())
-            if not arrow_objects and REGISTRY_PATH.exists():
-                with REGISTRY_PATH.open("r") as f:
-                    data = json.load(f)
-                    arrow_objects = list(data.get("arrow_to_original", {}).keys())
-            if arrow_objects:
-                available_files = [Path(a).name for a in arrow_objects]
-                logger.info("loaded %d arrow files from registry", len(available_files))
-                return available_files
+            
+            # List objects in bucket with current prefix
+            objects = minio_client.list_objects(self.file_loader.minio_bucket, prefix=self.prefix, recursive=True)
+            
+            files_with_columns = {}
+            
+            for obj in objects:
+                try:
+                    if obj.object_name.endswith('.arrow'):
+                        # Get Arrow file data
+                        response = minio_client.get_object(self.file_loader.minio_bucket, obj.object_name)
+                        data = response.read()
+                        
+                        # Read Arrow file
+                        with pa.ipc.open_file(pa.BufferReader(data)) as reader:
+                            table = reader.read_all()
+                            columns = table.column_names
+                            files_with_columns[obj.object_name] = {"columns": columns}
+                            
+                        logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
+                    
+                    elif obj.object_name.endswith(('.csv', '.xlsx', '.xls')):
+                        # For CSV/Excel files, try to read headers
+                        response = minio_client.get_object(self.file_loader.minio_bucket, obj.object_name)
+                        data = response.read()
+                        
+                        if obj.object_name.endswith('.csv'):
+                            # Read CSV headers
+                            df_sample = pd.read_csv(io.BytesIO(data), nrows=0)  # Just headers
+                            columns = list(df_sample.columns)
+                        else:
+                            # Read Excel headers
+                            df_sample = pd.read_excel(io.BytesIO(data), nrows=0)  # Just headers
+                            columns = list(df_sample.columns)
+                        
+                        files_with_columns[obj.object_name] = {"columns": columns}
+                        logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to load file {obj.object_name}: {e}")
+                    continue
+            
+            self.files_with_columns = files_with_columns
+            logger.info(f"Loaded {len(files_with_columns)} files from MinIO")
+            
         except Exception as e:
-            logger.warning("failed to read arrow registry: %s", e)
-
-        # Fallback to FileLoader for MinIO files
-        files_with_columns = self.file_loader.load_files()
-        available_files = []
-        
-        for file_path, file_data in files_with_columns.items():
-            if isinstance(file_data, dict):
-                file_name = file_data.get('file_name', os.path.basename(file_path))
-            else:
-                file_name = os.path.basename(file_path)
-            available_files.append(file_name)
-        
-        logger.info("loaded %d files from MinIO under prefix %s", len(available_files), self.prefix)
-        return available_files
+            logger.error(f"Error loading files from MinIO: {e}")
+            self.files_with_columns = {}
     
     def create_session(self, session_id=None):
         """Create new session"""
@@ -148,14 +239,14 @@ class SmartConcatAgent:
         
         session = self.get_session(session_id)
         self._maybe_update_prefix()
-        if not self.available_files:
+        if not self.files_with_columns:
             self._load_files()
         
         # Build rich conversation context with complete JSON history
         context = self._build_rich_context(session_id)
         
         # Create LLM prompt using the shared AI logic
-        prompt = build_prompt(user_prompt, self.available_files, context)
+        prompt = build_prompt(user_prompt, self.files_with_columns, context)
 
         try:
             # Call LLM
@@ -346,7 +437,7 @@ class SmartConcatAgent:
                 "I had trouble processing your request",
                 "Let me suggest based on your previous usage:",
                 f"Files you've used before: {', '.join(favorite_files) if favorite_files else 'None yet'}",
-                f"Available files: {', '.join(self.available_files[:5])}",
+                f"Available files: {', '.join(list(self.files_with_columns.keys())[:5])}",
                 "Example: 'concatenate beans.csv with mayo.csv vertically'"
             ],
             "recommended_files": favorite_files,
@@ -378,7 +469,28 @@ class SmartConcatAgent:
     
     def get_available_files(self):
         """Get available files"""
-        return self.available_files
+        return list(self.files_with_columns.keys())
+    
+    def list_available_files(self) -> Dict[str, Any]:
+        """List all available files from MinIO for concatenation using dynamic paths"""
+        try:
+            # Check if MinIO prefix needs an update (and files need reloading)
+            self._maybe_update_prefix()
+            self._load_files()
+            return {
+                "success": True,
+                "files": self.files_with_columns,
+                "total_files": len(self.files_with_columns),
+                "dynamic_prefix": self.prefix
+            }
+        except Exception as e:
+            logger.error(f"Error listing available files: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "files": {},
+                "total_files": 0
+            }
     
     def get_session_stats(self, session_id):
         """Get comprehensive session statistics"""
@@ -393,7 +505,7 @@ class SmartConcatAgent:
             "successful_configs": len(session.get("successful_configs", [])),
             "success_rate": successful / len(history) if history else 0,
             "created_at": session.get("created_at"),
-            "available_files": len(self.available_files),
+            "available_files": len(self.files_with_columns),
             "user_preferences": session.get("user_preferences", {}),
             "memory_utilization": {
                 "favorite_files": len(session.get("user_preferences", {}).get("favorite_files", {})),
@@ -408,6 +520,6 @@ class SmartConcatAgent:
         
         return {
             "session_data": session,
-            "available_files": self.available_files,
+            "available_files": list(self.files_with_columns.keys()),
             "memory_context": self._build_rich_context(session_id)
         }
