@@ -751,15 +751,10 @@ class MMMStackModelDataProcessor:
                 
                 # Calculate final betas for x_variables (main model variables)
                 for x_var in x_variables:
-                    # Determine the actual variable name used in the model
-                    if standardization == 'standard':
-                        model_var_name = f"standard_{x_var}"
-                    elif standardization == 'minmax':
-                        model_var_name = f"minmax_{x_var}"
-                    else:
-                        model_var_name = x_var
+                    # Use original variable name (mmm_stack_training.py uses original names throughout)
+                    model_var_name = x_var
                     
-                    # Common beta for this x_variable (use model variable name)
+                    # Common beta for this x_variable (use original variable name)
                     common_beta = coefficients.get(model_var_name, 0.0)
 
                     interaction_key = f"encoded_combination_{combination}_x_{x_var}"
@@ -771,19 +766,14 @@ class MMMStackModelDataProcessor:
                 for interaction_var in numerical_columns_for_interaction:
                     # Only add if it's not already in x_variables to avoid duplication
                     if interaction_var not in x_variables:
-                        # Determine the actual variable name used in the model
-                        if standardization == 'standard':
-                            model_var_name = f"standard_{interaction_var}"
-                        elif standardization == 'minmax':
-                            model_var_name = f"minmax_{interaction_var}"
-                        else:
-                            model_var_name = interaction_var
+                        # Use original variable name (mmm_stack_training.py uses original names throughout)
+                        model_var_name = interaction_var
                         
-                        # Common beta for this interaction variable (use model variable name)
+                        # Common beta for this interaction variable (use original variable name)
                         common_beta = coefficients.get(model_var_name, 0.0)
                         
                         # Individual beta for this combination and interaction variable
-                        interaction_key = f"encoded_combination_{combination}_x_{model_var_name}"
+                        interaction_key = f"encoded_combination_{combination}_x_{interaction_var}"
                         individual_beta = coefficients.get(interaction_key, 0.0)
                         
                         # Final beta = common + individual
@@ -824,8 +814,11 @@ class MMMStackModelDataProcessor:
             intercept_adjustment = 0.0
             
             for i, var in enumerate(x_variables_lower):
+                # Look for coefficient using original variable name (combination betas use original names)
                 if f"Beta_{var}" in coefficients:
                     coef_value = coefficients[f"Beta_{var}"]
+                    coef_key = f"Beta_{var}"
+                    logger.info(f"Found coefficient for {var}: {coef_key} = {coef_value}")
                     
                     # Get variable configuration
                     var_config = combo_config.get(var, {})
@@ -873,6 +866,12 @@ class MMMStackModelDataProcessor:
                         
                     else:  # "none"
                         unstandardized_coefficients[f"Beta_{var}"] = float(coef_value)
+                else:
+                    # No coefficient found for this variable
+                    logger.warning(f"No coefficient found for variable {var}. Expected: Beta_{var}")
+                    logger.warning(f"Available coefficient keys: {list(coefficients.keys())}")
+                    # Set to 0 as fallback
+                    unstandardized_coefficients[f"Beta_{var}"] = 0.0
             
             # Apply intercept destandardization based on transformation types
             has_standardized_vars = any(
@@ -1216,20 +1215,12 @@ class MMMStackModelDataProcessor:
                             logger.info(f"Betas unstandardized_coefficients: {betas.get('unstandardized_coefficients', {})}")
                             
                             # Get the parameter combination configuration for this model
-                            parameter_combination = betas.get('parameter_combination', {})
-                            logger.info(f"Parameter combination config: {parameter_combination}")
+                            combo_config = betas.get('parameter_combination', {})
+                            logger.info(f"Parameter combination config (combo_config): {combo_config}")
                             
                             # Apply the same transformations to individual combination data
                             from .mmm_training import MMMTransformationEngine
                             transformation_engine = MMMTransformationEngine()
-                            
-                            # Apply transformations to the individual combination data
-                            transformed_df, transformation_metadata = transformation_engine.apply_variable_transformations(
-                                df, parameter_combination
-                            )
-                            
-                            # Use transformed data for predictions
-                            X_transformed = transformed_df[x_variables_lower].values
                             
                             # Calculate combination-specific betas (common + interaction terms)
                             combination_betas = self.calculate_combination_betas(
@@ -1250,17 +1241,54 @@ class MMMStackModelDataProcessor:
                             if combination_key in combination_betas:
                                 combination_coefficients = combination_betas[combination_key]
                                 combination_intercept = combination_coefficients.pop('intercept', 0.0)
-                                logger.info(f"Combination coefficients: {combination_coefficients}")
+                                logger.info(f"Combination coefficients for {combination_key}: {combination_coefficients}")
+                                logger.info(f"Available coefficient keys: {list(combination_coefficients.keys())}")
                             else:
                                 # Fallback to unstandardized coefficients if combination betas not available
                                 combination_coefficients = betas.get('unstandardized_coefficients', betas.get('coefficients', {}))
                                 combination_intercept = betas.get('intercept', 0.0)
-                                logger.info(f"Using fallback coefficients: {combination_coefficients}")
+                                logger.info(f"Using fallback coefficients for {combination_key}: {combination_coefficients}")
+                                logger.info(f"Available fallback coefficient keys: {list(combination_coefficients.keys())}")
                             
-                            # Make predictions using the combination-specific coefficients on transformed data
-                            y_pred = self._predict_with_betas(X_transformed, combination_coefficients, x_variables_lower, combination_intercept)
+                            # STEP 1: Unstandardize the combination-specific coefficients FIRST
+                            # This is crucial - we need to convert transformed betas back to original scale
+                            unstandardized_coefficients, unstandardized_intercept = self.unstandardize_coefficients(
+                                coefficients=combination_coefficients,
+                                combo_config=combo_config,
+                                transformation_metadata=transformation_metadata,
+                                x_variables_lower=x_variables_lower,
+                                X_original=df  # Use individual combination data
+                            )
                             
-                            # Calculate individual combination metrics
+                            logger.info(f"Unstandardized coefficients for {combination}: {unstandardized_coefficients}")
+                            
+                            # STEP 2: Apply same transformations to individual combination data for predictions
+                            # For media variables, we need to use the SAME transformations that were used to get the betas
+                            from .mmm_training import MMMTransformationEngine
+                            transformation_engine = MMMTransformationEngine()
+                            
+                            # Apply the exact same transformations to individual combination data
+                            transformed_individual_df, _ = transformation_engine.apply_variable_transformations(
+                                df, combo_config
+                            )
+                            
+                            # Convert combination coefficients to the format expected by _predict_with_betas
+                            # combination_coefficients has keys like "digital_reach", but _predict_with_betas expects "Beta_digital_reach"
+                            formatted_coefficients = {}
+                            for var in x_variables_lower:
+                                if var in combination_coefficients:
+                                    formatted_coefficients[f"Beta_{var}"] = combination_coefficients[var]
+                            
+                            # Make predictions using transformed coefficients on TRANSFORMED individual data
+                            # This ensures we use the same transformation pipeline that produced the betas
+                            y_pred = self._predict_with_betas(
+                                X=transformed_individual_df[x_variables_lower].values,  # Use TRANSFORMED individual data
+                                coefficients=formatted_coefficients,  # Use formatted coefficients
+                                x_variables=x_variables_lower,
+                                intercept=combination_intercept
+                            )
+                            
+                            # STEP 3: Calculate individual combination metrics using correct predictions
                             individual_mape = safe_mape(y_actual, y_pred)
                             individual_r2 = self._calculate_r2(y_actual, y_pred)
                             
@@ -1275,42 +1303,19 @@ class MMMStackModelDataProcessor:
                             stack_key = f"{combination}_{param_index}_{model_name}"
                             stack_metrics = stack_metrics_by_combination_model.get(stack_key, {})
                             
-                            # Calculate elasticities and contributions for individual combination using combination coefficients
-                            elasticities = {}
-                            contributions = {}
-                            y_mean = df[y_variable.lower()].mean()
+                            # STEP 4: Calculate elasticities and contributions using unstandardized coefficients
+                            elasticities, contributions, individual_price_elasticity = self.calculate_elasticities_and_contributions(
+                                unstandardized_coefficients=unstandardized_coefficients,
+                                combo_config=combo_config,
+                                transformation_metadata=transformation_metadata,
+                                X_original=df,  # Use individual combination data
+                                y_original=df[y_variable.lower()],  # Use individual combination target
+                                x_variables_lower=x_variables_lower,
+                                price_column=price_column
+                            )
                             
-                            # Use original (untransformed) data for elasticity calculations
-                            for x_var in x_variables_lower:
-                                # Try different coefficient key formats for combination coefficients
-                                beta_key = f"Beta_{x_var}"
-                                beta_val = combination_coefficients.get(beta_key, combination_coefficients.get(x_var, 0.0))
-                                x_mean = df[x_var].mean()  # Use original data mean
-                                
-                                logger.info(f"Variable {x_var}: beta_key={beta_key}, beta_val={beta_val}, x_mean={x_mean}, y_mean={y_mean}")
-                                
-                                # Calculate elasticity: (β × X_mean) / Y_mean
-                                if y_mean != 0 and x_mean != 0:
-                                    elasticity = (beta_val * x_mean) / y_mean
-                                else:
-                                    elasticity = 0
-                                
-                                elasticities[x_var] = elasticity
-                                contributions[x_var] = abs(beta_val * x_mean)
-                            
-                            # Normalize contributions to sum to 1
-                            total_contribution = sum(contributions.values())
-                            if total_contribution > 0:
-                                for x_var in contributions:
-                                    contributions[x_var] = contributions[x_var] / total_contribution
-                            
-                            # Calculate price elasticity if price column is specified
-                            individual_price_elasticity = None
-                            if price_column and price_column.lower() in x_variables_lower:
-                                price_beta = combination_coefficients.get(f"Beta_{price_column.lower()}", 0.0)
-                                price_mean = df[price_column.lower()].mean()
-                                if y_mean != 0 and price_mean != 0:
-                                    individual_price_elasticity = (price_beta * price_mean) / y_mean
+                            logger.info(f"Individual combination elasticities for {combination}: {elasticities}")
+                            logger.info(f"Individual combination contributions for {combination}: {contributions}")
                             
                             # Create a unique key for this parameter combination and model
                             param_model_key = f"param_{param_index}_{model_name}"
