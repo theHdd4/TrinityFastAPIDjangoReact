@@ -168,7 +168,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
             
             {/* Combination names when per-combination CPRP is enabled */}
             {roiConfig.perCombinationCPRP && selectedFeatures.length > 0 && (
-              <div className="space-y-2 mt-2">
+              <div className="space-y-2 mt-7">
                 {availableCombinations.map(combination => (
                   <div key={combination} className="h-6 flex items-center text-xs text-gray-600 truncate">
                     {combination}
@@ -183,11 +183,11 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
             <div className="w-full self-center">
               <div className="text-sm text-gray-600">
                 {selectedFeatures.length > 0 ? (
-                  <div className="space-y-2">
+                  <div className="space-y-4">
                     {/* Feature names in a row */}
                     <div className="flex gap-2 overflow-x-auto">
                       {selectedFeatures.map(feature => (
-                        <span key={feature} className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs whitespace-nowrap flex-shrink-0">
+                        <span key={feature} className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs whitespace-nowrap flex-shrink-0 min-w-20 text-center">
                           {feature}
                         </span>
                       ))}
@@ -196,7 +196,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                      {/* CPI/CPRP dropdowns in a row below features */}
                      <div className="flex gap-2 overflow-x-auto">
                        {selectedFeatures.map(feature => (
-                         <div key={`${feature}-config`} className="flex flex-col items-center gap-2 flex-shrink-0 min-w-20">
+                         <div key={`${feature}-config`} className="flex flex-col items-center gap-9 flex-shrink-0 min-w-20">
                            <SingleSelectDropdown
                              label=""
                              options={[

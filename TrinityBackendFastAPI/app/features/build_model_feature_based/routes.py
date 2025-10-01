@@ -2670,12 +2670,24 @@ async def train_mmm_models(request: dict):
         
         # Process individual MMM training if enabled
         if individual_modeling:
-            logger.info(f"Starting individual MMM training for {len(combinations)} combinations")
+            logger.info("=" * 100)
+            logger.info("🚀 STARTING INDIVIDUAL MODELING")
+            logger.info("=" * 100)
+            logger.info(f"📊 Total combinations to process: {len(combinations)}")
+            logger.info(f"📊 Models to run: {individual_models_to_run}")
+            logger.info(f"📊 Scope number: {scope_number}")
+            logger.info("=" * 100)
+            
+            # Update training progress for UI
+            training_progress[run_id]["stage"] = "individual_modeling"
+            training_progress[run_id]["stage_description"] = "Training individual models"
+            training_progress[run_id]["current_step"] = "Starting individual modeling"
         
         # Process each combination
         for combination_index, combination in enumerate(combinations):
-            # Update progress
+            # Update progress for UI
             training_progress[run_id]["current_combination"] = combination
+            training_progress[run_id]["current_step"] = f"Reading file for {combination}"
             training_progress[run_id]["current"] = combination_index * individual_models_count
             training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
             
@@ -2704,11 +2716,16 @@ async def train_mmm_models(request: dict):
                     await asyncio.sleep(0.3)
                     
                     # Train MMM models for this combination
+                    training_progress[run_id]["current_step"] = f"Training models for {combination}"
                     training_progress[run_id]["current_model"] = "Training MMM models..."
                     await asyncio.sleep(0.5)
                     
                     try:
-                        logger.info(f"Starting MMM training for combination: {combination}")
+                        logger.info("=" * 80)
+                        logger.info(f"📁 READING TRAINING FILE FOR COMBINATION: {combination}")
+                        logger.info(f"   File key: {target_file_key}")
+                        logger.info(f"   Combination {combination_index + 1}/{len(combinations)}")
+                        logger.info("=" * 80)
                         # Convert x_variables to lowercase for consistency
                         x_variables_lower = [var.lower() for var in x_variables]
                         y_variable_lower = y_variable.lower()
@@ -2773,7 +2790,7 @@ async def train_mmm_models(request: dict):
                                 logger.info("=" * 100)
                             else:
                                 logger.info(f"ℹ️ No ROI results found for combination: {combination}")
-                            
+                        
                         # Update progress
                             training_progress[run_id]["current"] += individual_models_count
                         training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
@@ -2830,7 +2847,7 @@ async def train_mmm_models(request: dict):
                                     # Create summary row (same structure as train-models-direct)
                                 summary_row = {
                                         'Scope': f'Scope_{scope_number}',
-                                        'combination_id': combination,
+                                    'combination_id': combination,
                                         'y_variable': y_variable,
                                         'x_variables': x_variables,  # Keep as list instead of joining
                                         'model_name': model_result.get('model_name', 'Unknown'),
@@ -2981,10 +2998,38 @@ async def train_mmm_models(request: dict):
                 logger.error(f"Error processing combination {combination}: {e}")
                 continue
         
+        # Log completion of individual modeling
+        if individual_modeling:
+            logger.info("=" * 100)
+            logger.info("✅ COMPLETED INDIVIDUAL MODELING")
+            logger.info("=" * 100)
+            logger.info(f"📊 Total combinations processed: {len(combination_results)}")
+            logger.info(f"📊 Total models saved: {total_saved}")
+            logger.info("=" * 100)
+            training_progress[run_id]["current_step"] = "Individual modeling completed"
+        
         # MMM Stack modeling integration (similar to general models)
         if stack_modeling:
             try:
-                logger.info("Starting MMM stack modeling...")
+                logger.info("=" * 100)
+                logger.info("🚀 STARTING STACK MODELING")
+                logger.info("=" * 100)
+                logger.info(f"📊 Scope number: {scope_number}")
+                logger.info(f"📊 Total combinations: {len(combinations)}")
+                logger.info(f"📊 Pool by identifiers: {pool_by_identifiers}")
+                logger.info(f"📊 Models to run: {stack_models_to_run}")
+                logger.info(f"📊 Clustering enabled: {n_clusters is not None}")
+                if n_clusters:
+                    logger.info(f"📊 Number of clusters: {n_clusters}")
+                logger.info("=" * 100)
+                
+                # Update training progress for UI
+                training_progress[run_id]["stage"] = "stack_modeling"
+                training_progress[run_id]["stage_description"] = "Training stack models"
+                training_progress[run_id]["current_step"] = "Starting stack modeling"
+                training_progress[run_id]["completed_combinations"] = 0  # Reset counter for stack modeling
+                training_progress[run_id]["current_combination"] = ""
+                training_progress[run_id]["current_model"] = ""
                 
                 # Import MMM stack trainer
                 from .mmm_stack_training import MMMStackModelDataProcessor
@@ -2993,7 +3038,13 @@ async def train_mmm_models(request: dict):
                 mmm_stack_trainer = MMMStackModelDataProcessor()
                 
                 # Step 1: Prepare stack model data (get split clustered data)
-                logger.info("Preparing MMM stack model data...")
+                logger.info("=" * 80)
+                logger.info("📂 READING AND POOLING DATA FOR STACK MODELING")
+                logger.info("=" * 80)
+                logger.info(f"   Pooling by identifiers: {pool_by_identifiers}")
+                logger.info(f"   Reading files for {len(combinations)} combinations")
+                logger.info("=" * 80)
+                training_progress[run_id]["current_step"] = f"Reading and pooling data by {pool_by_identifiers}"
                 stack_data_result = await mmm_stack_trainer.prepare_stack_model_data(
                     scope_number=scope_number,
                     combinations=combinations,
@@ -3010,10 +3061,20 @@ async def train_mmm_models(request: dict):
                     raise Exception(f"Failed to prepare MMM stack model data: {stack_data_result.get('error', 'Unknown error')}")
                 
                 split_clustered_data = stack_data_result.get('split_clustered_data', {})
-                logger.info(f"Successfully prepared MMM stack data with {len(split_clustered_data)} clusters")
+                logger.info("=" * 80)
+                logger.info(f"✅ Successfully pooled data into {len(split_clustered_data)} clusters/pools")
+                for pool_key in split_clustered_data.keys():
+                    logger.info(f"   📦 Pool: {pool_key}")
+                logger.info("=" * 80)
                 
                 # Step 2: Train MMM stack models on prepared data
-                logger.info("Training MMM stack models on prepared data...")
+                logger.info("=" * 80)
+                logger.info("🎯 TRAINING STACK MODELS ON POOLED DATA")
+                logger.info("=" * 80)
+                logger.info(f"   Training {len(stack_models_to_run)} model(s) on each pool")
+                logger.info(f"   Models: {stack_models_to_run}")
+                logger.info("=" * 80)
+                training_progress[run_id]["current_step"] = f"Training {len(stack_models_to_run)} model(s) on {len(split_clustered_data)} pools"
                 stack_training_result = await mmm_stack_trainer.train_mmm_models_for_stack_data(
                     split_clustered_data=split_clustered_data,
                     x_variables=x_variables,
@@ -3029,7 +3090,9 @@ async def train_mmm_models(request: dict):
                     combinations=combinations,
                     minio_client=minio_client,
                     bucket_name=bucket_name,
-                    roi_config=roi_config
+                    roi_config=roi_config,
+                    run_id=run_id,
+                    training_progress=training_progress
                 )
                 
                 if stack_training_result and stack_training_result.get('status') == 'success':
@@ -3127,6 +3190,16 @@ async def train_mmm_models(request: dict):
                                 logger.info(f"Added {len(stack_model_results_formatted)} MMM stack models as new combination {combination} (no existing entry found)")
                     
                     logger.info(f"Stack modeling results processing completed. Total combinations: {len(combination_results)}, Total saved: {total_saved}")
+                    
+                    # Log completion of stack modeling
+                    logger.info("=" * 100)
+                    logger.info("✅ COMPLETED STACK MODELING")
+                    logger.info("=" * 100)
+                    logger.info(f"📊 Total pools processed: {len(split_clustered_data)}")
+                    logger.info(f"📊 Total stack models trained: {len(stack_training_result.get('stack_model_results', []))}")
+                    logger.info(f"📊 Total combinations with metrics: {len(stack_training_result.get('individual_combination_metrics', {}))}")
+                    logger.info("=" * 100)
+                    training_progress[run_id]["current_step"] = "Stack modeling completed"
                     
                     # Print the final processed results structure
                     logger.info("=" * 80)

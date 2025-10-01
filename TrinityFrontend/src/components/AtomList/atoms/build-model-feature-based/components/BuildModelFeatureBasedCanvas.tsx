@@ -641,8 +641,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
           } else if (filterColumn === 'BIC') {
             cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
-          } else if (filterColumn === 'Best Alpha') {
-            cellValue = model.best_alpha ? String(model.best_alpha.toFixed(6)) : 'N/A';
           }
           return filterValues.includes(cellValue);
         });
@@ -666,8 +664,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
       } else if (column === 'BIC') {
         cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
-      } else if (column === 'Best Alpha') {
-        cellValue = model.best_alpha ? String(model.best_alpha.toFixed(6)) : 'N/A';
       }
       if (cellValue && !values.includes(cellValue)) {
         values.push(cellValue);
@@ -780,8 +776,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
           } else if (column === 'BIC') {
             cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
-          } else if (column === 'Best Alpha') {
-            cellValue = model.best_alpha ? String(model.best_alpha.toFixed(6)) : 'N/A';
           }
           return filterValues.includes(cellValue);
         });
@@ -818,9 +812,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         } else if (currentSortColumn === 'BIC') {
           aVal = a.bic || 0;
           bVal = b.bic || 0;
-        } else if (currentSortColumn === 'Best Alpha') {
-          aVal = a.best_alpha || 0;
-          bVal = b.best_alpha || 0;
         }
         
         if (aVal === bVal) return 0;
@@ -1490,13 +1481,13 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             {modelResult.combination_results && modelResult.combination_results.length > 0 ? (
               <div className="max-h-[600px] overflow-y-auto space-y-4">
                 {modelResult.combination_results.map((combination, comboIndex) => (
-                  <div key={comboIndex} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow duration-200">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-green-100 rounded-lg">
-                          <Target className="w-5 h-5 text-green-600" />
+                  <div key={comboIndex} className="bg-white border border-gray-200 rounded-lg p-2 shadow-sm hover:shadow-md transition-shadow duration-200">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-1.5">
+                        <div className="p-1 bg-green-100 rounded">
+                          <Target className="w-3.5 h-3.5 text-green-600" />
                         </div>
-                                <h4 className="font-semibold text-base text-gray-800">
+                                <h4 className="font-semibold text-xs text-gray-800">
           Combination: <span 
             className="text-green-600 font-bold cursor-pointer hover:underline hover:text-green-700 transition-colors"
             onClick={() => handleOpenCombinationFile(combination.combination_id)}
@@ -1510,12 +1501,12 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                         variant="ghost"
                         size="sm"
                         onClick={() => toggleCombinationMinimize(comboIndex)}
-                        className="h-8 w-8 p-0 hover:bg-gray-100"
+                        className="h-5 w-5 p-0 hover:bg-gray-100"
                       >
                         {minimizedCombinations.has(comboIndex) ? (
-                          <Maximize2 className="w-4 h-4 text-gray-600" />
+                          <Maximize2 className="w-3 h-3 text-gray-600" />
                         ) : (
-                          <Minimize2 className="w-4 h-4 text-gray-600" />
+                          <Minimize2 className="w-3 h-3 text-gray-600" />
                         )}
                       </Button>
                     </div>
@@ -1840,50 +1831,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                         </ContextMenuContent>
                                       </ContextMenu>
                                     </TableHead>
-                                    <TableHead className="font-semibold text-gray-700">
-                                      <ContextMenu>
-                                        <ContextMenuTrigger asChild>
-                                          <div className="flex items-center gap-1 cursor-pointer">
-                                            Best Alpha
-                                            {(performanceSortColumn[comboIndex] || '') === 'Best Alpha' && (
-                                              (performanceSortDirection[comboIndex] || 'asc') === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                                            )}
-                                          </div>
-                                        </ContextMenuTrigger>
-                                        <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
-                                          <ContextMenuSub>
-                                            <ContextMenuSubTrigger className="flex items-center">
-                                              <ArrowUp className="w-4 h-4 mr-2" /> Sort
-                                            </ContextMenuSubTrigger>
-                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-                                              <ContextMenuItem onClick={() => handlePerformanceSort('Best Alpha', comboIndex, 'asc')}>
-                                                <ArrowUp className="w-4 h-4 mr-2" /> Ascending
-                                              </ContextMenuItem>
-                                              <ContextMenuItem onClick={() => handlePerformanceSort('Best Alpha', comboIndex, 'desc')}>
-                                                <ArrowDown className="w-4 h-4 mr-2" /> Descending
-                                              </ContextMenuItem>
-                                            </ContextMenuSubContent>
-                                          </ContextMenuSub>
-                                          <ContextMenuSeparator />
-                                          <ContextMenuSub>
-                                            <ContextMenuSubTrigger className="flex items-center">
-                                              <FilterIcon className="w-4 h-4 mr-2" /> Filter
-                                            </ContextMenuSubTrigger>
-                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
-                                              <PerformanceFilterMenu column="Best Alpha" modelResults={combination.model_results} comboIndex={comboIndex} />
-                                            </ContextMenuSubContent>
-                                          </ContextMenuSub>
-                                          {performanceColumnFilters[comboIndex]?.['Best Alpha']?.length > 0 && (
-                                            <>
-                                              <ContextMenuSeparator />
-                                              <ContextMenuItem onClick={() => clearPerformanceColumnFilter('Best Alpha', comboIndex)}>
-                                                Clear Filter
-                                              </ContextMenuItem>
-                                            </>
-                                          )}
-                                        </ContextMenuContent>
-                                      </ContextMenu>
-                                    </TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -1896,9 +1843,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                       <TableCell className="font-mono text-sm">{model.r2_test?.toFixed(1) || 'N/A'}</TableCell>
                                       <TableCell className="font-mono text-sm">{model.aic?.toFixed(1) || 'N/A'}</TableCell>
                                       <TableCell className="font-mono text-sm">{model.bic?.toFixed(1) || 'N/A'}</TableCell>
-                                      <TableCell className="font-mono text-sm">
-                                        {model.best_alpha ? model.best_alpha.toFixed(6) : 'N/A'}
-                                      </TableCell>
                                     </TableRow>
                                   ))}
                                 </TableBody>

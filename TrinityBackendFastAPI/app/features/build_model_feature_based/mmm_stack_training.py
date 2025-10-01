@@ -897,8 +897,10 @@ class MMMStackModelDataProcessor:
                     else:
                         elasticity = 0
                     
-                    # For contributions, use unstandardized beta with original mean
-                    contributions[var] = abs(unstandardized_coefficients.get(f"Beta_{var}", 0) * var_mean)
+                    # For contributions, use transformed beta with transformed mean (consistent scaling)
+                    # Get transformed mean from transformation_metadata
+                    transformed_mean = transformation_metadata.get(var, {}).get("final_mean", var_mean)
+                    contributions[var] = abs(unstandardized_coefficients.get(f"Beta_{var}", 0) * transformed_mean)
                     
                 else:
                     # For non-media variables, use the simple approach
@@ -1035,7 +1037,10 @@ class MMMStackModelDataProcessor:
         stack_model_results: List[Dict[str, Any]],
         variable_configs: Dict[str, Dict[str, Any]],
         price_column: Optional[str] = None,
-        roi_config: Optional[Dict[str, Any]] = None
+        roi_config: Optional[Dict[str, Any]] = None,
+        run_id: str = None,
+        training_progress: Dict = None,
+        models_to_run: List[str] = None
     ) -> Dict[str, Any]:
         """
         Calculate metrics for individual combinations using stack modeling betas (similar to stack_model_training.py).
@@ -1111,8 +1116,19 @@ class MMMStackModelDataProcessor:
             
 
             logger.info(f"🔄 Processing {len(combinations)} combinations for individual metrics")
-            for combination in combinations:
+            for combination_idx, combination in enumerate(combinations):
                 try:
+                    # Update progress for stack modeling
+                    if run_id and training_progress and run_id in training_progress:
+                        current_combination_idx = combination_idx + 1
+                        num_models = len(models_to_run) if models_to_run else 1
+                        training_progress[run_id]["current_combination"] = combination
+                        training_progress[run_id]["status"] = f"Stack Modeling: Processing {combination} ({current_combination_idx}/{len(combinations)})"
+                        # Update current to reflect starting this combination
+                        training_progress[run_id]["current"] = combination_idx * num_models
+                        training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100) if training_progress[run_id]["total"] > 0 else 0
+                        logger.info(f"📊 Updated progress: {combination} ({current_combination_idx}/{len(combinations)}) - {training_progress[run_id]['percentage']}%")
+                    
                     logger.info(f"📁 Fetching data for combination: {combination}")
                     # Fetch individual combination data
                     df = self._fetch_combination_file_direct(scope_number, combination, minio_client, bucket_name)
@@ -1146,7 +1162,15 @@ class MMMStackModelDataProcessor:
                     
                     for param_index, param_models in available_parameter_combinations.items():
                         
-                        for model_name, betas in param_models.items():
+                        for model_idx, (model_name, betas) in enumerate(param_models.items()):
+                            
+                            # Update progress for current model
+                            if run_id and training_progress and run_id in training_progress:
+                                current_model_idx = model_idx + 1
+                                total_models_in_combination = len(param_models)
+                                training_progress[run_id]["current_model"] = model_name
+                                training_progress[run_id]["status"] = f"Stack Modeling: {combination} - {model_name} ({current_model_idx}/{total_models_in_combination})"
+                                logger.info(f"📊 Processing model: {model_name} ({current_model_idx}/{total_models_in_combination})")
                             
                             # Get the parameter combination configuration for this model
                             combo_config = betas.get('parameter_combination', {})
@@ -1307,6 +1331,17 @@ class MMMStackModelDataProcessor:
                     
                     individual_metrics[combination] = combination_metrics
                     logger.info(f"✅ Successfully calculated metrics for {combination}: {len(combination_metrics)} parameter combinations")
+                    
+                    # Update progress - mark combination as completed
+                    if run_id and training_progress and run_id in training_progress:
+                        training_progress[run_id]["completed_combinations"] += 1
+                        completed = training_progress[run_id]["completed_combinations"]
+                        total = training_progress[run_id]["total_combinations"]
+                        # Update current based on models per combination
+                        num_models = len(models_to_run) if models_to_run else 1
+                        training_progress[run_id]["current"] = completed * num_models
+                        training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100) if training_progress[run_id]["total"] > 0 else 0
+                        logger.info(f"📊 Progress: Completed {completed}/{total} combinations ({training_progress[run_id]['percentage']}%)")
                     
                 except Exception as e:
                     logger.error(f"❌ Error calculating metrics for {combination}: {str(e)}")
@@ -1656,7 +1691,9 @@ class MMMStackModelDataProcessor:
         combinations: List[str] = None,
         minio_client = None,
         bucket_name: str = None,
-        roi_config: Optional[Dict[str, Any]] = None
+        roi_config: Optional[Dict[str, Any]] = None,
+        run_id: str = None,
+        training_progress: Dict = None
     ) -> Dict[str, Any]:
         """
         Train MMM models on split clustered data following the stack_model_training.py approach:
@@ -1711,7 +1748,10 @@ class MMMStackModelDataProcessor:
                     stack_model_results=stack_model_results,
                     variable_configs=variable_configs,
                     price_column=price_column,
-                    roi_config=roi_config
+                    roi_config=roi_config,
+                    run_id=run_id,
+                    training_progress=training_progress,
+                    models_to_run=models_to_run
                 )
             else:
                 logger.warning("Missing parameters for individual combination metrics calculation")
@@ -2185,7 +2225,7 @@ class MMMStackModelDataProcessor:
                     
                     model_results.append(model_result)
                     logger.info(f"Successfully added model result for {model_name}")
-                
+            
                 except Exception as e:
                     logger.error(f"Error training model {model_name}: {e}")
                     import traceback
