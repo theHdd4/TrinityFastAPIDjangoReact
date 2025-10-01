@@ -609,6 +609,35 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     return mapped;
   }, []);
 
+  // Helper function to filter backend response to preserve deleted columns
+  const filterBackendResponse = useCallback((resp: any, currentHiddenColumns: string[]) => {
+    const filteredHeaders = resp.headers.filter((header: string) => !currentHiddenColumns.includes(header));
+    
+    const filteredRows = resp.rows.map((row: any) => {
+      const filteredRow: any = {};
+      filteredHeaders.forEach((header: string) => {
+        if (row.hasOwnProperty(header)) {
+          filteredRow[header] = row[header];
+        }
+      });
+      return filteredRow;
+    });
+    
+    const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+    const filteredColumnTypes: any = {};
+    filteredHeaders.forEach((header: string) => {
+      if (columnTypes[header]) {
+        filteredColumnTypes[header] = columnTypes[header];
+      }
+    });
+    
+    return {
+      headers: filteredHeaders,
+      rows: filteredRows,
+      columnTypes: filteredColumnTypes
+    };
+  }, [normalizeBackendColumnTypes]);
+
   const buildFilterPayload = useCallback((value: any) => {
     if (Array.isArray(value)) {
       if (value.length === 2 && typeof value[0] === 'number' && typeof value[1] === 'number') {
@@ -979,16 +1008,20 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     try {
       console.log('[DataFrameOperations] sort', column, direction);
       const resp = await apiSort(fileId, column, direction);
-      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+      
+      // Preserve deleted columns by filtering out columns that were previously deleted
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns);
+      
       onDataChange({
-        headers: resp.headers,
-        rows: resp.rows,
+        headers: filtered.headers,
+        rows: filtered.rows,
         fileName: data.fileName,
-        columnTypes,
-        pinnedColumns: data.pinnedColumns,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-        hiddenColumns: data.hiddenColumns || [],
+        hiddenColumns: currentHiddenColumns,
       });
       onSettingsChange({ sortColumns: [{ column, direction }], fileId: resp.df_id });
     } catch (err) {
@@ -1045,16 +1078,20 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   
   try {
     const resp = await apiRenameColumn(fileId, oldHeader, newHeader);
-    const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+    
+    // Preserve deleted columns by filtering out columns that were previously deleted
+    const currentHiddenColumns = data.hiddenColumns || [];
+    const filtered = filterBackendResponse(resp, currentHiddenColumns);
+    
     onDataChange({
-      headers: resp.headers,
-      rows: resp.rows,
+      headers: filtered.headers,
+      rows: filtered.rows,
       fileName: data.fileName,
-      columnTypes,
-      pinnedColumns: data.pinnedColumns,
+      columnTypes: filtered.columnTypes,
+      pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
-      hiddenColumns: data.hiddenColumns || [],
+      hiddenColumns: currentHiddenColumns,
     });
     setColumnFormulas(prev => {
       if (!Object.prototype.hasOwnProperty.call(prev, oldHeader)) {
@@ -1082,15 +1119,20 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const globalRowIndex = startIndex + rowIndex;
     try {
       const resp = await apiEditCell(fileId, globalRowIndex, column, newValue);
-      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+      
+      // Preserve deleted columns by filtering out columns that were previously deleted
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns);
+      
       onDataChange({
-        headers: resp.headers,
-        rows: resp.rows,
+        headers: filtered.headers,
+        rows: filtered.rows,
         fileName: data.fileName,
-        columnTypes,
-        pinnedColumns: data.pinnedColumns,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
         frozenColumns: data.frozenColumns,
-        cellColors: data.cellColors
+        cellColors: data.cellColors,
+        hiddenColumns: currentHiddenColumns,
       });
     } catch (err) {
       handleApiError('Edit cell failed', err);
@@ -1108,15 +1150,20 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const dir: 'above' | 'below' = data.rows.length > 0 ? 'below' : 'above';
     try {
       const resp = await apiInsertRow(fileId, idx, dir);
-      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+      
+      // Preserve deleted columns by filtering out columns that were previously deleted
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns);
+      
       onDataChange({
-        headers: resp.headers,
-        rows: resp.rows,
+        headers: filtered.headers,
+        rows: filtered.rows,
         fileName: data.fileName,
-        columnTypes,
-        pinnedColumns: data.pinnedColumns,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
+        hiddenColumns: currentHiddenColumns,
       });
     } catch (err) {
       handleApiError('Insert row failed', err);
@@ -1133,16 +1180,20 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const newColumnName = `Column_${data.headers.length + 1}`;
     try {
       const resp = await apiInsertColumn(fileId, data.headers.length, newColumnName, '');
-      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+      
+      // Preserve deleted columns by filtering out columns that were previously deleted
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns);
+      
       onDataChange({
-        headers: resp.headers,
-        rows: resp.rows,
+        headers: filtered.headers,
+        rows: filtered.rows,
         fileName: data.fileName,
-        columnTypes,
-        pinnedColumns: data.pinnedColumns,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-        hiddenColumns: data.hiddenColumns || [],
+        hiddenColumns: currentHiddenColumns,
       });
     } catch (err) {
       handleApiError('Insert column failed', err);
@@ -1188,16 +1239,20 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       const toIndex = data.headers.indexOf(draggedCol);
       try {
         const resp = await apiMoveColumn(fileId, draggedCol, toIndex);
-        const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+        
+        // Preserve deleted columns by filtering out columns that were previously deleted
+        const currentHiddenColumns = data.hiddenColumns || [];
+        const filtered = filterBackendResponse(resp, currentHiddenColumns);
+        
         onDataChange({
-          headers: resp.headers,
-          rows: resp.rows,
+          headers: filtered.headers,
+          rows: filtered.rows,
           fileName: data.fileName,
-          columnTypes,
-          pinnedColumns: data.pinnedColumns,
+          columnTypes: filtered.columnTypes,
+          pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
           frozenColumns: data.frozenColumns,
           cellColors: data.cellColors,
-          hiddenColumns: data.hiddenColumns || [],
+          hiddenColumns: currentHiddenColumns,
         });
         
         // Add to history
@@ -1272,14 +1327,51 @@ const handleClearFilter = async (col: string) => {
 };
 
 const handleCellClick = (rowIndex: number, column: string) => {
-  setSelectedCell({ row: rowIndex, col: column });
-  setSelectedColumn(null);
+  // When clicking on a cell, select the entire column as the target column
+  // This matches Excel behavior where clicking any cell in a column selects that column
+  setSelectedColumn(column);
+  setSelectedCell(null);
+};
+
+const insertColumnIntoFormula = (columnName: string) => {
+  // Get the formula input element to find cursor position
+  const formulaInputElement = document.querySelector('input[placeholder*="=SUM"]') as HTMLInputElement;
+  if (!formulaInputElement) return;
+  
+  const cursorPosition = formulaInputElement.selectionStart || 0;
+  const currentFormula = formulaInput;
+  
+  // Insert column name at cursor position
+  const newFormula = currentFormula.slice(0, cursorPosition) + columnName + currentFormula.slice(cursorPosition);
+  
+  setFormulaInput(newFormula);
+  setIsFormulaMode(true);
+  
+  // If no target column is selected, set the clicked column as the target
+  if (!selectedColumn) {
+    setSelectedColumn(columnName);
+  }
+  
+  // Set cursor position after the inserted column name
+  setTimeout(() => {
+    const newCursorPosition = cursorPosition + columnName.length;
+    formulaInputElement.setSelectionRange(newCursorPosition, newCursorPosition);
+    formulaInputElement.focus();
+  }, 0);
 };
 
 const handleHeaderClick = (header: string) => {
   resetSaveSuccess();
-  setSelectedColumn(header);
-  setSelectedCell(null);
+  
+  // Check if we're in formula mode (formula input starts with =)
+  if (formulaInput.trim().startsWith('=')) {
+    // Insert column name into formula at cursor position
+    insertColumnIntoFormula(header);
+  } else {
+    // Normal column selection behavior
+    setSelectedColumn(header);
+    setSelectedCell(null);
+  }
 };
 
 const handleFormulaSubmit = async () => {
@@ -1293,16 +1385,20 @@ const handleFormulaSubmit = async () => {
   
   try {
     const resp = await apiApplyFormula(fileId, selectedColumn, trimmedFormula);
-    const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+    
+    // Preserve deleted columns by filtering out columns that were previously deleted
+    const currentHiddenColumns = data.hiddenColumns || [];
+    const filtered = filterBackendResponse(resp, currentHiddenColumns);
+    
     onDataChange({
-      headers: resp.headers,
-      rows: resp.rows,
+      headers: filtered.headers,
+      rows: filtered.rows,
       fileName: data.fileName,
-      columnTypes,
-      pinnedColumns: data.pinnedColumns,
+      columnTypes: filtered.columnTypes,
+      pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
-      hiddenColumns: data.hiddenColumns || [],
+      hiddenColumns: currentHiddenColumns,
     });
     setColumnFormulas(prev => {
       if (prev[selectedColumn] === trimmedFormula) {
@@ -1342,16 +1438,20 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     const newColKey = getNextColKey(data.headers);
     try {
       const resp = await apiInsertColumn(fileId, colIdx, newColKey, '');
-      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+      
+      // Preserve deleted columns by filtering out columns that were previously deleted
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns);
+      
       onDataChange({
-        headers: resp.headers,
-        rows: resp.rows,
+        headers: filtered.headers,
+        rows: filtered.rows,
         fileName: data.fileName,
-        columnTypes,
-        pinnedColumns: data.pinnedColumns,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-        hiddenColumns: data.hiddenColumns || [],
+        hiddenColumns: currentHiddenColumns,
       });
       
       // Add to history
@@ -1446,16 +1546,20 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     }
     try {
       const resp = await apiDuplicateColumn(fileId, col, newName);
-      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+      
+      // Preserve deleted columns by filtering out columns that were previously deleted
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns);
+      
       onDataChange({
-        headers: resp.headers,
-        rows: resp.rows,
+        headers: filtered.headers,
+        rows: filtered.rows,
         fileName: data.fileName,
-        columnTypes,
-        pinnedColumns: data.pinnedColumns,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-        hiddenColumns: data.hiddenColumns || [],
+        hiddenColumns: currentHiddenColumns,
       });
       // Remember the source for this duplicated column
       setDuplicateMap(prev => ({ ...prev, [newName]: prev[col] || col }));
@@ -1477,16 +1581,20 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     
     try {
       const resp = await apiInsertRow(fileId, rowIdx, position);
-      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+      
+      // Preserve deleted columns by filtering out columns that were previously deleted
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns);
+      
       onDataChange({
-        headers: resp.headers,
-        rows: resp.rows,
+        headers: filtered.headers,
+        rows: filtered.rows,
         fileName: data.fileName,
-        columnTypes,
-        pinnedColumns: data.pinnedColumns,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-        hiddenColumns: data.hiddenColumns || [],
+        hiddenColumns: currentHiddenColumns,
       });
       
       // Add to history
@@ -1505,16 +1613,20 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     
     try {
       const resp = await apiDuplicateRow(fileId, rowIdx);
-      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+      
+      // Preserve deleted columns by filtering out columns that were previously deleted
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns);
+      
       onDataChange({
-        headers: resp.headers,
-        rows: resp.rows,
+        headers: filtered.headers,
+        rows: filtered.rows,
         fileName: data.fileName,
-        columnTypes,
-        pinnedColumns: data.pinnedColumns,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-        hiddenColumns: data.hiddenColumns || [],
+        hiddenColumns: currentHiddenColumns,
       });
       
       // Add to history
@@ -1535,18 +1647,21 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       console.log('[DataFrameOperations] Retype column:', col, 'to', newType);
       const resp = await apiRetypeColumn(fileId, col, newType === 'text' ? 'string' : newType);
       console.log('[DataFrameOperations] Retype response:', resp);
-      const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
-      console.log('[DataFrameOperations] Normalized column types:', columnTypes);
+      
+      // Preserve deleted columns by filtering out columns that were previously deleted
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns);
+      console.log('[DataFrameOperations] Filtered column types:', filtered.columnTypes);
       
       const updatedData = {
-        headers: resp.headers,
-        rows: resp.rows,
+        headers: filtered.headers,
+        rows: filtered.rows,
         fileName: data.fileName,
-        columnTypes,
-        pinnedColumns: data.pinnedColumns,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-        hiddenColumns: data.hiddenColumns || [],
+        hiddenColumns: currentHiddenColumns,
       };
       
       onDataChange(updatedData);

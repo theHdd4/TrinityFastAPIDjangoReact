@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -578,6 +578,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
   const [selectedFormula, setSelectedFormula] = useState<FormulaItem | null>(null);
   const [activeTab, setActiveTab] = useState<TabValue>('all');
   const [isUsageGuideOpen, setIsUsageGuideOpen] = useState(false);
+  const formulaInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isFormulaMode) {
@@ -653,16 +654,47 @@ const FormularBar: React.FC<FormularBarProps> = ({
   };
 
   const handleColumnInsert = (column: string) => {
-    const trimmed = formulaInput.trim();
-    let next = formulaInput;
-    if (!trimmed) {
-      next = `=${column}`;
-    } else {
-      const separator = /[=(]$/.test(trimmed) ? '' : ', ';
-      next = `${formulaInput}${separator}${column}`;
+    const inputElement = formulaInputRef.current;
+    if (!inputElement) {
+      // Fallback to old behavior if ref is not available
+      const trimmed = formulaInput.trim();
+      let next = formulaInput;
+      if (!trimmed) {
+        next = `=${column}`;
+      } else {
+        const separator = /[=(]$/.test(trimmed) ? '' : ', ';
+        next = `${formulaInput}${separator}${column}`;
+      }
+      onFormulaInputChange(next);
+      onFormulaModeChange(true);
+      
+      // If no target column is selected, set the inserted column as the target
+      if (!selectedColumn) {
+        onSelectedColumnChange(column);
+      }
+      return;
     }
-    onFormulaInputChange(next);
+
+    const cursorPosition = inputElement.selectionStart || 0;
+    const currentValue = formulaInput;
+    
+    // Insert column at cursor position
+    const newValue = currentValue.slice(0, cursorPosition) + column + currentValue.slice(cursorPosition);
+    
+    onFormulaInputChange(newValue);
     onFormulaModeChange(true);
+    
+    // If no target column is selected, set the inserted column as the target
+    if (!selectedColumn) {
+      onSelectedColumnChange(column);
+    }
+    
+    // Set cursor position after the inserted column
+    setTimeout(() => {
+      const newCursorPosition = cursorPosition + column.length;
+      inputElement.setSelectionRange(newCursorPosition, newCursorPosition);
+      inputElement.focus();
+    }, 0);
   };
 
   const handleInputChange = (value: string) => {
@@ -856,6 +888,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
             <div className='relative'>
               <Sigma className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary z-10' />
               <Input
+                ref={formulaInputRef}
                 value={formulaInput}
                 onChange={(e) => handleInputChange(e.target.value)}
                 placeholder='=SUM(colA,colB), =IF(colA > 10, colB, colC), =DATE_DIFF(colEnd, colStart)'
