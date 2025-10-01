@@ -886,7 +886,51 @@ const FormularBar: React.FC<FormularBarProps> = ({
 
           <div className='flex flex-col flex-1'>
             <div className='relative'>
-              <Sigma className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary z-10' />
+              <Popover open={isLibraryOpen} onOpenChange={handleLibraryOpenChange}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    className='absolute left-1 top-1/2 -translate-y-1/2 h-6 w-6 p-0 hover:bg-primary/10 z-10'
+                    title='Open formula library'
+                  >
+                    <Sigma className='w-4 h-4 text-primary' />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className='w-96 p-0 shadow-lg' align='start'>
+                  <div className='border-b p-3'>
+                    <div className='flex items-center space-x-2'>
+                      <Search className='w-4 h-4 text-muted-foreground' />
+                      <Input
+                        placeholder='Search formulas...'
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className='h-8 border-0 focus-visible:ring-0'
+                      />
+                    </div>
+                  </div>
+                  <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabValue)} className='w-full'>
+                    <TabsList className='grid w-full grid-cols-5 p-1 m-1'>
+                      <TabsTrigger value='all' className='text-xs'>All</TabsTrigger>
+                      {categoryOrder.map((category) => (
+                        <TabsTrigger key={category} value={category} className='text-xs'>
+                          {tabLabels[category]}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+                    <ScrollArea className='h-80'>
+                      <TabsContent value='all' className='p-2'>
+                        {renderFormulaList(filteredFormulas)}
+                      </TabsContent>
+                      {categoryOrder.map((category) => (
+                        <TabsContent key={category} value={category} className='p-2'>
+                          {renderFormulaList(filteredFormulas.filter((f) => f.category === category))}
+                        </TabsContent>
+                      ))}
+                    </ScrollArea>
+                  </Tabs>
+                </PopoverContent>
+              </Popover>
               <Input
                 ref={formulaInputRef}
                 value={formulaInput}
@@ -914,47 +958,6 @@ const FormularBar: React.FC<FormularBarProps> = ({
           </div>
         </div>
 
-        <Popover open={isLibraryOpen} onOpenChange={handleLibraryOpenChange}>
-          <PopoverTrigger asChild>
-            <Button variant='outline' size='sm' className='h-8 px-3 shadow-sm'>
-              <BookOpen className='w-4 h-4 mr-1' />
-              Library
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className='w-96 p-0 shadow-lg' align='end'>
-            <div className='border-b p-3'>
-              <div className='flex items-center space-x-2'>
-                <Search className='w-4 h-4 text-muted-foreground' />
-                <Input
-                  placeholder='Search formulas...'
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className='h-8 border-0 focus-visible:ring-0'
-                />
-              </div>
-            </div>
-            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabValue)} className='w-full'>
-              <TabsList className='grid w-full grid-cols-5 p-1 m-1'>
-                <TabsTrigger value='all' className='text-xs'>All</TabsTrigger>
-                {categoryOrder.map((category) => (
-                  <TabsTrigger key={category} value={category} className='text-xs'>
-                    {tabLabels[category]}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-              <ScrollArea className='h-80'>
-                <TabsContent value='all' className='p-2'>
-                  {renderFormulaList(filteredFormulas)}
-                </TabsContent>
-                {categoryOrder.map((category) => (
-                  <TabsContent key={category} value={category} className='p-2'>
-                    {renderFormulaList(filteredFormulas.filter((f) => f.category === category))}
-                  </TabsContent>
-                ))}
-              </ScrollArea>
-            </Tabs>
-          </PopoverContent>
-        </Popover>
 
         <div className='flex items-center space-x-1'>
           <Button
