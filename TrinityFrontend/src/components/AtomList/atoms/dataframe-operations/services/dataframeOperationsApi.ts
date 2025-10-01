@@ -69,6 +69,7 @@ export function insertColumn(dfId: string, index: number, name: string, def: any
 }
 
 export function deleteColumn(dfId: string, name: string) {
+  console.log('[API] deleteColumn called with:', { df_id: dfId, name });
   return postJSON(`${DATAFRAME_OPERATIONS_API}/delete_column`, { df_id: dfId, name });
 }
 

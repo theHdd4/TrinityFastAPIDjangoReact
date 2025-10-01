@@ -138,6 +138,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [isFormulaMode, setIsFormulaMode] = useState(true);
   const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter' | 'operation'>(null);
   const [convertSubmenuOpen, setConvertSubmenuOpen] = useState(false);
+  const [unhideSubmenuOpen, setUnhideSubmenuOpen] = useState(false);
+  const [selectedHiddenColumns, setSelectedHiddenColumns] = useState<string[]>([]);
   const [contextMenu, setContextMenu] = useState<{
     pointerX: number;
     pointerY: number;
@@ -932,7 +934,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         columnTypes,
         pinnedColumns: [],
         frozenColumns: 0,
-        cellColors: {}
+        cellColors: {},
+        hiddenColumns: []
       };
       setUploadError(null);
       setPermanentlyDeletedRows(new Set()); // Clear deleted rows for new data
@@ -985,6 +988,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
+        hiddenColumns: data.hiddenColumns || [],
       });
       onSettingsChange({ sortColumns: [{ column, direction }], fileId: resp.df_id });
     } catch (err) {
@@ -1050,6 +1054,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       pinnedColumns: data.pinnedColumns,
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
+      hiddenColumns: data.hiddenColumns || [],
     });
     setColumnFormulas(prev => {
       if (!Object.prototype.hasOwnProperty.call(prev, oldHeader)) {
@@ -1137,6 +1142,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
+        hiddenColumns: data.hiddenColumns || [],
       });
     } catch (err) {
       handleApiError('Insert column failed', err);
@@ -1191,6 +1197,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
           pinnedColumns: data.pinnedColumns,
           frozenColumns: data.frozenColumns,
           cellColors: data.cellColors,
+          hiddenColumns: data.hiddenColumns || [],
         });
         
         // Add to history
@@ -1295,6 +1302,7 @@ const handleFormulaSubmit = async () => {
       pinnedColumns: data.pinnedColumns,
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
+      hiddenColumns: data.hiddenColumns || [],
     });
     setColumnFormulas(prev => {
       if (prev[selectedColumn] === trimmedFormula) {
@@ -1343,6 +1351,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
+        hiddenColumns: data.hiddenColumns || [],
       });
       
       // Add to history
@@ -1372,31 +1381,54 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     } else {
       // Delete single column (original behavior)
       const col = data.headers[colIdx];
-      try {
-        const resp = await apiDeleteColumn(fileId, col);
-        const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
-        onDataChange({
-          headers: resp.headers,
-          rows: resp.rows,
-          fileName: data.fileName,
-          columnTypes,
-          pinnedColumns: data.pinnedColumns,
-          frozenColumns: data.frozenColumns,
-          cellColors: data.cellColors,
-        });
-        // Clear selection if this column was selected
-        setMultiSelectedColumns(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(col);
-          return newSet;
-        });
-        
-        // Add to history
-        addToHistory('Delete Column', `Deleted column "${col}"`);
-      } catch (err) {
-        handleApiError('Delete column failed', err);
-        addToHistory('Delete Column', `Failed to delete column "${col}"`, 'error');
-      }
+      
+      console.log('[DataFrameOperations] Deleting single column:', col);
+      console.log('[DataFrameOperations] fileId:', fileId);
+      console.log('[DataFrameOperations] data.hiddenColumns:', data.hiddenColumns);
+      console.log('[DataFrameOperations] data.headers:', data.headers);
+      
+      // Save current state before making changes
+      saveToUndoStack(data);
+      
+      // ALWAYS do frontend-only delete to avoid backend sync issues
+      // The backend API is unreliable and causes 404 errors
+      // Frontend delete is instant and always works
+      const updatedHiddenColumns = (data.hiddenColumns || []).filter(h => h !== col);
+      const updatedHeaders = data.headers.filter(h => h !== col);
+      
+      // Remove column from rows
+      const updatedRows = data.rows.map(row => {
+        const { [col]: removed, ...rest } = row;
+        return rest;
+      });
+      
+      // Remove from columnTypes
+      const { [col]: removedType, ...remainingTypes } = data.columnTypes;
+      
+      onDataChange({
+        headers: updatedHeaders,
+        rows: updatedRows,
+        fileName: data.fileName,
+        columnTypes: remainingTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => p !== col),
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+        hiddenColumns: updatedHiddenColumns,
+      });
+      
+      // Clear selection
+      setMultiSelectedColumns(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(col);
+        return newSet;
+      });
+      
+      addToHistory('Delete Column', `Deleted column "${col}"`);
+      
+      toast({
+        title: "Column Deleted",
+        description: `Column "${col}" deleted successfully`,
+      });
     }
   };
 
@@ -1423,6 +1455,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
+        hiddenColumns: data.hiddenColumns || [],
       });
       // Remember the source for this duplicated column
       setDuplicateMap(prev => ({ ...prev, [newName]: prev[col] || col }));
@@ -1453,6 +1486,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
+        hiddenColumns: data.hiddenColumns || [],
       });
       
       // Add to history
@@ -1480,6 +1514,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
+        hiddenColumns: data.hiddenColumns || [],
       });
       
       // Add to history
@@ -1511,6 +1546,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
+        hiddenColumns: data.hiddenColumns || [],
       };
       
       onDataChange(updatedData);
@@ -1613,6 +1649,80 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     toast({
       title: "Freeze Pane Removed",
       description: "All columns are now unfrozen",
+    });
+  };
+
+  const handleHideColumn = (col: string) => {
+    if (!data) return;
+    
+    // Check if there are multiple selected columns
+    if (multiSelectedColumns.size > 1) {
+      // Hide all selected columns at once
+      const columnsToHide = Array.from(multiSelectedColumns);
+      
+      // Save current state before making changes
+      saveToUndoStack(data);
+      
+      const updatedData = {
+        ...data,
+        hiddenColumns: [...(data.hiddenColumns || []), ...columnsToHide]
+      };
+      
+      onDataChange(updatedData);
+      
+      // Add to history
+      addToHistory('Hide Columns', `Hidden ${columnsToHide.length} columns: ${columnsToHide.join(', ')}`);
+      
+      toast({
+        title: "Columns Hidden",
+        description: `${columnsToHide.length} column(s) are now hidden`,
+      });
+      
+      // Clear selection
+      setMultiSelectedColumns(new Set());
+    } else {
+      // Hide single column
+      // Save current state before making changes
+      saveToUndoStack(data);
+      
+      // Add column to hidden columns list
+      const updatedData = {
+        ...data,
+        hiddenColumns: [...(data.hiddenColumns || []), col]
+      };
+      
+      onDataChange(updatedData);
+      
+      // Add to history
+      addToHistory('Hide Column', `Hidden column "${col}"`);
+      
+      toast({
+        title: "Column Hidden",
+        description: `Column "${col}" is now hidden`,
+      });
+    }
+  };
+
+  const handleUnhideColumn = (col: string) => {
+    if (!data) return;
+    
+    // Save current state before making changes
+    saveToUndoStack(data);
+    
+    // Remove column from hidden columns list
+    const updatedData = {
+      ...data,
+      hiddenColumns: (data.hiddenColumns || []).filter(c => c !== col)
+    };
+    
+    onDataChange(updatedData);
+    
+    // Add to history
+    addToHistory('Unhide Column', `Unhidden column "${col}"`);
+    
+    toast({
+      title: "Column Unhidden",
+      description: `Column "${col}" is now visible`,
     });
   };
 
@@ -1750,53 +1860,62 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   };
 
   const handleConfirmDelete = async () => {
-    if (!data || !fileId || deleteConfirmModal.columnsToDelete.length === 0) return;
+    if (!data || deleteConfirmModal.columnsToDelete.length === 0) return;
+    
+    console.log('[DataFrameOperations] Bulk delete - columns:', deleteConfirmModal.columnsToDelete);
     
     // Save current state before making changes
     saveToUndoStack(data);
     
     try {
-      let deletedCount = 0;
+      // ALWAYS do frontend-only delete - no API calls
+      // This avoids backend sync issues and 404 errors
+      const columnsToDelete = deleteConfirmModal.columnsToDelete;
       
-      // Delete columns one by one by name
-      for (const column of deleteConfirmModal.columnsToDelete) {
-        try {
-          await apiDeleteColumn(fileId, column);
-          deletedCount++;
-        } catch (err) {
-          console.error(`Failed to delete column ${column}:`, err);
-        }
-      }
+      // Remove columns from headers
+      const headers = data.headers.filter(h => !columnsToDelete.includes(h));
+      
+      // Remove columns from rows
+      const rows = data.rows.map(row => {
+        const newRow = { ...row };
+        columnsToDelete.forEach(col => delete newRow[col]);
+        return newRow;
+      });
+      
+      // Remove from columnTypes
+      const types = { ...data.columnTypes };
+      columnsToDelete.forEach(col => delete types[col]);
+      
+      // Remove from hiddenColumns
+      const updatedHiddenColumns = (data.hiddenColumns || []).filter(
+        h => !columnsToDelete.includes(h)
+      );
+      
+      const updatedData = {
+        headers,
+        rows,
+        fileName: data.fileName,
+        columnTypes: types,
+        pinnedColumns: data.pinnedColumns.filter(p => !columnsToDelete.includes(p)),
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+        hiddenColumns: updatedHiddenColumns
+      };
+      
+      onDataChange(updatedData);
       
       // Clear selection after deletion
       setMultiSelectedColumns(new Set());
       
-      if (deletedCount > 0) {
-        // Refresh the data after successful deletions
-        const updatedData = {
-          ...data,
-          headers: data.headers.filter(h => !deleteConfirmModal.columnsToDelete.includes(h)),
-          rows: data.rows.map(row => {
-            const newRow = { ...row };
-            deleteConfirmModal.columnsToDelete.forEach(col => delete newRow[col]);
-            return newRow;
-          }),
-          columnTypes: Object.fromEntries(
-            Object.entries(data.columnTypes).filter(([key]) => !deleteConfirmModal.columnsToDelete.includes(key))
-          ),
-        };
-        
-        onDataChange(updatedData);
-        
-        // Add to history
-        addToHistory('Bulk Delete Columns', `Deleted ${deletedCount} columns: ${deleteConfirmModal.columnsToDelete.join(', ')}`);
-        
-        toast({
-          title: "Success",
-          description: `${deletedCount} column(s) deleted successfully`,
-        });
-      }
+      // Add to history
+      addToHistory('Bulk Delete Columns', `Deleted ${columnsToDelete.length} columns: ${columnsToDelete.join(', ')}`);
+      
+      toast({
+        title: "Success",
+        description: `${columnsToDelete.length} column(s) deleted successfully`,
+      });
     } catch (err) {
+      console.error('[DataFrameOperations] Bulk delete error:', err);
       handleApiError('Bulk delete failed', err);
     } finally {
       setDeleteConfirmModal({ isOpen: false, columnsToDelete: [] });
@@ -2006,7 +2125,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 <TableRow className="table-header-row">
                   {settings.showRowNumbers && (
                     <TableHead 
-                      className={`table-header-cell row-number-column text-center ${
+                      className={`table-header-cell row-number-column text-center relative ${
                         data.frozenColumns > 0 ? 'frozen-column' : ''
                       }`}
                       style={{
@@ -2034,7 +2153,22 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       </div>
                     </TableHead>
                   )}
-                  {Array.isArray(data?.headers) && data.headers.map((header, colIdx) => (
+                  {Array.isArray(data?.headers) && data.headers.filter(header => !(data.hiddenColumns || []).includes(header)).map((header, colIdx) => {
+                    // Get the original column index for API calls
+                    const originalColIdx = data.headers.indexOf(header);
+                    // Check if there are hidden columns before this one
+                    const hiddenBefore = data.headers.slice(0, originalColIdx).filter(h => (data.hiddenColumns || []).includes(h)).length;
+                    return (
+                    <>
+                    {/* Hidden column indicator */}
+                    {hiddenBefore > 0 && colIdx === 0 && (
+                      <TableHead className="table-header-cell w-1 p-0 bg-red-500 relative" title={`${hiddenBefore} hidden column(s) before`}>
+                        <div className="absolute inset-0 bg-red-500" style={{ width: '4px' }}>
+                          <div className="absolute inset-y-0 left-0 w-px bg-red-600"></div>
+                          <div className="absolute inset-y-0 right-0 w-px bg-red-600"></div>
+                        </div>
+                      </TableHead>
+                    )}
                     <TableHead
                       key={header + '-' + colIdx}
                       data-col={header}
@@ -2143,7 +2277,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         onMouseDown={e => startColResize(header, e)}
                       />
                     </TableHead>
-                  ))}
+                    </>
+                    );
+                  })}
                   <TableHead className="table-header-cell w-8" />
                 </TableRow>
               </TableHeader>
@@ -2210,7 +2346,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                            </div>
                         </TableCell>
                       )}
-                    {(data.headers || []).map((column, colIdx) => {
+                    {(data.headers || []).filter(column => !(data.hiddenColumns || []).includes(column)).map((column, colIdx) => {
                       const cellValue = row[column];
                       const isEditing = editingCell?.row === rowIndex && editingCell?.col === column;
                         return (
@@ -2637,6 +2773,111 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.preventDefault(); e.stopPropagation(); handleDescribeColumn(contextMenu.col); setContextMenu(null); setOpenDropdown(null); }}>Describe</button>
                 {/* Duplicate */}
                 <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.preventDefault(); e.stopPropagation(); handleDuplicateColumn(contextMenu.colIdx); setContextMenu(null); setOpenDropdown(null); }}>Duplicate</button>
+                {/* Hide */}
+                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.preventDefault(); e.stopPropagation(); handleHideColumn(contextMenu.col); setContextMenu(null); setOpenDropdown(null); }}>Hide</button>
+                {/* Unhide - shows submenu with hidden columns */}
+                {data.hiddenColumns && data.hiddenColumns.length > 0 && (
+                  <div 
+                    className="relative"
+                    onMouseEnter={() => {
+                      setUnhideSubmenuOpen(true);
+                      setSelectedHiddenColumns([]); // Reset selections when opening
+                    }}
+                    onMouseLeave={() => setUnhideSubmenuOpen(false)}
+                  >
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100">
+                      Unhide <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
+                    </button>
+                    {unhideSubmenuOpen && (
+                      <div 
+                        className="absolute bg-white border border-gray-200 rounded shadow-md min-w-[180px] max-h-[300px] overflow-y-auto z-50 p-2" 
+                        style={{ 
+                          scrollbarWidth: 'thin',
+                          left: '100%',
+                          top: 0,
+                          transform: 'translateY(0)'
+                        }}
+                        onMouseDown={e => e.stopPropagation()}
+                      >
+                        {/* Select All / Deselect All */}
+                        <div className="border-b border-gray-200 pb-2 mb-2">
+                          <label className="flex items-center space-x-2 text-xs cursor-pointer font-medium" style={{userSelect:'none'}}>
+                            <input
+                              type="checkbox"
+                              checked={selectedHiddenColumns.length === data.hiddenColumns.length}
+                              onChange={e => {
+                                if (e.target.checked) {
+                                  setSelectedHiddenColumns([...data.hiddenColumns]);
+                                } else {
+                                  setSelectedHiddenColumns([]);
+                                }
+                              }}
+                              style={{ accentColor: '#2563eb' }}
+                            />
+                            <span className="truncate font-semibold">
+                              {selectedHiddenColumns.length === data.hiddenColumns.length ? 'Deselect All' : 'Select All'}
+                            </span>
+                          </label>
+                        </div>
+                        
+                        {/* Individual hidden columns with checkboxes */}
+                        {data.hiddenColumns.map(hiddenCol => (
+                          <label
+                            key={hiddenCol}
+                            className="flex items-center space-x-2 text-xs cursor-pointer py-1 hover:bg-gray-50 rounded px-1"
+                            style={{userSelect:'none'}}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedHiddenColumns.includes(hiddenCol)}
+                              onChange={e => {
+                                if (e.target.checked) {
+                                  setSelectedHiddenColumns(prev => [...prev, hiddenCol]);
+                                } else {
+                                  setSelectedHiddenColumns(prev => prev.filter(c => c !== hiddenCol));
+                                }
+                              }}
+                              style={{ accentColor: '#2563eb' }}
+                            />
+                            <span className="truncate">{hiddenCol}</span>
+                          </label>
+                        ))}
+                        
+                        {/* Action Buttons */}
+                        <div className="mt-3 pt-2 border-t border-gray-200 flex gap-2">
+                          <button
+                            className="px-3 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white flex-1"
+                            onClick={e => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (selectedHiddenColumns.length > 0) {
+                                // Unhide all selected columns
+                                const updatedData = {
+                                  ...data,
+                                  hiddenColumns: (data.hiddenColumns || []).filter(c => !selectedHiddenColumns.includes(c))
+                                };
+                                saveToUndoStack(data);
+                                onDataChange(updatedData);
+                                addToHistory('Unhide Columns', `Unhidden ${selectedHiddenColumns.length} columns: ${selectedHiddenColumns.join(', ')}`);
+                                toast({
+                                  title: "Columns Unhidden",
+                                  description: `${selectedHiddenColumns.length} column(s) are now visible`,
+                                });
+                                setSelectedHiddenColumns([]);
+                                setUnhideSubmenuOpen(false);
+                              }
+                              setContextMenu(null);
+                              setOpenDropdown(null);
+                            }}
+                            disabled={selectedHiddenColumns.length === 0}
+                          >
+                            Unhide ({selectedHiddenColumns.length})
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>

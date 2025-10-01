@@ -17,6 +17,7 @@ export interface DataFrameData {
   pinnedColumns: string[];
   frozenColumns: number;
   cellColors: { [key: string]: string }; // key format: "row-col"
+  hiddenColumns: string[]; // Array of hidden column names
 }
 
 export interface DataFrameSettings {
@@ -174,6 +175,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
           pinnedColumns: [],
           frozenColumns: 0,
           cellColors: {},
+          hiddenColumns: [],
         };
         updateSettings(atomId, {
           tableData: newData,
