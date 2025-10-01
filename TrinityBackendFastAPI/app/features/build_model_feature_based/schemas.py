@@ -559,6 +559,8 @@ class MarketingModelTrainingResponse(BaseModel):
     summary: Dict[str, Any]
     best_models: Dict[str, int]
     execution_time_seconds: float
+    all_model_results: Optional[List[Dict[str, Any]]] = Field(None, description="All detailed model results with metrics")
+    combination_wise_results: Optional[Dict[str, List[Dict[str, Any]]]] = Field(None, description="Results organized by combination")
     
     class Config:
         schema_extra = {
@@ -578,7 +580,42 @@ class MarketingModelTrainingResponse(BaseModel):
                     "by_r2": 1,
                     "by_aic": 0
                 },
-                "execution_time_seconds": 2.34
+                "execution_time_seconds": 2.34,
+                "all_model_results": [
+                    {
+                        "model_name": "Linear Regression",
+                        "mape_test": 0.15,
+                        "r2_test": 0.85,
+                        "aic": 1200.5,
+                        "bic": 1210.3,
+                        "cluster_id": "cluster_0",
+                        "parameter_combination": {...}
+                    }
+                ],
+                "combination_wise_results": {
+                    "Brand_A_Region_X": [
+                        {
+                            "model_name": "Linear Regression",
+                            "mape_test": 0.12,
+                            "r2_test": 0.88,
+                            "cluster_id": "cluster_0"
+                        },
+                        {
+                            "model_name": "Ridge Regression", 
+                            "mape_test": 0.15,
+                            "r2_test": 0.85,
+                            "cluster_id": "cluster_0"
+                        }
+                    ],
+                    "Brand_B_Region_Y": [
+                        {
+                            "model_name": "Linear Regression",
+                            "mape_test": 0.18,
+                            "r2_test": 0.82,
+                            "cluster_id": "cluster_1"
+                        }
+                    ]
+                }
             }
         }
 

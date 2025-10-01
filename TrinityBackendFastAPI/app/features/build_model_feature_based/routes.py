@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Query, Path, Form, Body, Request
 import logging
 import asyncio
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import uuid
 
 # Model imports
@@ -2068,7 +2068,16 @@ async def prepare_stack_model_data(request: dict):
         
         # Get MinIO client and bucket name
         minio_client = get_minio_client()
-        bucket_name = "trinity"  # From config
+        
+        # Get bucket name from scope selector config
+        try:
+            from ..scope_selector.config import get_settings
+            scope_settings = get_settings()
+            bucket_name = scope_settings.minio_bucket
+            logger.info(f"🔧 Using bucket from scope selector config: '{bucket_name}'")
+        except Exception as e:
+            bucket_name = "Quant_Matrix_AI_Schema"  # Fallback bucket
+            logger.info(f"🔧 Using fallback bucket: '{bucket_name}' (error: {e})")
         
         # Initialize the processor
         processor = StackModelDataProcessor()
@@ -2213,7 +2222,16 @@ async def train_models_for_stacked_data(request: dict):
         
         # Get MinIO client and bucket name
         minio_client = get_minio_client()
-        bucket_name = "trinity"  # From config
+        
+        # Get bucket name from scope selector config
+        try:
+            from ..scope_selector.config import get_settings
+            scope_settings = get_settings()
+            bucket_name = scope_settings.minio_bucket
+            logger.info(f"🔧 Using bucket from scope selector config: '{bucket_name}'")
+        except Exception as e:
+            bucket_name = "Quant_Matrix_AI_Schema"  # Fallback bucket
+            logger.info(f"🔧 Using fallback bucket: '{bucket_name}' (error: {e})")
         
         # Initialize the stack model trainer
         trainer = StackModelTrainer()
@@ -2653,54 +2671,54 @@ async def train_mmm_models(request: dict):
         # Process individual MMM training if enabled
         if individual_modeling:
             logger.info(f"Starting individual MMM training for {len(combinations)} combinations")
+        
+        # Process each combination
+        for combination_index, combination in enumerate(combinations):
+            # Update progress
+            training_progress[run_id]["current_combination"] = combination
+            training_progress[run_id]["current"] = combination_index * individual_models_count
+            training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
             
-            # Process each combination
-            for combination_index, combination in enumerate(combinations):
-                # Update progress
-                training_progress[run_id]["current_combination"] = combination
-                training_progress[run_id]["current"] = combination_index * individual_models_count
-                training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
-            
-                # Search for the file in MinIO
-                target_file_key = None
-                try:
-                    # Search for files containing both Scope_X and the combination
-                    all_objects = list(minio_client.list_objects(bucket_name, recursive=True))
-                    matching_objects = []
+            # Search for the file in MinIO
+            target_file_key = None
+            try:
+                # Search for files containing both Scope_X and the combination
+                all_objects = list(minio_client.list_objects(bucket_name, recursive=True))
+                matching_objects = []
+                
+                for obj in all_objects:
+                    obj_name = obj.object_name
+                    scope_pattern = f"Scope_{scope_number}"
+                    has_scope = scope_pattern in obj_name
+                    has_combination = combination in obj_name
                     
-                    for obj in all_objects:
-                        obj_name = obj.object_name
-                        scope_pattern = f"Scope_{scope_number}"
-                        has_scope = scope_pattern in obj_name
-                        has_combination = combination in obj_name
-                        
-                        if has_scope and has_combination:
-                            matching_objects.append(obj_name)
+                    if has_scope and has_combination:
+                        matching_objects.append(obj_name)
+                
+                if matching_objects:
+                    target_file_key = matching_objects[0]
+                    logger.info(f"Found file for combination {combination}: {target_file_key}")
                     
-                    if matching_objects:
-                        target_file_key = matching_objects[0]
-                        logger.info(f"Found file for combination {combination}: {target_file_key}")
+                    # Update progress - reading file
+                    training_progress[run_id]["current_model"] = "Reading data file..."
+                    await asyncio.sleep(0.3)
+                    
+                    # Train MMM models for this combination
+                    training_progress[run_id]["current_model"] = "Training MMM models..."
+                    await asyncio.sleep(0.5)
+                    
+                    try:
+                        logger.info(f"Starting MMM training for combination: {combination}")
+                        # Convert x_variables to lowercase for consistency
+                        x_variables_lower = [var.lower() for var in x_variables]
+                        y_variable_lower = y_variable.lower()
                         
-                        # Update progress - reading file
-                        training_progress[run_id]["current_model"] = "Reading data file..."
-                        await asyncio.sleep(0.3)
+                        # Convert variable_configs keys to lowercase
+                        variable_configs_lower = {}
+                        for var, config in variable_configs.items():
+                            variable_configs_lower[var.lower()] = config
                         
-                        # Train MMM models for this combination
-                        training_progress[run_id]["current_model"] = "Training MMM models..."
-                        await asyncio.sleep(0.5)
-                        
-                        try:
-                            logger.info(f"Starting MMM training for combination: {combination}")
-                            # Convert x_variables to lowercase for consistency
-                            x_variables_lower = [var.lower() for var in x_variables]
-                            y_variable_lower = y_variable.lower()
-                            
-                            # Convert variable_configs keys to lowercase
-                            variable_configs_lower = {}
-                            for var, config in variable_configs.items():
-                                variable_configs_lower[var.lower()] = config
-                            
-                            # Train MMM models
+                        # Train MMM models
                             # Use price column from ROI config if available, otherwise use request price column
                             roi_price_column = None
                             if roi_config and roi_config.get('priceColumn'):
@@ -2717,32 +2735,32 @@ async def train_mmm_models(request: dict):
                                     logger.warning("⚠️ NO PRICE COLUMN SELECTED! ROI calculation will use default value of 1.0")
                                     logger.warning("Please select a price column in the ROI configuration for accurate ROI calculation")
                             
-                            model_results, variable_data = await mmm_trainer.train_mmm_models_for_combination(
-                                file_key=target_file_key,
-                                x_variables=x_variables_lower,
-                                y_variable=y_variable_lower,
-                                variable_configs=variable_configs_lower,
+                        model_results, variable_data = await mmm_trainer.train_mmm_models_for_combination(
+                            file_key=target_file_key,
+                            x_variables=x_variables_lower,
+                            y_variable=y_variable_lower,
+                            variable_configs=variable_configs_lower,
                                 models_to_run=individual_models_to_run,
                                 custom_configs=individual_custom_model_configs,  # Use individual configs
                                 k_folds=individual_k_folds,
                                 test_size=individual_test_size,
-                                bucket_name=bucket_name,
+                            bucket_name=bucket_name,
                                 price_column=roi_price_column,  # Use ROI config price column
                                 roi_config=request.get('roi_config'),  # Pass ROI configuration
                                 combination_name=combination  # Pass the actual combination name
-                            )
-                            
-                            logger.info(f"MMM training completed for {combination}. Generated {len(model_results)} model results")
-                            
-                            # Log ROI results summary for this combination
-                            roi_summary = {}
-                            for model_result in model_results:
-                                model_name = model_result.get('model_name', 'Unknown')
-                                roi_results = model_result.get('roi_results', {})
-                                if roi_results:
-                                    roi_summary[model_name] = {}
-                                    for feature_name, roi_data in roi_results.items():
-                                        roi_summary[model_name][feature_name] = roi_data.get('roi', 0)
+                        )
+                        
+                        logger.info(f"MMM training completed for {combination}. Generated {len(model_results)} model results")
+                        
+                        # Log ROI results summary for this combination
+                        roi_summary = {}
+                        for model_result in model_results:
+                            model_name = model_result.get('model_name', 'Unknown')
+                            roi_results = model_result.get('roi_results', {})
+                            if roi_results:
+                                roi_summary[model_name] = {}
+                                for feature_name, roi_data in roi_results.items():
+                                    roi_summary[model_name][feature_name] = roi_data.get('roi', 0)
                             
                             if roi_summary:
                                 logger.info("=" * 100)
@@ -2756,16 +2774,16 @@ async def train_mmm_models(request: dict):
                             else:
                                 logger.info(f"ℹ️ No ROI results found for combination: {combination}")
                             
-                            # Update progress
+                        # Update progress
                             training_progress[run_id]["current"] += individual_models_count
-                            training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
-                            
-                            # Store variable statistics
-                            all_variable_stats[combination] = variable_data
-                            
-                            # Save results to MongoDB
-                            try:
-                                saved_ids = await save_model_results_enhanced(
+                        training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
+                        
+                        # Store variable statistics
+                        all_variable_stats[combination] = variable_data
+                        
+                        # Save results to MongoDB
+                        try:
+                            saved_ids = await save_model_results_enhanced(
                                 scope_id=f"scope_{scope_number}",
                                 scope_name=f"Scope_{scope_number}",
                                 set_name=f"Scope_{scope_number}",
@@ -2786,31 +2804,31 @@ async def train_mmm_models(request: dict):
                                 variable_data=variable_data
                             )
                             
-                                total_saved += len(saved_ids)
-                                logger.info(f"Saved {len(saved_ids)} MMM model results for combination {combination}")
-                                
-                            except Exception as e:
-                                logger.error(f"Failed to save MMM results for {combination}: {e}")
+                            total_saved += len(saved_ids)
+                            logger.info(f"Saved {len(saved_ids)} MMM model results for combination {combination}")
                             
-                            # Save MMM results to MinIO as Arrow file
-                            try:
-                                import pandas as pd
-                                import pyarrow as pa
-                                import pyarrow.feather as feather
-                                from io import BytesIO
+                        except Exception as e:
+                            logger.error(f"Failed to save MMM results for {combination}: {e}")
+                        
+                        # Save MMM results to MinIO as Arrow file
+                        try:
+                            import pandas as pd
+                            import pyarrow as pa
+                            import pyarrow.feather as feather
+                            from io import BytesIO
+                            
+                            # Create timestamp for file naming (same as train-models-direct)
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            
+                            # Prepare summary data for MinIO
+                            summary_data = []
+                            logger.info(f"Preparing summary data for {len(model_results)} model results")
+                            for model_result in model_results:
+                                # Extract actual parameters used
+                                actual_params = model_result.get('actual_parameters_used', {})
                                 
-                                # Create timestamp for file naming (same as train-models-direct)
-                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                                
-                                # Prepare summary data for MinIO
-                                summary_data = []
-                                logger.info(f"Preparing summary data for {len(model_results)} model results")
-                                for model_result in model_results:
-                                    # Extract actual parameters used
-                                    actual_params = model_result.get('actual_parameters_used', {})
-                                    
                                     # Create summary row (same structure as train-models-direct)
-                                    summary_row = {
+                                summary_row = {
                                         'Scope': f'Scope_{scope_number}',
                                         'combination_id': combination,
                                         'y_variable': y_variable,
@@ -2829,18 +2847,18 @@ async def train_mmm_models(request: dict):
                                         'timestamp': timestamp,
                                     
                                         # MMM-specific parameters
-                                        'model_type': 'mmm_regression',
+                                    'model_type': 'mmm_regression',
                                         'file_key': target_file_key,
-                                        'total_records': variable_data.get("original_data_shape", [0, 0])[0],
-                                        'training_date': datetime.now().isoformat(),
-                                        'price_column': price_column.lower() if price_column else None,
+                                    'total_records': variable_data.get("original_data_shape", [0, 0])[0],
+                                    'training_date': datetime.now().isoformat(),
+                                    'price_column': price_column.lower() if price_column else None,
                                     
-                                        # Training configuration
-                                        'standardization': 'mmm_per_variable',
+                                    # Training configuration
+                                    'standardization': 'mmm_per_variable',
                                         'k_folds': individual_k_folds,
                                         'test_size': individual_test_size,
-                                        'x_variables': ','.join(x_variables_lower),
-                                        'y_variable': y_variable_lower,
+                                    'x_variables': ','.join(x_variables_lower),
+                                    'y_variable': y_variable_lower,
                                     
                                     # MMM-specific fields
                                     'transformation_types': ','.join([config.get('type', 'none') for config in actual_params.values()])
@@ -2892,76 +2910,76 @@ async def train_mmm_models(request: dict):
                                     summary_row[f"{feature_name}_avg_price_column"] = roi_data.get('avg_price_column', 0)
                                 
                                 summary_data.append(summary_row)
-                                
-                                if summary_data:
-                                    logger.info(f"Preparing to save {len(summary_data)} MMM results to MinIO for combination {combination}")
-                                    
-                                    # Convert to DataFrame and save as Arrow file
-                                    summary_df = pd.DataFrame(summary_data)
-                                    logger.info(f"Created DataFrame with shape: {summary_df.shape}")
-                                    logger.info(f"DataFrame columns: {list(summary_df.columns)}")
-                                    
-                                    arrow_buffer = BytesIO()
-                                    table = pa.Table.from_pandas(summary_df)
-                                    feather.write_feather(table, arrow_buffer)
-                                    arrow_buffer.seek(0)
-                                    
-                                    # Create MinIO file key for MMM results (same format as train-models-direct)
-                                    model_results_filename = f"mmm_results_scope_{scope_number}_{combination}_{timestamp}.arrow"
-                                    
-                                    # Get the standard prefix using get_object_prefix (same as train-models-direct)
-                                    prefix = await get_object_prefix()
-                                    model_results_file_key = f"{prefix}model-results/{model_results_filename}"
-                                    logger.info(f"Saving to MinIO with key: {model_results_file_key}")
-                                
-                                    # Save to MinIO
-                                    # Encode combination name for MinIO metadata (only supports US-ASCII)
-                                    combination_encoded = combination.encode('ascii', 'ignore').decode('ascii')
-                                    
-                                    minio_client.put_object(
-                                        bucket_name,
-                                        model_results_file_key,
-                                        arrow_buffer,
-                                        length=arrow_buffer.getbuffer().nbytes,
-                                        content_type='application/vnd.apache.arrow.file',
-                                        metadata={
-                                            "run_id": run_id,
-                                            "scope_number": str(scope_number),
-                                            "combination": combination_encoded,
-                                            "model_type": "mmm",
-                                            "total_models": str(len(model_results)),
-                                            "export_date": timestamp
-                                        }
-                                    )
-                                    
-                                    logger.info(f"Successfully saved MMM results to MinIO: {model_results_file_key}")
-                                
-                            except Exception as e:
-                                logger.warning(f"Failed to save MMM results to MinIO: {e}")
-                                # Don't fail the entire request if MinIO save fails
                             
-                            # Add to results
-                            combination_results.append({
-                                "combination_id": combination,
-                                "file_key": target_file_key,
-                                "total_records": variable_data.get("original_data_shape", [0, 0])[0],
-                                "model_results": model_results
-                            })
-                            
-                            # Update progress - combination completed
-                            training_progress[run_id]["completed_combinations"] += 1
-                            
+                            if summary_data:
+                                logger.info(f"Preparing to save {len(summary_data)} MMM results to MinIO for combination {combination}")
+                                
+                                # Convert to DataFrame and save as Arrow file
+                                summary_df = pd.DataFrame(summary_data)
+                                logger.info(f"Created DataFrame with shape: {summary_df.shape}")
+                                logger.info(f"DataFrame columns: {list(summary_df.columns)}")
+                                
+                                arrow_buffer = BytesIO()
+                                table = pa.Table.from_pandas(summary_df)
+                                feather.write_feather(table, arrow_buffer)
+                                arrow_buffer.seek(0)
+                                
+                                # Create MinIO file key for MMM results (same format as train-models-direct)
+                                model_results_filename = f"mmm_results_scope_{scope_number}_{combination}_{timestamp}.arrow"
+                                
+                                # Get the standard prefix using get_object_prefix (same as train-models-direct)
+                                prefix = await get_object_prefix()
+                                model_results_file_key = f"{prefix}model-results/{model_results_filename}"
+                                logger.info(f"Saving to MinIO with key: {model_results_file_key}")
+                                
+                                # Save to MinIO
+                                # Encode combination name for MinIO metadata (only supports US-ASCII)
+                                combination_encoded = combination.encode('ascii', 'ignore').decode('ascii')
+                                
+                                minio_client.put_object(
+                                    bucket_name,
+                                    model_results_file_key,
+                                    arrow_buffer,
+                                    length=arrow_buffer.getbuffer().nbytes,
+                                    content_type='application/vnd.apache.arrow.file',
+                                    metadata={
+                                        "run_id": run_id,
+                                        "scope_number": str(scope_number),
+                                        "combination": combination_encoded,
+                                        "model_type": "mmm",
+                                        "total_models": str(len(model_results)),
+                                        "export_date": timestamp
+                                    }
+                                )
+                                
+                                logger.info(f"Successfully saved MMM results to MinIO: {model_results_file_key}")
+                                
                         except Exception as e:
-                            logger.error(f"Error training MMM models for combination {combination}: {e}")
-                            continue
+                            logger.warning(f"Failed to save MMM results to MinIO: {e}")
+                            # Don't fail the entire request if MinIO save fails
                         
-                    else:
-                        logger.warning(f"Could not find file for combination: {combination}")
+                        # Add to results
+                        combination_results.append({
+                            "combination_id": combination,
+                            "file_key": target_file_key,
+                            "total_records": variable_data.get("original_data_shape", [0, 0])[0],
+                            "model_results": model_results
+                        })
+                        
+                        # Update progress - combination completed
+                        training_progress[run_id]["completed_combinations"] += 1
+                        
+                    except Exception as e:
+                        logger.error(f"Error training MMM models for combination {combination}: {e}")
                         continue
                         
-                except Exception as e:
-                    logger.error(f"Error processing combination {combination}: {e}")
+                else:
+                    logger.warning(f"Could not find file for combination: {combination}")
                     continue
+                    
+            except Exception as e:
+                logger.error(f"Error processing combination {combination}: {e}")
+                continue
         
         # MMM Stack modeling integration (similar to general models)
         if stack_modeling:
@@ -3010,7 +3028,8 @@ async def train_mmm_models(request: dict):
                     scope_number=scope_number,
                     combinations=combinations,
                     minio_client=minio_client,
-                    bucket_name=bucket_name
+                    bucket_name=bucket_name,
+                    roi_config=roi_config
                 )
                 
                 if stack_training_result and stack_training_result.get('status') == 'success':
@@ -3060,13 +3079,13 @@ async def train_mmm_models(request: dict):
                                 continue
                             
                             stack_model_result = {
-                                "model_name": model_result.get('model_name', 'Unknown'),
+                                "model_name": f"Stack_{model_result.get('model_name', 'Unknown')}",
                                 "mape_train": model_result.get('mape_train', 0.0),
                                 "mape_test": model_result.get('mape_test', 0.0),
                                 "r2_train": model_result.get('r2_train', 0.0),
                                 "r2_test": model_result.get('r2_test', 0.0),
-                                "coefficients": model_result.get('coefficients', {}),
-                                "unstandardized_coefficients": model_result.get('unstandardized_coefficients', {}),
+                                "coefficients": model_result.get('unstandardized_coefficients', {}),
+                                "standardized_coefficients": model_result.get('coefficients', {}),
                                 "intercept": model_result.get('intercept', 0.0),
                                 "unstandardized_intercept": model_result.get('unstandardized_intercept', 0.0),
                                 "aic": model_result.get('aic', 0.0),
@@ -3077,8 +3096,8 @@ async def train_mmm_models(request: dict):
                                 "contributions": model_result.get('contributions', {}),
                                 "transformation_metadata": model_result.get('transformation_metadata', {}),
                                 "variable_configs": model_result.get('variable_configs', {}),
+                                "roi_results": model_result.get('roi_results', {}),  # Include ROI results
                                 "model_type": "mmm_stack",  # Mark as stack model
-                                "stack_cluster_id": model_result.get('stack_cluster_id', ''),
                                 "best_alpha": model_result.get('best_alpha', None)
                             }
                             stack_model_results_formatted.append(stack_model_result)
@@ -3275,7 +3294,7 @@ async def train_mmm_models(request: dict):
                     summary["best_models_by_type"][combo_id][model_name]["best_r2"] = {
                         "mape_test": model_result["mape_test"],
                         "r2_test": model_result["r2_test"]
-                    }
+                }
         
         logger.info(f"MMM training completed successfully: {len(combination_results)} combinations processed, {total_saved} models saved")
         
@@ -3301,44 +3320,244 @@ async def train_mmm_models(request: dict):
 
 
 
-@router.get("/get-column-classifier-metadata")
-async def get_column_classifier_metadata():
-    """
-    Get column classifier metadata for the hardcoded project ID.
-    This endpoint fetches the column classifier configuration from MongoDB.
-    """
-    try:
-        from .mongodb_saver import get_column_classifier_config_from_mongo
+# @router.post("/mmm-stack-simple", response_model=Dict[str, Any])
+# async def mmm_stack_simple_training(request: Dict[str, Any]):
+#     """
+#     Simple stack training endpoint that only calls prepare_stack_data and _train_stack_models_for_betas.
+#     Returns just the model results without individual combination metrics.
+#     """
+#     try:
+#         # Extract parameters from request (same as mmm-stack-train-models)
+#         scope_number = request.get('scope_number')
+#         combinations = request.get('combinations', [])
+#         pool_by_identifiers = request.get('pool_by_identifiers', [])
+#         x_variables = request.get('x_variables', [])
+#         y_variable = request.get('y_variable')
+#         variable_configs = request.get('variable_configs', {})
+#         models_to_run = request.get('models_to_run', ['Linear Regression'])
+#         custom_configs = request.get('custom_configs', {})
+#         apply_interaction_terms = request.get('apply_interaction_terms', True)
+#         numerical_columns_for_interaction = request.get('numerical_columns_for_interaction', [])
+#         test_size = request.get('test_size', 0.2)
+#         price_column = request.get('price_column')
+#         n_clusters = request.get('n_clusters', None)
+#         clustering_columns = request.get('clustering_columns', None)
         
-        # Hardcoded _id for testing
-        hardcoded_id = "Quant_Matrix_AI_Schema/marketing-mix/New Marketing Mix Modeling Project"
+#         # Validate required parameters
+#         if not scope_number:
+#             raise HTTPException(status_code=400, detail="scope_number is required")
+#         if not combinations:
+#             raise HTTPException(status_code=400, detail="combinations list is required")
+#         if not x_variables:
+#             raise HTTPException(status_code=400, detail="x_variables list is required")
+#         if not y_variable:
+#             raise HTTPException(status_code=400, detail="y_variable is required")
         
-        # Fetch the metadata
-        metadata = await get_column_classifier_config_from_mongo(hardcoded_id)
+#         logger.info(f"Starting simple MMM stack training for scope {scope_number}")
+#         logger.info(f"Combinations: {combinations}")
+#         logger.info(f"X variables: {x_variables}")
+#         logger.info(f"Y variable: {y_variable}")
         
-        if metadata:
-            logger.info(f"✅ Successfully retrieved column classifier metadata for: {hardcoded_id}")
-            return {
-                "status": "success",
-                "message": "Column classifier metadata retrieved successfully",
-                "project_id": hardcoded_id,
-                "metadata": metadata
-            }
-        else:
-            logger.warning(f"⚠️ No column classifier metadata found for: {hardcoded_id}")
-            return {
-                "status": "not_found",
-                "message": f"No column classifier metadata found for project: {hardcoded_id}",
-                "project_id": hardcoded_id,
-                "metadata": None
-            }
-            
-    except Exception as e:
-        logger.error(f"❌ Error fetching column classifier metadata: {str(e)}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Error fetching column classifier metadata: {str(e)}"
-        )
+#         # Get MinIO client and bucket
+#         minio_client = get_minio_client()
+        
+#         # Get bucket name from scope selector config
+#         try:
+#             from ..scope_selector.config import get_settings
+#             scope_settings = get_settings()
+#             bucket_name = scope_settings.minio_bucket
+#             logger.info(f"Using bucket from scope selector config: '{bucket_name}'")
+#         except Exception as e:
+#             bucket_name = "Quant_Matrix_AI_Schema"  # Fallback bucket
+#             logger.info(f"Using fallback bucket: '{bucket_name}' (error: {e})")
+        
+#         # Initialize the stack training processor
+#         from .mmm_stack_training import MMMStackModelDataProcessor
+#         processor = MMMStackModelDataProcessor()
+        
+#         # Step 1: Prepare stack data
+#         logger.info("Step 1: Preparing stack data...")
+#         split_clustered_data = await processor.prepare_stack_model_data(
+#             scope_number=scope_number,
+#             combinations=combinations,
+#             pool_by_identifiers=pool_by_identifiers,
+#             x_variables=x_variables,
+#             y_variable=y_variable,
+#             minio_client=minio_client,
+#             bucket_name=bucket_name,
+#             n_clusters=n_clusters,
+#             clustering_columns=clustering_columns
+#         )
+        
+#         if not split_clustered_data:
+#             raise HTTPException(status_code=400, detail="Failed to prepare stack data")
+        
+#         logger.info(f"Prepared {len(split_clustered_data)} split clusters")
+        
+#         # Step 2: Train stack models for betas
+#         logger.info("Step 2: Training stack models for betas...")
+#         logger.info(f"Split clustered data keys: {list(split_clustered_data.keys())}")
+#         logger.info(f"X variables: {x_variables}")
+#         logger.info(f"Y variable: {y_variable}")
+#         logger.info(f"Variable configs: {variable_configs}")
+#         logger.info(f"Models to run: {models_to_run}")
+        
+#         stack_model_results = await processor._train_stack_models_for_betas(
+#             split_clustered_data=split_clustered_data,
+#             x_variables=x_variables,
+#             y_variable=y_variable,
+#             variable_configs=variable_configs,
+#             models_to_run=models_to_run,
+#             custom_configs=custom_configs,
+#             apply_interaction_terms=apply_interaction_terms,
+#             numerical_columns_for_interaction=numerical_columns_for_interaction,
+#             test_size=test_size,
+#             price_column=price_column
+#         )
+        
+#         logger.info(f"Trained {len(stack_model_results)} stack models")
+#         if stack_model_results:
+#             logger.info(f"Sample model result keys: {list(stack_model_results[0].keys()) if stack_model_results else 'No results'}")
+#         else:
+#             logger.warning("No models were trained - check the _train_stack_models_for_betas function")
+        
+#         # Return simple results
+#         return {
+#             "status": "success",
+#             "total_models_trained": len(stack_model_results),
+#             "split_clusters": len(split_clustered_data),
+#             "stack_model_results": stack_model_results
+#         }
+        
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error in simple MMM stack training: {str(e)}")
+#         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-
-
+#     @router.post("/mmm-stack-individual-metrics")
+#     async def mmm_stack_individual_metrics(request: Dict[str, Any]):
+#         """
+#         Get individual combination metrics from stack training without response validation.
+#         Returns raw results including individual combination metrics.
+#         """
+#         try:
+#             # Extract parameters from request
+#             scope_number = request.get('scope_number')
+#             combinations = request.get('combinations', [])
+#             pool_by_identifiers = request.get('pool_by_identifiers', [])
+#             x_variables = request.get('x_variables', [])
+#             y_variable = request.get('y_variable')
+#             variable_configs = request.get('variable_configs', {})
+#             models_to_run = request.get('models_to_run', ['Linear Regression'])
+#             custom_configs = request.get('custom_configs', {})
+#             apply_interaction_terms = request.get('apply_interaction_terms', True)
+#             numerical_columns_for_interaction = request.get('numerical_columns_for_interaction', [])
+#             test_size = request.get('test_size', 0.2)
+#             price_column = request.get('price_column')
+#             roi_config = request.get('roi_config')
+#             n_clusters = request.get('n_clusters', None)
+#             clustering_columns = request.get('clustering_columns', None)
+        
+#         # Validate required parameters
+#         if not scope_number:
+#             raise HTTPException(status_code=400, detail="scope_number is required")
+#         if not combinations:
+#             raise HTTPException(status_code=400, detail="combinations list is required")
+#         if not x_variables:
+#             raise HTTPException(status_code=400, detail="x_variables list is required")
+#         if not y_variable:
+#             raise HTTPException(status_code=400, detail="y_variable is required")
+        
+#         logger.info(f"Starting individual metrics extraction for scope {scope_number}")
+#         logger.info(f"Combinations: {combinations}")
+#         logger.info(f"X variables: {x_variables}")
+#         logger.info(f"Y variable: {y_variable}")
+        
+#         # Get MinIO client and bucket
+#         minio_client = get_minio_client()
+        
+#         # Get bucket name from scope selector config
+#         try:
+#             from ..scope_selector.config import get_settings
+#             scope_settings = get_settings()
+#             bucket_name = scope_settings.minio_bucket
+#             logger.info(f"Using bucket from scope selector config: '{bucket_name}'")
+#         except Exception as e:
+#             bucket_name = "Quant_Matrix_AI_Schema"  # Fallback bucket
+#             logger.info(f"Using fallback bucket: '{bucket_name}' (error: {e})")
+        
+#         # Initialize the stack training processor
+#         from .mmm_stack_training import MMMStackModelDataProcessor
+#         processor = MMMStackModelDataProcessor()
+        
+#         # Step 1: Prepare stack data
+#         logger.info("Step 1: Preparing stack data...")
+#         split_clustered_data = await processor.prepare_stack_model_data(
+#             scope_number=scope_number,
+#             combinations=combinations,
+#             pool_by_identifiers=pool_by_identifiers,
+#             x_variables=x_variables,
+#             y_variable=y_variable,
+#             minio_client=minio_client,
+#             bucket_name=bucket_name,
+#             n_clusters=n_clusters,
+#             clustering_columns=clustering_columns
+#         )
+        
+#         if not split_clustered_data:
+#             raise HTTPException(status_code=400, detail="Failed to prepare stack data")
+        
+#         logger.info(f"Prepared {len(split_clustered_data.get('split_clustered_data', {}))} split clusters")
+        
+#         # Step 2: Train stack models for betas
+#         logger.info("Step 2: Training stack models for betas...")
+#         stack_model_results = await processor._train_stack_models_for_betas(
+#             split_clustered_data=split_clustered_data,
+#             x_variables=x_variables,
+#             y_variable=y_variable,
+#             variable_configs=variable_configs,
+#             models_to_run=models_to_run,
+#             custom_configs=custom_configs,
+#             apply_interaction_terms=apply_interaction_terms,
+#             numerical_columns_for_interaction=numerical_columns_for_interaction,
+#             test_size=test_size,
+#             price_column=price_column
+#         )
+        
+#         logger.info(f"Trained {len(stack_model_results)} stack models")
+        
+#         # Step 3: Calculate individual combination metrics
+#         logger.info("Step 3: Calculating individual combination metrics...")
+#         individual_metrics = await processor._calculate_individual_combination_metrics(
+#             scope_number=scope_number,
+#             combinations=combinations,
+#             x_variables=x_variables,
+#             y_variable=y_variable,
+#             minio_client=minio_client,
+#             bucket_name=bucket_name,
+#             stack_model_results=stack_model_results,
+#             variable_configs=variable_configs,
+#             price_column=price_column,
+#             roi_config=roi_config
+#         )
+        
+#         logger.info(f"Calculated individual metrics for {len(individual_metrics)} combinations")
+        
+#         # Return raw results without validation
+#         return {
+#             "status": "success",
+#             "scope_number": scope_number,
+#             "combinations": combinations,
+#             "individual_metrics": individual_metrics,
+#             "split_clustered_data_summary": {
+#                 "total_clusters": len(split_clustered_data.get('split_clustered_data', {})),
+#                 "cluster_keys": list(split_clustered_data.get('split_clustered_data', {}).keys()) if split_clustered_data.get('split_clustered_data') else []
+#             }
+#         }
+        
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error in individual metrics extraction: {str(e)}")
+#         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

@@ -97,9 +97,9 @@ class MMMTransformationEngine:
                 if data_frequency == "weekly":
                     adstock_decay = config.get("adstock_decay", [0.70])  # Weekly decay values
                 else:  # monthly
-                    adstock_decay = config.get("adstock_decay", [0.4])  # Monthly decay values
+                    adstock_decay = config.get("adstock_decay", [0.4, 0.5, 0.6])  # Monthly decay values
                 
-                logistic_growth = config.get("logistic_growth", [3.5])  # Default range
+                logistic_growth = config.get("logistic_growth", [1.5, 2.5, 3.5])  # Default range
                 logistic_midpoint = config.get("logistic_midpoint", [0.0])  # Default range
                 logistic_carryover = config.get("logistic_carryover", [0.0])  # Single value since it's not used
                 
@@ -545,6 +545,50 @@ class MMMModelTrainer:
     def __init__(self):
         self.transformation_engine = MMMTransformationEngine()
     
+    def _filter_last_12_months(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Filter dataframe to include only the last 12 months of data.
+        
+        Args:
+            df: DataFrame with date information
+            
+        Returns:
+            DataFrame filtered to last 12 months
+        """
+        try:
+            # Common date column names to check
+            date_columns = ['date', 'Date', 'DATE', 'date_index', 'Date_Index', 'DATE_INDEX', 
+                          'month', 'Month', 'MONTH', 'year', 'Year', 'YEAR',
+                          'fiscal_year', 'Fiscal_Year', 'FISCAL_YEAR']
+            
+            date_col = None
+            for col in date_columns:
+                if col in df.columns:
+                    date_col = col
+                    break
+            
+            if date_col is None:
+                # If no date column found, return original dataframe
+                return df
+            
+            # Convert to datetime if not already
+            if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
+                try:
+                    df[date_col] = pd.to_datetime(df[date_col])
+                except:
+                    # If conversion fails, return original dataframe
+                    return df
+            
+            # Sort by date column and take the last 12 months worth of data
+            # Assuming monthly data, so we take the last 12 rows
+            filtered_df = df.sort_values(by=date_col).tail(12).copy()
+            
+            return filtered_df
+            
+        except Exception as e:
+            # If any error occurs, return original dataframe
+            return df
+
     def calculate_roi_for_features(
         self,
         roi_config: Optional[Dict[str, Any]],
@@ -1094,13 +1138,21 @@ class MMMModelTrainer:
                         logger.info(f"Full original dataframe columns: {list(df.columns)}")
                         logger.info(f"Full original dataframe shape: {df.shape}")
                         
+                        # Filter data to last 12 months for ROI calculation
+                        df_last_12_months = self._filter_last_12_months(df)
+                        
+                        # Apply transformations to the filtered 12-month data
+                        transformed_df_last_12_months, transformation_metadata = self.transformation_engine.apply_variable_transformations(
+                            df_last_12_months, combo_config
+                        )
+                        
                         roi_results = self.calculate_roi_for_features(
                             roi_config=roi_config,
                             x_variables=x_variables_lower,
                             unstandardized_coefficients=unstandardized_coefficients,
-                            transformed_df=transformed_df,
-                            X_original=X_original,
-                            full_original_df=df,  # Pass the full original dataframe
+                            transformed_df=transformed_df_last_12_months,
+                            X_original=df_last_12_months[x_variables_lower],
+                            full_original_df=df_last_12_months,  # Pass the filtered original dataframe
                             combination_name=combination_name,
                             price_column=price_column
                         )
