@@ -136,7 +136,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [formulaValidationError, setFormulaValidationError] = useState<string | null>(null);
   const headersKey = useMemo(() => (data?.headers || []).join('|'), [data?.headers]);
   const [isFormulaMode, setIsFormulaMode] = useState(true);
-  const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter'>(null);
+  const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter' | 'operation'>(null);
+  const [convertSubmenuOpen, setConvertSubmenuOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     pointerX: number;
     pointerY: number;
@@ -378,7 +379,103 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   // Loading indicator for server-side operations
   const [operationLoading, setOperationLoading] = useState(false);
+  
+  // Undo/Redo state management
+  const [undoStack, setUndoStack] = useState<DataFrameData[]>([]);
+  const [redoStack, setRedoStack] = useState<DataFrameData[]>([]);
+  const [isUndoRedoOperation, setIsUndoRedoOperation] = useState(false);
 
+  // History panel state
+  const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const [historyPanelMinimized, setHistoryPanelMinimized] = useState(false);
+  const [historyPanelPosition, setHistoryPanelPosition] = useState({ x: 0, y: 0 });
+  const [historyOperations, setHistoryOperations] = useState<Array<{
+    id: string;
+    type: string;
+    description: string;
+    timestamp: Date;
+    status: 'success' | 'error' | 'pending';
+  }>>([]);
+
+  // Removed overlay system - frozen columns handle background blocking
+
+  // Function to add operation to history
+  const addToHistory = useCallback((type: string, description: string, status: 'success' | 'error' | 'pending' = 'success') => {
+    const operation = {
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type,
+      description,
+      timestamp: new Date(),
+      status
+    };
+    setHistoryOperations(prev => [operation, ...prev].slice(0, 100)); // Keep last 100 operations
+  }, []);
+
+  // Function to save current state to undo stack
+  const saveToUndoStack = useCallback((currentData: DataFrameData) => {
+    if (isUndoRedoOperation) return; // Don't save during undo/redo operations
+    
+    setUndoStack(prev => {
+      const newStack = [...prev, JSON.parse(JSON.stringify(currentData))];
+      // Limit undo stack to 50 operations
+      return newStack.slice(-50);
+    });
+    // Clear redo stack when new operation is performed
+    setRedoStack([]);
+  }, [isUndoRedoOperation]);
+
+  // Function to undo last operation
+  const handleUndo = useCallback(() => {
+    if (undoStack.length === 0 || !data) return;
+    
+    setIsUndoRedoOperation(true);
+    
+    // Move current state to redo stack
+    setRedoStack(prev => [...prev, JSON.parse(JSON.stringify(data))]);
+    
+    // Restore previous state
+    const previousState = undoStack[undoStack.length - 1];
+    setUndoStack(prev => prev.slice(0, -1));
+    
+    // Update the data
+    onDataChange(previousState);
+    
+    // Add to history
+    addToHistory('Undo', 'Reverted last operation');
+    
+    toast({
+      title: "Undo Applied",
+      description: "Last operation has been undone",
+    });
+    
+    // Reset flag after a short delay
+    setTimeout(() => setIsUndoRedoOperation(false), 100);
+  }, [undoStack, data, onDataChange, addToHistory]);
+
+  // Function to redo last undone operation
+  const handleRedo = useCallback(() => {
+    if (redoStack.length === 0 || !data) return;
+    
+    setIsUndoRedoOperation(true);
+    
+    // Move current state to undo stack
+    setUndoStack(prev => [...prev, JSON.parse(JSON.stringify(data))]);
+    
+    // Restore next state
+    const nextState = redoStack[redoStack.length - 1];
+    setRedoStack(prev => prev.slice(0, -1));
+    
+    // Update the data
+    onDataChange(nextState);
+    
+    toast({
+      title: "Redo Applied",
+      description: "Last undone operation has been redone",
+    });
+    
+    // Reset flag after a short delay
+    setTimeout(() => setIsUndoRedoOperation(false), 100);
+  }, [redoStack, data, onDataChange]);
 
   // Helper to convert current table to CSV (includes filtered and deleted state)
   const toCSV = () => {
@@ -871,6 +968,10 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   const handleSort = async (column: string, direction: 'asc' | 'desc') => {
     if (!data || !fileId) return;
+    
+    // Save current state before making changes
+    saveToUndoStack(data);
+    
     setOperationLoading(true);
     try {
       console.log('[DataFrameOperations] sort', column, direction);
@@ -909,10 +1010,21 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
     onSettingsChange({ filters: { ...updatedFilters } });
     setCurrentPage(1);
+    
+    // Add to history
+    if (Array.isArray(selectedValues) && selectedValues.length === 2 && typeof selectedValues[0] === 'number') {
+      addToHistory('Filter', `Applied range filter to column "${column}": ${selectedValues[0]} - ${selectedValues[1]}`);
+    } else {
+      addToHistory('Filter', `Applied filter to column "${column}": ${Array.isArray(selectedValues) ? selectedValues.length + ' values' : 'custom filter'}`);
+    }
   };
 
 // Helper to commit a cell edit after user finishes editing
 const commitCellEdit = (rowIndex: number, column: string) => {
+  // Save current state before making changes
+  if (data) {
+    saveToUndoStack(data);
+  }
   handleCellEdit(rowIndex, column, editingCellValue);
   setEditingCell(null);
 };
@@ -923,6 +1035,10 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   const newHeader = value !== undefined ? value : editingHeaderValue;
   const oldHeader = data.headers[colIdx];
   if (newHeader === oldHeader) { setEditingHeader(null); return; }
+  
+  // Save current state before making changes
+  saveToUndoStack(data);
+  
   try {
     const resp = await apiRenameColumn(fileId, oldHeader, newHeader);
     const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
@@ -944,8 +1060,12 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       onSettingsChange({ columnFormulas: next });
       return next;
     });
+    
+    // Add to history
+    addToHistory('Rename Column', `Renamed column "${oldHeader}" to "${newHeader}"`);
   } catch (err) {
     handleApiError('Rename column failed', err);
+    addToHistory('Rename Column', `Failed to rename column "${oldHeader}"`, 'error');
   }
   setEditingHeader(null);
 };
@@ -975,6 +1095,10 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   const handleAddRow = async () => {
     resetSaveSuccess();
     if (!data || !fileId) return;
+    
+    // Save current state before making changes
+    saveToUndoStack(data);
+    
     const idx = data.rows.length > 0 ? data.rows.length - 1 : 0;
     const dir: 'above' | 'below' = data.rows.length > 0 ? 'below' : 'above';
     try {
@@ -997,6 +1121,10 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   const handleAddColumn = async () => {
     resetSaveSuccess();
     if (!data || !fileId) return;
+    
+    // Save current state before making changes
+    saveToUndoStack(data);
+    
     const newColumnName = `Column_${data.headers.length + 1}`;
     try {
       const resp = await apiInsertColumn(fileId, data.headers.length, newColumnName, '');
@@ -1048,6 +1176,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
 
   const handleDragEnd = async () => {
     if (draggedCol && data && fileId) {
+      // Save current state before making changes
+      saveToUndoStack(data);
+      
       const toIndex = data.headers.indexOf(draggedCol);
       try {
         const resp = await apiMoveColumn(fileId, draggedCol, toIndex);
@@ -1061,8 +1192,12 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
           frozenColumns: data.frozenColumns,
           cellColors: data.cellColors,
         });
+        
+        // Add to history
+        addToHistory('Move Column', `Moved column "${draggedCol}" to position ${toIndex + 1}`);
       } catch (err) {
         handleApiError('Move column failed', err);
+        addToHistory('Move Column', `Failed to move column "${draggedCol}"`, 'error');
       }
     }
     setDraggedCol(null);
@@ -1077,6 +1212,7 @@ const handleSortAsc = (colIdx: number) => {
   if (!data) return;
   const col = data.headers[colIdx];
   handleSort(col, 'asc');
+  addToHistory('Sort', `Sorted column "${col}" in ascending order`);
   setContextMenu(null);
   setOpenDropdown(null);
 };
@@ -1085,6 +1221,7 @@ const handleSortDesc = (colIdx: number) => {
   if (!data) return;
   const col = data.headers[colIdx];
   handleSort(col, 'desc');
+  addToHistory('Sort', `Sorted column "${col}" in descending order`);
   setContextMenu(null);
   setOpenDropdown(null);
 };
@@ -1094,6 +1231,7 @@ const handleClearSort = () => {
   const col = contextMenu.col;
   const newSortColumns = settings.sortColumns.filter(s => s.column !== col);
   onSettingsChange({ sortColumns: newSortColumns });
+  addToHistory('Clear Sort', `Cleared sorting for column "${col}"`);
   setContextMenu(null);
   setOpenDropdown(null);
 };
@@ -1116,6 +1254,9 @@ const handleClearFilter = async (col: string) => {
 
   // Use local filtering to preserve all columns and deletions
   onSettingsChange({ filters: { ...newFilters } });
+  
+  // Add to history
+  addToHistory('Clear Filter', `Cleared filter for column "${col}"`);
 
   setFilterRange(null);
   setCurrentPage(1);
@@ -1139,6 +1280,10 @@ const handleFormulaSubmit = async () => {
   if (!data || !selectedColumn || !fileId) return;
   const trimmedFormula = formulaInput.trim();
   if (!trimmedFormula) return;
+  
+  // Save current state before making changes
+  saveToUndoStack(data);
+  
   try {
     const resp = await apiApplyFormula(fileId, selectedColumn, trimmedFormula);
     const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
@@ -1160,8 +1305,12 @@ const handleFormulaSubmit = async () => {
       return next;
     });
     setFormulaInput(trimmedFormula);
+    
+    // Add to history
+    addToHistory('Apply Formula', `Applied formula "${trimmedFormula}" to column "${selectedColumn}"`);
   } catch (err) {
     handleApiError('Apply formula failed', err);
+    addToHistory('Apply Formula', `Failed to apply formula "${trimmedFormula}" to column "${selectedColumn}"`, 'error');
   }
 };
 
@@ -1178,6 +1327,10 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleInsertColumn = async (colIdx: number) => {
     resetSaveSuccess();
     if (!data || !fileId) return;
+    
+    // Save current state before making changes
+    saveToUndoStack(data);
+    
     const newColKey = getNextColKey(data.headers);
     try {
       const resp = await apiInsertColumn(fileId, colIdx, newColKey, '');
@@ -1191,8 +1344,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
+      
+      // Add to history
+      addToHistory('Insert Column', `Inserted column "${newColKey}" at position ${colIdx + 1}`);
     } catch (err) {
       handleApiError('Insert column failed', err);
+      addToHistory('Insert Column', `Failed to insert column at position ${colIdx + 1}`, 'error');
     }
   };
 
@@ -1200,6 +1357,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     resetSaveSuccess();
     if (!data || !fileId) return;
     if (colIdx < 0 || colIdx >= data.headers.length) return;
+    
+    // Save current state before making changes
+    saveToUndoStack(data);
     
     // Check if there are multiple selected columns
     if (multiSelectedColumns.size > 1) {
@@ -1230,8 +1390,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           newSet.delete(col);
           return newSet;
         });
+        
+        // Add to history
+        addToHistory('Delete Column', `Deleted column "${col}"`);
       } catch (err) {
         handleApiError('Delete column failed', err);
+        addToHistory('Delete Column', `Failed to delete column "${col}"`, 'error');
       }
     }
   };
@@ -1239,6 +1403,10 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleDuplicateColumn = async (colIdx: number) => {
     resetSaveSuccess();
     if (!data || !fileId) return;
+    
+    // Save current state before making changes
+    saveToUndoStack(data);
+    
     const col = data.headers[colIdx];
     let newName = `${col}_copy`;
     while (data.headers.includes(newName)) {
@@ -1258,14 +1426,22 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       });
       // Remember the source for this duplicated column
       setDuplicateMap(prev => ({ ...prev, [newName]: prev[col] || col }));
+      
+      // Add to history
+      addToHistory('Duplicate Column', `Duplicated column "${col}" as "${newName}"`);
     } catch (err) {
       handleApiError('Duplicate column failed', err);
+      addToHistory('Duplicate Column', `Failed to duplicate column "${col}"`, 'error');
     }
   };
 
   // Row insert / delete handlers
   const handleInsertRow = async (position: 'above' | 'below', rowIdx: number) => {
     if (!data || !fileId) return;
+    
+    // Save current state before making changes
+    saveToUndoStack(data);
+    
     try {
       const resp = await apiInsertRow(fileId, rowIdx, position);
       const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
@@ -1278,13 +1454,21 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
+      
+      // Add to history
+      addToHistory('Insert Row', `Inserted row ${position} row ${rowIdx + 1}`);
     } catch (err) {
       handleApiError('Insert row failed', err);
+      addToHistory('Insert Row', `Failed to insert row ${position} row ${rowIdx + 1}`, 'error');
     }
   };
 
   const handleDuplicateRow = async (rowIdx: number) => {
     if (!data || !fileId) return;
+    
+    // Save current state before making changes
+    saveToUndoStack(data);
+    
     try {
       const resp = await apiDuplicateRow(fileId, rowIdx);
       const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
@@ -1297,17 +1481,29 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
       });
+      
+      // Add to history
+      addToHistory('Duplicate Row', `Duplicated row ${rowIdx + 1}`);
     } catch (err) {
       handleApiError('Duplicate row failed', err);
+      addToHistory('Duplicate Row', `Failed to duplicate row ${rowIdx + 1}`, 'error');
     }
   };
 
-  const handleRetypeColumn = async (col: string, newType: 'number' | 'text') => {
+  const handleRetypeColumn = async (col: string, newType: 'number' | 'text' | 'date') => {
     if (!data || !fileId) return;
+    
+    // Save current state before making changes
+    saveToUndoStack(data);
+    
     try {
+      console.log('[DataFrameOperations] Retype column:', col, 'to', newType);
       const resp = await apiRetypeColumn(fileId, col, newType === 'text' ? 'string' : newType);
+      console.log('[DataFrameOperations] Retype response:', resp);
       const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
-      onDataChange({
+      console.log('[DataFrameOperations] Normalized column types:', columnTypes);
+      
+      const updatedData = {
         headers: resp.headers,
         rows: resp.rows,
         fileName: data.fileName,
@@ -1315,9 +1511,20 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
+      };
+      
+      onDataChange(updatedData);
+      
+      // Add to history
+      addToHistory('Retype Column', `Changed column "${col}" type to ${newType}`);
+      
+      toast({
+        title: "Column Type Changed",
+        description: `Column "${col}" converted to ${newType}`,
       });
     } catch (err) {
       handleApiError('Retype column failed', err);
+      addToHistory('Retype Column', `Failed to retype column "${col}"`, 'error');
     }
   };
 
@@ -1357,6 +1564,56 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     } catch (err) {
       handleApiError('Describe column failed', err);
     }
+  };
+
+  const handleFreezePane = (colIdx: number) => {
+    if (!data) return;
+    
+    // Save current state before making changes
+    saveToUndoStack(data);
+    
+    // Set frozen columns to the index + 1 (since we want to freeze up to and including this column)
+    // The # column is always included when freeze pane is active
+    const newFrozenColumns = colIdx + 1;
+    
+    // Update the data with new frozen columns
+    const updatedData = {
+      ...data,
+      frozenColumns: newFrozenColumns
+    };
+    
+    onDataChange(updatedData);
+    
+    // Add to history
+    addToHistory('Freeze Pane', `Froze columns 1-${newFrozenColumns} (including # column)`);
+    
+    toast({
+      title: "Freeze Pane Applied",
+      description: `Columns 1-${newFrozenColumns} are now frozen (including # column)`,
+    });
+  };
+
+  const handleUnfreezePane = () => {
+    if (!data) return;
+    
+    // Save current state before making changes
+    saveToUndoStack(data);
+    
+    // Reset frozen columns to 0
+    const updatedData = {
+      ...data,
+      frozenColumns: 0
+    };
+    
+    onDataChange(updatedData);
+    
+    // Add to history
+    addToHistory('Unfreeze Pane', 'Removed freeze pane from all columns');
+    
+    toast({
+      title: "Freeze Pane Removed",
+      description: "All columns are now unfrozen",
+    });
   };
 
   const handleColumnMultiSelect = (header: string, event: React.MouseEvent) => {
@@ -1495,6 +1752,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleConfirmDelete = async () => {
     if (!data || !fileId || deleteConfirmModal.columnsToDelete.length === 0) return;
     
+    // Save current state before making changes
+    saveToUndoStack(data);
+    
     try {
       let deletedCount = 0;
       
@@ -1528,6 +1788,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         
         onDataChange(updatedData);
         
+        // Add to history
+        addToHistory('Bulk Delete Columns', `Deleted ${deletedCount} columns: ${deleteConfirmModal.columnsToDelete.join(', ')}`);
+        
         toast({
           title: "Success",
           description: `${deletedCount} column(s) deleted successfully`,
@@ -1554,6 +1817,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       // Clear selection after deletion
       setMultiSelectedRows(new Set());
       
+      // Add to history
+      addToHistory('Bulk Delete Rows', `Deleted ${rowDeleteConfirmModal.rowsToDelete.length} rows`);
+      
       toast({
         title: "Success",
         description: `${rowDeleteConfirmModal.rowsToDelete.length} row(s) deleted successfully`,
@@ -1577,6 +1843,20 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   // Keyboard shortcuts for multi-select
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Handle Ctrl+Z for undo
+      if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+      
+      // Handle Ctrl+Y or Ctrl+Shift+Z for redo
+      if ((e.ctrlKey && e.key === 'y') || (e.ctrlKey && e.shiftKey && e.key === 'z')) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+      
       if (e.ctrlKey || e.metaKey) {
         if (e.key === 'a' && data?.headers) {
           e.preventDefault();
@@ -1602,7 +1882,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [data?.headers, data?.rows, permanentlyDeletedRows, processedData.filteredRows]);
+  }, [data?.headers, data?.rows, permanentlyDeletedRows, processedData.filteredRows, handleUndo, handleRedo]);
 
   return (
     <>
@@ -1662,7 +1942,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 )}
               </div>
             </div>
-            <div className="relative flex flex-col items-center" style={{ minWidth: 180 }}>
+            <div className="relative flex items-center gap-2">
               <Button
                 onClick={handleSaveDataFrame}
                 disabled={saveLoading}
@@ -1676,19 +1956,32 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           {/* Table section - Excel-like appearance */}
           <div className="flex-1 flex flex-col overflow-hidden min-h-0">
             {data && (
-              <FormularBar
-                data={data}
-                selectedCell={selectedCell}
-                selectedColumn={selectedColumn}
-                formulaInput={formulaInput}
-                isFormulaMode={isFormulaMode}
-                onSelectedCellChange={setSelectedCell}
-                onSelectedColumnChange={setSelectedColumn}
-                onFormulaInputChange={setFormulaInput}
-                onFormulaModeChange={setIsFormulaMode}
-                onFormulaSubmit={handleFormulaSubmit}
-                onValidationError={setFormulaValidationError}
-              />
+              <div className="flex items-center border-b border-slate-200">
+                <div className="flex-1">
+                  <FormularBar
+                    data={data}
+                    selectedCell={selectedCell}
+                    selectedColumn={selectedColumn}
+                    formulaInput={formulaInput}
+                    isFormulaMode={isFormulaMode}
+                    onSelectedCellChange={setSelectedCell}
+                    onSelectedColumnChange={setSelectedColumn}
+                    onFormulaInputChange={setFormulaInput}
+                    onFormulaModeChange={setIsFormulaMode}
+                    onFormulaSubmit={handleFormulaSubmit}
+                    onValidationError={setFormulaValidationError}
+                  />
+                </div>
+                <button
+                  onClick={() => setHistoryPanelOpen(true)}
+                  className="p-2 mx-1 hover:bg-purple-50 rounded-md transition-colors"
+                  title="History"
+                >
+                  <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </button>
+              </div>
             )}
             <div className="flex-1 overflow-auto min-h-0">
               {/* Placeholder for when no data is loaded */}
@@ -1712,7 +2005,25 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               <TableHeader className="table-header">
                 <TableRow className="table-header-row">
                   {settings.showRowNumbers && (
-                    <TableHead className="table-header-cell w-16 text-center">
+                    <TableHead 
+                      className={`table-header-cell row-number-column text-center ${
+                        data.frozenColumns > 0 ? 'frozen-column' : ''
+                      }`}
+                      style={{
+                        ...(data.frozenColumns > 0 ? { 
+                          position: 'sticky', 
+                          left: '0px',
+                          zIndex: 1001,
+                          marginRight: data.frozenColumns > 0 ? '2px' : '0px',
+                          backgroundColor: 'white',
+                          opacity: 1,
+                          borderLeft: '2px solid #22c55e',
+                          borderRight: '1px solid #d1d5db',
+                          borderTop: '1px solid #d1d5db',
+                          borderBottom: '1px solid #d1d5db'
+                        } : {})
+                      }}
+                    >
                       <div className="flex items-center justify-center">
                         <Checkbox
                           checked={selectAllRows}
@@ -1733,8 +2044,35 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                          multiSelectedColumns.has(header) ? 'bg-blue-100 border-blue-500' : ''
                        } ${
                          filters[header] ? 'bg-yellow-50' : ''
+                       } ${
+                         data.frozenColumns && colIdx < data.frozenColumns ? 'frozen-column' : ''
                        }`}
-                      style={settings.columnWidths?.[header] ? { width: settings.columnWidths[header], minWidth: settings.columnWidths[header] } : undefined}
+                      style={{
+                        ...(settings.columnWidths?.[header] ? { width: settings.columnWidths[header], minWidth: settings.columnWidths[header] } : { width: '120px', minWidth: '120px', maxWidth: '120px' }),
+                        ...(data.frozenColumns && colIdx < data.frozenColumns ? { 
+                          position: 'sticky', 
+                          left: (() => {
+                            let leftOffset = 0;
+                            // Add width of # column if it's shown and frozen
+                            if (settings.showRowNumbers && data.frozenColumns > 0) {
+                              leftOffset += 64; // w-16 = 64px
+                            }
+                            for (let i = 0; i < colIdx; i++) {
+                              const colWidth = settings.columnWidths?.[data.headers[i]] || 120;
+                              leftOffset += colWidth;
+                            }
+                            return `${leftOffset}px`;
+                          })(),
+                          zIndex: 1001,
+                          marginRight: colIdx === data.frozenColumns - 1 ? '2px' : '0px',
+                          backgroundColor: 'white',
+                          opacity: 1,
+                          borderLeft: colIdx === 0 ? '1px solid #d1d5db' : '1px solid #d1d5db',
+                          borderRight: colIdx === data.frozenColumns - 1 ? '2px solid #22c55e' : '1px solid #d1d5db',
+                          borderTop: '1px solid #d1d5db',
+                          borderBottom: '1px solid #d1d5db'
+                        } : {})
+                      }}
                       draggable
                       onDragStart={() => handleDragStart(header)}
                       onDragOver={e => handleDragOver(e, header)}
@@ -1830,7 +2168,23 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     >
                       {settings.showRowNumbers && (
                         <TableCell
-                          className={`table-cell w-16 text-center text-xs font-medium ${isRowSelected ? 'bg-blue-200' : ''}`}
+                          className={`table-cell row-number-column text-center text-xs font-medium ${isRowSelected ? 'bg-blue-200' : ''} ${
+                            data.frozenColumns > 0 ? 'frozen-column' : ''
+                          }`}
+                          style={{
+                            ...(data.frozenColumns > 0 ? { 
+                              position: 'sticky', 
+                              left: '0px',
+                              zIndex: 1001,
+                              marginRight: data.frozenColumns > 0 ? '2px' : '0px',
+                              backgroundColor: 'white',
+                              opacity: 1,
+                              borderLeft: '2px solid #22c55e',
+                              borderRight: '1px solid #d1d5db',
+                              borderTop: '1px solid #d1d5db',
+                              borderBottom: '1px solid #d1d5db'
+                            } : {})
+                          }}
                           onContextMenu={e => {
                             e.preventDefault();
                             const { clientX, clientY } = e;
@@ -1863,8 +2217,33 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           <TableCell
                             key={colIdx}
                             data-col={column}
-                            className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-500 bg-blue-50' : selectedColumn === column ? 'border border-blue-500 bg-blue-50' : ''} ${isRowSelected ? 'bg-blue-100' : ''}`}
-                            style={settings.columnWidths?.[column] ? { width: settings.columnWidths[column], minWidth: settings.columnWidths[column] } : undefined}
+                            className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-500 bg-blue-50' : selectedColumn === column ? 'border border-blue-500 bg-blue-50' : ''} ${isRowSelected ? 'bg-blue-100' : ''} ${data.frozenColumns && colIdx < data.frozenColumns ? 'frozen-column' : ''}`}
+                            style={{
+                              ...(settings.columnWidths?.[column] ? { width: settings.columnWidths[column], minWidth: settings.columnWidths[column] } : { width: '120px', minWidth: '120px', maxWidth: '120px' }),
+                              ...(data.frozenColumns && colIdx < data.frozenColumns ? { 
+                                position: 'sticky', 
+                                left: (() => {
+                                  let leftOffset = 0;
+                                  // Add width of # column if it's shown and frozen
+                                  if (settings.showRowNumbers && data.frozenColumns > 0) {
+                                    leftOffset += 64; // w-16 = 64px
+                                  }
+                                  for (let i = 0; i < colIdx; i++) {
+                                    const colWidth = settings.columnWidths?.[data.headers[i]] || 120;
+                                    leftOffset += colWidth;
+                                  }
+                                  return `${leftOffset}px`;
+                                })(),
+                                zIndex: 1001,
+                                marginRight: colIdx === data.frozenColumns - 1 ? '2px' : '0px',
+                                backgroundColor: 'white',
+                                opacity: 1,
+                                borderLeft: colIdx === 0 ? '1px solid #d1d5db' : '1px solid #d1d5db',
+                                borderRight: colIdx === data.frozenColumns - 1 ? '2px solid #22c55e' : '1px solid #d1d5db',
+                                borderTop: '1px solid #d1d5db',
+                                borderBottom: '1px solid #d1d5db'
+                              } : {})
+                            }}
                             onClick={() => handleCellClick(rowIndex, column)}
                             onDoubleClick={() => {
                             // Always allow cell editing regardless of enableEditing setting
@@ -2225,16 +2604,42 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               </div>
             )}
           </div>
-          {/* Describe */}
-          <button
-            className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
-            onClick={e => {
-              e.preventDefault();
-              e.stopPropagation();
-              handleDescribeColumn(contextMenu.col);
-              setContextMenu(null);
-            }}
-          >Describe</button>
+          {/* Operation Submenu - placed after Filter */}
+          <div className="relative group">
+            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.stopPropagation(); setOpenDropdown(openDropdown === 'operation' ? null : 'operation'); }}>
+              Operation <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
+            </button>
+            {openDropdown === 'operation' && (
+              <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md min-w-[180px] z-50">
+                {/* Convert To Submenu - First option */}
+                <div 
+                  className="relative"
+                  onMouseEnter={() => setConvertSubmenuOpen(true)}
+                  onMouseLeave={() => setConvertSubmenuOpen(false)}
+                >
+                  <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100">
+                    Convert to <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
+                  </button>
+                  {convertSubmenuOpen && (
+                    <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md min-w-[140px] max-h-[300px] overflow-y-auto z-50" style={{ scrollbarWidth: 'thin' }}>
+                      <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>String/Text</button>
+                      <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Integer</button>
+                      <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Float</button>
+                      <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'date'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Date/DateTime</button>
+                      <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Boolean</button>
+                      <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Category</button>
+                      <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Decimal</button>
+                      <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Object</button>
+                    </div>
+                  )}
+                </div>
+                {/* Describe */}
+                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.preventDefault(); e.stopPropagation(); handleDescribeColumn(contextMenu.col); setContextMenu(null); setOpenDropdown(null); }}>Describe</button>
+                {/* Duplicate */}
+                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={e => { e.preventDefault(); e.stopPropagation(); handleDuplicateColumn(contextMenu.colIdx); setContextMenu(null); setOpenDropdown(null); }}>Duplicate</button>
+              </div>
+            )}
+          </div>
           {/* Insert */}
           <button
             className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
@@ -2245,16 +2650,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               setContextMenu(null);
             }}
           >Insert</button>
-          {/* Duplicate */}
-          <button
-            className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
-            onClick={e => {
-              e.preventDefault();
-              e.stopPropagation();
-              handleDuplicateColumn(contextMenu.colIdx);
-              setContextMenu(null);
-            }}
-          >Duplicate</button>
           {/* Delete */}
           <button
             className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
@@ -2265,12 +2660,27 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               setContextMenu(null);
             }}
           >Delete</button>
-          {/* Retype */}
-          {data && data.columnTypes[contextMenu.col] !== 'number' && (
-            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); }}>Convert to Number</button>
-          )}
-          {data && data.columnTypes[contextMenu.col] !== 'text' && (
-            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); }}>Convert to Text</button>
+          {/* Freeze Pane */}
+          {data.frozenColumns === 0 ? (
+            <button
+              className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
+              onClick={e => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleFreezePane(contextMenu.colIdx);
+                setContextMenu(null);
+              }}
+            >Freeze Pane</button>
+          ) : (
+            <button
+              className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100"
+              onClick={e => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleUnfreezePane();
+                setContextMenu(null);
+              }}
+            >Unfreeze Pane</button>
           )}
           <div className="px-3 py-2 text-xs text-gray-400">Right-click to close</div>
           </div>,
@@ -2521,6 +2931,134 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 Delete {rowDeleteConfirmModal.rowsToDelete.length} Row{rowDeleteConfirmModal.rowsToDelete.length > 1 ? 's' : ''}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* History Panel */}
+      {historyPanelOpen && (
+        <div className="fixed inset-0 z-50 pointer-events-none">
+          <div 
+            className={`absolute right-0 top-0 h-full bg-white shadow-2xl border-l border-gray-200 transition-all duration-300 ${
+              historyPanelMinimized ? 'w-16' : 'w-96'
+            } pointer-events-auto`}
+            style={{
+              transform: `translateX(${historyPanelPosition.x}px) translateY(${historyPanelPosition.y}px)`
+            }}
+          >
+            {/* Panel Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gradient-to-r from-purple-600 to-purple-700 text-white">
+              <div className="flex items-center">
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {!historyPanelMinimized && (
+                  <h3 className="font-semibold">
+                    Operation History <span className="text-purple-200 ml-2">({historyOperations.length})</span>
+                  </h3>
+                )}
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setHistoryPanelMinimized(!historyPanelMinimized)}
+                  className="p-1 hover:bg-white/20 rounded transition-colors"
+                  title={historyPanelMinimized ? "Expand" : "Minimize"}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={historyPanelMinimized ? "M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" : "M9 9V4.5M9 9H4.5M9 9L3.5 3.5M15 9v4.5M15 9h4.5M15 9l5.5-5.5M9 15v4.5M9 15H4.5M9 15l-5.5 5.5M15 15h4.5M15 15v4.5m0-4.5l5.5 5.5"} />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => setHistoryPanelOpen(false)}
+                  className="p-1 hover:bg-white/20 rounded transition-colors"
+                  title="Close"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Panel Content */}
+            {!historyPanelMinimized && (
+              <div className="flex-1 overflow-y-auto p-4 max-h-[calc(100vh-80px)]" style={{ scrollbarWidth: 'thin' }}>
+                <div className="space-y-2">
+                  {/* Operations History */}
+                  {historyOperations.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <p>No operations recorded yet</p>
+                      <p className="text-sm">Start working with your data to see the history</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                        {historyOperations.map((operation, index) => (
+                          <div key={operation.id} className="relative">
+                            {/* Connection Line */}
+                            {index < historyOperations.length - 1 && (
+                              <div className="absolute left-4 top-8 w-0.5 h-6 bg-gray-300"></div>
+                            )}
+                            
+                            {/* Operation Node */}
+                            <div className={`flex items-start p-3 rounded-lg border-l-4 ${
+                              operation.status === 'success' ? 'bg-green-50 border-green-400' :
+                              operation.status === 'error' ? 'bg-red-50 border-red-400' :
+                              'bg-yellow-50 border-yellow-400'
+                            }`}>
+                              {/* Status Icon */}
+                              <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center mr-3 ${
+                                operation.status === 'success' ? 'bg-green-100 text-green-600' :
+                                operation.status === 'error' ? 'bg-red-100 text-red-600' :
+                                'bg-yellow-100 text-yellow-600'
+                              }`}>
+                                {operation.status === 'success' ? (
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                ) : operation.status === 'error' ? (
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                                ) : (
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                )}
+                              </div>
+                              
+                              {/* Operation Details */}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between">
+                                  <h5 className="font-medium text-gray-900 text-sm">{operation.type}</h5>
+                                  <span className="text-xs text-gray-500">
+                                    {operation.timestamp.toLocaleTimeString()}
+                                  </span>
+                                </div>
+                                <p className="text-sm text-gray-600 mt-1">{operation.description}</p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+
+                  {/* Clear History Button */}
+                  {historyOperations.length > 0 && (
+                    <div className="pt-4 border-t border-gray-200">
+                      <button
+                        onClick={() => setHistoryOperations([])}
+                        className="w-full px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                      >
+                        Clear History
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -17,14 +17,14 @@ MINIO_BUCKET_QUOTA = int(
 )  # default 10GB to handle >500MB uploads
 
 _client = Minio(
-    MINIO_ENDPOINT,
+    endpoint=MINIO_ENDPOINT,
     access_key=MINIO_ACCESS_KEY,
     secret_key=MINIO_SECRET_KEY,
     secure=False,
 )
 
 _admin_client = MinioAdmin(
-    MINIO_ENDPOINT,
+    endpoint=MINIO_ENDPOINT,
     credentials=StaticProvider(MINIO_ACCESS_KEY, MINIO_SECRET_KEY),
     secure=False,
 )
