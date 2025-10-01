@@ -2343,15 +2343,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     const hiddenBefore = data.headers.slice(0, originalColIdx).filter(h => (data.hiddenColumns || []).includes(h)).length;
                     return (
                     <>
-                    {/* Hidden column indicator */}
-                    {hiddenBefore > 0 && colIdx === 0 && (
-                      <TableHead className="table-header-cell w-1 p-0 bg-red-500 relative" title={`${hiddenBefore} hidden column(s) before`}>
-                        <div className="absolute inset-0 bg-red-500" style={{ width: '4px' }}>
-                          <div className="absolute inset-y-0 left-0 w-px bg-red-600"></div>
-                          <div className="absolute inset-y-0 right-0 w-px bg-red-600"></div>
-                        </div>
-                      </TableHead>
-                    )}
                     <TableHead
                       key={header + '-' + colIdx}
                       data-col={header}
