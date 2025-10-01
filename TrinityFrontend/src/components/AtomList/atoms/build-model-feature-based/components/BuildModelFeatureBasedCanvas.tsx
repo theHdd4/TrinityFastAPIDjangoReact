@@ -1386,6 +1386,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
               availableCombinations={data?.selectedCombinations || []}
               roiConfig={roiConfig}
               onROIConfigChange={setRoiConfig}
+              yVariable={data?.yVariable}
             />
             
           </div>

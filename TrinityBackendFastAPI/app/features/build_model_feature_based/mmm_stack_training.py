@@ -1280,11 +1280,18 @@ class MMMStackModelDataProcessor:
                             # STEP 5: Calculate ROI for selected features
                             roi_results = {}
                             if roi_config and roi_config.get('enabled', False):
+                                logger.info(f"🎯 Starting ROI calculation for stack modeling - {combination}")
+                                logger.info(f"   Unstandardized coefficients: {unstandardized_coefficients}")
+                                
                                 # Filter data to last 12 months for ROI calculation
                                 df_last_12_months = self._filter_last_12_months(df)
+                                logger.info(f"   Last 12 months data shape: {df_last_12_months.shape}")
+                                
                                 transformed_df_last_12_months, transformation_metadata = transformation_engine.apply_variable_transformations(
                                     df_last_12_months, modified_combo_config
                                 )
+                                logger.info(f"   Transformed data shape: {transformed_df_last_12_months.shape}")
+                                logger.info(f"   Transformed data columns: {list(transformed_df_last_12_months.columns)}")
                                 
                                 # Import the ROI calculation function from mmm_training
                                 from .mmm_training import MMMModelTrainer
@@ -1299,6 +1306,8 @@ class MMMStackModelDataProcessor:
                                     combination_name=combination,
                                     price_column=price_column
                                 )
+                                
+                                logger.info(f"   ROI results: {roi_results}")
                             
                             # Create a unique key for this parameter combination and model
                             param_model_key = f"param_{param_index}_{model_name}"

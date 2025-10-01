@@ -622,9 +622,50 @@ class MMMModelTrainer:
         if not roi_config or not roi_config.get('enabled', False):
             return roi_results
         
-        features_config = roi_config.get('features', {})
+        # ===== NEW: Build features_config from roiVariables and costPerUnit if using new structure =====
+        roi_variables = roi_config.get('roiVariables', [])
+        global_cost_per_unit = roi_config.get('costPerUnit', {})
+        
+        logger.info(f"🔍 ROI Config Analysis for {combination_name}:")
+        logger.info(f"   roiVariables: {roi_variables}")
+        logger.info(f"   costPerUnit: {global_cost_per_unit}")
+        logger.info(f"   perCombinationCostPerUnit: {roi_config.get('perCombinationCostPerUnit', False)}")
+        logger.info(f"   combinationCostPerUnit: {roi_config.get('combinationCostPerUnit', {})}")
+        
+        # Check if using new structure (roiVariables + costPerUnit)
+        if roi_variables and global_cost_per_unit:
+            # Build features_config from new structure
+            features_config = {}
+            for variable in roi_variables:
+                if variable:  # Skip empty strings
+                    cost_value = global_cost_per_unit.get(variable, 0)
+                    features_config[variable] = {
+                        'type': 'CPRP',  # Use CPRP type for compatibility
+                        'value': cost_value  # Use cost per unit as CPRP value
+                    }
+                    logger.info(f"   Added {variable} with cost value: {cost_value}")
+            logger.info(f"✓ Built features_config from roiVariables: {features_config}")
+        else:
+            # Use old structure
+            features_config = roi_config.get('features', {})
+            logger.info(f"Using features from old structure: {list(features_config.keys())}")
+        
         per_combination_cprp = roi_config.get('perCombinationCPRP', False)
         combination_cprp_values = roi_config.get('combinationCPRPValues', {})
+        
+        # ===== NEW: Also check for per-combination cost per unit =====
+        per_combination_cost = roi_config.get('perCombinationCostPerUnit', False)
+        combination_cost_per_unit_values = roi_config.get('combinationCostPerUnit', {})
+        
+        # Merge per-combination cost per unit into combination_cprp_values if using new structure
+        if per_combination_cost and combination_cost_per_unit_values:
+            per_combination_cprp = True  # Enable per-combination mode
+            # Merge with existing CPRP values
+            for combo_name, costs in combination_cost_per_unit_values.items():
+                if combo_name not in combination_cprp_values:
+                    combination_cprp_values[combo_name] = {}
+                combination_cprp_values[combo_name].update(costs)
+            logger.info(f"Merged per-combination cost per unit into CPRP values for {len(combination_cost_per_unit_values)} combinations")
         
         # Find matching combination name (case-insensitive and partial matching)
         matched_combination_name = None
@@ -657,33 +698,107 @@ class MMMModelTrainer:
                 logger.warning(f"Available combinations: {list(combination_cprp_values.keys())}")
                 logger.warning(f"Will use global CPRP values instead")
         
-        # Get average price column value from full original dataframe
-        avg_price_column = 1.0  # Default to 1 if no price column
-        if price_column and price_column.lower() in full_original_df.columns:
-            avg_price_column = float(full_original_df[price_column.lower()].mean())
-            logger.info(f"Price column '{price_column}' found. Average value: {avg_price_column}")
+        # ===== NEW: Get average price value (handles both column and manual entry) =====
+        avg_price_column = 1.0  # Default to 1
+        
+        # Check if manual price entry is enabled
+        manual_price_entry = roi_config.get('manualPriceEntry', False)
+        per_combination_manual_price = roi_config.get('perCombinationManualPrice', False)
+        
+        if manual_price_entry:
+            # Use manual price values
+            if per_combination_manual_price:
+                # Get combination-specific manual price
+                combination_manual_prices = roi_config.get('combinationManualPriceValues', {})
+                if matched_combination_name and matched_combination_name in combination_manual_prices:
+                    avg_price_column = float(combination_manual_prices[matched_combination_name])
+                    logger.info(f"Using manual price for combination '{matched_combination_name}': {avg_price_column}")
+                elif combination_name in combination_manual_prices:
+                    avg_price_column = float(combination_manual_prices[combination_name])
+                    logger.info(f"Using manual price for combination '{combination_name}': {avg_price_column}")
+                else:
+                    # Fallback to global manual price
+                    avg_price_column = float(roi_config.get('manualPriceValue', 1.0))
+                    logger.warning(f"No manual price found for combination '{combination_name}', using global: {avg_price_column}")
+            else:
+                # Use global manual price
+                avg_price_column = float(roi_config.get('manualPriceValue', 1.0))
+                logger.info(f"Using global manual price: {avg_price_column}")
         else:
-            logger.warning(f"Price column '{price_column}' not found in dataframe columns: {list(full_original_df.columns)}")
-            logger.warning(f"Using default avg_price_column = {avg_price_column}")
+            # Use price column from data
+            if price_column and price_column.lower() in full_original_df.columns:
+                price_series = full_original_df[price_column.lower()]
+                
+                # Apply rolling average if specified
+                average_months = roi_config.get('averageMonths', None)
+                if average_months and average_months > 0:
+                    # Calculate rolling average and then take mean
+                    avg_price_column = float(price_series.rolling(window=average_months, min_periods=1).mean().mean())
+                    logger.info(f"Price column '{price_column}' with {average_months}-month rolling average: {avg_price_column}")
+                else:
+                    avg_price_column = float(price_series.mean())
+                    logger.info(f"Price column '{price_column}' average value: {avg_price_column}")
+            else:
+                logger.warning(f"Price column '{price_column}' not found in dataframe columns: {list(full_original_df.columns)}")
+                logger.warning(f"Using default avg_price_column = {avg_price_column}")
+        
+        # ===== Calculate for all features (already filtered by roiVariables above) =====
+        features_to_calculate = features_config
+        
+        if not features_to_calculate:
+            logger.warning(f"⚠️ No features to calculate ROI for in combination '{combination_name}'")
+            logger.warning(f"   roi_variables: {roi_variables}")
+            logger.warning(f"   global_cost_per_unit: {global_cost_per_unit}")
+            logger.warning(f"   features from config: {roi_config.get('features', {})}")
+            return roi_results
+        
+        logger.info(f"📊 Calculating ROI for {len(features_to_calculate)} features: {list(features_to_calculate.keys())}")
         
         # Calculate ROI for each selected feature
-        for feature_name, feature_config in features_config.items():
-            if feature_config.get('type') != 'CPRP':
-                continue  # Skip non-CPRP features
-                
-            # Get CPRP value for this combination
-            if per_combination_cprp and matched_combination_name:
-                # Use matched combination name to get CPRP values
-                combination_values = combination_cprp_values[matched_combination_name]
-                cprp_value = combination_values.get(feature_name, 0)
-                logger.info(f"Using per-combination CPRP for '{feature_name}' in '{matched_combination_name}': {cprp_value}")
-            else:
-                # Use global CPRP value (either perCombinationCPRP is false or no match found)
-                cprp_value = feature_config.get('value', 0)
-                if per_combination_cprp:
-                    logger.info(f"Using global CPRP for '{feature_name}' (no combination match): {cprp_value}")
+        for feature_name, feature_config in features_to_calculate.items():
+            # ===== Determine cost metric to use (Cost Per Unit or CPRP) =====
+            use_cost_per_unit = feature_name in global_cost_per_unit or (
+                per_combination_cost and matched_combination_name and 
+                matched_combination_name in combination_cost_per_unit_values and 
+                feature_name in combination_cost_per_unit_values.get(matched_combination_name, {})
+            )
+            
+            if use_cost_per_unit:
+                # Use Cost Per Unit instead of CPRP
+                if per_combination_cost:
+                    # Get combination-specific cost per unit
+                    if matched_combination_name and matched_combination_name in combination_cost_per_unit_values:
+                        cprp_value = combination_cost_per_unit_values[matched_combination_name].get(feature_name, 0)
+                        logger.info(f"Using per-combination cost per unit for '{feature_name}' in '{matched_combination_name}': {cprp_value}")
+                    elif combination_name in combination_cost_per_unit_values:
+                        cprp_value = combination_cost_per_unit_values[combination_name].get(feature_name, 0)
+                        logger.info(f"Using per-combination cost per unit for '{feature_name}' in '{combination_name}': {cprp_value}")
+                    else:
+                        # Fallback to global cost per unit
+                        cprp_value = global_cost_per_unit.get(feature_name, 0)
+                        logger.warning(f"No per-combination cost found for '{combination_name}', using global: {cprp_value}")
                 else:
-                    logger.info(f"Using global CPRP for '{feature_name}': {cprp_value}")
+                    # Use global cost per unit
+                    cprp_value = global_cost_per_unit.get(feature_name, 0)
+                    logger.info(f"Using global cost per unit for '{feature_name}': {cprp_value}")
+            else:
+                # Use CPRP values (original logic)
+                if feature_config.get('type') != 'CPRP':
+                    continue  # Skip non-CPRP features
+                    
+                # Get CPRP value for this combination
+                if per_combination_cprp and matched_combination_name:
+                    # Use matched combination name to get CPRP values
+                    combination_values = combination_cprp_values[matched_combination_name]
+                    cprp_value = combination_values.get(feature_name, 0)
+                    logger.info(f"Using per-combination CPRP for '{feature_name}' in '{matched_combination_name}': {cprp_value}")
+                else:
+                    # Use global CPRP value (either perCombinationCPRP is false or no match found)
+                    cprp_value = feature_config.get('value', 0)
+                    if per_combination_cprp:
+                        logger.info(f"Using global CPRP for '{feature_name}' (no combination match): {cprp_value}")
+                    else:
+                        logger.info(f"Using global CPRP for '{feature_name}': {cprp_value}")
             
             # Check if feature exists in variables
             feature_lower = feature_name.lower()
@@ -694,29 +809,34 @@ class MMMModelTrainer:
             # Get coefficient for this feature
             beta_key = f"Beta_{feature_lower}"
             beta = unstandardized_coefficients.get(beta_key, 0)
+            logger.info(f"   Processing ROI for {feature_name}: beta={beta}, cprp_value={cprp_value}")
             
             # Calculate sigma_j(beta * transformed(xij)) - sum of beta * transformed values
             if feature_lower in transformed_df.columns:
                 transformed_values = transformed_df[feature_lower].values
                 beta_transformed_sum = np.sum(beta * transformed_values)
+                logger.info(f"   {feature_name}: beta_transformed_sum = {beta_transformed_sum} (from {len(transformed_values)} values)")
             else:
-                logger.warning(f"Feature {feature_lower} not found in transformed_df")
+                logger.warning(f"   Feature {feature_lower} not found in transformed_df columns: {list(transformed_df.columns)}")
                 beta_transformed_sum = 0
             
             # Calculate sigma_j(cprp * xij) - sum of cprp * original values
             if feature_lower in X_original.columns:
                 original_values = X_original[feature_lower].values
                 cprp_original_sum = np.sum(cprp_value * original_values)
+                logger.info(f"   {feature_name}: cprp_original_sum = {cprp_original_sum} (cprp={cprp_value} * sum of {len(original_values)} values)")
             else:
-                logger.warning(f"Feature {feature_lower} not found in X_original")
+                logger.warning(f"   Feature {feature_lower} not found in X_original columns: {list(X_original.columns)}")
                 cprp_original_sum = 0
             
             # Calculate ROI using the formula
             if cprp_original_sum != 0:
                 roi = (beta_transformed_sum / cprp_original_sum) * avg_price_column
+                logger.info(f"   {feature_name}: ROI = ({beta_transformed_sum} / {cprp_original_sum}) * {avg_price_column} = {roi}")
             else:
                 roi = 0
-                logger.warning(f"CPRP original sum is 0 for feature {feature_name}, ROI set to 0")
+                logger.warning(f"   ⚠️ CPRP original sum is 0 for feature {feature_name}, ROI set to 0")
+                logger.warning(f"   Reason: cprp_value={cprp_value}, original_values sum={np.sum(original_values) if feature_lower in X_original.columns else 'N/A'}")
             
             roi_results[feature_name] = {
                 'cprp_value': float(cprp_value),

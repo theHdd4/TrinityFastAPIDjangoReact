@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { MultiSelectDropdown } from '@/templates/dropdown/multiselect';
+import { Checkbox } from '@/components/ui/checkbox';
 import { SingleSelectDropdown } from '@/templates/dropdown/single-select';
 
 interface ROIConfigurationProps {
@@ -10,6 +10,7 @@ interface ROIConfigurationProps {
   availableCombinations: string[];
   roiConfig: ROIConfig;
   onROIConfigChange: (config: ROIConfig) => void;
+  yVariable?: string; // The selected y_variable for modeling
 }
 
 export interface ROIConfig {
@@ -27,6 +28,26 @@ export interface ROIConfig {
       [featureName: string]: number;
     };
   };
+  // New fields for Part 1
+  manualPriceEntry: boolean;
+  manualPriceValue: number;
+  perCombinationManualPrice: boolean;
+  combinationManualPriceValues: {
+    [combinationName: string]: number;
+  };
+  averageMonths: number;
+  // Part 2 fields
+  roiVariables: string[]; // Array of selected variables to measure ROI for
+  // Part 3 fields
+  perCombinationCostPerUnit: boolean;
+  costPerUnit: {
+    [variableName: string]: number;
+  };
+  combinationCostPerUnit: {
+    [combinationName: string]: {
+      [variableName: string]: number;
+    };
+  };
 }
 
 const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
@@ -34,224 +55,408 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
   availableColumns,
   availableCombinations,
   roiConfig,
-  onROIConfigChange
+  onROIConfigChange,
+  yVariable
 }) => {
-  const [selectedFeatures, setSelectedFeatures] = useState<string[]>(
-    Object.keys(roiConfig.features || {})
-  );
   
-
-  const handleFeatureToggle = (features: string[]) => {
-    setSelectedFeatures(features);
-
-    // Update ROI config
-    const newFeatures: { [key: string]: { type: 'CPI' | 'CPRP'; value: number } } = {};
-      features.forEach(featureName => {
-        newFeatures[featureName] = roiConfig.features[featureName] || {
-          type: 'CPRP',
-          value: 0
-        };
-      });
-
-    onROIConfigChange({
-      ...roiConfig,
-      enabled: true,  // Always keep enabled as true
-      features: newFeatures
-    });
-  };
-
-  const handleFeatureTypeChange = (feature: string, type: 'CPI' | 'CPRP') => {
-    onROIConfigChange({
-      ...roiConfig,
-      enabled: true,  // Always keep enabled as true
-      features: {
-        ...roiConfig.features,
-        [feature]: {
-          ...roiConfig.features[feature],
-          type
-        }
-      }
-    });
-  };
-
-  const handleFeatureValueChange = (feature: string, value: string) => {
-    const numericValue = parseFloat(value) || 0;
-    onROIConfigChange({
-      ...roiConfig,
-      enabled: true,  // Always keep enabled as true
-      features: {
-        ...roiConfig.features,
-        [feature]: {
-          ...roiConfig.features[feature],
-          value: numericValue
-        }
-      }
-    });
-  };
-
   const handlePriceColumnChange = (priceColumn: string) => {
     onROIConfigChange({
       ...roiConfig,
-      enabled: true,  // Always keep enabled as true
-      priceColumn: priceColumn || ''  // Ensure it's not undefined
+      enabled: true,
+      priceColumn: priceColumn || ''
     });
   };
 
-  const handlePerCombinationToggle = (enabled: boolean) => {
+  const handleManualPriceToggle = (enabled: boolean) => {
     onROIConfigChange({
       ...roiConfig,
-      enabled: true,  // Always keep enabled as true
-      perCombinationCPRP: enabled
+      enabled: true,
+      manualPriceEntry: enabled
     });
   };
 
-  const handleCombinationCPRPValueChange = (combination: string, feature: string, value: string) => {
+  const handleManualPriceValueChange = (value: string) => {
     const numericValue = parseFloat(value) || 0;
-    const currentCombinationValues = roiConfig.combinationCPRPValues?.[combination] || {};
+    onROIConfigChange({
+      ...roiConfig,
+      enabled: true,
+      manualPriceValue: numericValue
+    });
+  };
+
+  const handlePerCombinationManualPriceToggle = (enabled: boolean) => {
+    onROIConfigChange({
+      ...roiConfig,
+      enabled: true,
+      perCombinationManualPrice: enabled
+    });
+  };
+
+  const handleCombinationManualPriceValueChange = (combination: string, value: string) => {
+    const numericValue = parseFloat(value) || 0;
+    onROIConfigChange({
+      ...roiConfig,
+      enabled: true,
+      combinationManualPriceValues: {
+        ...roiConfig.combinationManualPriceValues,
+        [combination]: numericValue
+      }
+    });
+  };
+
+  const handleAverageMonthsChange = (months: string) => {
+    onROIConfigChange({
+      ...roiConfig,
+      enabled: true,
+      averageMonths: parseInt(months) || 3
+    });
+  };
+
+  // Part 2 Handlers
+  const handleAddVariable = () => {
+    const currentVariables = roiConfig.roiVariables || [];
+    onROIConfigChange({
+      ...roiConfig,
+      enabled: true,
+      roiVariables: [...currentVariables, ''] // Add empty slot for new variable
+    });
+  };
+
+  const handleVariableChange = (index: number, variable: string) => {
+    const currentVariables = roiConfig.roiVariables || [];
+    const updatedVariables = [...currentVariables];
+    updatedVariables[index] = variable;
+    onROIConfigChange({
+      ...roiConfig,
+      enabled: true,
+      roiVariables: updatedVariables
+    });
+  };
+
+  const handleRemoveVariable = (index: number) => {
+    const currentVariables = roiConfig.roiVariables || [];
+    const updatedVariables = currentVariables.filter((_, i) => i !== index);
+    onROIConfigChange({
+      ...roiConfig,
+      enabled: true,
+      roiVariables: updatedVariables
+    });
+  };
+
+  // Part 3 Handlers
+  const handlePerCombinationCostToggle = (enabled: boolean) => {
+    onROIConfigChange({
+      ...roiConfig,
+      enabled: true,
+      perCombinationCostPerUnit: enabled
+    });
+  };
+
+  const handleCostPerUnitChange = (variable: string, value: string) => {
+    const numericValue = parseFloat(value) || 0;
+    onROIConfigChange({
+      ...roiConfig,
+      enabled: true,
+      costPerUnit: {
+        ...roiConfig.costPerUnit,
+        [variable]: numericValue
+      }
+    });
+  };
+
+  const handleCombinationCostPerUnitChange = (combination: string, variable: string, value: string) => {
+    const numericValue = parseFloat(value) || 0;
+    const currentCombinationValues = roiConfig.combinationCostPerUnit?.[combination] || {};
     
     onROIConfigChange({
       ...roiConfig,
-      enabled: true,  // Always keep enabled as true
-      combinationCPRPValues: {
-        ...roiConfig.combinationCPRPValues,
+      enabled: true,
+      combinationCostPerUnit: {
+        ...roiConfig.combinationCostPerUnit,
         [combination]: {
           ...currentCombinationValues,
-          [feature]: numericValue
+          [variable]: numericValue
         }
       }
     });
   };
 
+  // Check if Part 1 is complete to show Part 2
+  // Part 1 is complete when:
+  // - Average months is selected AND
+  // - Either manual entry is enabled OR price column is selected
+  const isPart1Complete = roiConfig.averageMonths && 
+    (roiConfig.manualPriceEntry || roiConfig.priceColumn);
+
+  // Check if Part 2 has selected variables to show Part 3
+  const isPart2Complete = (roiConfig.roiVariables || []).length > 0 && 
+    (roiConfig.roiVariables || []).every(v => v !== '');
+
+  // Generate month options (3 to 24 months)
+  const monthOptions = Array.from({ length: 22 }, (_, i) => {
+    const months = i + 3;
+    return {
+      value: months.toString(),
+      label: `Avg over ${months} months`
+    };
+  });
 
   return (
     <div className="space-y-4">
-      {/* Per Combination CPRP Toggle */}
-      <div className="flex items-center space-x-2">
-        <input
-          type="checkbox"
-          id="per-combination-cprp"
-          checked={roiConfig.perCombinationCPRP || false}
-          onChange={(e) => handlePerCombinationToggle(e.target.checked)}
-          className="rounded border-gray-300"
-        />
-        <Label htmlFor="per-combination-cprp" className="text-sm font-medium">
-          Enable per-combination CPRP values
-        </Label>
+      {/* Part 1: Sales Value Conversion */}
+      <div className="space-y-3">
+        <Label className="text-sm font-medium">ROI Specific Inputs</Label>
+        <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
+          {/* Header Text */}
+          <div className="mb-4">
+            <p className="text-sm font-medium text-gray-700">
+              "<span className="text-blue-600 font-semibold">{yVariable || 'y_variable'}</span>" is converted to salesvalue by multiplying with:
+            </p>
+          </div>
+
+          {/* Dropdowns and Checkbox Row */}
+          <div className="flex gap-3 items-start flex-wrap">
+            {/* Price Column Dropdown or Manual Input */}
+            {!roiConfig.manualPriceEntry ? (
+              <div className="flex-shrink-0">
+                <SingleSelectDropdown
+                  label=""
+                  placeholder=""
+                  value={roiConfig.priceColumn || ''}
+                  onValueChange={handlePriceColumnChange}
+                  options={availableColumns.map(column => ({ value: column, label: column }))}
+                  className="w-48 h-8"
+                />
+              </div>
+            ) : (
+              /* Manual Entry - Show either global or per-combination inputs */
+              !roiConfig.perCombinationManualPrice ? (
+                /* Global Manual Input */
+                <div className="flex-shrink-0">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={roiConfig.manualPriceValue || 0}
+                    onChange={(e) => handleManualPriceValueChange(e.target.value)}
+                    className="w-48 h-8"
+                    placeholder="Enter price value"
+                  />
+                </div>
+              ) : (
+                /* Per-Combination Manual Inputs */
+                <div className="flex gap-2 flex-wrap">
+                  {availableCombinations.map((combination, index) => (
+                    <div key={index} className="flex flex-col gap-1">
+                      <div 
+                        className="text-xs font-medium text-gray-600 truncate max-w-[120px] cursor-help hover:text-gray-800 transition-colors" 
+                        title={combination}
+                      >
+                        {combination}
+                      </div>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={roiConfig.combinationManualPriceValues?.[combination] || 0}
+                        onChange={(e) => handleCombinationManualPriceValueChange(combination, e.target.value)}
+                        className="w-32 h-8"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
+
+            {/* Average Months Dropdown */}
+            <div className="flex-shrink-0">
+              <SingleSelectDropdown
+                label=""
+                placeholder="Select avg over month"
+                value={roiConfig.averageMonths?.toString() || ''}
+                onValueChange={handleAverageMonthsChange}
+                options={monthOptions}
+                className="w-56 h-8"
+              />
+            </div>
+
+            {/* Manual Entry Checkbox */}
+            <div className="flex items-center space-x-2 pt-1.5">
+              <Checkbox
+                id="manual-price-entry"
+                checked={roiConfig.manualPriceEntry || false}
+                onCheckedChange={(checked) => handleManualPriceToggle(!!checked)}
+              />
+              <Label htmlFor="manual-price-entry" className="text-sm text-gray-600 cursor-pointer">
+                Enter manually
+              </Label>
+            </div>
+
+            {/* Per-Combination Manual Price Checkbox - Only show when manual entry is enabled */}
+            {roiConfig.manualPriceEntry && (
+              <div className="flex items-center space-x-2 pt-1.5">
+                <Checkbox
+                  id="per-combination-manual-price"
+                  checked={roiConfig.perCombinationManualPrice || false}
+                  onCheckedChange={(checked) => handlePerCombinationManualPriceToggle(!!checked)}
+                />
+                <Label htmlFor="per-combination-manual-price" className="text-sm text-gray-600 cursor-pointer">
+                  Different price per combination
+                </Label>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Feature Selection with Global MultiSelect */}
-      <div className="space-y-2">
-        <Label className="text-sm font-medium">Select Features for ROI Calculation</Label>
-        <div className="flex items-start gap-4 p-3 rounded-lg shadow-sm bg-white border-l-4 border-indigo-300 overflow-x-auto overflow-y-auto max-h-60">
-          {/* Feature selection and price column dropdowns stacked vertically */}
-          <div className="flex-shrink-0 w-64 flex flex-col gap-2">
-            <MultiSelectDropdown
-              label=""
-              placeholder="Select Features for ROI Calculation"
-              selectedValues={selectedFeatures}
-              onSelectionChange={handleFeatureToggle}
-              options={availableFeatures.map(feature => ({ value: feature, label: feature }))}
-              showSelectAll={true}
-              showTrigger={true}
-              className="w-full"
-              triggerClassName="w-full max-w-none h-6"
+      {/* Part 2: Determine Variables to Measure ROI */}
+      {isPart1Complete && (
+        <div className="space-y-3">
+          <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
+            {/* Header Text */}
+            <div className="mb-3">
+              <p className="text-sm font-medium text-gray-700">
+                Determine variables to measure ROI for:
+              </p>
+            </div>
+
+            {/* Variables Row */}
+            <div className="flex gap-3 items-start flex-wrap">
+              {/* Existing variable dropdowns */}
+              {(roiConfig.roiVariables || []).map((variable, index) => {
+                // Filter out already selected variables (except current dropdown's value)
+                const selectedVariables = (roiConfig.roiVariables || []).filter((v, i) => i !== index && v !== '');
+                const availableOptions = availableFeatures
+                  .filter(feature => !selectedVariables.includes(feature))
+                  .map(feature => ({ value: feature, label: feature }));
+                
+                return (
+                  <div key={index} className="flex items-start gap-2">
+                    <div className="flex-shrink-0">
+                      <SingleSelectDropdown
+                        label=""
+                        placeholder="Select variable"
+                        value={variable}
+                        onValueChange={(val) => handleVariableChange(index, val)}
+                        options={availableOptions}
+                        className="w-48 h-8"
+                      />
+                    </div>
+                    {/* Remove button (X) */}
+                    <button
+                      onClick={() => handleRemoveVariable(index)}
+                      className="h-8 w-8 flex items-center justify-center rounded border border-red-300 bg-red-50 hover:bg-red-100 text-red-600 transition-colors flex-shrink-0"
+                      title="Remove variable"
+                    >
+                      <span className="text-lg font-bold leading-none">×</span>
+                    </button>
+                  </div>
+                );
+              })}
+
+              {/* Add Variable Button */}
+              <button
+                onClick={handleAddVariable}
+                className="h-8 px-4 flex items-center gap-2 rounded border border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors text-sm font-medium whitespace-nowrap flex-shrink-0"
+              >
+                <span className="text-lg leading-none font-bold">+</span>
+                Add Variable
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Part 3: Enter Cost Per Unit for Each Variable */}
+      {isPart2Complete && (
+        <div className="space-y-3">
+          {/* Per Combination Cost Toggle */}
+          <div className="flex items-center space-x-2">
+            <Checkbox
+              id="per-combination-cost"
+              checked={roiConfig.perCombinationCostPerUnit || false}
+              onCheckedChange={(checked) => handlePerCombinationCostToggle(!!checked)}
             />
-            <SingleSelectDropdown
-              label=""
-              placeholder="Select Price Column"
-              value={roiConfig.priceColumn || ''}
-              onValueChange={handlePriceColumnChange}
-              options={availableColumns.map(column => ({ value: column, label: column }))}
-              className="w-full h-6"
-            />
-            
-            
-            {/* Combination names when per-combination CPRP is enabled */}
-            {roiConfig.perCombinationCPRP && selectedFeatures.length > 0 && (
-              <div className="space-y-2 mt-7">
-                {availableCombinations.map(combination => (
-                  <div key={combination} className="h-6 flex items-center text-xs text-gray-600 truncate">
-                    {combination}
+            <Label htmlFor="per-combination-cost" className="text-sm font-medium cursor-pointer">
+              Enable per-combination cost per unit values
+            </Label>
+          </div>
+
+          <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
+            {/* Header Text */}
+            <div className="mb-4">
+              <p className="text-sm font-medium text-gray-700">
+                For each selected variables enter cost per unit:
+              </p>
+            </div>
+
+            {!roiConfig.perCombinationCostPerUnit ? (
+              /* Global Cost Per Unit - When checkbox is disabled */
+              <div className="flex gap-4 items-start flex-wrap">
+                {(roiConfig.roiVariables || []).filter(v => v !== '').map((variable, index) => (
+                  <div key={index} className="flex flex-col gap-2">
+                    {/* Variable Name Label */}
+                    <label className="text-xs font-medium text-gray-700">
+                      {variable}
+                    </label>
+                    {/* Cost Per Unit Input */}
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={roiConfig.costPerUnit?.[variable] || 0}
+                      onChange={(e) => handleCostPerUnitChange(variable, e.target.value)}
+                      className="w-48 h-8"
+                      placeholder="Enter cost per unit"
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              /* Per-Combination Cost Per Unit - When checkbox is enabled */
+              <div className="flex gap-4 items-start">
+                {/* Combinations Column */}
+                <div className="flex flex-col gap-2">
+                  <div className="h-6"></div> {/* Spacer for variable names row */}
+                  {availableCombinations.map((combination, index) => (
+                    <div 
+                      key={index} 
+                      className="h-8 flex items-center text-xs text-gray-600 truncate pr-2 max-w-[180px] cursor-help hover:text-gray-800 transition-colors" 
+                      title={combination}
+                    >
+                      {combination}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Variable Inputs Columns */}
+                {(roiConfig.roiVariables || []).filter(v => v !== '').map((variable, varIndex) => (
+                  <div key={varIndex} className="flex flex-col gap-2">
+                    {/* Variable Name Header */}
+                    <label className="h-6 text-xs font-medium text-gray-700 flex items-center">
+                      {variable}
+                    </label>
+                    {/* Input boxes for each combination */}
+                    {availableCombinations.map((combination, comboIndex) => (
+                      <Input
+                        key={comboIndex}
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={roiConfig.combinationCostPerUnit?.[combination]?.[variable] || 0}
+                        onChange={(e) => handleCombinationCostPerUnitChange(combination, variable, e.target.value)}
+                        className="w-32 h-8"
+                        placeholder="0.00"
+                      />
+                    ))}
                   </div>
                 ))}
               </div>
             )}
           </div>
-
-          {/* Selected features display on the right */}
-          <div className="flex-shrink-0">
-            <div className="w-full self-center">
-              <div className="text-sm text-gray-600">
-                {selectedFeatures.length > 0 ? (
-                  <div className="space-y-4">
-                    {/* Feature names in a row */}
-                    <div className="flex gap-2 overflow-x-auto">
-                      {selectedFeatures.map(feature => (
-                        <span key={feature} className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs whitespace-nowrap flex-shrink-0 min-w-20 text-center">
-                          {feature}
-                        </span>
-                      ))}
-                    </div>
-                    
-                     {/* CPI/CPRP dropdowns in a row below features */}
-                     <div className="flex gap-2 overflow-x-auto">
-                       {selectedFeatures.map(feature => (
-                         <div key={`${feature}-config`} className="flex flex-col items-center gap-9 flex-shrink-0 min-w-20">
-                           <SingleSelectDropdown
-                             label=""
-                             options={[
-                               { value: 'CPI', label: 'CPI' },
-                               { value: 'CPRP', label: 'CPRP' }
-                             ]}
-                             selectedValue={roiConfig.features[feature]?.type || 'CPRP'}
-                             onSelectionChange={(value) => handleFeatureTypeChange(feature, value as 'CPI' | 'CPRP')}
-                             placeholder="CPRP"
-                             className="w-20 h-6"
-                            />
-                            {roiConfig.features[feature]?.type === 'CPRP' && !roiConfig.perCombinationCPRP && (
-                              <Input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                value={roiConfig.features[feature]?.value || 0}
-                                onChange={(e) => handleFeatureValueChange(feature, e.target.value)}
-                                className="h-6 w-20 text-xs"
-                                placeholder="0.00"
-                              />
-                            )}
-                            
-                            {/* Per-combination CPRP input boxes */}
-                            {roiConfig.features[feature]?.type === 'CPRP' && roiConfig.perCombinationCPRP && (
-                              <div className="space-y-2">
-                                {availableCombinations.map(combination => (
-                                  <Input
-                                    key={`${combination}-${feature}`}
-                                    type="number"
-                                    step="0.01"
-                                    min="0"
-                                    value={roiConfig.combinationCPRPValues?.[combination]?.[feature] || 0}
-                                    onChange={(e) => handleCombinationCPRPValueChange(combination, feature, e.target.value)}
-                                    className="h-6 w-20 text-xs"
-                                    placeholder="0.00"
-                                  />
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                  </div>
-                ) : (
-                  <span className="text-gray-400">No features selected</span>
-                )}
-              </div>
-            </div>
-          </div>
         </div>
-      </div>
-
-
-
+      )}
     </div>
   );
 };
