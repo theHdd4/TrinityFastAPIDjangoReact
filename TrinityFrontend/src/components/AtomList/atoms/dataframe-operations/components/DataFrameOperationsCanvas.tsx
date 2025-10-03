@@ -65,6 +65,18 @@ function safeToString(val: any): string {
   }
 }
 
+// Debounce function
+function debounce<T extends (...args: any[]) => any>(
+  func: T,
+  wait: number
+): (...args: Parameters<T>) => void {
+  let timeout: number | null = null;
+  return (...args: Parameters<T>) => {
+    if (timeout) clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), wait);
+  };
+}
+
 function highlightMatch(text: string, search: string) {
   if (!search) return text;
   const idx = text.toLowerCase().indexOf(search.toLowerCase());
@@ -135,7 +147,53 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [columnFormulas, setColumnFormulas] = useState<Record<string, string>>(settings.columnFormulas || {});
   const [formulaValidationError, setFormulaValidationError] = useState<string | null>(null);
   const errorTimeoutRef = useRef<number | null>(null);
+  const [forceRefresh, setForceRefresh] = useState(0);
+  const [isProcessingOperation, setIsProcessingOperation] = useState(false);
+  const operationQueueRef = useRef<Array<() => Promise<void>>>([]);
   const headersKey = useMemo(() => (data?.headers || []).join('|'), [data?.headers]);
+
+  // Function to process operations sequentially
+  const processOperationQueue = useCallback(async () => {
+    if (isProcessingOperation || operationQueueRef.current.length === 0) {
+      return;
+    }
+    
+    setIsProcessingOperation(true);
+    
+    while (operationQueueRef.current.length > 0) {
+      const operation = operationQueueRef.current.shift();
+      if (operation) {
+        try {
+          await operation();
+          // Add a small delay between operations to ensure proper sequencing
+          await new Promise(resolve => setTimeout(resolve, 50));
+        } catch (error) {
+          console.error('Operation failed:', error);
+        }
+      }
+    }
+    
+    setIsProcessingOperation(false);
+  }, [isProcessingOperation]);
+
+  // Function to add operation to queue
+  const queueOperation = useCallback((operation: () => Promise<void>) => {
+    operationQueueRef.current.push(operation);
+    processOperationQueue();
+  }, [processOperationQueue]);
+
+  // Debounced data update to prevent conflicts
+  const debouncedDataUpdate = useCallback(
+    debounce((newData: DataFrameData) => {
+      console.log('[DataFrameOperations] Debounced data update:', {
+        headers: newData.headers.length,
+        rows: newData.rows.length,
+        fileName: newData.fileName
+      });
+      onDataChange(newData);
+    }, 100),
+    [onDataChange]
+  );
 
   // Function to show error with auto-dismiss
   const showValidationError = (error: string | null) => {
@@ -324,6 +382,11 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   }, [settings.columnFormulas]);
 
   useEffect(() => {
+    // Don't update column formulas during operations to prevent conflicts
+    if (isProcessingOperation) {
+      return;
+    }
+    
     setColumnFormulas(prev => {
       if (!data?.headers?.length) {
         if (Object.keys(prev).length) {
@@ -352,7 +415,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       onSettingsChange({ columnFormulas: next });
       return next;
     });
-  }, [headersKey, data?.headers, onSettingsChange]);
+  }, [headersKey, data?.headers, onSettingsChange, isProcessingOperation]);
 
   useEffect(() => {
     const stored = selectedColumn ? columnFormulas[selectedColumn] : undefined;
@@ -574,31 +637,12 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       if (saveSuccessTimeout.current) clearTimeout(saveSuccessTimeout.current);
       saveSuccessTimeout.current = setTimeout(() => setSaveSuccess(false), 2000);
       fetchSavedDataFrames(); // Refresh the saved dataframes list in the UI
-      // Update the data to reflect the current filtered state (saved data)
-      const currentData = {
-        ...data,
-        rows: processedData.filteredRows,
-        fileName: filename
-      };
-      
-      // Update settings with new file info
+      // Simple update like the old file - only update settings, not data
       onSettingsChange({
+        tableData: { ...data, fileName: filename },
         columnWidths: settings.columnWidths,
         rowHeights: settings.rowHeights,
         fileId: (result?.df_id as string | undefined) ?? fileId ?? settings.fileId ?? null,
-      });
-      
-      // Update the actual data with the processed state
-      onDataChange(currentData);
-      
-      // Clear the permanently deleted rows since they're now saved
-      setPermanentlyDeletedRows(new Set());
-      
-      // Clear filters since the saved data now represents the filtered state
-      onSettingsChange({
-        ...settings,
-        filters: {},
-        searchTerm: ''
       });
       toast({
         title: 'DataFrame Saved',
@@ -838,6 +882,14 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   // Process and filter data
   const processedData = useMemo(() => {
+    console.log('[DataFrameOperations] processedData recalculating with data:', {
+      hasData: !!data,
+      headersLength: data?.headers?.length,
+      rowsLength: data?.rows?.length,
+      searchTerm: settings.searchTerm,
+      filtersCount: Object.keys(settings.filters || {}).length
+    });
+    
     if (!data || !Array.isArray(data.headers) || !Array.isArray(data.rows)) {
       return { filteredRows: [], totalRows: 0, uniqueValues: {} };
     }
@@ -948,8 +1000,14 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       uniqueValues[header] = values.slice(0, 50);
     });
 
-    return { filteredRows, totalRows: filteredRows.length, uniqueValues };
-  }, [data, originalData, settings.searchTerm, settings.filters, duplicateMap, permanentlyDeletedRows]);
+    const result = { filteredRows, totalRows: filteredRows.length, uniqueValues };
+    console.log('[DataFrameOperations] processedData result:', {
+      filteredRowsCount: result.filteredRows.length,
+      totalRows: result.totalRows,
+      uniqueValuesCount: Object.keys(result.uniqueValues).length
+    });
+    return result;
+  }, [data, originalData, settings.searchTerm, settings.filters, duplicateMap, permanentlyDeletedRows, forceRefresh]);
 
   // Pagination
   const totalPages = Math.ceil(processedData.totalRows / (settings.rowsPerPage || 15));
@@ -1460,13 +1518,16 @@ const handleHeaderClick = (header: string) => {
 };
 
   const handleFormulaSubmit = async () => {
+    console.log('[DataFrameOperations] handleFormulaSubmit called');
     resetSaveSuccess();
     if (!data || !selectedColumn || !fileId) {
+      console.log('[DataFrameOperations] Missing required data:', { data: !!data, selectedColumn, fileId });
       showValidationError('Please select a target column first');
       return;
     }
     const trimmedFormula = formulaInput.trim();
     if (!trimmedFormula) {
+      console.log('[DataFrameOperations] No formula provided');
       showValidationError('Please enter a formula');
       return;
     }
@@ -1476,26 +1537,62 @@ const handleHeaderClick = (header: string) => {
     selectedColumn,
     formula: trimmedFormula,
     fileId,
-    currentHeaders: data.headers
+    currentHeaders: data.headers,
+    hasFilters: Object.keys(settings.filters || {}).length > 0,
+    hasSearchTerm: !!settings.searchTerm,
+    currentDataRows: data.rows.length,
+    processedDataRows: processedData.filteredRows.length,
+    isProcessingOperation
   });
   
-  // Save current state before making changes
-  saveToUndoStack(data);
-  
+  // Apply formula directly without queuing to test
+  console.log('[DataFrameOperations] Starting formula application');
   setFormulaLoading(true);
+  setIsProcessingOperation(false); // Reset processing state
   try {
-    const resp = await apiApplyFormula(fileId, selectedColumn, trimmedFormula);
+    // Save current state before making changes
+    saveToUndoStack(data);
+      // Check if we have active filters or search
+      const hasActiveFilters = Object.keys(settings.filters || {}).length > 0 || !!settings.searchTerm;
+      const currentFilters = settings.filters || {};
+      const currentSearchTerm = settings.searchTerm || '';
+      
+      console.log('[DataFrameOperations] Current data state:', {
+        hasActiveFilters,
+        currentFilters,
+        currentSearchTerm,
+        originalDataRows: data.rows.length,
+        filteredDataRows: processedData.filteredRows.length
+      });
+      
+      // Apply the formula to the original data (backend requirement)
+      // But we'll ensure the filtered view reflects the changes
+      console.log('[DataFrameOperations] Calling apiApplyFormula with:', {
+        fileId,
+        selectedColumn,
+        formula: trimmedFormula
+      });
+      
+      const resp = await apiApplyFormula(fileId, selectedColumn, trimmedFormula);
     
     console.log('[DataFrameOperations] Formula applied successfully:', {
       selectedColumn,
       responseHeaders: resp.headers,
-      responseRowsCount: resp.rows?.length
+      responseRowsCount: resp.rows?.length,
+      responseTypes: resp.types
     });
     
     // Preserve deleted columns by filtering out columns that were previously deleted
     const currentHiddenColumns = data.hiddenColumns || [];
     const currentDeletedColumns = data.deletedColumns || [];
     const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+    
+    console.log('[DataFrameOperations] Updating data with:', {
+      headers: filtered.headers.length,
+      rows: filtered.rows.length,
+      fileName: data.fileName,
+      columnTypes: Object.keys(filtered.columnTypes || {}).length
+    });
     
     onDataChange({
       headers: filtered.headers,
@@ -1505,15 +1602,25 @@ const handleHeaderClick = (header: string) => {
       pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
-         hiddenColumns: currentHiddenColumns,
-         deletedColumns: currentDeletedColumns,
-       });
+      hiddenColumns: currentHiddenColumns,
+      deletedColumns: currentDeletedColumns,
+    });
+    
+    console.log('[DataFrameOperations] Data updated successfully');
+    
+    // Force a refresh to ensure the UI updates with the new data
+    setForceRefresh(prev => prev + 1);
+    
+    // Don't re-apply filters - let the data update naturally
+    // The processedData will automatically reflect the new data with existing filters
+    console.log('[DataFrameOperations] Formula applied to original data, filtered view will update automatically');
     
     console.log('[DataFrameOperations] Data updated after formula:', {
       selectedColumn,
       newHeaders: filtered.headers,
       newRowsCount: filtered.rows?.length,
-      columnStillExists: filtered.headers.includes(selectedColumn)
+      columnStillExists: filtered.headers.includes(selectedColumn),
+      firstRowSample: filtered.rows?.[0] ? Object.keys(filtered.rows[0]) : []
     });
     
     setColumnFormulas(prev => {
@@ -1521,10 +1628,13 @@ const handleHeaderClick = (header: string) => {
         return prev;
       }
       const next = { ...prev, [selectedColumn]: trimmedFormula };
+      console.log('[DataFrameOperations] Updating column formulas:', next);
       onSettingsChange({ columnFormulas: next });
       return next;
     });
     setFormulaInput(trimmedFormula);
+    
+    console.log('[DataFrameOperations] Formula application completed successfully');
     
     console.log('[DataFrameOperations] Formula state updated:', {
       selectedColumn,
@@ -1534,11 +1644,14 @@ const handleHeaderClick = (header: string) => {
     
     // Add to history
     addToHistory('Apply Formula', `Applied formula "${trimmedFormula}" to column "${selectedColumn}"`);
+    
+    console.log('[DataFrameOperations] Formula application process completed');
   } catch (err) {
     console.error('[DataFrameOperations] Formula application failed:', err);
     handleApiError('Apply formula failed', err);
     addToHistory('Apply Formula', `Failed to apply formula "${trimmedFormula}" to column "${selectedColumn}"`, 'error');
   } finally {
+    console.log('[DataFrameOperations] Formula application finally block - setting loading to false');
     setFormulaLoading(false);
   }
 };
