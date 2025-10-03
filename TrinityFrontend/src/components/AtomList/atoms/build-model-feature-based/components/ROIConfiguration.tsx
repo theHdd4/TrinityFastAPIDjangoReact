@@ -215,7 +215,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
           </div>
 
           {/* Dropdowns and Checkbox Row */}
-          <div className="flex gap-3 items-start flex-wrap">
+          <div className="flex gap-4 items-center flex-wrap">
             {/* Price Column Dropdown or Manual Input */}
             {!roiConfig.manualPriceEntry ? (
               <div className="flex-shrink-0">
@@ -269,20 +269,22 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
               )
             )}
 
-            {/* Average Months Dropdown */}
-            <div className="flex-shrink-0">
-              <SingleSelectDropdown
-                label=""
-                placeholder="Select avg over month"
-                value={roiConfig.averageMonths?.toString() || ''}
-                onValueChange={handleAverageMonthsChange}
-                options={monthOptions}
-                className="w-56 h-8"
-              />
-            </div>
+            {/* Average Months Dropdown - Only show when manual entry is disabled */}
+            {!roiConfig.manualPriceEntry && (
+              <div className="flex-shrink-0">
+                <SingleSelectDropdown
+                  label=""
+                  placeholder="Select avg over month"
+                  value={roiConfig.averageMonths?.toString() || ''}
+                  onValueChange={handleAverageMonthsChange}
+                  options={monthOptions}
+                  className="w-56 h-8"
+                />
+              </div>
+            )}
 
             {/* Manual Entry Checkbox */}
-            <div className="flex items-center space-x-2 pt-1.5">
+            <div className="flex items-center space-x-2">
               <Checkbox
                 id="manual-price-entry"
                 checked={roiConfig.manualPriceEntry || false}
@@ -295,7 +297,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
 
             {/* Per-Combination Manual Price Checkbox - Only show when manual entry is enabled */}
             {roiConfig.manualPriceEntry && (
-              <div className="flex items-center space-x-2 pt-1.5">
+              <div className="flex items-center space-x-2">
                 <Checkbox
                   id="per-combination-manual-price"
                   checked={roiConfig.perCombinationManualPrice || false}
@@ -322,7 +324,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
             </div>
 
             {/* Variables Row */}
-            <div className="flex gap-3 items-start flex-wrap">
+            <div className="flex gap-2 items-start flex-wrap">
               {/* Existing variable dropdowns */}
               {(roiConfig.roiVariables || []).map((variable, index) => {
                 // Filter out already selected variables (except current dropdown's value)
@@ -332,7 +334,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                   .map(feature => ({ value: feature, label: feature }));
                 
                 return (
-                  <div key={index} className="flex items-start gap-2">
+                  <div key={index} className="flex items-start gap-1">
                     <div className="flex-shrink-0">
                       <SingleSelectDropdown
                         label=""
@@ -343,24 +345,24 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                         className="w-48 h-8"
                       />
                     </div>
-                    {/* Remove button (X) */}
+                    {/* Remove button (X) - positioned slightly below dropdown center */}
                     <button
                       onClick={() => handleRemoveVariable(index)}
-                      className="h-8 w-8 flex items-center justify-center rounded border border-red-300 bg-red-50 hover:bg-red-100 text-red-600 transition-colors flex-shrink-0"
+                      className="h-6 w-6 flex items-center justify-center rounded border border-red-300 bg-red-50 hover:bg-red-100 text-red-600 transition-colors flex-shrink-0 mt-1"
                       title="Remove variable"
                     >
-                      <span className="text-lg font-bold leading-none">×</span>
+                      <span className="text-sm font-bold leading-none">×</span>
                     </button>
                   </div>
                 );
               })}
 
-              {/* Add Variable Button */}
+              {/* Add Variable Button - positioned slightly below dropdown center */}
               <button
                 onClick={handleAddVariable}
-                className="h-8 px-4 flex items-center gap-2 rounded border border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors text-sm font-medium whitespace-nowrap flex-shrink-0"
+                className="h-6 px-2 flex items-center gap-1 rounded border border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors text-xs font-medium whitespace-nowrap flex-shrink-0 mt-1"
               >
-                <span className="text-lg leading-none font-bold">+</span>
+                <span className="text-sm leading-none font-bold">+</span>
                 Add Variable
               </button>
             </div>

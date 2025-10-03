@@ -97,9 +97,9 @@ class MMMTransformationEngine:
                 if data_frequency == "weekly":
                     adstock_decay = config.get("adstock_decay", [0.70])  # Weekly decay values
                 else:  # monthly
-                    adstock_decay = config.get("adstock_decay", [0.4, 0.5, 0.6])  # Monthly decay values
+                    adstock_decay = config.get("adstock_decay", [0.4])  # Monthly decay values
                 
-                logistic_growth = config.get("logistic_growth", [1.5, 2.5, 3.5])  # Default range
+                logistic_growth = config.get("logistic_growth", [1.5])  # Default range
                 logistic_midpoint = config.get("logistic_midpoint", [0.0])  # Default range
                 logistic_carryover = config.get("logistic_carryover", [0.0])  # Single value since it's not used
                 

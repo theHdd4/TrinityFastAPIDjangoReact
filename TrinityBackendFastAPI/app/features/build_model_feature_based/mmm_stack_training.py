@@ -15,6 +15,16 @@ from sklearn.metrics import r2_score
 
 logger = logging.getLogger("stack-model-data")
 
+# Import global training_progress for progress tracking
+def get_training_progress():
+    """Import and return the global training_progress dictionary from routes."""
+    try:
+        from .routes import training_progress
+        return training_progress
+    except ImportError:
+        logger.warning("Could not import training_progress from routes")
+        return {}
+
 
 
 class MMMStackDataPooler:
@@ -1119,15 +1129,17 @@ class MMMStackModelDataProcessor:
             for combination_idx, combination in enumerate(combinations):
                 try:
                     # Update progress for stack modeling
-                    if run_id and training_progress and run_id in training_progress:
-                        current_combination_idx = combination_idx + 1
-                        num_models = len(models_to_run) if models_to_run else 1
-                        training_progress[run_id]["current_combination"] = combination
-                        training_progress[run_id]["status"] = f"Stack Modeling: Processing {combination} ({current_combination_idx}/{len(combinations)})"
-                        # Update current to reflect starting this combination
-                        training_progress[run_id]["current"] = combination_idx * num_models
-                        training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100) if training_progress[run_id]["total"] > 0 else 0
-                        logger.info(f"📊 Updated progress: {combination} ({current_combination_idx}/{len(combinations)}) - {training_progress[run_id]['percentage']}%")
+                    if run_id:
+                        progress_dict = get_training_progress()
+                        if run_id in progress_dict:
+                            current_combination_idx = combination_idx + 1
+                            num_models = len(models_to_run) if models_to_run else 1
+                            progress_dict[run_id]["current_combination"] = combination
+                            progress_dict[run_id]["status"] = f"Stack Modeling: Processing {combination} ({current_combination_idx}/{len(combinations)})"
+                            # Update current to reflect starting this combination
+                            progress_dict[run_id]["current"] = combination_idx * num_models
+                            progress_dict[run_id]["percentage"] = int((progress_dict[run_id]["current"] / progress_dict[run_id]["total"]) * 100) if progress_dict[run_id]["total"] > 0 else 0
+                            logger.info(f"📊 Updated progress: {combination} ({current_combination_idx}/{len(combinations)}) - {progress_dict[run_id]['percentage']}%")
                     
                     logger.info(f"📁 Fetching data for combination: {combination}")
                     # Fetch individual combination data
@@ -1165,12 +1177,14 @@ class MMMStackModelDataProcessor:
                         for model_idx, (model_name, betas) in enumerate(param_models.items()):
                             
                             # Update progress for current model
-                            if run_id and training_progress and run_id in training_progress:
-                                current_model_idx = model_idx + 1
-                                total_models_in_combination = len(param_models)
-                                training_progress[run_id]["current_model"] = model_name
-                                training_progress[run_id]["status"] = f"Stack Modeling: {combination} - {model_name} ({current_model_idx}/{total_models_in_combination})"
-                                logger.info(f"📊 Processing model: {model_name} ({current_model_idx}/{total_models_in_combination})")
+                            if run_id:
+                                progress_dict = get_training_progress()
+                                if run_id in progress_dict:
+                                    current_model_idx = model_idx + 1
+                                    total_models_in_combination = len(param_models)
+                                    progress_dict[run_id]["current_model"] = model_name
+                                    progress_dict[run_id]["status"] = f"Stack Modeling: {combination} - {model_name} ({current_model_idx}/{total_models_in_combination})"
+                                    logger.info(f"📊 Processing model: {model_name} ({current_model_idx}/{total_models_in_combination})")
                             
                             # Get the parameter combination configuration for this model
                             combo_config = betas.get('parameter_combination', {})
@@ -1243,13 +1257,22 @@ class MMMStackModelDataProcessor:
                             from .mmm_training import MMMTransformationEngine
                             transformation_engine = MMMTransformationEngine()
 
-                            transformed_individual_df = df.copy()
+                            # Apply transformations to individual data
+                            transformed_individual_df, individual_transformation_metadata = transformation_engine.apply_variable_transformations(
+                                df, combo_config
+                            )
                             
+                            logger.info(f"   Using TRANSFORMED coefficients for prediction:")
+                            logger.info(f"   Transformed coefficients: {combination_coefficients}")
+                            logger.info(f"   Transformed intercept: {combination_intercept}")
+                            logger.info(f"   Transformed data shape: {transformed_individual_df[x_variables_lower].shape}")
+                            
+                            # Use transformed coefficients with transformed data for prediction
                             y_pred = self._predict_with_betas(
-                                X=transformed_individual_df[x_variables_lower].values,  # Use ORIGINAL individual data
-                                coefficients=unstandardized_coefficients,  # Use unstandardized coefficients
+                                X=transformed_individual_df[x_variables_lower].values,  # Use TRANSFORMED individual data
+                                coefficients=combination_coefficients,  # Use TRANSFORMED coefficients (not unstandardized)
                                 x_variables=x_variables_lower,
-                                intercept=unstandardized_intercept
+                                intercept=combination_intercept  # Use TRANSFORMED intercept
                             )
                             
                             individual_mape = safe_mape(y_actual, y_pred)
@@ -1342,15 +1365,17 @@ class MMMStackModelDataProcessor:
                     logger.info(f"✅ Successfully calculated metrics for {combination}: {len(combination_metrics)} parameter combinations")
                     
                     # Update progress - mark combination as completed
-                    if run_id and training_progress and run_id in training_progress:
-                        training_progress[run_id]["completed_combinations"] += 1
-                        completed = training_progress[run_id]["completed_combinations"]
-                        total = training_progress[run_id]["total_combinations"]
-                        # Update current based on models per combination
-                        num_models = len(models_to_run) if models_to_run else 1
-                        training_progress[run_id]["current"] = completed * num_models
-                        training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100) if training_progress[run_id]["total"] > 0 else 0
-                        logger.info(f"📊 Progress: Completed {completed}/{total} combinations ({training_progress[run_id]['percentage']}%)")
+                    if run_id:
+                        progress_dict = get_training_progress()
+                        if run_id in progress_dict:
+                            progress_dict[run_id]["completed_combinations"] += 1
+                            completed = progress_dict[run_id]["completed_combinations"]
+                            total = progress_dict[run_id]["total_combinations"]
+                            # Update current based on models per combination
+                            num_models = len(models_to_run) if models_to_run else 1
+                            progress_dict[run_id]["current"] = completed * num_models
+                            progress_dict[run_id]["percentage"] = int((progress_dict[run_id]["current"] / progress_dict[run_id]["total"]) * 100) if progress_dict[run_id]["total"] > 0 else 0
+                            logger.info(f"📊 Progress: Completed {completed}/{total} combinations ({progress_dict[run_id]['percentage']}%)")
                     
                 except Exception as e:
                     logger.error(f"❌ Error calculating metrics for {combination}: {str(e)}")

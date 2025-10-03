@@ -109,10 +109,6 @@ training_progress = {}
 logger = logging.getLogger(__name__)
 
 
-
-
-
-
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -3313,15 +3309,17 @@ async def train_mmm_models(request: dict):
                 # Find best MAPE for this model type
                 best_mape_model = min(model_list, key=lambda x: x["mape_test"])
                 best_mape_model = best_mape_model.copy()
-                best_mape_model["best_metric"] = "mape"
-                best_mape_model["model_type"] = model_name
+                # Remove extra fields that don't match ModelResult schema
+                best_mape_model.pop("best_metric", None)
+                best_mape_model.pop("model_type", None)
                 best_models.append(best_mape_model)
                 
                 # Find best R² for this model type
                 best_r2_model = max(model_list, key=lambda x: x["r2_test"])
                 best_r2_model = best_r2_model.copy()
-                best_r2_model["best_metric"] = "r2"
-                best_r2_model["model_type"] = model_name
+                # Remove extra fields that don't match ModelResult schema
+                best_r2_model.pop("best_metric", None)
+                best_r2_model.pop("model_type", None)
                 best_models.append(best_r2_model)
             
             # Add filtered combination result
