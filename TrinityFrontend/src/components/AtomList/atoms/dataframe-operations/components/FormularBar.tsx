@@ -103,6 +103,96 @@ const hasQuotes = (value: string) => /["']/.test(value);
 const formatExampleExpression = (formula: FormulaItem) =>
   formula.example.startsWith('=') ? formula.example : `=${formula.example}`;
 
+// Helper function to replace placeholder columns with Col1, Col2, etc. (Excel-like behavior)
+const replacePlaceholdersWithColNumbers = (expression: string): string => {
+  // Common placeholder patterns: colA, colB, colC, colX, colY, colDate, colEnd, colStart, number, text, value
+  const placeholderPattern = /\b(col[A-Z]|colX|colY|colDate|colEnd|colStart|number|text|value)\b/g;
+  let colCounter = 1;
+  return expression.replace(placeholderPattern, () => `Col${colCounter++}`);
+};
+
+// Helper function to replace next ColX with column name
+const replaceNextColPlaceholder = (expression: string, columnName: string): string => {
+  const colMatch = expression.match(/Col\d+/);
+  if (colMatch) {
+    const colIndex = expression.indexOf(colMatch[0]);
+    const colLength = colMatch[0].length;
+    return expression.slice(0, colIndex) + columnName + expression.slice(colIndex + colLength);
+  }
+  return expression;
+};
+
+// Helper function to replace next ColX with typed content
+const replaceNextColPlaceholderWithContent = (expression: string, newContent: string, cursorPosition: number): { newExpression: string; newCursorPosition: number } => {
+  // Find the ColX closest to cursor position
+  let colMatch = null;
+  let minDistance = Infinity;
+  let colIndex = -1;
+  
+  const matches = expression.matchAll(/Col\d+/g);
+  for (const match of matches) {
+    const distance = Math.abs(match.index! - cursorPosition);
+    if (distance < minDistance) {
+      minDistance = distance;
+      colMatch = match;
+      colIndex = match.index!;
+    }
+  }
+  
+  if (colMatch && colIndex !== -1) {
+    const newExpression = expression.slice(0, colIndex) + newContent + expression.slice(colIndex + colMatch[0].length);
+    const newCursorPosition = colIndex + newContent.length;
+    return { newExpression, newCursorPosition };
+  }
+  
+  return { newExpression: expression, newCursorPosition: cursorPosition };
+};
+
+// Helper function to validate column names in formula - ONLY validate Col1, Col2, etc. placeholders
+const validateFormulaColumns = (expression: string, availableColumns: string[]): string | null => {
+  // Don't validate if user is still typing Col placeholders
+  if (expression.includes('Col')) {
+    return null; // Still has placeholders, don't validate yet
+  }
+  
+  // Don't validate if formula is incomplete (missing closing parenthesis)
+  const openParens = (expression.match(/\(/g) || []).length;
+  const closeParens = (expression.match(/\)/g) || []).length;
+  if (openParens > closeParens) {
+    return null; // Formula is incomplete, don't validate yet
+  }
+  
+  // First, remove all quoted strings from the expression to avoid false positives
+  const expressionWithoutQuotes = expression.replace(/"[^"]*"/g, '').replace(/'[^']*'/g, '');
+  
+  // Extract only actual column references (not function names, numbers, or quoted strings)
+  const columnPattern = /\b[A-Za-z_][A-Za-z0-9_]*\b/g;
+  const matches = expressionWithoutQuotes.match(columnPattern) || [];
+  
+  // Filter out function names, numbers, and other non-column references
+  const functionNames = ['SUM', 'AVG', 'MAX', 'MIN', 'DIV', 'PROD', 'ABS', 'ROUND', 'FLOOR', 'CEIL', 'EXP', 'LOG', 'SQRT', 'MEAN', 'CORR', 'ZSCORE', 'NORM', 'IF', 'ISNULL', 'LOWER', 'UPPER', 'LEN', 'SUBSTR', 'STR_REPLACE', 'YEAR', 'MONTH', 'DAY', 'WEEKDAY', 'DATE_DIFF', 'MAP', 'FILLNA', 'BIN', 'AND', 'OR', 'NOT', 'TRUE', 'FALSE'];
+  
+  const columnReferences = matches.filter(match => 
+    !functionNames.includes(match.toUpperCase()) && 
+    !match.startsWith('Col') && // Ignore placeholder Col1, Col2, etc.
+    !/^\d+$/.test(match) && // Ignore numbers
+    !/^[0-9]+\.?[0-9]*$/.test(match) // Ignore decimal numbers
+  );
+  
+  // If no column references found, no validation needed
+  if (columnReferences.length === 0) {
+    return null;
+  }
+  
+  // ONLY validate column references against actual dataframe columns
+  const invalidColumns = columnReferences.filter(col => !availableColumns.includes(col));
+  if (invalidColumns.length > 0) {
+    return `Invalid columns: ${invalidColumns.join(', ')}`;
+  }
+  
+  return null;
+};
+
 const isFunctionStyleExample = (formula: FormulaItem) => {
   const candidate = formatExampleExpression(formula).slice(1).toUpperCase();
   return /^[A-Z_]+\s*\(/.test(candidate);
@@ -586,6 +676,21 @@ const FormularBar: React.FC<FormularBarProps> = ({
     }
   }, [isFormulaMode, onFormulaModeChange]);
 
+  // Ensure input is focusable and working when maximized
+  useEffect(() => {
+    const handleResize = () => {
+      // Re-focus input after window resize (maximize/restore)
+      if (formulaInputRef.current && isFormulaMode) {
+        setTimeout(() => {
+          formulaInputRef.current?.focus();
+        }, 100);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [isFormulaMode]);
+
   useEffect(() => {
     const trimmed = formulaInput.trim();
     if (!trimmed) {
@@ -640,7 +745,9 @@ const FormularBar: React.FC<FormularBarProps> = ({
     setSelectedFormula(formula);
     setActiveTab(formula.category);
     const expression = formatExampleExpression(formula);
-    onFormulaInputChange(expression);
+    // Replace placeholder columns with Col1, Col2, etc. for Excel-like behavior
+    const expressionWithColNumbers = replacePlaceholdersWithColNumbers(expression);
+    onFormulaInputChange(expressionWithColNumbers);
     onFormulaModeChange(true);
     setIsLibraryOpen(false);
     onValidationError?.(null);
@@ -655,8 +762,35 @@ const FormularBar: React.FC<FormularBarProps> = ({
 
   const handleColumnInsert = (column: string) => {
     const inputElement = formulaInputRef.current;
+    
+    // Check if there are ColX placeholders to replace (Excel-like behavior)
+    if (formulaInput.includes('Col')) {
+      const newValue = replaceNextColPlaceholder(formulaInput, column);
+      onFormulaInputChange(newValue);
+      onFormulaModeChange(true);
+      
+      // If no target column is selected, set the inserted column as the target
+      if (!selectedColumn) {
+        onSelectedColumnChange(column);
+      }
+      
+      // Set cursor position after the inserted column
+      setTimeout(() => {
+        if (inputElement) {
+          const colMatch = formulaInput.match(/Col\d+/);
+          if (colMatch) {
+            const colIndex = formulaInput.indexOf(colMatch[0]);
+            const newCursorPosition = colIndex + column.length;
+            inputElement.setSelectionRange(newCursorPosition, newCursorPosition);
+            inputElement.focus();
+          }
+        }
+      }, 0);
+      return;
+    }
+    
+    // Fallback to original behavior if no ColX placeholders found
     if (!inputElement) {
-      // Fallback to old behavior if ref is not available
       const trimmed = formulaInput.trim();
       let next = formulaInput;
       if (!trimmed) {
@@ -698,9 +832,46 @@ const FormularBar: React.FC<FormularBarProps> = ({
   };
 
   const handleInputChange = (value: string) => {
+    const inputElement = formulaInputRef.current;
+    const cursorPosition = inputElement?.selectionStart || 0;
+    
+    // Check if we're replacing a ColX placeholder (Excel-like behavior)
+    if (formulaInput.includes('Col') && value.length > formulaInput.length) {
+      const addedContent = value.slice(formulaInput.length);
+      const { newExpression, newCursorPosition } = replaceNextColPlaceholderWithContent(formulaInput, addedContent, cursorPosition);
+      
+      onFormulaInputChange(newExpression);
+      onFormulaModeChange(true);
+      
+      // Validate column names if we have data available
+      if (data?.headers) {
+        const validationError = validateFormulaColumns(newExpression, data.headers);
+        onValidationError?.(validationError);
+      } else {
+        onValidationError?.(null);
+      }
+      
+      // Set cursor position after the replacement
+      setTimeout(() => {
+        if (inputElement) {
+          inputElement.setSelectionRange(newCursorPosition, newCursorPosition);
+          inputElement.focus();
+        }
+      }, 0);
+      return;
+    }
+    
+    // Normal input handling
     onFormulaInputChange(value);
     onFormulaModeChange(true);
-    onValidationError?.(null);
+    
+    // Validate column names if we have data available
+    if (data?.headers) {
+      const validationError = validateFormulaColumns(value, data.headers);
+      onValidationError?.(validationError);
+    } else {
+      onValidationError?.(null);
+    }
   };
 
   const handleTabCompletion = () => {
@@ -737,11 +908,13 @@ const FormularBar: React.FC<FormularBarProps> = ({
     }
 
     const expression = formatExampleExpression(completion);
-    if (expression === formulaInput) {
+    // Replace placeholder columns with Col1, Col2, etc. for Excel-like behavior
+    const expressionWithColNumbers = replacePlaceholdersWithColNumbers(expression);
+    if (expressionWithColNumbers === formulaInput) {
       return false;
     }
 
-    onFormulaInputChange(expression);
+    onFormulaInputChange(expressionWithColNumbers);
     onFormulaModeChange(true);
     onValidationError?.(null);
     return true;
@@ -749,12 +922,22 @@ const FormularBar: React.FC<FormularBarProps> = ({
 
   const handleSubmit = () => {
     if (!selectedColumn) {
+      onValidationError?.('Please select a target column first');
       return;
     }
 
     if (!isValidFormulaInput(formulaInput)) {
       onValidationError?.('Please enter a valid formula and then hit Apply');
       return;
+    }
+
+    // Validate column names if we have data available
+    if (data?.headers) {
+      const validationError = validateFormulaColumns(formulaInput, data.headers);
+      if (validationError) {
+        onValidationError?.(validationError);
+        return;
+      }
     }
 
     onValidationError?.(null);
@@ -792,9 +975,9 @@ const FormularBar: React.FC<FormularBarProps> = ({
   };
 
   return (
-    <div className='flex-shrink-0 border-b border-border bg-gradient-to-r from-card via-card/95 to-card shadow-sm'>
-      <div className='flex items-center h-12 px-4 space-x-3'>
-        <div className='flex items-center space-x-2'>
+    <div className='flex-shrink-0 border-b border-border bg-gradient-to-r from-card via-card/95 to-card shadow-sm w-full'>
+      <div className='flex items-center h-12 px-4 space-x-3 w-full min-w-0'>
+        <div className='flex items-center space-x-2 flex-shrink-0 z-30'>
           <div className='flex items-center space-x-2 bg-primary/10 rounded-lg px-3 py-1.5 border border-primary/20 shadow-sm'>
             <Hash className='w-4 h-4 text-primary' />
             <div className='flex flex-col leading-tight'>
@@ -806,23 +989,27 @@ const FormularBar: React.FC<FormularBarProps> = ({
           </div>
         </div>
 
-        <div className='flex items-center flex-1 space-x-2'>
+        <div className='flex items-center flex-1 space-x-2 min-w-0'>
           <Popover open={isUsageGuideOpen} onOpenChange={setIsUsageGuideOpen}>
             <PopoverTrigger asChild>
               <Button
                 variant='outline'
                 size='sm'
-                className={`h-8 w-8 p-0 shadow-sm ${
+                className={`h-8 w-8 p-0 shadow-sm z-20 ${
                   isUsageGuideOpen ? 'bg-primary/10 text-primary border-primary/40' : ''
                 }`}
                 title={isUsageGuideOpen ? 'Hide usage guide' : 'Show usage guide'}
                 aria-pressed={isUsageGuideOpen}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsUsageGuideOpen(!isUsageGuideOpen);
+                }}
               >
                 <Calculator className='w-4 h-4' />
               </Button>
             </PopoverTrigger>
             <PopoverContent
-              className='w-[520px] p-0 shadow-lg border border-border bg-popover overflow-hidden'
+              className='w-[520px] p-0 shadow-lg border border-border bg-popover overflow-hidden z-50'
               align='start'
               side='bottom'
               sideOffset={8}
@@ -884,20 +1071,24 @@ const FormularBar: React.FC<FormularBarProps> = ({
             </PopoverContent>
           </Popover>
 
-          <div className='flex flex-col flex-1'>
-            <div className='relative'>
+          <div className='flex flex-col flex-1 min-w-0'>
+            <div className='relative w-full'>
               <Popover open={isLibraryOpen} onOpenChange={handleLibraryOpenChange}>
                 <PopoverTrigger asChild>
                   <Button
                     variant='ghost'
                     size='sm'
-                    className='absolute left-1 top-1/2 -translate-y-1/2 h-6 w-6 p-0 hover:bg-primary/10 z-10'
+                    className='absolute left-1 top-1/2 -translate-y-1/2 h-6 w-6 p-0 hover:bg-primary/10 z-20'
                     title='Open formula library'
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleLibraryOpenChange(!isLibraryOpen);
+                    }}
                   >
                     <Sigma className='w-4 h-4 text-primary' />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className='w-96 p-0 shadow-lg' align='start'>
+                <PopoverContent className='w-96 p-0 shadow-lg z-50' align='start' side='bottom' sideOffset={4}>
                   <div className='border-b p-3'>
                     <div className='flex items-center space-x-2'>
                       <Search className='w-4 h-4 text-muted-foreground' />
@@ -935,8 +1126,12 @@ const FormularBar: React.FC<FormularBarProps> = ({
                 ref={formulaInputRef}
                 value={formulaInput}
                 onChange={(e) => handleInputChange(e.target.value)}
-                placeholder='=SUM(colA,colB), =IF(colA > 10, colB, colC), =DATE_DIFF(colEnd, colStart)'
-                className='h-8 shadow-sm pl-10 font-mono border-primary/50 bg-primary/5 transition-all duration-200'
+                onClick={(e) => {
+                  e.stopPropagation();
+                  formulaInputRef.current?.focus();
+                }}
+                placeholder='=SUM(Col1,Col2), =IF(Col1 > 10, Col2, Col3), =DATE_DIFF(Col1, Col2)'
+                className='h-8 shadow-sm pl-10 font-mono border-primary/50 bg-primary/5 transition-all duration-200 w-full min-w-0 focus:ring-2 focus:ring-primary/20 focus:border-primary'
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
@@ -959,7 +1154,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
         </div>
 
 
-        <div className='flex items-center space-x-1'>
+        <div className='flex items-center space-x-1 flex-shrink-0 z-30'>
           <Button
             variant='outline'
             size='sm'

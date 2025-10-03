@@ -134,7 +134,35 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [formulaInput, setFormulaInput] = useState('');
   const [columnFormulas, setColumnFormulas] = useState<Record<string, string>>(settings.columnFormulas || {});
   const [formulaValidationError, setFormulaValidationError] = useState<string | null>(null);
+  const errorTimeoutRef = useRef<number | null>(null);
   const headersKey = useMemo(() => (data?.headers || []).join('|'), [data?.headers]);
+
+  // Function to show error with auto-dismiss
+  const showValidationError = (error: string | null) => {
+    // Clear existing timeout
+    if (errorTimeoutRef.current) {
+      clearTimeout(errorTimeoutRef.current);
+    }
+    
+    setFormulaValidationError(error);
+    
+    // Auto-dismiss after 3 seconds if error is shown
+    if (error) {
+      errorTimeoutRef.current = setTimeout(() => {
+        setFormulaValidationError(null);
+      }, 3000);
+    }
+  };
+
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (errorTimeoutRef.current) {
+        clearTimeout(errorTimeoutRef.current);
+      }
+    };
+  }, []);
   const [isFormulaMode, setIsFormulaMode] = useState(true);
   const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter' | 'operation'>(null);
   const [convertSubmenuOpen, setConvertSubmenuOpen] = useState(false);
@@ -381,6 +409,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   // Loading indicator for server-side operations
   const [operationLoading, setOperationLoading] = useState(false);
+  const [formulaLoading, setFormulaLoading] = useState(false);
   
   // Undo/Redo state management
   const [undoStack, setUndoStack] = useState<DataFrameData[]>([]);
@@ -483,8 +512,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const toCSV = () => {
     if (!data) return '';
     const headers = data.headers;
-    // Use processed data that excludes permanently deleted rows
-    const rows = data.rows.filter((_, index) => !permanentlyDeletedRows.has(index));
+    // Use processed data that includes all filters (search, column filters, and deleted rows)
+    const rows = processedData.filteredRows;
     const csvRows = [headers.join(',')];
     for (const row of rows) {
       csvRows.push(headers.map(h => JSON.stringify(row[h] ?? '')).join(','));
@@ -545,10 +574,10 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       if (saveSuccessTimeout.current) clearTimeout(saveSuccessTimeout.current);
       saveSuccessTimeout.current = setTimeout(() => setSaveSuccess(false), 2000);
       fetchSavedDataFrames(); // Refresh the saved dataframes list in the UI
-      // Update the data to reflect the current state (without deleted rows)
+      // Update the data to reflect the current filtered state (saved data)
       const currentData = {
         ...data,
-        rows: data.rows.filter((_, index) => !permanentlyDeletedRows.has(index)),
+        rows: processedData.filteredRows,
         fileName: filename
       };
       
@@ -564,9 +593,16 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       
       // Clear the permanently deleted rows since they're now saved
       setPermanentlyDeletedRows(new Set());
+      
+      // Clear filters since the saved data now represents the filtered state
+      onSettingsChange({
+        ...settings,
+        filters: {},
+        searchTerm: ''
+      });
       toast({
         title: 'DataFrame Saved',
-        description: result?.message ?? `${filename} saved successfully.`,
+        description: result?.message ?? `${filename} saved successfully with ${processedData.filteredRows.length} filtered rows.`,
         variant: 'default',
       });
     } catch (err) {
@@ -1356,7 +1392,34 @@ const handleCellClick = (rowIndex: number, column: string) => {
 };
 
 const insertColumnIntoFormula = (columnName: string) => {
-  // Get the formula input element to find cursor position
+  // Check if there are ColX placeholders to replace (Excel-like behavior)
+  if (formulaInput.includes('Col')) {
+    const colMatch = formulaInput.match(/Col\d+/);
+    if (colMatch) {
+      const colIndex = formulaInput.indexOf(colMatch[0]);
+      const newFormula = formulaInput.slice(0, colIndex) + columnName + formulaInput.slice(colIndex + colMatch[0].length);
+      setFormulaInput(newFormula);
+      setIsFormulaMode(true);
+      
+      // If no target column is selected, set the clicked column as the target
+      if (!selectedColumn) {
+        setSelectedColumn(columnName);
+      }
+      
+      // Set cursor position after the inserted column name
+      setTimeout(() => {
+        const formulaInputElement = document.querySelector('input[placeholder*="=SUM"]') as HTMLInputElement;
+        if (formulaInputElement) {
+          const newCursorPosition = colIndex + columnName.length;
+          formulaInputElement.setSelectionRange(newCursorPosition, newCursorPosition);
+          formulaInputElement.focus();
+        }
+      }, 0);
+      return;
+    }
+  }
+  
+  // Fallback to original behavior if no ColX placeholders found
   const formulaInputElement = document.querySelector('input[placeholder*="=SUM"]') as HTMLInputElement;
   if (!formulaInputElement) return;
   
@@ -1396,11 +1459,17 @@ const handleHeaderClick = (header: string) => {
   }
 };
 
-const handleFormulaSubmit = async () => {
-  resetSaveSuccess();
-  if (!data || !selectedColumn || !fileId) return;
-  const trimmedFormula = formulaInput.trim();
-  if (!trimmedFormula) return;
+  const handleFormulaSubmit = async () => {
+    resetSaveSuccess();
+    if (!data || !selectedColumn || !fileId) {
+      showValidationError('Please select a target column first');
+      return;
+    }
+    const trimmedFormula = formulaInput.trim();
+    if (!trimmedFormula) {
+      showValidationError('Please enter a formula');
+      return;
+    }
   
   // Debug logging
   console.log('[DataFrameOperations] Applying formula:', {
@@ -1413,6 +1482,7 @@ const handleFormulaSubmit = async () => {
   // Save current state before making changes
   saveToUndoStack(data);
   
+  setFormulaLoading(true);
   try {
     const resp = await apiApplyFormula(fileId, selectedColumn, trimmedFormula);
     
@@ -1468,6 +1538,8 @@ const handleFormulaSubmit = async () => {
     console.error('[DataFrameOperations] Formula application failed:', err);
     handleApiError('Apply formula failed', err);
     addToHistory('Apply Formula', `Failed to apply formula "${trimmedFormula}" to column "${selectedColumn}"`, 'error');
+  } finally {
+    setFormulaLoading(false);
   }
 };
 
@@ -2197,7 +2269,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       />
 
       <div ref={containerRef} className="w-full h-full p-6 overflow-y-auto" style={{position: 'relative'}}>
-        <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm w-full">
         {/* File name display in separate blue header section */}
         {data?.fileName && (
           <div className="border-b border-blue-200 bg-blue-50">
@@ -2229,7 +2301,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    setFormulaValidationError(null);
+                    showValidationError(null);
                     setPermanentlyDeletedRows(new Set());
                     onClearAll();
                   }}
@@ -2238,9 +2310,14 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   Reset
                 </Button>
                 {formulaValidationError && (
-                  <span className="text-xs font-medium text-destructive max-w-xs leading-snug">
-                    {formulaValidationError}
-                  </span>
+                  <div className="relative">
+                    <div className="absolute bottom-full left-0 mb-2 px-3 py-2 bg-red-100 border border-red-300 rounded-lg shadow-lg z-50 whitespace-nowrap">
+                      <div className="text-xs font-medium text-red-700">
+                        {formulaValidationError}
+                      </div>
+                      <div className="absolute top-full left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-red-300"></div>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -2248,9 +2325,19 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               <Button
                 onClick={handleSaveDataFrame}
                 disabled={saveLoading}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
+                className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2"
               >
-                {saveLoading ? 'Saving...' : 'Save DataFrame'}
+                {saveLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>Save DataFrame</span>
+                  </>
+                )}
               </Button>
             </div>
           </div>
@@ -2258,21 +2345,31 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           {/* Table section - Excel-like appearance */}
           <div className="flex-1 flex flex-col overflow-hidden min-h-0">
             {data && (
-              <div className="flex items-center border-b border-slate-200">
-                <div className="flex-1">
-                  <FormularBar
-                    data={data}
-                    selectedCell={selectedCell}
-                    selectedColumn={selectedColumn}
-                    formulaInput={formulaInput}
-                    isFormulaMode={isFormulaMode}
-                    onSelectedCellChange={setSelectedCell}
-                    onSelectedColumnChange={setSelectedColumn}
-                    onFormulaInputChange={setFormulaInput}
-                    onFormulaModeChange={setIsFormulaMode}
-                    onFormulaSubmit={handleFormulaSubmit}
-                    onValidationError={setFormulaValidationError}
-                  />
+              <div className="flex items-center border-b border-slate-200 min-h-0">
+                <div className="flex-1 min-w-0">
+                  <div className="relative w-full">
+                    <FormularBar
+                      data={data}
+                      selectedCell={selectedCell}
+                      selectedColumn={selectedColumn}
+                      formulaInput={formulaInput}
+                      isFormulaMode={isFormulaMode}
+                      onSelectedCellChange={setSelectedCell}
+                      onSelectedColumnChange={setSelectedColumn}
+                      onFormulaInputChange={setFormulaInput}
+                      onFormulaModeChange={setIsFormulaMode}
+                      onFormulaSubmit={handleFormulaSubmit}
+                      onValidationError={showValidationError}
+                    />
+                    {formulaLoading && (
+                      <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10">
+                        <div className="flex items-center space-x-2 text-sm text-slate-700">
+                          <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+                          <span>Processing formula...</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <button
                   onClick={() => setHistoryPanelOpen(true)}
@@ -2285,7 +2382,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 </button>
               </div>
             )}
-            <div className="flex-1 overflow-auto min-h-0">
+            <div className="flex-1 min-h-0" style={{maxHeight: 'calc(100vh - 300px)'}}>
               {/* Placeholder for when no data is loaded */}
               {!data || !Array.isArray(data.headers) || data.headers.length === 0 ? (
                 <div className="flex flex-1 items-center justify-center bg-gray-50">
@@ -2294,21 +2391,29 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   </div>
                 </div>
               ) : (
-                <div className="table-wrapper">
-                  <div className="table-edge-left" />
-                  <div className="table-edge-right" />
-                  <div className="table-overflow relative">
-                    {operationLoading && (
-                      <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10 text-sm text-slate-700">
-                        Operation Loading...
+                <div className="relative">
+                  {operationLoading && (
+                    <div className="absolute inset-0 bg-white/80 flex flex-col items-center justify-center z-10 text-sm text-slate-700">
+                      <div className="flex flex-col items-center space-y-3">
+                        {/* Rotating Circle Spinner */}
+                        <div className="relative">
+                          <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+                        </div>
+                        {/* Processing Text */}
+                        <div className="text-center">
+                          <p className="text-sm font-medium text-slate-700">Processing...</p>
+                          <p className="text-xs text-slate-500 mt-1">Please wait while the operation completes</p>
+                        </div>
                       </div>
-                    )}
-                    <Table className="table-base">
+                    </div>
+                  )}
+                  
+                  <Table className="table-base w-full" maxHeight="max-h-[500px]">
               <TableHeader className="table-header">
                 <TableRow className="table-header-row">
                   {settings.showRowNumbers && (
                     <TableHead 
-                      className={`table-header-cell row-number-column text-center relative ${
+                      className={`table-header-cell row-number-column text-center relative sticky top-0 z-10 ${
                         data.frozenColumns > 0 ? 'frozen-column' : ''
                       }`}
                       style={{
@@ -2332,7 +2437,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           onCheckedChange={handleSelectAllRows}
                           className="mr-2"
                         />
-                        #
+                        <span className="font-bold text-black">#</span>
                       </div>
                     </TableHead>
                   )}
@@ -2346,7 +2451,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     <TableHead
                       key={header + '-' + colIdx}
                       data-col={header}
-                       className={`table-header-cell text-center bg-white border-r border-gray-200 relative ${
+                       className={`table-header-cell text-center bg-white border-r border-gray-200 relative sticky top-0 z-10 ${
                          selectedColumn === header ? 'border-2 border-blue-500 bg-blue-100' : ''
                        } ${
                          multiSelectedColumns.has(header) ? 'bg-blue-100 border-blue-500' : ''
@@ -2416,7 +2521,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       {editingHeader === colIdx ? (
                         <input
                           type="text"
-                          className="h-7 text-xs outline-none border-none bg-white px-0 font-bold text-gray-800 truncate text-center w-full"
+                          className="h-7 text-xs outline-none border-none bg-white px-0 font-bold text-black truncate text-center w-full"
                           style={{ width: '100%', boxSizing: 'border-box', background: 'inherit', textAlign: 'center', padding: 0, margin: 0 }}
                           value={editingHeaderValue}
                           autoFocus
@@ -2438,7 +2543,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                            title="Click to select • Ctrl+Click for multi-select • Double-click to edit • Delete key to delete selected"
                            style={{ width: '100%', height: '100%' }}
                          >
-                           <span className="flex items-center gap-1">
+                           <span className="flex items-center gap-1 font-bold text-black">
                              {headerDisplayNames[header] ?? header}
                              {filters[header] && (
                                <Filter className="w-3 h-3 text-blue-600" />
@@ -2454,7 +2559,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     </>
                     );
                   })}
-                  <TableHead className="table-header-cell w-8" />
+                  <TableHead className="table-header-cell w-8 sticky top-0 z-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -2602,8 +2707,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               </TableBody>
             </Table>
                 </div>
-              </div>
-            )}
+              )}
             </div>
             {totalPages > 1 && (
             <div className="flex flex-col items-center py-4">

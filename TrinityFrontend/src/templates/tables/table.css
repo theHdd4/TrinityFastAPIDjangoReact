@@ -38,7 +38,7 @@
 }
 
 .table-header {
-  @apply sticky top-0 z-10 bg-green-50 text-slate-600;
+  @apply sticky top-0 z-10 bg-white text-black;
 }
 
 .table-header-row {
@@ -46,10 +46,11 @@
 }
 
 .table-header-cell {
-  @apply px-5 py-3 text-left font-bold text-gray-800;
+  @apply px-5 py-3 text-left font-bold text-black bg-white;
   width: 120px !important; /* Default column width */
   min-width: 120px !important;
   max-width: 120px !important;
+  font-weight: 700 !important; /* Ensure bold text */
 }
 
 .table-row {
