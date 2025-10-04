@@ -60,10 +60,10 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     perCombinationCPRP: false,
     combinationCPRPValues: {},
     manualPriceEntry: false,
-    manualPriceValue: 0,
+    manualPriceValue: undefined,
     perCombinationManualPrice: false,
     combinationManualPriceValues: {},
-    averageMonths: 3,
+    averageMonths: undefined,
     roiVariables: [],
     perCombinationCostPerUnit: false,
     costPerUnit: {},
@@ -665,10 +665,10 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         perCombinationCPRP: false,
         combinationCPRPValues: {},
         manualPriceEntry: false,
-        manualPriceValue: 0,
+        manualPriceValue: undefined,
         perCombinationManualPrice: false,
         combinationManualPriceValues: {},
-        averageMonths: 3,
+        averageMonths: undefined,
         roiVariables: [],
         perCombinationCostPerUnit: false,
         costPerUnit: {},
@@ -1067,7 +1067,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
 
             {/* Part 2: Select X Variables and Transformations - Only show when Y variable is selected */}
             {finalData?.yVariable && (
-              <div className="space-y-3">
+              <div className="space-y-3 animate-in slide-in-from-top-4 duration-300 ease-out">
                 <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
                   <div className="mb-4">
                     <p className="text-sm font-medium text-gray-700">
@@ -1340,7 +1340,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
           {finalData?.yVariable && 
            finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && 
            finalData?.modelType !== 'mmm' && (
-            <div className="space-y-3">
+            <div className="space-y-3 animate-in slide-in-from-top-4 duration-300 ease-out">
               <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
                 <div className="mb-4">
                   <p className="text-sm font-medium text-gray-700">
@@ -1460,7 +1460,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             {finalData?.yVariable && 
              finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && 
              finalData?.modelType === 'mmm' && !mmmSelectedOption && (
-              <div className="space-y-3">
+              <div className="space-y-3 animate-in slide-in-from-top-4 duration-300 ease-out">
                 <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
                   <div className="mb-4">
                     <p className="text-sm font-medium text-gray-700">
@@ -1505,7 +1505,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
              finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && 
              finalData?.modelType === 'mmm' && 
              enableConstraintSetup && (
-              <div className="space-y-3">
+              <div className="space-y-3 animate-in slide-in-from-top-4 duration-300 ease-out">
                 <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
                   <div className="mb-4">
                     <p className="text-sm font-medium text-gray-700">
@@ -1644,7 +1644,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
              mmmSelectedOption === 'constraint' && 
              enableConstraintSetup && 
              !showSecondOption && (
-              <div className="space-y-3">
+              <div className="space-y-3 animate-in slide-in-from-top-4 duration-300 ease-out">
                 <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
                   <div className="mb-4 flex items-center justify-between">
                     <p className="text-sm font-medium text-gray-700">
@@ -1693,7 +1693,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
              finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && 
              finalData?.modelType === 'mmm' && 
              enableROICalculation && (
-              <div className="space-y-3">
+              <div className="space-y-3 animate-in slide-in-from-top-4 duration-300 ease-out">
                 <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
                   <ROIConfiguration
                     availableFeatures={data?.xVariables?.flat() || []}
@@ -1714,7 +1714,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
              mmmSelectedOption === 'roi' && 
              enableROICalculation && 
              !showSecondOption && (
-              <div className="space-y-3">
+              <div className="space-y-3 animate-in slide-in-from-top-4 duration-300 ease-out">
                 <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
                   <div className="mb-4 flex items-center justify-between">
                     <p className="text-sm font-medium text-gray-700">

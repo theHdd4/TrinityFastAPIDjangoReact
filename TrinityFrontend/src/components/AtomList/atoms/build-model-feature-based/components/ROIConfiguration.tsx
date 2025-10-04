@@ -207,9 +207,35 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
       {/* Part 1: Sales Value Conversion */}
       <div className="space-y-3">
         <Label className="text-sm font-medium">ROI Specific Inputs</Label>
-        <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
+        <div className="relative p-4 rounded-lg shadow-sm bg-white border border-gray-200">
+          {/* Clear Button - Right Center */}
+          <button
+            className="absolute top-1/2 right-2 transform -translate-y-1/2 h-6 w-6 flex items-center justify-center text-black hover:text-red-600 transition-colors"
+            onClick={() => {
+              onROIConfigChange({
+                enabled: true,
+                features: {},
+                priceColumn: '',
+                perCombinationCPRP: false,
+                combinationCPRPValues: {},
+                manualPriceEntry: false,
+                manualPriceValue: undefined,
+                perCombinationManualPrice: false,
+                combinationManualPriceValues: {},
+                averageMonths: undefined,
+                roiVariables: [],
+                perCombinationCostPerUnit: false,
+                costPerUnit: {},
+                combinationCostPerUnit: {}
+              });
+            }}
+            title="Clear all ROI configuration"
+          >
+            <X className="w-4 h-4" />
+          </button>
+          
           {/* Header Text */}
-          <div className="mb-4">
+          <div className="mb-4 pr-8">
             <p className="text-sm font-medium text-gray-700">
               "<span className="text-blue-600 font-semibold">{yVariable || 'y_variable'}</span>" is converted to salesvalue by multiplying with:
             </p>
@@ -310,41 +336,34 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
               </div>
             )}
           </div>
-          
-          {/* Clear Part 1 Button */}
-          <div className="mt-4 flex justify-end">
-            <button 
-              className="h-8 w-8 flex items-center justify-center text-black hover:text-red-600 transition-colors" 
-              onClick={() => {
-                onROIConfigChange({
-                  ...roiConfig,
-                  enabled: true,
-                  priceColumn: '',
-                  manualPriceEntry: false,
-                  manualPriceValue: 0,
-                  perCombinationManualPrice: false,
-                  combinationManualPriceValues: {},
-                  averageMonths: 0
-                });
-              }}
-              title="Clear Part 1 selections"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
         </div>
       </div>
 
-      {/* Part 2: Determine Variables to Measure ROI */}
-      {isPart1Complete && (
-        <div className="space-y-3">
-          <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
-            {/* Header Text */}
-            <div className="mb-3">
-              <p className="text-sm font-medium text-gray-700">
-                Determine variables to measure ROI for:
-              </p>
-            </div>
+       {/* Part 2: Determine Variables to Measure ROI */}
+       {isPart1Complete && (
+         <div className="space-y-3 animate-in slide-in-from-top-4 duration-300 ease-out">
+           <div className="relative p-4 rounded-lg shadow-sm bg-white border border-gray-200">
+             {/* Clear Button - Right Center */}
+             <button
+               className="absolute top-1/2 right-2 transform -translate-y-1/2 h-6 w-6 flex items-center justify-center text-black hover:text-red-600 transition-colors"
+               onClick={() => {
+                 onROIConfigChange({
+                   ...roiConfig,
+                   enabled: true,
+                   roiVariables: []
+                 });
+               }}
+               title="Clear Part 2 selections"
+             >
+               <X className="w-4 h-4" />
+             </button>
+             
+             {/* Header Text */}
+             <div className="mb-3 pr-8">
+               <p className="text-sm font-medium text-gray-700">
+                 Determine variables to measure ROI for:
+               </p>
+             </div>
 
             {/* Variables Row */}
             <div className="flex gap-2 items-start flex-wrap">
@@ -388,31 +407,14 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                 <span className="text-sm leading-none font-bold">+</span>
                 Add Variable
               </button>
-            </div>
-            
-            {/* Clear Part 2 Button */}
-            <div className="mt-4 flex justify-end">
-              <button 
-                className="h-8 w-8 flex items-center justify-center text-black hover:text-red-600 transition-colors" 
-                onClick={() => {
-                  onROIConfigChange({
-                    ...roiConfig,
-                    enabled: true,
-                    roiVariables: []
-                  });
-                }}
-                title="Clear Part 2 selections"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+             </div>
           </div>
         </div>
       )}
 
-      {/* Part 3: Enter Cost Per Unit for Each Variable */}
-      {isPart2Complete && (
-        <div className="space-y-3">
+       {/* Part 3: Enter Cost Per Unit for Each Variable */}
+       {isPart2Complete && (
+         <div className="space-y-3 animate-in slide-in-from-top-4 duration-300 ease-out">
           {/* Per Combination Cost Toggle */}
           <div className="flex items-center space-x-2">
             <Checkbox

@@ -2631,129 +2631,129 @@ async def train_mmm_models(request: dict):
         # Process individual MMM training for each combination if enabled
         if individual_modeling:
         # Process each combination
-        for combination_index, combination in enumerate(combinations):
-            # Update progress for UI
-            training_progress[run_id]["current_combination"] = combination
-            training_progress[run_id]["current_step"] = f"Reading file for {combination}"
-            training_progress[run_id]["current"] = combination_index * individual_models_count
-            training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
-            
-            # Search for the file in MinIO
-            target_file_key = None
-            try:
-                # Search for files containing both Scope_X and the combination
-                all_objects = list(minio_client.list_objects(bucket_name, recursive=True))
-                matching_objects = []
+            for combination_index, combination in enumerate(combinations):
+                # Update progress for UI
+                training_progress[run_id]["current_combination"] = combination
+                training_progress[run_id]["current_step"] = f"Reading file for {combination}"
+                training_progress[run_id]["current"] = combination_index * individual_models_count
+                training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
                 
-                for obj in all_objects:
-                    obj_name = obj.object_name
-                    scope_pattern = f"Scope_{scope_number}"
-                    has_scope = scope_pattern in obj_name
-                    has_combination = combination in obj_name
+                # Search for the file in MinIO
+                target_file_key = None
+                try:
+                    # Search for files containing both Scope_X and the combination
+                    all_objects = list(minio_client.list_objects(bucket_name, recursive=True))
+                    matching_objects = []
                     
-                    if has_scope and has_combination:
-                        matching_objects.append(obj_name)
-                
-                if matching_objects:
-                    target_file_key = matching_objects[0]
+                    for obj in all_objects:
+                        obj_name = obj.object_name
+                        scope_pattern = f"Scope_{scope_number}"
+                        has_scope = scope_pattern in obj_name
+                        has_combination = combination in obj_name
+                        
+                        if has_scope and has_combination:
+                            matching_objects.append(obj_name)
                     
-                    # Update progress - reading file
-                    training_progress[run_id]["current_model"] = "Reading data file..."
-                    await asyncio.sleep(0.3)
-                    
-                    # Train MMM models for this combination
-                    training_progress[run_id]["current_step"] = f"Training models for {combination}"
-                    training_progress[run_id]["current_model"] = "Training MMM models..."
-                    await asyncio.sleep(0.5)
-                    
-                    try:
-                        # Convert x_variables to lowercase for consistency
-                        x_variables_lower = [var.lower() for var in x_variables]
-                        y_variable_lower = y_variable.lower()
+                    if matching_objects:
+                        target_file_key = matching_objects[0]
                         
-                        # Convert variable_configs keys to lowercase
-                        variable_configs_lower = {}
-                        for var, config in variable_configs.items():
-                            variable_configs_lower[var.lower()] = config
+                        # Update progress - reading file
+                        training_progress[run_id]["current_model"] = "Reading data file..."
+                        await asyncio.sleep(0.3)
                         
-                        # Train MMM models
-                            # Use price column from ROI config if available, otherwise use request price column
-                            roi_price_column = None
-                            if roi_config and roi_config.get('priceColumn'):
-                                roi_price_column = roi_config.get('priceColumn').lower()
-                            else:
-                                roi_price_column = price_column.lower() if price_column else None
-                            
-                        model_results, variable_data = await mmm_trainer.train_mmm_models_for_combination(
-                            file_key=target_file_key,
-                            x_variables=x_variables_lower,
-                            y_variable=y_variable_lower,
-                            variable_configs=variable_configs_lower,
-                                models_to_run=individual_models_to_run,
-                                custom_configs=individual_custom_model_configs,  # Use individual configs
-                                k_folds=individual_k_folds,
-                                test_size=individual_test_size,
-                            bucket_name=bucket_name,
-                                price_column=roi_price_column,  # Use ROI config price column
-                                roi_config=request.get('roi_config'),  # Pass ROI configuration
-                                combination_name=combination  # Pass the actual combination name
-                        )
+                        # Train MMM models for this combination
+                        training_progress[run_id]["current_step"] = f"Training models for {combination}"
+                        training_progress[run_id]["current_model"] = "Training MMM models..."
+                        await asyncio.sleep(0.5)
                         
-                        # Update progress
-                            training_progress[run_id]["current"] += individual_models_count
-                        training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
-                        
-                        # Store variable statistics
-                        all_variable_stats[combination] = variable_data
-                        
-                                    # Save results to MongoDB (same format as train-models-direct)
                         try:
-                            saved_ids = await save_model_results_enhanced(
-                                scope_id=f"scope_{scope_number}",
-                                scope_name=f"Scope_{scope_number}",
-                                set_name=f"Scope_{scope_number}",
-                                combination={
-                                    "combination_id": combination,
-                                    "file_key": target_file_key,
-                                    "filename": target_file_key.split('/')[-1],
-                                    "set_name": f"Scope_{scope_number}",
-                                    "record_count": variable_data.get("original_data_shape", [0, 0])[0]
-                                },
-                                model_results=model_results,
+                            # Convert x_variables to lowercase for consistency
+                            x_variables_lower = [var.lower() for var in x_variables]
+                            y_variable_lower = y_variable.lower()
+                            
+                            # Convert variable_configs keys to lowercase
+                            variable_configs_lower = {}
+                            for var, config in variable_configs.items():
+                                variable_configs_lower[var.lower()] = config
+                            
+                            # Train MMM models
+                                # Use price column from ROI config if available, otherwise use request price column
+                                roi_price_column = None
+                                if roi_config and roi_config.get('priceColumn'):
+                                    roi_price_column = roi_config.get('priceColumn').lower()
+                                else:
+                                    roi_price_column = price_column.lower() if price_column else None
+                                
+                            model_results, variable_data = await mmm_trainer.train_mmm_models_for_combination(
+                                file_key=target_file_key,
                                 x_variables=x_variables_lower,
                                 y_variable=y_variable_lower,
-                                            price_column=roi_price_column,  # Use ROI config price column
-                                standardization="mmm_per_variable",  # Special marker for MMM
-                                            test_size=individual_test_size,
-                                run_id=run_id,
-                                variable_data=variable_data
+                                variable_configs=variable_configs_lower,
+                                    models_to_run=individual_models_to_run,
+                                    custom_configs=individual_custom_model_configs,  # Use individual configs
+                                    k_folds=individual_k_folds,
+                                    test_size=individual_test_size,
+                                bucket_name=bucket_name,
+                                    price_column=roi_price_column,  # Use ROI config price column
+                                    roi_config=request.get('roi_config'),  # Pass ROI configuration
+                                    combination_name=combination  # Pass the actual combination name
                             )
                             
+                                # Update pogress
+                            training_progress[run_id]["current"] += individual_models_count
+                            training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
+                            
+                            # Store variable statistics
+                            all_variable_stats[combination] = variable_data
+                            
+                                                # Save results to MongoDB (same format as train-models-direct)
+                            try:
+                                saved_ids = await save_model_results_enhanced(
+                                    scope_id=f"scope_{scope_number}",
+                                    scope_name=f"Scope_{scope_number}",
+                                    set_name=f"Scope_{scope_number}",
+                                    combination={
+                                        "combination_id": combination,
+                                        "file_key": target_file_key,
+                                        "filename": target_file_key.split('/')[-1],
+                                        "set_name": f"Scope_{scope_number}",
+                                        "record_count": variable_data.get("original_data_shape", [0, 0])[0]
+                                    },
+                                    model_results=model_results,
+                                    x_variables=x_variables_lower,
+                                    y_variable=y_variable_lower,
+                                                        price_column=roi_price_column,  # Use ROI config price column
+                                    standardization="mmm_per_variable",  # Special marker for MMM
+                                                        test_size=individual_test_size,
+                                    run_id=run_id,
+                                    variable_data=variable_data
+                                )
+                                
+                            except Exception as e:
+                                                    pass  # Don't fail the entire request if MongoDB save fails
+                            
+                            # Add to results
+                            combination_results.append({
+                                "combination_id": combination,
+                                "file_key": target_file_key,
+                                "total_records": variable_data.get("original_data_shape", [0, 0])[0],
+                                "model_results": model_results
+                            })
+                            
+                            # Update progress - combination completed
+                            training_progress[run_id]["completed_combinations"] += 1
+                            
                         except Exception as e:
-                                        pass  # Don't fail the entire request if MongoDB save fails
-                        
-                        # Add to results
-                        combination_results.append({
-                            "combination_id": combination,
-                            "file_key": target_file_key,
-                            "total_records": variable_data.get("original_data_shape", [0, 0])[0],
-                            "model_results": model_results
-                        })
-                        
-                        # Update progress - combination completed
-                        training_progress[run_id]["completed_combinations"] += 1
-                        
-                    except Exception as e:
-                        logger.error(f"Error training MMM models for combination {combination}: {e}")
+                            logger.error(f"Error training MMM models for combination {combination}: {e}")
+                            continue
+                            
+                    else:
+                        logger.warning(f"Could not find file for combination: {combination}")
                         continue
                         
-                else:
-                    logger.warning(f"Could not find file for combination: {combination}")
+                except Exception as e:
+                    logger.error(f"Error processing combination {combination}: {e}")
                     continue
-                    
-            except Exception as e:
-                logger.error(f"Error processing combination {combination}: {e}")
-                continue
         
         # Log completion of individual modeling
         if individual_modeling:
