@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2 } from 'lucide-react';
 import { SCOPE_SELECTOR_API } from '@/lib/api';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
+import { CheckboxTemplate } from '@/templates/checkbox';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -156,48 +156,36 @@ const ScopeSelectorSettings: React.FC<ScopeSelectorSettingsProps> = ({ data, onD
         </div>
       </div>
       
-      <div className="flex-1 overflow-y-auto pr-1">
+      <div className="flex-1 overflow-y-auto pr-4">
         <div className="grid grid-cols-1 gap-2">
           {availableIdentifiers.map((identifier) => (
-            <div 
-              key={identifier} 
-              className={`flex items-center p-2 rounded-md border ${
-                selectedIdentifiers.includes(identifier) 
-                  ? 'bg-blue-50 border-blue-200' 
-                  : 'border-gray-200 hover:border-blue-200 hover:bg-gray-50'
-              } transition-colors cursor-pointer`}
-              onClick={() => toggleIdentifier(identifier)}
-            >
-              <Checkbox
+             <div 
+               key={identifier} 
+               className="cursor-pointer"
+               onClick={() => toggleIdentifier(identifier)}
+             >
+              <CheckboxTemplate
                 id={`checkbox-${identifier}`}
+                label={identifier}
                 checked={selectedIdentifiers.includes(identifier)}
                 onCheckedChange={() => toggleIdentifier(identifier)}
-                className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600 mr-2"
               />
-              <Label 
-                htmlFor={`checkbox-${identifier}`}
-                className="flex-1 text-sm font-normal cursor-pointer truncate"
-                title={identifier}
-              >
-                {identifier}
-              </Label>
             </div>
           ))}
         </div>
       </div>
 
       {/* Criteria Section */}
-      <div className="mt-4 pt-4 border-t border-gray-200 space-y-4 grid gap-4 overflow-x-auto">
+       <div className="mt-4 pt-4 border-t border-gray-200 space-y-4 grid gap-4 overflow-x-auto pr-4">
         <h4 className="text-sm font-medium text-gray-700">Criteria</h4>
         {/* Min datapoints */}
-        <div className="flex items-center gap-3">
-          <Checkbox
-            id="chk-min-dp"
-            checked={criteria.minDatapointsEnabled}
-            onCheckedChange={(v) => updateCriteria({ minDatapointsEnabled: Boolean(v) })}
-            className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
-          />
-          <Label htmlFor="chk-min-dp" className="text-sm flex-1">Min datapoints</Label>
+         <div className="flex items-center gap-3">
+           <CheckboxTemplate
+             id="chk-min-dp"
+             label="Min datapoints"
+             checked={criteria.minDatapointsEnabled}
+             onCheckedChange={(v) => updateCriteria({ minDatapointsEnabled: Boolean(v) })}
+           />
           <Input
             type="number"
             min={0}
@@ -208,13 +196,14 @@ const ScopeSelectorSettings: React.FC<ScopeSelectorSettingsProps> = ({ data, onD
           />
         </div>
         {/* Percentile criterion */}
-        <div className="flex items-center gap-3 flex-nowrap overflow-x-auto">
-          <Checkbox
-            id="chk-pct"
-            checked={criteria.pct90Enabled}
-            onCheckedChange={(v) => updateCriteria({ pct90Enabled: Boolean(v) })}
-            className="data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
-          />
+         <div className="flex items-center gap-3 flex-nowrap overflow-x-auto">
+           <CheckboxTemplate
+             id="chk-pct"
+             label=""
+             checked={criteria.pct90Enabled}
+             onCheckedChange={(v) => updateCriteria({ pct90Enabled: Boolean(v) })}
+             showLabel={false}
+           />
           <Input
             type="number"
             min={0}

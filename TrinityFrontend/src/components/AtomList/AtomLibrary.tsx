@@ -58,6 +58,7 @@ const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse }
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 text-sm"
+              data-atom-search="true"
             />
           </div>
           {onCollapse && (

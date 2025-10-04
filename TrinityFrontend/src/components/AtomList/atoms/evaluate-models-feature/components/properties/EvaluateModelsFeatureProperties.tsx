@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
+import { CheckboxTemplate } from '@/templates/checkbox';
 import { Label } from '@/components/ui/label';
 import { Upload, Eye } from 'lucide-react';
 
@@ -61,24 +61,18 @@ const InternalEvaluateModelsFeatureProperties: React.FC<StandaloneProps> = ({
               </CardHeader>
               <CardContent className="space-y-3">
                 {data.graphs?.map((graph) => (
-                  <div key={graph.id} className="flex items-center space-x-2">
-                    <Checkbox
-                      id={`graph-${graph.id}`}
-                      checked={graph.selected}
-                      onCheckedChange={(checked) => {
-                        const updatedGraphs = data.graphs?.map(g =>
-                          g.id === graph.id ? { ...g, selected: checked as boolean } : g
-                        );
-                        onDataChange({ graphs: updatedGraphs });
-                      }}
-                    />
-                    <Label 
-                      htmlFor={`graph-${graph.id}`} 
-                      className="text-xs font-normal cursor-pointer"
-                    >
-                      {graph.name}
-                    </Label>
-                  </div>
+                  <CheckboxTemplate
+                    key={graph.id}
+                    id={`graph-${graph.id}`}
+                    label={graph.name}
+                    checked={graph.selected}
+                    onCheckedChange={(checked) => {
+                      const updatedGraphs = data.graphs?.map(g =>
+                        g.id === graph.id ? { ...g, selected: checked as boolean } : g
+                      );
+                      onDataChange({ graphs: updatedGraphs });
+                    }}
+                  />
                 ))}
               </CardContent>
             </Card>

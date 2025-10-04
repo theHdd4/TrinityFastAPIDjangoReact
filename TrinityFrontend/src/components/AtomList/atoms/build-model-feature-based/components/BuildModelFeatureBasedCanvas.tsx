@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Plus, Play, X, Settings2, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Info, DollarSign } from 'lucide-react';
 import { BuildModelFeatureBasedData, VariableTransformation, ModelConfig } from '../BuildModelFeatureBasedAtom';
@@ -48,12 +49,25 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
   const [minimizedCombinations, setMinimizedCombinations] = useState<Set<number>>(new Set());
   const [constraintSettingsOpen, setConstraintSettingsOpen] = useState(false);
   const [roiSettingsOpen, setRoiSettingsOpen] = useState(false);
+  const [enableConstraintSetup, setEnableConstraintSetup] = useState(false);
+  const [enableROICalculation, setEnableROICalculation] = useState(false);
+  const [mmmSelectedOption, setMmmSelectedOption] = useState<'constraint' | 'roi' | null>(null);
+  const [showSecondOption, setShowSecondOption] = useState(false);
   const [roiConfig, setRoiConfig] = useState<ROIConfig>({
     enabled: true,  // Always enabled
     features: {},
     priceColumn: '',
     perCombinationCPRP: false,
-    combinationCPRPValues: {}
+    combinationCPRPValues: {},
+    manualPriceEntry: false,
+    manualPriceValue: 0,
+    perCombinationManualPrice: false,
+    combinationManualPriceValues: {},
+    averageMonths: 3,
+    roiVariables: [],
+    perCombinationCostPerUnit: false,
+    costPerUnit: {},
+    combinationCostPerUnit: {}
   });
   
   // Model Performance Metrics sorting and filtering state - per combination
@@ -613,6 +627,56 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     }
   }, [modelResult?.combination_results]);
 
+  // Auto-open constraint settings for general modeling when X-variables are selected
+  useEffect(() => {
+    if (finalData?.yVariable && 
+        finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && 
+        finalData?.modelType !== 'mmm') {
+      setConstraintSettingsOpen(true);
+    }
+  }, [finalData?.yVariable, finalData?.xVariables, finalData?.modelType]);
+
+
+  // Handle constraint setup checkbox changes
+  useEffect(() => {
+    if (enableConstraintSetup) {
+      setConstraintSettingsOpen(true);
+    } else {
+      setConstraintSettingsOpen(false);
+      // Clear constraint data when disabled
+      handleDataChange({ 
+        positiveConstraints: [], 
+        negativeConstraints: [] 
+      });
+    }
+  }, [enableConstraintSetup]);
+
+  // Handle ROI calculation checkbox changes
+  useEffect(() => {
+    if (enableROICalculation) {
+      setRoiSettingsOpen(true);
+    } else {
+      setRoiSettingsOpen(false);
+      // Clear ROI config when disabled
+      setRoiConfig({
+        enabled: true,
+        features: {},
+        priceColumn: '',
+        perCombinationCPRP: false,
+        combinationCPRPValues: {},
+        manualPriceEntry: false,
+        manualPriceValue: 0,
+        perCombinationManualPrice: false,
+        combinationManualPriceValues: {},
+        averageMonths: 3,
+        roiVariables: [],
+        perCombinationCostPerUnit: false,
+        costPerUnit: {},
+        combinationCostPerUnit: {}
+      });
+    }
+  }, [enableROICalculation]);
+
   // Model Performance Metrics sorting and filtering functions
   const getPerformanceUniqueColumnValues = (column: string, modelResults: any[], comboIndex: number): string[] => {
     if (!modelResults.length) return [];
@@ -939,32 +1003,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
               Modeling
             </h3>
             <div className="flex items-center gap-2">
-              {/* Constraint Settings Toggle */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setConstraintSettingsOpen(!constraintSettingsOpen)}
-                className="flex items-center gap-2"
-              >
-                <Settings2 className="w-4 h-4" />
-                Constraints
-              </Button>
-              
-              {/* ROI Settings Toggle */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setRoiSettingsOpen(!roiSettingsOpen)}
-                className="flex items-center gap-2"
-              >
-                <DollarSign className="w-4 h-4" />
-                ROI Configuration
-                {Object.keys(roiConfig.features).length > 0 && (
-                  <Badge variant="secondary" className="ml-2">
-                    {Object.keys(roiConfig.features).length} features
-                  </Badge>
-                )}
-              </Button>
               <Button
                 variant="ghost"
                 size="sm"
@@ -982,33 +1020,17 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         </div>
         {modelingSectionExpanded && (
           <div className="p-6 space-y-6">
-            {/* Header row for Y & X variable controls */}
-          <div className="flex items-center gap-4 mb-2">
-            <div className="flex-1">
-              <label className="text-sm font-medium text-muted-foreground text-right">Select Y-Variable</label>
-            </div>
-            <div className="flex-1">
-              <label className="text-sm font-medium text-muted-foreground text-right">Select X-Variable</label>
-            </div>
-            <div className="flex-1">
-              {/* Empty space for standardization column */}
-            </div>
-            <div className="flex-shrink-0">
-              <Button size="sm" className="bg-orange-300 text-white hover:bg-orange-400" onClick={addXVariable}>
-                <Plus className="w-4 h-4 mr-2" />
-                Add Variable
-              </Button>
-            </div>
+            {/* Part 1: Select Y Variable */}
+            <div className="space-y-3">
+              <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
+                <div className="mb-4">
+                  <p className="text-sm font-medium text-gray-700">
+                    Select your dependent variable (Y-Variable) - the outcome you want to predict:
+                  </p>
           </div>
 
-          {/* Combined Y & X-Variables Selection list */}
-          <div className="space-y-3">
-            {(finalData?.xVariables || []).map((variable, index) => (
-              <div key={`x-variable-${index}`} className={`flex items-center gap-4 p-3 rounded-lg shadow-sm ${index % 2 === 0 ? 'bg-white border-l-4 border-indigo-300' : 'bg-gray-50 border-l-4 border-teal-300'}`}>
-                {/* Y-variable column only for first row */}
-                {index === 0 ? (
-                  <div className="flex-1 flex items-center">
-                    <div className="w-full self-center">
+                <div className="flex gap-4 items-center">
+                  <div className="w-72">
                       <SingleSelectDropdown
                         label=""
                         placeholder={isLoadingColumns ? "Loading..." : "Select Y-Variable"}
@@ -1016,7 +1038,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                         onValueChange={(value) => handleDataChange({ yVariable: value })}
                         options={isLoadingColumns ? [] : numericalColumns
                           .filter(col => {
-                            // Exclude any X-variables that are selected (either as strings or arrays)
+                          // Exclude any X-variables that are selected
                             const isSelectedAsXVariable = finalData?.xVariables?.some(xVar => 
                               Array.isArray(xVar) ? xVar.includes(col) : xVar === col
                             );
@@ -1025,22 +1047,45 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                           .map(col => ({ value: col, label: col }))
                         }
                         disabled={isLoadingColumns}
-                        className="w-full space-y-0"
+                      className="w-full"
                       />
                     </div>
-                  </div>
-                ) : (
-                  <div className="flex-1" />
-                )}
+                  
+                  {/* Clear Y Variable Button */}
+                  {finalData?.yVariable && (
+                    <button
+                      onClick={() => handleDataChange({ yVariable: '' })}
+                      className="h-10 w-10 flex items-center justify-center text-black hover:text-red-600 transition-colors flex-shrink-0"
+                      title="Clear Y-Variable"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
 
+            {/* Part 2: Select X Variables and Transformations - Only show when Y variable is selected */}
+            {finalData?.yVariable && (
+              <div className="space-y-3">
+                <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
+                  <div className="mb-4">
+                    <p className="text-sm font-medium text-gray-700">
+                      Select independent variables (X-Variables) and their transformations - the factors that influence your outcome:
+                    </p>
+                  </div>
+
+                  {/* X-Variables Selection */}
+                  <div className="space-y-3">
+                    {/* Dropdowns row */}
+                    <div className="flex items-end gap-1">
                 {/* X-variable select */}
-                <div className="flex-1 flex items-center">
-                  <div className="w-full self-center">
+                      <div className="w-72 flex-shrink-0">
                     <MultiSelectDropdown
                       label=""
                       placeholder={isLoadingColumns ? "Loading..." : "Select X-Variables"}
-                      selectedValues={Array.isArray(variable) ? variable : variable ? [variable] : []}
-                      onSelectionChange={(selectedValues) => updateXVariable(index, selectedValues)}
+                          selectedValues={Array.isArray(finalData?.xVariables?.[0]) ? finalData.xVariables[0] : (finalData?.xVariables?.[0] ? [finalData.xVariables[0]] : [])}
+                          onSelectionChange={(selectedValues) => updateXVariable(0, selectedValues)}
                       options={isLoadingColumns ? [] : numericalColumns
                         .filter(col => col !== finalData?.yVariable)
                         .map(col => ({ value: col, label: col }))
@@ -1049,19 +1094,17 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                       showTrigger={true}
                       disabled={isLoadingColumns}
                       className="w-full"
-                      triggerClassName="w-full max-w-none h-10"
+                          triggerClassName="w-full h-10 max-w-none"
                     />
-                  </div>
                 </div>
 
-                {/* Standardization select */}
-                <div className="flex-1 flex items-center">
-                  <div className="w-full self-center">
+                      {/* Transformation select */}
+                      <div className="w-72 flex-shrink-0">
                     <SingleSelectDropdown
                       label=""
-                      placeholder="Transformation"
-                      value={finalData?.transformations?.[index] || ''}
-                      onValueChange={(val) => updateTransformation(index, val)}
+                          placeholder="Select Transformation"
+                          value={finalData?.transformations?.[0] || ''}
+                          onValueChange={(val) => updateTransformation(0, val)}
                       options={[
                         { value: "none", label: "None" },
                         { value: "normalize", label: "Normalize (Min-Max)" },
@@ -1070,19 +1113,110 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                           { value: "media", label: "Media (Adstock → Standard → Logistic → MinMax)" }
                         ] : [])
                       ]}
-                      className="w-full space-y-0"
+                          className="w-full"
+                          triggerClassName="w-full h-10"
                     />
+                </div>
+
+                      {/* Clear All Button */}
+                <div className="flex-shrink-0">
+                        <button 
+                          className="h-10 w-10 flex items-center justify-center text-black hover:text-red-600 transition-colors" 
+                          onClick={() => {
+                            handleDataChange({ xVariables: [], transformations: [] });
+                            // Reset configuration states when clearing X-variables
+                            setConstraintSettingsOpen(false);
+                            setRoiSettingsOpen(false);
+                            setEnableConstraintSetup(false);
+                            setEnableROICalculation(false);
+                            setMmmSelectedOption(null);
+                            setShowSecondOption(false);
+                          }}
+                          title="Clear all selections"
+                        >
+                    <X className="w-4 h-4" />
+                        </button>
                   </div>
                 </div>
 
-                {/* Remove button */}
+                  </div>
+
+                    {/* Individual X-Variable Rows */}
+                    {finalData?.xVariables && finalData.xVariables.length > 1 && (
+                      <>
+                        {finalData.xVariables.slice(1).map((xVar, index) => (
+                          <div key={index + 1} className="flex items-end gap-1">
+                            {/* X-variable select */}
+                            <div className="w-72 flex-shrink-0">
+                              <MultiSelectDropdown
+                                label=""
+                                placeholder={isLoadingColumns ? "Loading..." : "Select X-Variables"}
+                                selectedValues={Array.isArray(xVar) ? xVar : (xVar ? [xVar] : [])}
+                                onSelectionChange={(selectedValues) => updateXVariable(index + 1, selectedValues)}
+                                options={isLoadingColumns ? [] : numericalColumns
+                                  .filter(col => col !== finalData?.yVariable)
+                                  .map(col => ({ value: col, label: col }))
+                                }
+                                showSelectAll={true}
+                                showTrigger={true}
+                                disabled={isLoadingColumns}
+                                className="w-full"
+                                triggerClassName="w-full h-10 max-w-none"
+                              />
+                            </div>
+
+                            {/* Transformation select */}
+                            <div className="w-72 flex-shrink-0">
+                              <SingleSelectDropdown
+                                label=""
+                                placeholder="Select Transformation"
+                                value={finalData?.transformations?.[index + 1] || ''}
+                                onValueChange={(val) => updateTransformation(index + 1, val)}
+                                options={[
+                                  { value: "none", label: "None" },
+                                  { value: "normalize", label: "Normalize (Min-Max)" },
+                                  { value: "standardize", label: "Standardize (Z-Score)" },
+                                  ...(finalData?.modelType === 'mmm' ? [
+                                    { value: "media", label: "Media (Adstock → Standard → Logistic → MinMax)" }
+                                  ] : [])
+                                ]}
+                                className="w-full"
+                                triggerClassName="w-full h-10"
+                              />
+                            </div>
+
+                            {/* Remove Variable Button */}
                 <div className="flex-shrink-0">
-                  <Button size="sm" variant="ghost" onClick={() => removeXVariable(index)}>
+                              <button 
+                                className="h-10 w-10 flex items-center justify-center text-black hover:text-red-600 transition-colors" 
+                                onClick={() => {
+                                  const updatedXVariables = finalData.xVariables.filter((_, i) => i !== index + 1);
+                                  const updatedTransformations = finalData.transformations.filter((_, i) => i !== index + 1);
+                                  handleDataChange({ 
+                                    xVariables: updatedXVariables, 
+                                    transformations: updatedTransformations 
+                                  });
+                                }}
+                                title="Remove this X-variable"
+                              >
                     <X className="w-4 h-4" />
-                  </Button>
+                              </button>
                 </div>
               </div>
             ))}
+                      </>
+                    )}
+
+                  {/* Add Variable Button - Single button that moves to the end */}
+                  <div className="flex justify-start mt-4" style={{ marginLeft: '230px' }}>
+                    <Button 
+                      size="sm" 
+                      className="bg-orange-300 text-white hover:bg-orange-400 h-8 px-3 text-xs" 
+                      onClick={addXVariable}
+                    >
+                      <Plus className="w-3 h-3 mr-1" />
+                      Add Variable
+                    </Button>
           </div>
 
           {/* Interaction Terms Controls - Only show when stack modeling is enabled */}
@@ -1198,12 +1332,438 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
               )}
             </div>
           )}
+                </div>
+            </div>
+          )}
+
+          {/* Part 3: Constraint Selection - Only show when X variables are selected for general modeling */}
+          {finalData?.yVariable && 
+           finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && 
+           finalData?.modelType !== 'mmm' && (
+            <div className="space-y-3">
+              <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
+                <div className="mb-4">
+                  <p className="text-sm font-medium text-gray-700">
+                    Configure constraints for your model - set which variables should have positive or negative effects:
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Non-Positive Constraints */}
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-medium text-gray-900">Non-Positive Constraints</h4>
+                      <p className="text-xs text-gray-600">Variables that should have negative or zero effects</p>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" className="w-full justify-between">
+                            <span>
+                              {data?.negativeConstraints?.length > 0 
+                                ? `${data.negativeConstraints.length} variable${data.negativeConstraints.length > 1 ? 's' : ''} selected`
+                                : "Select Variables"
+                              }
+                            </span>
+                            <ChevronDown className="w-4 h-4" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
+                          <div className="flex items-center gap-2 py-1 border-b mb-2">
+                            <Checkbox
+                              checked={data?.negativeConstraints?.length === (data?.xVariables?.flat() || []).filter(variable => !data?.positiveConstraints?.includes(variable)).length}
+                              onCheckedChange={(checked) => {
+                                const availableVariables = (data?.xVariables?.flat() || []).filter(variable => !data?.positiveConstraints?.includes(variable));
+                                handleDataChange({ 
+                                  negativeConstraints: checked ? availableVariables : [] 
+                                });
+                              }}
+                            />
+                            <span className="text-sm font-medium">Select All</span>
+                          </div>
+                          {(data?.xVariables?.flat() || [])
+                            .filter(variable => !data?.positiveConstraints?.includes(variable)) // Exclude variables already selected in positive constraints
+                            .map((variable) => {
+                              return (
+                                <div key={variable} className="flex items-center gap-2 py-1">
+                                  <Checkbox
+                                    checked={data?.negativeConstraints?.includes(variable) || false}
+                                    onCheckedChange={(checked) => {
+                                      const current = data?.negativeConstraints || [];
+                                      const updated = checked 
+                                        ? [...current, variable]
+                                        : current.filter(v => v !== variable);
+                                      handleDataChange({ negativeConstraints: updated });
+                                    }}
+                                  />
+                                  <span className="text-sm">{variable}</span>
+                                </div>
+                              );
+                            })}
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+
+                    {/* Non-Negative Constraints */}
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-medium text-gray-900">Non-Negative Constraints</h4>
+                      <p className="text-xs text-gray-600">Variables that should have positive or zero effects</p>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button variant="outline" className="w-full justify-between">
+                            <span>
+                              {data?.positiveConstraints?.length > 0 
+                                ? `${data.positiveConstraints.length} variable${data.positiveConstraints.length > 1 ? 's' : ''} selected`
+                                : "Select Variables"
+                              }
+                            </span>
+                            <ChevronDown className="w-4 h-4" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
+                          <div className="flex items-center gap-2 py-1 border-b mb-2">
+                            <Checkbox
+                              checked={data?.positiveConstraints?.length === (data?.xVariables?.flat() || []).filter(variable => !data?.negativeConstraints?.includes(variable)).length}
+                              onCheckedChange={(checked) => {
+                                const availableVariables = (data?.xVariables?.flat() || []).filter(variable => !data?.negativeConstraints?.includes(variable));
+                                handleDataChange({ 
+                                  positiveConstraints: checked ? availableVariables : [] 
+                                });
+                              }}
+                            />
+                            <span className="text-sm font-medium">Select All</span>
+                          </div>
+                          {(data?.xVariables?.flat() || [])
+                            .filter(variable => !data?.negativeConstraints?.includes(variable)) // Exclude variables already selected in negative constraints
+                            .map((variable) => {
+                              return (
+                                <div key={variable} className="flex items-center gap-2 py-1">
+                                  <Checkbox
+                                    checked={data?.positiveConstraints?.includes(variable) || false}
+                                    onCheckedChange={(checked) => {
+                                      const current = data?.positiveConstraints || [];
+                                      const updated = checked 
+                                        ? [...current, variable]
+                                        : current.filter(v => v !== variable);
+                                      handleDataChange({ positiveConstraints: updated });
+                                    }}
+                                  />
+                                  <span className="text-sm">{variable}</span>
+                                </div>
+                              );
+                            })}
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Part 3: MMM Configuration Options - Show when X variables are selected for MMM models only */}
+            {finalData?.yVariable && 
+             finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && 
+             finalData?.modelType === 'mmm' && !mmmSelectedOption && (
+              <div className="space-y-3">
+                <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
+                  <div className="mb-4">
+                    <p className="text-sm font-medium text-gray-700">
+                      Configure your MMM model options:
+                    </p>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <RadioGroup
+                      value={mmmSelectedOption || ''}
+                      onValueChange={(value) => {
+                        setMmmSelectedOption(value as 'constraint' | 'roi');
+                        if (value === 'constraint') {
+                          setEnableConstraintSetup(true);
+                          setConstraintSettingsOpen(true);
+                        } else if (value === 'roi') {
+                          setEnableROICalculation(true);
+                          setRoiSettingsOpen(true);
+                        }
+                      }}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <RadioGroupItem value="constraint" id="constraint-option" />
+                        <Label htmlFor="constraint-option" className="text-sm font-medium">
+                          Setup constraint configuration
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-3">
+                        <RadioGroupItem value="roi" id="roi-option" />
+                        <Label htmlFor="roi-option" className="text-sm font-medium">
+                          Calculate ROI
+                        </Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Part 3: Constraint Configuration - Show when constraint checkbox is enabled for MMM models */}
+            {finalData?.yVariable && 
+             finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && 
+             finalData?.modelType === 'mmm' && 
+             enableConstraintSetup && (
+              <div className="space-y-3">
+                <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
+                  <div className="mb-4">
+                    <p className="text-sm font-medium text-gray-700">
+                      Configure constraints for your model - set which variables should have positive or negative effects:
+                    </p>
+                  </div>
+                   <div className="flex gap-4 items-end">
+                     {/* Non-Positive Constraints */}
+                     <div className="flex-1 space-y-3">
+                       <h4 className="text-sm font-medium text-gray-900">Non-Positive Constraints</h4>
+                       <p className="text-xs text-gray-600">Variables that should have negative or zero effects</p>
+                       <Popover>
+                         <PopoverTrigger asChild>
+                           <Button variant="outline" className="w-full justify-between">
+                             <span>
+                               {data?.negativeConstraints?.length > 0 
+                                 ? `${data.negativeConstraints.length} variable${data.negativeConstraints.length > 1 ? 's' : ''} selected`
+                                 : "Select Variables"
+                               }
+                             </span>
+                             <ChevronDown className="w-4 h-4" />
+                           </Button>
+                         </PopoverTrigger>
+                         <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
+                           <div className="flex items-center gap-2 py-1 border-b mb-2">
+                             <Checkbox
+                               checked={data?.negativeConstraints?.length === (data?.xVariables?.flat() || []).filter(variable => !data?.positiveConstraints?.includes(variable)).length}
+                               onCheckedChange={(checked) => {
+                                 const availableVariables = (data?.xVariables?.flat() || []).filter(variable => !data?.positiveConstraints?.includes(variable));
+                                 handleDataChange({ 
+                                   negativeConstraints: checked ? availableVariables : [] 
+                                 });
+                               }}
+                             />
+                             <span className="text-sm font-medium">Select All</span>
+                           </div>
+                           {(data?.xVariables?.flat() || [])
+                             .filter(variable => !data?.positiveConstraints?.includes(variable)) // Exclude variables already selected in positive constraints
+                             .map((variable) => {
+                               return (
+                                 <div key={variable} className="flex items-center gap-2 py-1">
+                                   <Checkbox
+                                     checked={data?.negativeConstraints?.includes(variable) || false}
+                                     onCheckedChange={(checked) => {
+                                       const current = data?.negativeConstraints || [];
+                                       const updated = checked 
+                                         ? [...current, variable]
+                                         : current.filter(v => v !== variable);
+                                       handleDataChange({ negativeConstraints: updated });
+                                     }}
+                                   />
+                                   <span className="text-sm">{variable}</span>
+                                 </div>
+                               );
+                             })}
+                         </PopoverContent>
+                       </Popover>
+                     </div>
+
+                     {/* Non-Negative Constraints */}
+                     <div className="flex-1 space-y-3">
+                       <h4 className="text-sm font-medium text-gray-900">Non-Negative Constraints</h4>
+                       <p className="text-xs text-gray-600">Variables that should have positive or zero effects</p>
+                       <Popover>
+                         <PopoverTrigger asChild>
+                           <Button variant="outline" className="w-full justify-between">
+                             <span>
+                               {data?.positiveConstraints?.length > 0 
+                                 ? `${data.positiveConstraints.length} variable${data.positiveConstraints.length > 1 ? 's' : ''} selected`
+                                 : "Select Variables"
+                               }
+                             </span>
+                             <ChevronDown className="w-4 h-4" />
+                           </Button>
+                         </PopoverTrigger>
+                         <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
+                           <div className="flex items-center gap-2 py-1 border-b mb-2">
+                             <Checkbox
+                               checked={data?.positiveConstraints?.length === (data?.xVariables?.flat() || []).filter(variable => !data?.negativeConstraints?.includes(variable)).length}
+                               onCheckedChange={(checked) => {
+                                 const availableVariables = (data?.xVariables?.flat() || []).filter(variable => !data?.negativeConstraints?.includes(variable));
+                                 handleDataChange({ 
+                                   positiveConstraints: checked ? availableVariables : [] 
+                                 });
+                               }}
+                             />
+                             <span className="text-sm font-medium">Select All</span>
+                           </div>
+                           {(data?.xVariables?.flat() || [])
+                             .filter(variable => !data?.negativeConstraints?.includes(variable)) // Exclude variables already selected in negative constraints
+                             .map((variable) => {
+                               return (
+                                 <div key={variable} className="flex items-center gap-2 py-1">
+                                   <Checkbox
+                                     checked={data?.positiveConstraints?.includes(variable) || false}
+                                     onCheckedChange={(checked) => {
+                                       const current = data?.positiveConstraints || [];
+                                       const updated = checked 
+                                         ? [...current, variable]
+                                         : current.filter(v => v !== variable);
+                                       handleDataChange({ positiveConstraints: updated });
+                                     }}
+                                   />
+                                   <span className="text-sm">{variable}</span>
+                                 </div>
+                               );
+                             })}
+                         </PopoverContent>
+                       </Popover>
+                     </div>
+
+                     {/* Clear Constraints Button */}
+                     <div className="flex-shrink-0">
+                       <button 
+                         className="h-10 w-10 flex items-center justify-center text-black hover:text-red-600 transition-colors" 
+                         onClick={() => {
+                           handleDataChange({ 
+                             positiveConstraints: [], 
+                             negativeConstraints: [] 
+                           });
+                         }}
+                         title="Clear all constraint selections"
+                       >
+                         <X className="w-4 h-4" />
+                       </button>
+                     </div>
+                   </div>
+                 </div>
+              </div>
+            )}
+
+            {/* Second Option Container - Show after constraint configuration */}
+            {finalData?.yVariable && 
+             finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && 
+             finalData?.modelType === 'mmm' && 
+             mmmSelectedOption === 'constraint' && 
+             enableConstraintSetup && 
+             !showSecondOption && (
+              <div className="space-y-3">
+                <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
+                  <div className="mb-4 flex items-center justify-between">
+                    <p className="text-sm font-medium text-gray-700">
+                      Additional MMM configuration:
+                    </p>
+                    <button
+                      className="text-black hover:text-red-600 transition-colors"
+                      onClick={() => {
+                        setMmmSelectedOption(null);
+                        setShowSecondOption(false);
+                        setEnableConstraintSetup(false);
+                        setEnableROICalculation(false);
+                        setConstraintSettingsOpen(false);
+                        setRoiSettingsOpen(false);
+                      }}
+                      title="Clear MMM configuration"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-3">
+                      <Checkbox
+                        id="enable-second-option"
+                        checked={showSecondOption}
+                        onCheckedChange={(checked) => {
+                          setShowSecondOption(!!checked);
+                          if (checked) {
+                            setEnableROICalculation(true);
+                            setRoiSettingsOpen(true);
+                          }
+                        }}
+                      />
+                      <Label htmlFor="enable-second-option" className="text-sm font-medium">
+                        Do you want to compute ROI?
+                      </Label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+             {/* ROI Configuration - Show when ROI checkbox is enabled for MMM models */}
+            {finalData?.yVariable && 
+             finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && 
+             finalData?.modelType === 'mmm' && 
+             enableROICalculation && (
+              <div className="space-y-3">
+                <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
+                  <ROIConfiguration
+                    availableFeatures={data?.xVariables?.flat() || []}
+                    availableColumns={numericalColumns || []}
+                    availableCombinations={data?.selectedCombinations || []}
+                    roiConfig={roiConfig}
+                    onROIConfigChange={setRoiConfig}
+                    yVariable={data?.yVariable}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Second Option Container - Show after ROI configuration */}
+            {finalData?.yVariable && 
+             finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && 
+             finalData?.modelType === 'mmm' && 
+             mmmSelectedOption === 'roi' && 
+             enableROICalculation && 
+             !showSecondOption && (
+              <div className="space-y-3">
+                <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
+                  <div className="mb-4 flex items-center justify-between">
+                    <p className="text-sm font-medium text-gray-700">
+                      Additional MMM configuration:
+                    </p>
+                    <button
+                      className="text-black hover:text-red-600 transition-colors"
+                      onClick={() => {
+                        setMmmSelectedOption(null);
+                        setShowSecondOption(false);
+                        setEnableConstraintSetup(false);
+                        setEnableROICalculation(false);
+                        setConstraintSettingsOpen(false);
+                        setRoiSettingsOpen(false);
+                      }}
+                      title="Clear MMM configuration"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-3">
+                      <Checkbox
+                        id="enable-second-option-roi"
+                        checked={showSecondOption}
+                        onCheckedChange={(checked) => {
+                          setShowSecondOption(!!checked);
+                          if (checked) {
+                            setEnableConstraintSetup(true);
+                            setConstraintSettingsOpen(true);
+                          }
+                        }}
+                      />
+                      <Label htmlFor="enable-second-option-roi" className="text-sm font-medium">
+                        Do you want to setup the constraint?
+                      </Label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
         </div>
         )}
       </Card>
 
-      {/* Constraint Settings Box */}
-      {constraintSettingsOpen && (
+      {/* Old Constraint Settings Box - Removed */}
+      {false && (
         <Card className="mb-6">
           <div className="py-2 px-4 border-b bg-muted/30">
             <h3 className="font-semibold text-foreground flex items-center gap-2">
@@ -1370,8 +1930,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         </Card>
       )}
 
-      {/* ROI Settings Box */}
-      {roiSettingsOpen && (
+      {/* Old ROI Settings Box - Removed */}
+      {false && (
         <Card className="mb-6">
           <div className="py-2 px-4 border-b bg-muted/30">
             <h3 className="font-semibold text-foreground flex items-center gap-2">

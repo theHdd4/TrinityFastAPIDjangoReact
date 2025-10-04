@@ -633,7 +633,7 @@ class MMMStackModelDataProcessor:
     
 
     
-    def calculate_combination_betas(self, model_results: List[Dict[str, Any]], combinations: List[str], x_variables: List[str], numerical_columns_for_interaction: List[str], split_cluster_id: str = None, standardization: str = 'none') -> Dict[str, Dict[str, float]]:
+    def calculate_combination_betas(self, model_results: List[Dict[str, Any]], combinations: List[str], x_variables: List[str], numerical_columns_for_interaction: List[str], split_cluster_id: str = None, standardization: str = 'none', apply_interaction_terms: bool = True) -> Dict[str, Dict[str, float]]:
         """
         Calculate final beta coefficients for each combination by combining common betas and interaction term betas.
         This method follows the same logic as stack_model_training.py.
@@ -691,22 +691,23 @@ class MMMStackModelDataProcessor:
                     logger.info(f"Final beta for {x_var}: {final_beta}")
                     
                 
-                # Calculate final betas for numerical_columns_for_interaction (interaction variables)
-                for interaction_var in numerical_columns_for_interaction:
-                    # Only add if it's not already in x_variables to avoid duplication
-                    if interaction_var not in x_variables:
-                        # Use original variable name (mmm_stack_training.py uses original names throughout)
-                        model_var_name = interaction_var
-                        
-                        # Common beta for this interaction variable (use original variable name)
-                        common_beta = coefficients.get(model_var_name, 0.0)
-                        
-                        # Individual beta for this combination and interaction variable
-                        interaction_key = f"encoded_combination_{combination}_x_{interaction_var}"
-                        individual_beta = coefficients.get(interaction_key, 0.0)
-                        
-                        # Final beta = common + individual
-                        final_betas[interaction_var] = common_beta + individual_beta
+                # Calculate final betas for numerical_columns_for_interaction (interaction variables) ONLY if interaction terms are enabled
+                if apply_interaction_terms:
+                    for interaction_var in numerical_columns_for_interaction:
+                        # Only add if it's not already in x_variables to avoid duplication
+                        if interaction_var not in x_variables:
+                            # Use original variable name (mmm_stack_training.py uses original names throughout)
+                            model_var_name = interaction_var
+                            
+                            # Common beta for this interaction variable (use original variable name)
+                            common_beta = coefficients.get(model_var_name, 0.0)
+                            
+                            # Individual beta for this combination and interaction variable
+                            interaction_key = f"encoded_combination_{combination}_x_{interaction_var}"
+                            individual_beta = coefficients.get(interaction_key, 0.0)
+                            
+                            # Final beta = common + individual
+                            final_betas[interaction_var] = common_beta + individual_beta
                 
                 combination_betas[combination_key] = final_betas
                 logger.info(f"Stored final betas for {combination_key}: {final_betas}")
@@ -1991,11 +1992,12 @@ class MMMStackModelDataProcessor:
                 if col.startswith('encoded_combination_') and col not in feature_columns:
                     feature_columns.append(col)
             
-            # Add interaction variables (ending with x_variable names)
-            for var in x_variables_lower:
-                for col in df.columns:
-                    if col.endswith(f'_x_{var}') and col not in feature_columns:
-                        feature_columns.append(col)
+            # Add interaction variables (ending with x_variable names) ONLY if interaction terms are enabled
+            if apply_interaction_terms:
+                for var in x_variables_lower:
+                    for col in df.columns:
+                        if col.endswith(f'_x_{var}') and col not in feature_columns:
+                            feature_columns.append(col)
             
             # Sort to ensure consistent order
             feature_columns.sort()
@@ -2233,7 +2235,8 @@ class MMMStackModelDataProcessor:
                             x_variables=x_variables_lower,
                             numerical_columns_for_interaction=numerical_columns_for_interaction or [],
                             split_cluster_id=None,
-                            standardization='none'
+                            standardization='none',
+                            apply_interaction_terms=apply_interaction_terms
                         )
                         combination_betas[combination] = combination_beta.get(combination, {})
                         logger.info(f"Combination betas for '{combination}': {combination_betas[combination]}")

@@ -139,13 +139,13 @@ const BuildModelFeatureBasedInput: React.FC<BuildModelFeatureBasedInputProps> = 
           </div>
           
           <div>
-            <Label>Model Type</Label>
+            <Label>Application Area</Label>
             <Select 
               value={data.modelType || 'general'} 
               onValueChange={(value) => onDataChange({ modelType: value })}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select model type" />
+                <SelectValue placeholder="Select application area" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="general">General Models (Individual & Stack)</SelectItem>

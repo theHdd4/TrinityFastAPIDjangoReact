@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import ExploreCanvas from './components/ExploreCanvas';
 import { useLaboratoryStore, ExploreData } from '@/components/LaboratoryMode/store/laboratoryStore';
 
@@ -24,17 +24,22 @@ const ExploreAtom: React.FC<ExploreAtomProps> = ({ atomId }) => {
 
   const isApplied = useMemo(() => atom?.settings?.data?.applied === true, [atom?.settings?.data?.applied]);
 
+  const handleDataChange = useCallback((newData: Partial<ExploreData>) => {
+    const { getAtom, updateAtomSettings } = useLaboratoryStore.getState();
+    const currentAtom = getAtom(atomId);
+    const existingData = currentAtom?.settings?.data || {};
+
+    updateAtomSettings(atomId, {
+      data: { ...existingData, ...newData },
+    });
+  }, [atomId]);
+
   return (
     <div className="w-full h-full">
       <ExploreCanvas
         data={data}
         isApplied={isApplied}
-        onDataChange={(newData) => {
-          const currentSettings = atom?.settings || {};
-          useLaboratoryStore.getState().updateAtomSettings(atomId, {
-            data: { ...(currentSettings.data || {}), ...newData },
-          });
-        }}
+        onDataChange={handleDataChange}
       />
     </div>
   );

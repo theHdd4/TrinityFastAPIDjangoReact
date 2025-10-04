@@ -231,7 +231,6 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
       <div>
         <div className="flex items-center gap-3 mb-6">
           <div className="p-2 bg-gradient-to-br from-blue-500/20 to-blue-400/10 rounded-xl">
-            <Tag className="w-5 h-5 text-blue-600" />
           </div>
           <h3 className="text-xl font-bold text-foreground">Dimension Mapping</h3>
           <Badge

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { safeStringify } from '@/utils/safeStringify';
 import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon } from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
@@ -19,6 +20,7 @@ import {
 } from '@/lib/api';
 import { AIChatBot, AtomAIChatBot } from '@/components/TrinityAI';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
+import { AtomSuggestion } from '@/components/AtomSuggestion';
 import TextBoxEditor from '@/components/AtomList/atoms/text-box/TextBoxEditor';
 import DataUploadValidateAtom from '@/components/AtomList/atoms/data-upload-validate/DataUploadValidateAtom';
 import FeatureOverviewAtom from '@/components/AtomList/atoms/feature-overview/FeatureOverviewAtom';
@@ -73,6 +75,7 @@ interface CanvasAreaProps {
   onCardSelect?: (cardId: string, exhibited: boolean) => void;
   selectedCardId?: string;
   onToggleSettingsPanel?: () => void;
+  onToggleHelpPanel?: () => void;
   canEdit: boolean;
 }
 
@@ -118,6 +121,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   onCardSelect,
   selectedCardId,
   onToggleSettingsPanel,
+  onToggleHelpPanel,
   canEdit,
 }) => {
   const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings } = useLaboratoryStore();
@@ -127,6 +131,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
   const [addDragTarget, setAddDragTarget] = useState<string | null>(null);
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [showAtomSuggestion, setShowAtomSuggestion] = useState<Record<string, boolean>>({});
   const [isCanvasLoading, setIsCanvasLoading] = useState(true);
   const loadingMessages = useMemo(
     () => [
@@ -141,6 +146,31 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     loadingMessages[loadingMessageIndex] ?? loadingMessages[0] ?? 'Loading';
   const prevLayout = React.useRef<LayoutCard[] | null>(null);
   const initialLoad = React.useRef(true);
+
+  useEffect(() => {
+    if (!expandedCard) {
+      return;
+    }
+
+    if (typeof document === 'undefined' || typeof window === 'undefined') {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setExpandedCard(null);
+      }
+    };
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [expandedCard]);
 
   const { updateCard, setCards } = useExhibitionStore();
   const { toast } = useToast();
@@ -1045,6 +1075,17 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     ]);
   }
   setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
+  
+  // Scroll to the newly created card after a short delay to ensure it's rendered
+  setTimeout(() => {
+    const cardElement = document.querySelector(`[data-card-id="${newCard.id}"]`);
+    if (cardElement) {
+      cardElement.scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'center' 
+      });
+    }
+  }, 100);
 };
 
 const addNewCardWithAtom = (
@@ -1201,6 +1242,13 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       prefillColumnClassifier(newAtom.id);
     } else if (info.id === 'scope-selector') {
       prefillScopeSelector(newAtom.id);
+    }
+  };
+
+  const handleAddAtomFromSuggestion = (atomId: string, atomData: any, targetCardId?: string) => {
+    const cardId = targetCardId || selectedCardId;
+    if (cardId) {
+      addAtomByName(cardId, atomId);
     }
   };
 
@@ -1640,11 +1688,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
             <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
               {card.atoms.length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mb-4">
-                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                    <Grid3X3 className="w-8 h-8 text-gray-400" />
-                  </div>
-                  <p className="text-gray-500 mb-2">No atoms in this section</p>
-                  <p className="text-sm text-gray-400">Configure this atom for your application</p>
+                  <AtomSuggestion
+                    cardId={card.id}
+                    isVisible={true}
+                    onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
+                    onAddAtom={handleAddAtomFromSuggestion}
+                  />
                 </div>
               ) : (
                 <div
@@ -1677,6 +1726,19 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                             title="Atom Settings"
                           >
                             <Settings className="w-4 h-4 text-gray-400" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onAtomSelect) {
+                                onAtomSelect(atom.id);
+                              }
+                              onToggleHelpPanel?.();
+                            }}
+                            className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                            title="Help"
+                          >
+                            <span className="w-4 h-4 text-gray-400 text-base font-bold flex items-center justify-center">?</span>
                           </button>
                         </div>
                         <button
@@ -1794,11 +1856,22 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       </div>
 
       {/* Fullscreen Card Modal */}
-      {expandedCard && (
-        <div className="fixed inset-0 z-50 bg-gray-50 flex flex-col h-screen w-screen">
-            {/* Fullscreen Header */}
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
-              <div className="flex items-center space-x-2">
+      {expandedCard &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-[1000]"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="absolute inset-0 bg-black/40"
+              aria-hidden="true"
+              onClick={() => setExpandedCard(null)}
+            />
+            <div className="relative z-10 flex h-full w-full flex-col bg-gray-50 shadow-2xl">
+              {/* Fullscreen Header */}
+              <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
+                <div className="flex items-center space-x-2">
                 <Eye className={`w-4 h-4 ${layoutCards.find(c => c.id === expandedCard)?.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                 <span className="text-lg font-semibold text-gray-900">
                   {(() => {
@@ -1811,8 +1884,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         : 'Card';
                   })()}
                 </span>
-              </div>
-              <div className="flex items-center space-x-2">
+                </div>
+                <div className="flex items-center space-x-2">
                 <span className="text-sm text-gray-500">Exhibit the Card</span>
                 <Switch
                   checked={layoutCards.find(c => c.id === expandedCard)?.isExhibited || false}
@@ -1826,12 +1899,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                 >
                   <X className="w-5 h-5 text-gray-500" />
                 </button>
+                </div>
               </div>
-            </div>
 
-            {/* Fullscreen Content */}
-            <div className="flex-1 flex flex-col px-8 py-4 space-y-4 overflow-auto">
-              {(() => {
+              {/* Fullscreen Content */}
+              <div className="flex-1 flex flex-col px-8 py-4 space-y-4 overflow-auto">
+                {(() => {
                 const card = layoutCards.find(c => c.id === expandedCard);
                 if (!card) return null;
 
@@ -1866,7 +1939,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                             <Trash2 className="w-4 h-4 text-gray-400" />
                           </button>
                         </div>
-                        
+
                         {/* Atom Content */}
                         <div className="w-full flex-1 overflow-hidden">
                           {atom.atomId === 'text-box' ? (
@@ -1920,8 +1993,10 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                   </div>
                 );
               })()}
-            </div>
-        </div>
+              </div>
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

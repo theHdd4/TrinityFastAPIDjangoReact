@@ -1343,7 +1343,6 @@ class MMMModelTrainer:
             variable_statistics = {
                 "combination_index": combo_idx,
                 "parameter_combination": combo_config,
-                "variable_averages": {var: float(X_original[var].mean()) for var in x_variables_lower},
                 "variable_averages": {**{var: float(X_original[var].mean()) for var in x_variables_lower}, 
                                     y_variable_lower: float(y_original.mean())},
                 "transformation_metadata": transformation_metadata,

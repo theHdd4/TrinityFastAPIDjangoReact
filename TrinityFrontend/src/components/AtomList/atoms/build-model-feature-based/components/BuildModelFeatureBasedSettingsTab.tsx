@@ -17,22 +17,22 @@ interface BuildModelFeatureBasedSettingsTabProps {
 
 const individualModels = [
   { id: 'Linear Regression', name: 'Linear Regression', params: [], supportsAutoTuning: false },
+  { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', params: [], supportsAutoTuning: false },
   { id: 'Ridge Regression', name: 'Ridge Regression', params: ['Alpha'], supportsAutoTuning: true },
   { id: 'Lasso Regression', name: 'Lasso Regression', params: ['Alpha'], supportsAutoTuning: true },
   { id: 'ElasticNet Regression', name: 'ElasticNet Regression', params: ['Alpha', 'L1 Ratio'], supportsAutoTuning: true },
-  { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', params: [], supportsAutoTuning: false },
   { id: 'Custom Constrained Ridge', name: 'Custom Constrained Ridge', params: ['L2 Penalty', 'Learning Rate', 'Iterations', 'Adam'], supportsAutoTuning: true },
-  { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', params: ['Learning Rate', 'Iterations', 'Adam'], supportsAutoTuning: false }
+  { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', params: ['Learning Rate', 'Iterations', 'Adam'], supportsAutoTuning: true }
 ];
 
 const stackModels = [
   { id: 'Linear Regression', name: 'Linear Regression', params: [], supportsAutoTuning: false },
+  { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', params: [], supportsAutoTuning: false },
   { id: 'Ridge Regression', name: 'Ridge Regression', params: ['Alpha'], supportsAutoTuning: true },
   { id: 'Lasso Regression', name: 'Lasso Regression', params: ['Alpha'], supportsAutoTuning: true },
   { id: 'ElasticNet Regression', name: 'ElasticNet Regression', params: ['Alpha', 'L1 Ratio'], supportsAutoTuning: true },
-  { id: 'Bayesian Ridge Regression', name: 'Bayesian Ridge Regression', params: [], supportsAutoTuning: false },
   { id: 'Constrained Ridge', name: 'Constrained Ridge', params: ['L2 Penalty', 'Learning Rate', 'Iterations', 'Adam'], supportsAutoTuning: true },
-  { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', params: ['Learning Rate', 'Iterations', 'Adam'], supportsAutoTuning: false }
+  { id: 'Constrained Linear Regression', name: 'Constrained Linear Regression', params: ['Learning Rate', 'Iterations', 'Adam'], supportsAutoTuning: true }
 ];
 
 const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettingsTabProps> = ({
@@ -46,6 +46,7 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
   const [isLoadingIdentifiers, setIsLoadingIdentifiers] = useState(false);
   const [isIndividualModelingCollapsed, setIsIndividualModelingCollapsed] = useState(false);
   const [isStackModelingCollapsed, setIsStackModelingCollapsed] = useState(false);
+  const [isModelTestConfigCollapsed, setIsModelTestConfigCollapsed] = useState(false);
   
   // State for expanded models (Excel-like hierarchical checkboxes)
   const [expandedIndividualModels, setExpandedIndividualModels] = useState<Set<string>>(new Set());
@@ -249,70 +250,33 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
       {/* Individual Modeling */}
       <Card>
         <div className="p-4 border-b bg-muted/30">
-          <div 
-            className="flex items-center justify-between cursor-pointer"
-            onClick={() => setIsIndividualModelingCollapsed(!isIndividualModelingCollapsed)}
-          >
-          <h4 className="font-medium text-foreground flex items-center gap-2">
-            <Cpu className="w-4 h-4 text-primary" />
-              Individual Modeling
-          </h4>
-            {isIndividualModelingCollapsed ? (
-              <ChevronRight className="w-4 h-4 text-muted-foreground" />
-            ) : (
-              <ChevronDown className="w-4 h-4 text-muted-foreground" />
-            )}
+          <div className="flex items-center justify-between">
+            <div 
+              className="flex items-center gap-2 cursor-pointer"
+              onClick={() => setIsIndividualModelingCollapsed(!isIndividualModelingCollapsed)}
+            >
+              <Checkbox
+                id="individual-modeling"
+                checked={data?.individualModeling ?? true}
+                onCheckedChange={(checked) => onDataChange({ individualModeling: !!checked })}
+              />
+              <h4 className="font-medium text-foreground flex items-center gap-2">
+                Individual Modeling
+              </h4>
+              {isIndividualModelingCollapsed ? (
+                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-muted-foreground" />
+              )}
+            </div>
           </div>
         </div>
         {!isIndividualModelingCollapsed && (
         <div className="p-4 space-y-4">
-          {/* Enable Individual Modeling Toggle */}
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="individual-modeling"
-              checked={data?.individualModeling ?? true}
-              onCheckedChange={(checked) => onDataChange({ individualModeling: !!checked })}
-            />
-            <Label htmlFor="individual-modeling" className="text-sm font-medium">
-              Enable Individual Modeling
-            </Label>
-          </div>
 
           {/* Individual Modeling Configuration - Only show when enabled */}
           {data?.individualModeling && (
             <div className="space-y-4 pl-6 border-l-2 border-border">
-          {/* Training Parameters */}
-          <div className="space-y-4">
-            <div>
-              <Label>K-Fold Cross Validation</Label>
-              <Input
-                type="number"
-                min="2"
-                max="10"
-                    value={data?.individualKFolds || 5}
-                    onChange={(e) => onDataChange({ individualKFolds: parseInt(e.target.value) || 5 })}
-                placeholder="5"
-                className="mt-1"
-              />
-            </div>
-            
-            <div>
-              <Label>Test Size Ratio</Label>
-              <Input
-                type="number"
-                min="0.1"
-                max="0.5"
-                step="0.1"
-                    value={data?.individualTestSize || 0.2}
-                    onChange={(e) => onDataChange({ individualTestSize: parseFloat(e.target.value) || 0.2 })}
-                placeholder="0.2"
-                className="mt-1"
-              />
-            </div>
-          </div>
-          
-          {/* Separator Line */}
-          <div className="border-t border-blue-200 my-4"></div>
           
           <div>
                 {/* Select All Individual Models Checkbox */}
@@ -365,32 +329,29 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                 <div key={model.id} className="space-y-1">
                   {/* Excel-like hierarchical checkbox */}
                   <div className="flex items-center space-x-2">
-                    {/* Plus/Minus expand button */}
-                    <button
-                      onClick={() => {
-                        if (model.supportsAutoTuning) {
-                          const newExpanded = new Set(expandedIndividualModels);
-                          if (newExpanded.has(model.id)) {
-                            newExpanded.delete(model.id);
-                          } else {
-                            newExpanded.add(model.id);
-                          }
-                          setExpandedIndividualModels(newExpanded);
-                        }
-                      }}
-                      disabled={!model.supportsAutoTuning}
-                      className={`flex items-center justify-center w-4 h-4 border border-gray-300 rounded text-xs ${
-                        model.supportsAutoTuning 
-                          ? 'hover:bg-gray-100 cursor-pointer' 
-                          : 'cursor-not-allowed opacity-50'
-                      }`}
-                    >
-                      {expandedIndividualModels.has(model.id) ? (
-                        <Minus className={`w-3 h-3 ${model.supportsAutoTuning ? 'text-blue-600' : 'text-gray-400'}`} />
-                      ) : (
-                        <Plus className={`w-3 h-3 ${model.supportsAutoTuning ? 'text-blue-600' : 'text-gray-400'}`} />
+                    {/* Plus/Minus expand button - Always reserve space for alignment */}
+                    <div className="w-4 h-4 flex items-center justify-center">
+                      {model.supportsAutoTuning && (
+                        <button
+                          onClick={() => {
+                            const newExpanded = new Set(expandedIndividualModels);
+                            if (newExpanded.has(model.id)) {
+                              newExpanded.delete(model.id);
+                            } else {
+                              newExpanded.add(model.id);
+                            }
+                            setExpandedIndividualModels(newExpanded);
+                          }}
+                          className="flex items-center justify-center w-4 h-4 border border-gray-300 rounded text-xs hover:bg-gray-100 cursor-pointer"
+                        >
+                          {expandedIndividualModels.has(model.id) ? (
+                            <Minus className="w-3 h-3 text-blue-600" />
+                          ) : (
+                            <Plus className="w-3 h-3 text-blue-600" />
+                          )}
+                        </button>
                       )}
-                    </button>
+                    </div>
                     
                     {/* Main model checkbox */}
                     <Checkbox
@@ -435,33 +396,64 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                     <Label htmlFor={`individual-${model.id}`} className="text-sm">{model.name}</Label>
                   </div>
                   
-                  {/* Expanded sub-options (Excel-like hierarchy) */}
-                  {expandedIndividualModels.has(model.id) && (
-                    <div className="ml-6 space-y-2 border-l-2 border-gray-200 pl-4">
-                      {/* Manual Parameters Toggle - Only show for models that support auto tuning */}
-                      {model.supportsAutoTuning && (
-                        <div className="flex items-center space-x-2">
-                          <Checkbox
-                            id={`manual-params-${model.id}`}
-                            checked={data?.individualModelConfigs?.find(c => c.id === model.id)?.tuning_mode === 'manual'}
-                            onCheckedChange={(checked) => {
-                              const updatedConfigs = (data?.individualModelConfigs || []).map(c => {
-                                if (c.id === model.id) {
-                                  return {
-                                    ...c,
-                                    tuning_mode: checked ? 'manual' : 'auto'
-                                  };
-                                }
-                                return c;
-                              });
-                              onDataChange({ individualModelConfigs: updatedConfigs });
-                            }}
-                          />
-                          <Label htmlFor={`manual-params-${model.id}`} className="text-xs text-muted-foreground">
-                            Use Manual Parameters (default: auto-tuning)
-                          </Label>
-                        </div>
-                      )}
+                      {/* Expanded sub-options (Excel-like hierarchy) */}
+                      {expandedIndividualModels.has(model.id) && (
+                        <div className="ml-6 space-y-2 border-l-2 border-gray-200 pl-4">
+                          {/* Manual Parameters Toggle - Only show for models that support auto tuning */}
+                          {model.supportsAutoTuning && (
+                            <div className="flex items-center space-x-2">
+                              <Checkbox
+                                id={`manual-params-${model.id}`}
+                                checked={data?.individualModelConfigs?.find(c => c.id === model.id)?.tuning_mode === 'manual'}
+                                onCheckedChange={(checked) => {
+                                  const currentModels = data?.individualSelectedModels || [];
+                                  const currentConfigs = data?.individualModelConfigs || [];
+                                  
+                                  // If enabling manual and model is not selected, select it
+                                  if (checked && !currentModels.includes(model.id)) {
+                                    const defaultParams: Record<string, any> = {};
+                                    model.params.forEach(param => {
+                                      if (param === 'Alpha') defaultParams[param] = '1.0';
+                                      else if (param === 'L1 Ratio') defaultParams[param] = '0.5';
+                                      else if (param === 'L2 Penalty') defaultParams[param] = '0.1';
+                                      else if (param === 'Learning Rate') defaultParams[param] = '0.001';
+                                      else if (param === 'Iterations') defaultParams[param] = '10000';
+                                      else if (param === 'Adam') defaultParams[param] = 'false';
+                                      else defaultParams[param] = '';
+                                    });
+                                    
+                                    const updatedModels = [...currentModels, model.id];
+                                    const updatedConfigs = [...currentConfigs, {
+                                      id: model.id,
+                                      name: model.name,
+                                      parameters: defaultParams,
+                                      tuning_mode: 'manual'
+                                    }];
+                                    
+                                    onDataChange({
+                                      individualSelectedModels: updatedModels,
+                                      individualModelConfigs: updatedConfigs
+                                    });
+                                  } else {
+                                    // Just update the tuning mode for existing model
+                                    const updatedConfigs = currentConfigs.map(c => {
+                                      if (c.id === model.id) {
+                                        return {
+                                          ...c,
+                                          tuning_mode: checked ? 'manual' : 'auto'
+                                        };
+                                      }
+                                      return c;
+                                    });
+                                    onDataChange({ individualModelConfigs: updatedConfigs });
+                                  }
+                                }}
+                              />
+                              <Label htmlFor={`manual-params-${model.id}`} className="text-xs text-muted-foreground">
+                                Use Manual Parameters (default: auto-tuning)
+                              </Label>
+                            </div>
+                          )}
                       
                       {/* Parameters - Only show when manual tuning is selected or model doesn't support auto tuning */}
                       {(!model.supportsAutoTuning || (data?.individualModelConfigs?.find(c => c.id === model.id)?.tuning_mode === 'manual')) && model.params.map(param => {
@@ -515,34 +507,29 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
       {/* Stack Modeling */}
       <Card>
         <div className="p-4 border-b bg-muted/30">
-          <div 
-            className="flex items-center justify-between cursor-pointer"
-            onClick={() => setIsStackModelingCollapsed(!isStackModelingCollapsed)}
-          >
-            <h4 className="font-medium text-foreground flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-primary" />
-              Stack Modeling
-            </h4>
-            {isStackModelingCollapsed ? (
-              <ChevronRight className="w-4 h-4 text-muted-foreground" />
-            ) : (
-              <ChevronDown className="w-4 h-4 text-muted-foreground" />
-            )}
+          <div className="flex items-center justify-between">
+            <div 
+              className="flex items-center gap-2 cursor-pointer"
+              onClick={() => setIsStackModelingCollapsed(!isStackModelingCollapsed)}
+            >
+              <Checkbox
+                id="stack-modeling"
+                checked={data?.stackModeling || false}
+                onCheckedChange={(checked) => onDataChange({ stackModeling: checked as boolean })}
+              />
+              <h4 className="font-medium text-foreground flex items-center gap-2">
+                Stack Modeling
+              </h4>
+              {isStackModelingCollapsed ? (
+                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-muted-foreground" />
+              )}
+            </div>
           </div>
         </div>
         {!isStackModelingCollapsed && (
           <div className="p-4 space-y-4">
-          {/* Enable Stack Modeling Toggle */}
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="stack-modeling"
-              checked={data?.stackModeling || false}
-              onCheckedChange={(checked) => onDataChange({ stackModeling: checked as boolean })}
-            />
-            <Label htmlFor="stack-modeling" className="text-sm font-medium">
-              Enable Stack Modeling
-            </Label>
-          </div>
 
           {/* Stack Modeling Configuration - Only show when enabled */}
           {data?.stackModeling && (
@@ -671,38 +658,6 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
               {/* Separator Line */}
               <div className="border-t border-blue-200 my-4"></div>
               
-              {/* Stack Modeling Training Parameters */}
-              <div className="space-y-4">
-                <div>
-                  <Label>K-Fold Cross Validation</Label>
-                  <Input
-                    type="number"
-                    min="2"
-                    max="10"
-                    value={data?.stackKFolds || 5}
-                    onChange={(e) => onDataChange({ stackKFolds: parseInt(e.target.value) || 5 })}
-                    placeholder="5"
-                    className="mt-1"
-                  />
-                </div>
-                
-                <div>
-                  <Label>Test Size Ratio</Label>
-                  <Input
-                    type="number"
-                    min="0.1"
-                    max="0.5"
-                    step="0.1"
-                    value={data?.stackTestSize || 0.2}
-                    onChange={(e) => onDataChange({ stackTestSize: parseFloat(e.target.value) || 0.2 })}
-                    placeholder="0.2"
-                    className="mt-1"
-                  />
-                </div>
-              </div>
-              
-              {/* Separator Line */}
-              <div className="border-t border-blue-200 my-4"></div>
               
               {/* Stack Modeling Models Selection */}
               <div>
@@ -757,32 +712,29 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                     <div key={model.id} className="space-y-1">
                       {/* Excel-like hierarchical checkbox */}
                       <div className="flex items-center space-x-2">
-                        {/* Plus/Minus expand button */}
-                        <button
-                          onClick={() => {
-                            if (model.supportsAutoTuning) {
-                              const newExpanded = new Set(expandedStackModels);
-                              if (newExpanded.has(model.id)) {
-                                newExpanded.delete(model.id);
-                              } else {
-                                newExpanded.add(model.id);
-                              }
-                              setExpandedStackModels(newExpanded);
-                            }
-                          }}
-                          disabled={!model.supportsAutoTuning}
-                          className={`flex items-center justify-center w-4 h-4 border border-gray-300 rounded text-xs ${
-                            model.supportsAutoTuning 
-                              ? 'hover:bg-gray-100 cursor-pointer' 
-                              : 'cursor-not-allowed opacity-50'
-                          }`}
-                        >
-                          {expandedStackModels.has(model.id) ? (
-                            <Minus className={`w-3 h-3 ${model.supportsAutoTuning ? 'text-blue-600' : 'text-gray-400'}`} />
-                          ) : (
-                            <Plus className={`w-3 h-3 ${model.supportsAutoTuning ? 'text-blue-600' : 'text-gray-400'}`} />
+                        {/* Plus/Minus expand button - Always reserve space for alignment */}
+                        <div className="w-4 h-4 flex items-center justify-center">
+                          {model.supportsAutoTuning && (
+                            <button
+                              onClick={() => {
+                                const newExpanded = new Set(expandedStackModels);
+                                if (newExpanded.has(model.id)) {
+                                  newExpanded.delete(model.id);
+                                } else {
+                                  newExpanded.add(model.id);
+                                }
+                                setExpandedStackModels(newExpanded);
+                              }}
+                              className="flex items-center justify-center w-4 h-4 border border-gray-300 rounded text-xs hover:bg-gray-100 cursor-pointer"
+                            >
+                              {expandedStackModels.has(model.id) ? (
+                                <Minus className="w-3 h-3 text-blue-600" />
+                              ) : (
+                                <Plus className="w-3 h-3 text-blue-600" />
+                              )}
+                            </button>
                           )}
-                        </button>
+                        </div>
                         
                         {/* Main model checkbox */}
                         <Checkbox
@@ -837,16 +789,47 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                                 id={`manual-params-stack-${model.id}`}
                                 checked={data?.stackModelConfigs?.find(c => c.id === model.id)?.tuning_mode === 'manual'}
                                 onCheckedChange={(checked) => {
-                                  const updatedConfigs = (data?.stackModelConfigs || []).map(c => {
-                                    if (c.id === model.id) {
-                                      return {
-                                        ...c,
-                                        tuning_mode: checked ? 'manual' : 'auto'
-                                      };
-                                    }
-                                    return c;
-                                  });
-                                  onDataChange({ stackModelConfigs: updatedConfigs });
+                                  const currentModels = data?.stackSelectedModels || [];
+                                  const currentConfigs = data?.stackModelConfigs || [];
+                                  
+                                  // If enabling manual and model is not selected, select it
+                                  if (checked && !currentModels.includes(model.id)) {
+                                    const defaultParams: Record<string, any> = {};
+                                    model.params.forEach(param => {
+                                      if (param === 'Alpha') defaultParams[param] = '1.0';
+                                      else if (param === 'L1 Ratio') defaultParams[param] = '0.5';
+                                      else if (param === 'L2 Penalty') defaultParams[param] = '0.1';
+                                      else if (param === 'Learning Rate') defaultParams[param] = '0.001';
+                                      else if (param === 'Iterations') defaultParams[param] = '10000';
+                                      else if (param === 'Adam') defaultParams[param] = 'false';
+                                      else defaultParams[param] = '';
+                                    });
+                                    
+                                    const updatedModels = [...currentModels, model.id];
+                                    const updatedConfigs = [...currentConfigs, {
+                                      id: model.id,
+                                      name: model.name,
+                                      parameters: defaultParams,
+                                      tuning_mode: 'manual'
+                                    }];
+                                    
+                                    onDataChange({
+                                      stackSelectedModels: updatedModels,
+                                      stackModelConfigs: updatedConfigs
+                                    });
+                                  } else {
+                                    // Just update the tuning mode for existing model
+                                    const updatedConfigs = currentConfigs.map(c => {
+                                      if (c.id === model.id) {
+                                        return {
+                                          ...c,
+                                          tuning_mode: checked ? 'manual' : 'auto'
+                                        };
+                                      }
+                                      return c;
+                                    });
+                                    onDataChange({ stackModelConfigs: updatedConfigs });
+                                  }
                                 }}
                               />
                               <Label htmlFor={`manual-params-stack-${model.id}`} className="text-xs text-muted-foreground">
@@ -901,6 +884,58 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
           </div>
         </div>
           )}
+          </div>
+        )}
+      </Card>
+
+      {/* Model Test Configuration */}
+      <Card>
+        <div className="p-4 border-b bg-muted/30">
+          <div 
+            className="flex items-center justify-between cursor-pointer"
+            onClick={() => setIsModelTestConfigCollapsed(!isModelTestConfigCollapsed)}
+          >
+            <h4 className="font-medium text-foreground flex items-center gap-2">
+              <Cpu className="w-4 h-4 text-primary" />
+              Model Test Configuration
+            </h4>
+            {isModelTestConfigCollapsed ? (
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            )}
+          </div>
+        </div>
+        {!isModelTestConfigCollapsed && (
+          <div className="p-4 space-y-4">
+            <div className="space-y-4">
+              <div>
+                <Label>K-Fold Cross Validation</Label>
+                <Input
+                  type="number"
+                  min="2"
+                  max="10"
+                  value={data?.kFolds || 5}
+                  onChange={(e) => onDataChange({ kFolds: parseInt(e.target.value) || 5 })}
+                  placeholder="5"
+                  className="mt-1"
+                />
+              </div>
+              
+              <div>
+                <Label>Test Size Ratio</Label>
+                <Input
+                  type="number"
+                  min="0.1"
+                  max="0.5"
+                  step="0.1"
+                  value={data?.testSize || 0.2}
+                  onChange={(e) => onDataChange({ testSize: parseFloat(e.target.value) || 0.2 })}
+                  placeholder="0.2"
+                  className="mt-1"
+                />
+              </div>
+            </div>
           </div>
         )}
       </Card>

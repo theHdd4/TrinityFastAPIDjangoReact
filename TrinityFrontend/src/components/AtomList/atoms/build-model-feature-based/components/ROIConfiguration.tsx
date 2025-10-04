@@ -3,6 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { SingleSelectDropdown } from '@/templates/dropdown/single-select';
+import { X } from 'lucide-react';
 
 interface ROIConfigurationProps {
   availableFeatures: string[];
@@ -237,7 +238,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                     type="number"
                     step="0.01"
                     min="0"
-                    value={roiConfig.manualPriceValue || 0}
+                    value={roiConfig.manualPriceValue || ''}
                     onChange={(e) => handleManualPriceValueChange(e.target.value)}
                     className="w-48 h-8"
                     placeholder="Enter price value"
@@ -245,11 +246,11 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                 </div>
               ) : (
                 /* Per-Combination Manual Inputs */
-                <div className="flex gap-2 flex-wrap">
+                <div className="space-y-3">
                   {availableCombinations.map((combination, index) => (
-                    <div key={index} className="flex flex-col gap-1">
+                    <div key={index} className="flex items-center gap-3">
                       <div 
-                        className="text-xs font-medium text-gray-600 truncate max-w-[120px] cursor-help hover:text-gray-800 transition-colors" 
+                        className="h-8 flex items-center text-xs text-gray-600 truncate pr-2 max-w-[180px] cursor-help hover:text-gray-800 transition-colors" 
                         title={combination}
                       >
                         {combination}
@@ -258,7 +259,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                         type="number"
                         step="0.01"
                         min="0"
-                        value={roiConfig.combinationManualPriceValues?.[combination] || 0}
+                        value={roiConfig.combinationManualPriceValues?.[combination] || ''}
                         onChange={(e) => handleCombinationManualPriceValueChange(combination, e.target.value)}
                         className="w-32 h-8"
                         placeholder="0.00"
@@ -304,10 +305,32 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                   onCheckedChange={(checked) => handlePerCombinationManualPriceToggle(!!checked)}
                 />
                 <Label htmlFor="per-combination-manual-price" className="text-sm text-gray-600 cursor-pointer">
-                  Different price per combination
+                  Per combination input
                 </Label>
               </div>
             )}
+          </div>
+          
+          {/* Clear Part 1 Button */}
+          <div className="mt-4 flex justify-end">
+            <button 
+              className="h-8 w-8 flex items-center justify-center text-black hover:text-red-600 transition-colors" 
+              onClick={() => {
+                onROIConfigChange({
+                  ...roiConfig,
+                  enabled: true,
+                  priceColumn: '',
+                  manualPriceEntry: false,
+                  manualPriceValue: 0,
+                  perCombinationManualPrice: false,
+                  combinationManualPriceValues: {},
+                  averageMonths: 0
+                });
+              }}
+              title="Clear Part 1 selections"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </div>
@@ -366,6 +389,23 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                 Add Variable
               </button>
             </div>
+            
+            {/* Clear Part 2 Button */}
+            <div className="mt-4 flex justify-end">
+              <button 
+                className="h-8 w-8 flex items-center justify-center text-black hover:text-red-600 transition-colors" 
+                onClick={() => {
+                  onROIConfigChange({
+                    ...roiConfig,
+                    enabled: true,
+                    roiVariables: []
+                  });
+                }}
+                title="Clear Part 2 selections"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -407,7 +447,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                       type="number"
                       step="0.01"
                       min="0"
-                      value={roiConfig.costPerUnit?.[variable] || 0}
+                        value={roiConfig.costPerUnit?.[variable] || ''}
                       onChange={(e) => handleCostPerUnitChange(variable, e.target.value)}
                       className="w-48 h-8"
                       placeholder="Enter cost per unit"
@@ -446,7 +486,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                         type="number"
                         step="0.01"
                         min="0"
-                        value={roiConfig.combinationCostPerUnit?.[combination]?.[variable] || 0}
+                          value={roiConfig.combinationCostPerUnit?.[combination]?.[variable] || ''}
                         onChange={(e) => handleCombinationCostPerUnitChange(combination, variable, e.target.value)}
                         className="w-32 h-8"
                         placeholder="0.00"

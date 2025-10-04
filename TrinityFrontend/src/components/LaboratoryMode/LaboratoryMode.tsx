@@ -207,6 +207,11 @@ const LaboratoryMode = () => {
     setAuxActive(prev => (prev === 'settings' ? null : 'settings'));
   };
 
+  const toggleHelpPanel = () => {
+    if (!canEdit) return;
+    setAuxActive(prev => (prev === 'help' ? null : 'help'));
+  };
+
   const handleSave = async () => {
     if (!canEdit) return;
     try {
@@ -312,6 +317,7 @@ const LaboratoryMode = () => {
               className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
               onClick={handleSave}
               disabled={!canEdit}
+              data-lab-save="true"
             >
               <Save className="w-4 h-4 mr-2" />
               Save
@@ -370,6 +376,7 @@ const LaboratoryMode = () => {
               onCardSelect={handleCardSelect}
               selectedCardId={selectedCardId}
               onToggleSettingsPanel={toggleSettingsPanel}
+              onToggleHelpPanel={toggleHelpPanel}
               canEdit={canEdit}
             />
           </div>

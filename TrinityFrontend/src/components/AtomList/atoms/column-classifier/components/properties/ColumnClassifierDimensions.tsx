@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
+import { CheckboxTemplate } from '@/templates/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Plus } from 'lucide-react';
 import {
@@ -143,30 +143,24 @@ const ColumnClassifierDimensions: React.FC<Props> = ({ atomId }) => {
         {enableMapping && (
           <div>
             <Label className="text-sm mb-2 block">Business Dimensions</Label>
-            <div className="flex items-center space-x-2 mb-1">
-              <Checkbox id={`${atomId}-unattributed`} checked disabled />
-              <label
-                htmlFor={`${atomId}-unattributed`}
-                className="text-sm capitalize"
-              >
-                Unattributed
-              </label>
+            <div className="mb-1">
+              <CheckboxTemplate
+                id={`${atomId}-unattributed`}
+                label="Unattributed"
+                checked={true}
+                disabled={true}
+              />
             </div>
             {options
               .filter(dim => dim !== 'unattributed')
               .map(dim => (
-                <div key={dim} className="flex items-center space-x-2 mb-1">
-                  <Checkbox
+                <div key={dim} className="mb-1">
+                  <CheckboxTemplate
                     id={`${atomId}-${dim}`}
+                    label={dim}
                     checked={selected.includes(dim)}
                     onCheckedChange={() => toggle(dim)}
                   />
-                  <label
-                    htmlFor={`${atomId}-${dim}`}
-                    className="text-sm capitalize"
-                  >
-                    {dim}
-                  </label>
                 </div>
               ))}
             {options.length < 5 && !showInput && (
