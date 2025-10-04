@@ -8,6 +8,9 @@ from langchain_core.messages import HumanMessage
 from langchain.memory import ConversationBufferWindowMemory
 
 from .ai_logic import build_prompt_group_by, call_llm_group_by, extract_json_group_by
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from file_loader import FileLoader
 
 logger = logging.getLogger("agent.group_by")
@@ -56,6 +59,16 @@ class SmartGroupByAgent:
         self.prefix = prefix
         self.sessions: Dict[str, Dict[str, Any]] = {}
         self.history_window_size = history_window_size
+        
+        # File context for intelligent suggestions
+        self.files_with_columns: Dict[str, List[str]] = {}
+        self.files_metadata: Dict[str, Dict[str, Any]] = {}
+        self.current_file_id: Optional[str] = None
+        
+        # MinIO configuration
+        self.minio_endpoint = minio_endpoint
+        self.access_key = access_key
+        self.secret_key = secret_key
         
         # Initialize FileLoader for standardized file handling
         self.file_loader = FileLoader(
@@ -164,7 +177,7 @@ class SmartGroupByAgent:
                 self.files_with_columns = {}
                 return
             
-            logger.info(f"Loading files with prefix: {self.prefix}")
+            # logger.info(f"Loading files with prefix: {self.prefix}")
             
             # Initialize MinIO client
             minio_client = Minio(
@@ -192,7 +205,7 @@ class SmartGroupByAgent:
                             columns = table.column_names
                             files_with_columns[obj.object_name] = {"columns": columns}
                             
-                        logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
+                        # logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
                     
                     elif obj.object_name.endswith(('.csv', '.xlsx', '.xls')):
                         # For CSV/Excel files, try to read headers
@@ -209,7 +222,7 @@ class SmartGroupByAgent:
                             columns = list(df_sample.columns)
                         
                         files_with_columns[obj.object_name] = {"columns": columns}
-                        logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
+                        # logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
                         
                 except Exception as e:
                     logger.warning(f"Failed to load file {obj.object_name}: {e}")
@@ -282,11 +295,47 @@ class SmartGroupByAgent:
         elif filtered.get("success") and "groupby_json" not in filtered:
             filtered["groupby_json"] = {}
             
-        if not filtered.get("success"):
+        # Only remove groupby_json if success is explicitly false AND we don't have other useful fields
+        if not filtered.get("success") and not filtered.get("suggestions") and not filtered.get("smart_response"):
             filtered.pop("groupby_json", None)
             
-        filtered.setdefault("suggestions", [] if filtered.get("success") else ["Please provide more details."])
-        filtered.setdefault("message", "")
+        # Set default suggestions and message
+        if not filtered.get("suggestions"):
+            filtered["suggestions"] = [] if filtered.get("success") else ["Please provide more details."]
+        if not filtered.get("message"):
+            filtered["message"] = ""
+        
+        # Ensure smart_response is present for UI display
+        if not filtered.get("smart_response"):
+            if filtered.get("success") and filtered.get("groupby_json"):
+                # Generate smart response for successful groupby operations
+                groupby_config = filtered["groupby_json"]
+                identifiers = groupby_config.get("identifiers", [])
+                aggregations = groupby_config.get("aggregations", {})
+                file_name = groupby_config.get("object_names", "your data")
+                
+                if identifiers and aggregations:
+                    agg_summary = []
+                    for field, agg_config in aggregations.items():
+                        if isinstance(agg_config, dict):
+                            agg_type = agg_config.get("agg", "sum")
+                            rename_to = agg_config.get("rename_to", field)
+                            agg_summary.append(f"{field} ({agg_type})")
+                        else:
+                            agg_summary.append(f"{field} ({agg_config})")
+                    
+                    filtered["smart_response"] = f"I've configured the groupby operation for you. The data will be grouped by {', '.join(identifiers)} and aggregated using {', '.join(agg_summary)}. You can now proceed with the operation or make adjustments as needed."
+                else:
+                    filtered["smart_response"] = "I've configured the groupby operation for you. You can now proceed with the operation or make adjustments as needed."
+            elif filtered.get("success"):
+                filtered["smart_response"] = "GroupBy configuration completed successfully. You can now proceed with the operation."
+            else:
+                # Generate smart response for failed operations
+                if filtered.get("suggestions"):
+                    filtered["smart_response"] = "I can help you create groupby operations from your data. Please provide more details about what you'd like to group and aggregate, or ask me to suggest appropriate groupings for your data."
+                else:
+                    filtered["smart_response"] = "I'm here to help you create groupby operations and analyze your data. Please describe what you'd like to group and aggregate."
+        
         return filtered
 
     def process_request(self, user_prompt: str, session_id: Optional[str] = None, client_name: str = "", app_name: str = "", project_name: str = ""):

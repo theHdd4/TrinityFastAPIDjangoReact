@@ -122,7 +122,7 @@ class SmartMergeAgent:
             # Update prefix to current path before loading files
             self._maybe_update_prefix()
             
-            logger.info(f"Loading files with prefix: {self.prefix}")
+            # logger.info(f"Loading files with prefix: {self.prefix}")
             
             # Initialize MinIO client
             minio_client = Minio(
@@ -150,7 +150,7 @@ class SmartMergeAgent:
                             columns = table.column_names
                             files_with_columns[obj.object_name] = {"columns": columns}
                             
-                        logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
+                        # logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
                     
                     elif obj.object_name.endswith(('.csv', '.xlsx', '.xls')):
                         # For CSV/Excel files, try to read headers
@@ -167,7 +167,7 @@ class SmartMergeAgent:
                             columns = list(df_sample.columns)
                         
                         files_with_columns[obj.object_name] = {"columns": columns}
-                        logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
+                        # logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
                         
                 except Exception as e:
                     logger.warning(f"Failed to load file {obj.object_name}: {e}")

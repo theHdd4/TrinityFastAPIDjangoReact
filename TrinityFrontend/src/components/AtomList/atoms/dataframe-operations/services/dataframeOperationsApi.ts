@@ -85,6 +85,10 @@ export function retypeColumn(dfId: string, name: string, new_type: string) {
   return postJSON(`${DATAFRAME_OPERATIONS_API}/retype_column`, { df_id: dfId, name, new_type });
 }
 
+export function roundColumn(dfId: string, name: string, decimal_places: number) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/round_column`, { df_id: dfId, name, decimal_places });
+}
+
 export function renameColumn(dfId: string, old_name: string, new_name: string) {
   return postJSON(`${DATAFRAME_OPERATIONS_API}/rename_column`, { df_id: dfId, old_name, new_name });
 }

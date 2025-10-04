@@ -108,8 +108,13 @@ def call_llm_group_by(api_url: str, model_name: str, bearer_token: str, prompt: 
     payload = {
         "model": model_name,
         "messages": [{"role": "user", "content": prompt}],
-        "options": {"temperature": 0.05},  # deterministic
-        "stream": False
+        "stream": False,
+        "options": {
+            "temperature": 0.0,
+            "num_predict": 1200,
+            "top_p": 0.9,
+            "repeat_penalty": 1.1
+        }
     }
     for attempt in range(retry):
         try:
@@ -125,25 +130,67 @@ def extract_json_group_by(response: str) -> Optional[Union[Dict, list]]:
     """Extract JSON object from raw LLM response."""
     if not response:
         return None
-    # backticks pattern (3 backticks)
+    
+    # First try to find JSON in code blocks
     match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)
     if match:
         try:
             return json.loads(match.group(1))
         except json.JSONDecodeError:
             pass
-    # brace search
+    
+    # Find all JSON objects in the response
+    json_objects = []
+    start = 0
+    while True:
+        start_brace = response.find('{', start)
+        if start_brace == -1:
+            break
+        
+        # Find the matching closing brace
+        brace_count = 0
+        end_brace = start_brace
+        for i in range(start_brace, len(response)):
+            if response[i] == '{':
+                brace_count += 1
+            elif response[i] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_brace = i
+                    break
+        
+        if brace_count == 0:  # Found matching closing brace
+            json_str = response[start_brace:end_brace + 1]
+            try:
+                parsed = json.loads(json_str)
+                if isinstance(parsed, dict):
+                    json_objects.append((len(json_str), parsed))  # Store with length for sorting
+            except json.JSONDecodeError:
+                pass
+        
+        start = start_brace + 1
+    
+    # Sort by length (longest first) and return the first valid one
+    json_objects.sort(key=lambda x: x[0], reverse=True)
+    
+    # Look for objects with the expected structure
+    for _, parsed in json_objects:
+        # Check if this looks like a complete AI response
+        if ('success' in parsed and 
+            ('groupby_json' in parsed or 'suggestions' in parsed or 'smart_response' in parsed)):
+            return parsed
+    
+    # If no complete response found, return the largest valid JSON object
+    if json_objects:
+        return json_objects[0][1]
+    
+    # Fallback: try to find any JSON object
     start, end = response.find("{"), response.rfind("}")
     if start != -1 and end != -1:
         try:
             return json.loads(response[start:end+1])
         except json.JSONDecodeError:
             pass
-    # patterns
-    for pat in [r"\{[^{}]*\{[^{}]*\}[^{}]*\}", r"\{[^{}]+\}", r"\{.*?\}(?=\s*$)", r"\{.*\}"]:
-        for m in re.findall(pat, response, re.DOTALL):
-            try:
-                return json.loads(m)
-            except json.JSONDecodeError:
-                continue
+    
     return None
+

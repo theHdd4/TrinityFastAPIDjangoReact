@@ -907,6 +907,19 @@ async def retype_column(df_id: str = Body(...), name: str = Body(...), new_type:
     return result
 
 
+@router.post("/round_column")
+async def round_column(df_id: str = Body(...), name: str = Body(...), decimal_places: int = Body(...)):
+    df = _get_df(df_id)
+    try:
+        # Round the specified column to the given decimal places
+        df = df.with_columns(pl.col(name).round(decimal_places))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    result = _df_payload(df, df_id)
+    return result
+
+
 @router.get("/preview")
 async def preview(df_id: str, n: int = 5):
     df = _get_df(df_id)

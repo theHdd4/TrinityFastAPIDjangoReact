@@ -37,6 +37,7 @@ import {
   duplicateColumn as apiDuplicateColumn,
   moveColumn as apiMoveColumn,
   retypeColumn as apiRetypeColumn,
+  roundColumn as apiRoundColumn,
   applyFormula as apiApplyFormula,
   loadDataframeByKey,
   describeColumn as apiDescribeColumn,
@@ -221,9 +222,10 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       }
     };
   }, []);
-  const [isFormulaMode, setIsFormulaMode] = useState(true);
-  const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter' | 'operation'>(null);
+  const [isFormulaMode, setIsFormulaMode] = useState(false); // Start with formula bar disabled
+  const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter' | 'operation' | 'round'>(null);
   const [convertSubmenuOpen, setConvertSubmenuOpen] = useState(false);
+  const [roundDecimalPlaces, setRoundDecimalPlaces] = useState(2);
   const [unhideSubmenuOpen, setUnhideSubmenuOpen] = useState(false);
   const [selectedHiddenColumns, setSelectedHiddenColumns] = useState<string[]>([]);
   const [contextMenu, setContextMenu] = useState<{
@@ -321,8 +323,19 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   const startColResize = (key: string, e: React.MouseEvent) => {
     e.preventDefault();
-    const startWidth = headerRefs.current[key]?.offsetWidth || 0;
-    setResizingCol({ key, startX: e.clientX, startWidth });
+    e.stopPropagation();
+    
+    console.log('Column resize started for:', key);
+    
+    // Get the current width from settings or default (simplified approach like row resize)
+    const currentWidth = settings.columnWidths?.[key] || 150;
+    const startX = e.clientX;
+    
+    setResizingCol({ key, startX, startWidth: currentWidth });
+    
+    // Add visual feedback
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
   };
 
   const startRowResize = (index: number, e: React.MouseEvent) => {
@@ -335,7 +348,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     const handleMouseMove = (e: MouseEvent) => {
       if (resizingCol) {
         const delta = e.clientX - resizingCol.startX;
-        const newWidth = Math.max(resizingCol.startWidth + delta, 30);
+        const newWidth = Math.max(Math.min(resizingCol.startWidth + delta, 500), 50);
+        console.log('Column resize:', resizingCol.key, 'new width:', newWidth);
         onSettingsChange({
           columnWidths: { ...(settings.columnWidths || {}), [resizingCol.key]: newWidth }
         });
@@ -349,7 +363,11 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       }
     };
     const handleMouseUp = () => {
-      if (resizingCol) setResizingCol(null);
+      if (resizingCol) {
+        setResizingCol(null);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
       if (resizingRow) setResizingRow(null);
     };
     if (resizingCol || resizingRow) {
@@ -359,6 +377,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      // Clean up cursor styles on unmount
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
     };
   }, [resizingCol, resizingRow, settings.columnWidths, settings.rowHeights, onSettingsChange]);
 
@@ -1443,13 +1464,51 @@ const handleClearFilter = async (col: string) => {
 };
 
 const handleCellClick = (rowIndex: number, column: string) => {
-  // When clicking on a cell, select the entire column as the target column
-  // This matches Excel behavior where clicking any cell in a column selects that column
+  // When clicking on a cell, select the column
   setSelectedColumn(column);
   setSelectedCell(null);
+  
+  // Only clear formula bar if clicking on a different column
+  // This allows working with the same column without interference
+  if (selectedColumn !== column) {
+    // Clear formula bar when switching to a different column
+    setIsFormulaMode(false);
+    setFormulaInput('');
+    showValidationError(null);
+    console.log('[DataFrameOperations] Column changed to:', column, 'Formula bar cleared');
+  } else {
+    // Keep formula bar state when clicking on the same column
+    console.log('[DataFrameOperations] Same column clicked:', column, 'Formula bar state preserved');
+  }
+};
+
+// Function to completely reset the formula bar to a clean state
+const resetFormulaBar = () => {
+  setFormulaInput('');
+  setSelectedColumn(null);
+  setSelectedCell(null);
+  setIsFormulaMode(false); // Disable formula bar after reset
+  showValidationError(null);
+  console.log('[DataFrameOperations] Formula bar completely reset and disabled');
+};
+
+// Function to activate formula bar for a specific column
+const activateFormulaBar = (column: string) => {
+  setSelectedColumn(column);
+  setSelectedCell(null);
+  setIsFormulaMode(true);
+  setFormulaInput('');
+  showValidationError(null);
+  console.log('[DataFrameOperations] Formula bar activated for column:', column);
 };
 
 const insertColumnIntoFormula = (columnName: string) => {
+  // Only insert column into formula if formula bar is already active
+  if (!isFormulaMode) {
+    console.log('[DataFrameOperations] Formula bar not active - cannot insert column');
+    return;
+  }
+  
   // Check if there are ColX placeholders to replace (Excel-like behavior)
   if (formulaInput.includes('Col')) {
     const colMatch = formulaInput.match(/Col\d+/);
@@ -1457,7 +1516,6 @@ const insertColumnIntoFormula = (columnName: string) => {
       const colIndex = formulaInput.indexOf(colMatch[0]);
       const newFormula = formulaInput.slice(0, colIndex) + columnName + formulaInput.slice(colIndex + colMatch[0].length);
       setFormulaInput(newFormula);
-      setIsFormulaMode(true);
       
       // If no target column is selected, set the clicked column as the target
       if (!selectedColumn) {
@@ -1488,7 +1546,6 @@ const insertColumnIntoFormula = (columnName: string) => {
   const newFormula = currentFormula.slice(0, cursorPosition) + columnName + currentFormula.slice(cursorPosition);
   
   setFormulaInput(newFormula);
-  setIsFormulaMode(true);
   
   // If no target column is selected, set the clicked column as the target
   if (!selectedColumn) {
@@ -1632,18 +1689,33 @@ const handleHeaderClick = (header: string) => {
       onSettingsChange({ columnFormulas: next });
       return next;
     });
-    setFormulaInput(trimmedFormula);
+    
+    // Reset formula bar to completely clean state after successful application
+    resetFormulaBar();
+    
+    // Force a complete reset to ensure the new column is usable for future operations
+    setTimeout(() => {
+      resetFormulaBar();
+      console.log('[DataFrameOperations] Formula bar completely reset - new column ready for future operations');
+    }, 200);
     
     console.log('[DataFrameOperations] Formula application completed successfully');
     
     console.log('[DataFrameOperations] Formula state updated:', {
       selectedColumn,
-      formulaInput: trimmedFormula,
+      formulaApplied: trimmedFormula,
+      formulaBarReset: true,
       columnFormulasUpdated: true
     });
     
     // Add to history
     addToHistory('Apply Formula', `Applied formula "${trimmedFormula}" to column "${selectedColumn}"`);
+    
+    // Show success notification
+    toast({
+      title: "Formula Applied Successfully",
+      description: `Formula applied to column "${selectedColumn}". Click on formula bar to edit this column again.`,
+    });
     
     console.log('[DataFrameOperations] Formula application process completed');
   } catch (err) {
@@ -1925,6 +1997,110 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     } catch (err) {
       handleApiError('Retype column failed', err);
       addToHistory('Retype Column', `Failed to retype column "${col}"`, 'error');
+    }
+  };
+
+  const handleMultiColumnRetype = async (columns: string[], newType: string) => {
+    if (!data || !settings.fileId || columns.length === 0) return;
+    
+    const fileId = settings.fileId;
+    
+    try {
+      console.log('[DataFrameOperations] Retype multiple columns:', columns, 'to', newType);
+      
+      // Process each column sequentially
+      let currentData = data;
+      for (const col of columns) {
+        const resp = await apiRetypeColumn(fileId, col, newType === 'text' ? 'string' : newType);
+        
+        // Preserve deleted columns by filtering out columns that were previously deleted
+        const currentHiddenColumns = currentData.hiddenColumns || [];
+        const currentDeletedColumns = currentData.deletedColumns || [];
+        const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+        
+        currentData = {
+          headers: filtered.headers,
+          rows: filtered.rows,
+          fileName: currentData.fileName,
+          columnTypes: filtered.columnTypes,
+          pinnedColumns: currentData.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+          frozenColumns: currentData.frozenColumns,
+          cellColors: currentData.cellColors,
+          hiddenColumns: currentHiddenColumns,
+        };
+      }
+      
+      onDataChange(currentData);
+      addToHistory('Multi-Column Retype', `${columns.length} columns converted to ${newType}: ${columns.join(', ')}`);
+      
+      toast({
+        title: "Multiple Columns Converted",
+        description: `${columns.length} columns converted to ${newType}`,
+      });
+      
+      // Clear selection
+      setMultiSelectedColumns(new Set());
+    } catch (err) {
+      handleApiError('Multi-column retype failed', err);
+      addToHistory('Multi-Column Retype', `Failed to convert ${columns.length} columns`, 'error');
+    }
+  };
+
+  const handleRoundColumns = async (columns: string[], decimalPlaces: number) => {
+    if (!data || !settings.fileId || columns.length === 0) return;
+    
+    const fileId = settings.fileId;
+    
+    try {
+      console.log('[DataFrameOperations] Round columns:', columns, 'to', decimalPlaces, 'decimal places');
+      
+      // Process each column sequentially
+      let currentData = data;
+      for (const col of columns) {
+        // Check if column exists and is numeric
+        if (!data.headers.includes(col)) {
+          throw new Error(`Column "${col}" does not exist`);
+        }
+        
+        const columnType = data.columnTypes[col];
+        if (columnType !== 'number' && columnType !== 'float' && columnType !== 'integer') {
+          console.warn(`[DataFrameOperations] Column "${col}" is not numeric (type: ${columnType}), skipping...`);
+          continue;
+        }
+        
+        const resp = await apiRoundColumn(fileId, col, decimalPlaces);
+        
+        // Preserve deleted columns by filtering out columns that were previously deleted
+        const currentHiddenColumns = currentData.hiddenColumns || [];
+        const currentDeletedColumns = currentData.deletedColumns || [];
+        const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+        
+        currentData = {
+          headers: filtered.headers,
+          rows: filtered.rows,
+          fileName: currentData.fileName,
+          columnTypes: filtered.columnTypes,
+          pinnedColumns: currentData.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+          frozenColumns: currentData.frozenColumns,
+          cellColors: currentData.cellColors,
+          hiddenColumns: currentHiddenColumns,
+        };
+      }
+      
+      onDataChange(currentData);
+      addToHistory('Round Columns', `${columns.length} columns rounded to ${decimalPlaces} decimal places: ${columns.join(', ')}`);
+      
+      toast({
+        title: "Columns Rounded",
+        description: `${columns.length} columns rounded to ${decimalPlaces} decimal places`,
+      });
+      
+      // Clear selection
+      setMultiSelectedColumns(new Set());
+    } catch (err) {
+      console.error('[DataFrameOperations] Round columns error:', err);
+      handleApiError('Round columns failed', err);
+      addToHistory('Round Columns', `Failed to round ${columns.length} columns`, 'error');
     }
   };
 
@@ -2574,7 +2750,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                          data.frozenColumns && colIdx < data.frozenColumns ? 'frozen-column' : ''
                        }`}
                       style={{
-                        ...(settings.columnWidths?.[header] ? { width: settings.columnWidths[header], minWidth: settings.columnWidths[header] } : { width: '120px', minWidth: '120px', maxWidth: '120px' }),
+                        ...(settings.columnWidths?.[header] ? { 
+                          width: settings.columnWidths[header], 
+                          minWidth: '50px',
+                          maxWidth: '500px'
+                        } : { 
+                          width: '150px', 
+                          minWidth: '50px', 
+                          maxWidth: '500px' 
+                        }),
                         ...(data.frozenColumns && colIdx < data.frozenColumns ? { 
                           position: 'sticky', 
                           left: (() => {
@@ -2584,7 +2768,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                               leftOffset += 64; // w-16 = 64px
                             }
                             for (let i = 0; i < colIdx; i++) {
-                              const colWidth = settings.columnWidths?.[data.headers[i]] || 120;
+                              const colWidth = settings.columnWidths?.[data.headers[i]] || 150;
                               leftOffset += colWidth;
                             }
                             return `${leftOffset}px`;
@@ -2647,26 +2831,35 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         />
                       ) : (
                          <div
-                           className="flex items-center justify-center cursor-pointer w-full h-full"
+                           className="flex items-center justify-center cursor-pointer w-full h-full overflow-hidden"
                            onDoubleClick={() => {
                              // Always allow header editing regardless of enableEditing setting
                              setEditingHeader(colIdx);
                              setEditingHeaderValue(header);
                            }}
-                           title="Click to select • Ctrl+Click for multi-select • Double-click to edit • Delete key to delete selected"
-                           style={{ width: '100%', height: '100%' }}
+                           title={`Click to select • Ctrl+Click for multi-select • Double-click to edit • Delete key to delete selected\nHeader: ${headerDisplayNames[header] ?? header}`}
+                           style={{ 
+                             width: '100%', 
+                             height: '100%',
+                             textOverflow: 'ellipsis',
+                             whiteSpace: 'nowrap'
+                           }}
                          >
-                           <span className="flex items-center gap-1 font-bold text-black">
-                             {headerDisplayNames[header] ?? header}
+                           <span className="flex items-center gap-1 font-bold text-black overflow-hidden" style={{ maxWidth: '100%' }}>
+                             <span className="truncate">{headerDisplayNames[header] ?? header}</span>
                              {filters[header] && (
-                               <Filter className="w-3 h-3 text-blue-600" />
+                               <Filter className="w-3 h-3 text-blue-600 flex-shrink-0" />
                              )}
                            </span>
                          </div>
                       )}
                       <div
-                        className="absolute top-0 right-0 h-full w-1 cursor-col-resize"
+                        className="absolute top-0 right-0 h-full w-1 cursor-col-resize bg-blue-300 opacity-0 hover:opacity-100 transition-opacity duration-150"
                         onMouseDown={e => startColResize(header, e)}
+                        style={{ 
+                          zIndex: 20
+                        }}
+                        title="Drag to resize column"
                       />
                     </TableHead>
                     </>
@@ -2747,7 +2940,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                             data-col={column}
                             className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-500 bg-blue-50' : selectedColumn === column ? 'border border-blue-500 bg-blue-50' : ''} ${isRowSelected ? 'bg-blue-100' : ''} ${data.frozenColumns && colIdx < data.frozenColumns ? 'frozen-column' : ''}`}
                             style={{
-                              ...(settings.columnWidths?.[column] ? { width: settings.columnWidths[column], minWidth: settings.columnWidths[column] } : { width: '120px', minWidth: '120px', maxWidth: '120px' }),
+                              ...(settings.columnWidths?.[column] ? { 
+                                width: settings.columnWidths[column], 
+                                minWidth: '50px',
+                                maxWidth: '500px'
+                              } : { 
+                                width: '150px', 
+                                minWidth: '50px', 
+                                maxWidth: '500px' 
+                              }),
                               ...(data.frozenColumns && colIdx < data.frozenColumns ? { 
                                 position: 'sticky', 
                                 left: (() => {
@@ -2757,7 +2958,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                                     leftOffset += 64; // w-16 = 64px
                                   }
                                   for (let i = 0; i < colIdx; i++) {
-                                    const colWidth = settings.columnWidths?.[data.headers[i]] || 120;
+                                    const colWidth = settings.columnWidths?.[data.headers[i]] || 150;
                                     leftOffset += colWidth;
                                   }
                                   return `${leftOffset}px`;
@@ -2794,13 +2995,20 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                               onBlur={() => commitCellEdit(rowIndex, column)}
                             />
                           ) : (
-                            <div className="text-xs p-1 hover:bg-blue-50 rounded cursor-pointer min-h-[20px] flex items-center text-gray-800"
+                            <div 
+                              className="text-xs p-1 hover:bg-blue-50 rounded cursor-pointer min-h-[20px] flex items-center text-gray-800 overflow-hidden"
+                              style={{
+                                maxWidth: '100%',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                wordBreak: 'break-all'
+                              }}
                               onDoubleClick={() => {
                                 // Always allow cell editing regardless of enableEditing setting
                                 setEditingCell({ row: rowIndex, col: column });
                                 setEditingCellValue(safeToString(row[column]));
                               }}
-                              title="Double-click to edit cell"
+                              title={`Double-click to edit cell\nValue: ${safeToString(row[column])}`}
                             >
                               {safeToString(row[column]) !== '' ? highlightMatch(safeToString(row[column]), settings.searchTerm || '') : null}
                             </div>
@@ -2883,7 +3091,10 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 200 }}
           >
           <div className="px-3 py-2 text-xs font-semibold border-b border-gray-200 flex items-center justify-between" style={{color:'#222'}}>
-            Column: {contextMenu.col}
+            {multiSelectedColumns.size > 1 ? 
+              `${multiSelectedColumns.size} Columns Selected` : 
+              `Column: ${contextMenu.col}`
+            }
             <button 
               className="ml-2 w-4 h-4 rounded-full bg-blue-100 hover:bg-blue-200 flex items-center justify-center transition-colors"
               onClick={e => { 
@@ -3158,14 +3369,72 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             </button>
             {convertSubmenuOpen && (
               <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md min-w-[140px] max-h-[300px] overflow-y-auto z-50" style={{ scrollbarWidth: 'thin' }}>
-                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>String/Text</button>
-                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Integer</button>
-                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Float</button>
-                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'date'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Date/DateTime</button>
-                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Boolean</button>
-                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Category</button>
-                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Decimal</button>
-                <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Object</button>
+                {multiSelectedColumns.size > 1 ? (
+                  <>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>String/Text (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Integer (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Float (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'date'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Date/DateTime (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Boolean (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Category (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Decimal (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Object (All)</button>
+                  </>
+                ) : (
+                  <>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>String/Text</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Integer</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Float</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'date'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Date/DateTime</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Boolean</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Category</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Decimal</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Object</button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+          {/* Round - dropdown like Sort */}
+          <div className="relative group">
+            <button 
+              className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" 
+              onClick={e => { 
+                e.stopPropagation(); 
+                setOpenDropdown(openDropdown === 'round' ? null : 'round'); 
+              }}
+            >
+              Round <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
+            </button>
+            {openDropdown === 'round' && (
+              <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md min-w-[120px] z-50 p-2">
+                <div className="flex items-center space-x-2 mb-2">
+                  <input
+                    type="number"
+                    min="0"
+                    max="10"
+                    value={roundDecimalPlaces}
+                    onChange={(e) => setRoundDecimalPlaces(Math.max(0, Math.min(10, parseInt(e.target.value) || 0)))}
+                    className="w-12 text-xs text-center border border-gray-300 rounded px-1 py-0.5"
+                    placeholder="2"
+                  />
+                </div>
+                <button 
+                  className="w-full px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+                  onClick={() => {
+                    const columnsToRound = multiSelectedColumns.size > 1 ? 
+                      Array.from(multiSelectedColumns) : 
+                      (contextMenu?.col ? [contextMenu.col] : []);
+                    
+                    if (columnsToRound.length > 0) {
+                      handleRoundColumns(columnsToRound, roundDecimalPlaces);
+                      setContextMenu(null);
+                      setOpenDropdown(null);
+                    }
+                  }}
+                >
+                  Apply
+                </button>
               </div>
             )}
           </div>
@@ -3570,6 +3839,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       )}
 
       {/* History Panel */}
+
       {historyPanelOpen && (
         <div className="fixed inset-0 z-50 pointer-events-none">
           <div 

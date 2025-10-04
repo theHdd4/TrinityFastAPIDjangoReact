@@ -100,7 +100,7 @@ class FileLoader:
                             "file_name": os.path.basename(obj.object_name)
                         }
                         
-                        logger.info(f"Loaded file {obj.object_name} with {len(columns)} columns")
+                        # logger.info(f"Loaded file {obj.object_name} with {len(columns)} columns")
                     
                 except Exception as e:
                     logger.warning(f"Failed to load file {obj.object_name}: {e}")
@@ -110,7 +110,7 @@ class FileLoader:
                         response.close()
                         response.release_conn()
             
-            logger.info(f"Successfully loaded {len(files_with_columns)} files from MinIO")
+            # logger.info(f"Successfully loaded {len(files_with_columns)} files from MinIO")
             return files_with_columns
             
         except Exception as e:

@@ -1,162 +1,187 @@
-# ai_logic.py - Minimal, strict, and precise Chart Maker AI Logic
+# ai_logic.py - Chart Maker AI Logic (following concat pattern)
 
-import re
 import json
+import re
+import requests
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger("smart.chart.ai")
 
-# Removed schema validation - using simple JSON extraction only
-
-# ------------------------------------------------------------------------------
-# Strict JSON Schema (precise shape, minimal fields, filters optional)
-# ------------------------------------------------------------------------------
-
-# Removed schema - using simple JSON extraction only
-
-# ------------------------------------------------------------------------------
-# Intent detection and sanitization helpers
-# ------------------------------------------------------------------------------
-
-def _detect_chart_request(user_prompt: str) -> bool:
-    kws = ['chart', 'graph', 'plot', 'visualize', 'bar chart', 'line chart', 'pie chart', 'scatter', 'dashboard']
-    up = user_prompt.lower()
-    return any(k in up for k in kws)
-
-def _detect_filter_intent(user_prompt: str) -> bool:
-    """Simple filter detection - check if user mentioned filtering"""
-    kws = [
-        "filter", "where", "only", "show only", "for ", " in ", " with ", "by ",
-        "filtered by", "specific", "particular", "equals", "=", ":"
-    ]
-    up = user_prompt.lower()
-    return any(k in up for k in kws)
-
-# Removed helper functions - using simple JSON extraction only
-
-# Removed schema pruning - using simple JSON extraction only
-
-# Removed complex processing functions - using simple JSON extraction only
-
-# ------------------------------------------------------------------------------
-# Prompt builders (minimal, deterministic, JSON-only)
-# ------------------------------------------------------------------------------
-
-def build_chart_prompt(user_prompt: str, available_files_with_columns: dict, context: str, file_analysis_data: dict = None) -> str:
-    """
-    Generate backend-compatible chart configuration JSON.
-    """
-    return (
-        "Return ONLY valid JSON (no prose, no markdown, no code blocks).\n"
-        "Rules:\n"
-        "- Use ONLY columns from AVAILABLE_FILES_WITH_COLUMNS.\n"
-        "- file_name and data_source MUST be exact paths from AVAILABLE_FILES_WITH_COLUMNS.\n"
-        "- filters is OPTIONAL: include ONLY if the user explicitly asked to filter; otherwise set filters to {}.\n"
-        "- NEVER invent or copy example/sample values; only include filter values explicitly present in USER INPUT text.\n"
-        "- FILTER LOGIC: If user says 'filter by PPG' (no specific values) → {\"PPG\": []}. If user says 'filter by PPG xl and lg' (with values) → {\"PPG\": [\"xl\", \"lg\"]}.\n"
-        "- Do not include suggestions or explanations in the output.\n"
-        "- Do not wrap JSON in markdown code blocks (```json).\n"
-        "- CRITICAL: Each trace MUST include 'chart_type' field with value 'bar', 'line', 'area', 'pie', or 'scatter'.\n"
-        "- CRITICAL: aggregation must be one of: 'sum', 'mean', 'count', 'min', 'max'.\n"
-        "- CRITICAL: All required fields in traces must be present: x_column, y_column, name, chart_type, aggregation.\n"
-        "- CRITICAL: x_column and y_column must be STRINGS (column names), not arrays or lists.\n"
-        "- CRITICAL: For multiple charts, each chart can have different filters based on user requirements.\n"
-        "- CRITICAL: If user mentions different filters for different charts, apply them to the respective charts.\n"
-        "- CRITICAL: Only include filters when user explicitly mentions filtering, sorting, or finding specific things.\n"
-        "- CRITICAL: Do NOT add filters automatically - only when user context clearly indicates filtering is needed.\n"
-        "- CRITICAL: For filters: If user mentions a filter column but no specific values, use {\"ColumnName\": []}. If user mentions specific values, use {\"ColumnName\": [\"Value1\", \"Value2\"]}. Use empty object {} when no filtering is needed.\n"
-        f"USER INPUT: {user_prompt}\n"
-        f"AVAILABLE_FILES_WITH_COLUMNS: {json.dumps(available_files_with_columns)}\n"
-        f"CONTEXT: {context}\n"
-        "\n"
-        "FILTER EXAMPLES:\n"
-        "- User: 'Create chart filtered by PPG' → filters: {\"PPG\": []}\n"
-        "- User: 'Create chart filtered by PPG xl and lg' → filters: {\"PPG\": [\"xl\", \"lg\"]}\n"
-        "- User: 'Create chart' (no filter mention) → filters: {}\n"
-        "Output shape:\n"
-        "{"
-        "\"success\": true,"
-        "\"chart_json\": [ {"
-          "\"chart_id\": \"1\","
-          "\"chart_type\": \"bar|line|area|pie|scatter\","
-          "\"title\": \"Chart Title\","
-          "\"traces\": [ {"
-            "\"x_column\": \"ColumnName\","
-            "\"y_column\": \"ColumnName\","
-            "\"name\": \"Trace Name\","
-            "\"chart_type\": \"bar|line|area|pie|scatter\","
-            "\"aggregation\": \"sum|mean|count|min|max\","
-            "\"color\": \"#8884d8\","
-            "\"filters\": {} or {\"ColumnName\": [\"Value1\", \"Value2\"]} or {\"ColumnName\": []}"
-          "} ],"
-          "\"filters\": {} or {\"ColumnName\": [\"Value1\", \"Value2\"]} or {\"ColumnName\": []}"
-        "}, {"
-          "\"chart_id\": \"2\","
-          "\"chart_type\": \"bar|line|area|pie|scatter\","
-          "\"title\": \"Second Chart Title\","
-          "\"traces\": [ {"
-            "\"x_column\": \"ColumnName\","
-            "\"y_column\": \"ColumnName\","
-            "\"name\": \"Trace Name\","
-            "\"chart_type\": \"bar|line|area|pie|scatter\","
-            "\"aggregation\": \"sum|mean|count|min|max\","
-            "\"color\": \"#82ca9d\","
-            "\"filters\": {} or {\"DifferentColumn\": [\"Value3\", \"Value4\"]}"
-          "} ],"
-          "\"filters\": {} or {\"DifferentColumn\": [\"Value3\", \"Value4\"]}"
-        "} ],"
-        "\"file_name\": \"exact_file_path_from_available_files\","
-        "\"data_source\": \"exact_file_path_from_available_files\","
-        "\"message\": \"Chart configuration completed successfully\","
-        "\"reasoning\": \"Brief explanation of chart choices\","
-        "\"used_memory\": true,"
-        "\"smart_response\": \"User-friendly message about the chart created\""
-        "}"
-        "REMEMBER - Return ONLY valid JSON (no prose, no markdown, no code blocks).\n"
-    )
-
-def build_data_question_prompt(user_prompt: str, available_files_with_columns: dict, context: str, file_analysis_data: dict = None, file_info_section: str = "") -> str:
-    """
-    Minimal data Q&A path returning JSON suggestions; kept short for large prompts.
-    """
-    return (
-        "Return ONLY valid JSON (no prose, no markdown).\n"
-        f"USER INPUT: {user_prompt}\n"
-        f"AVAILABLE_FILES_WITH_COLUMNS: {json.dumps(available_files_with_columns)}\n"
-        f"FILE_ANALYSIS_DATA: {json.dumps(file_analysis_data)}\n"
+def build_prompt(user_prompt: str, available_files_with_columns: dict, context: str, file_analysis_data: dict = None) -> str:
+    """Return the LLM prompt for the chart maker assistant."""
+    
+    # Analyze available files for better context
+    file_summary = []
+    numeric_columns = []
+    categorical_columns = []
+    
+    for filename, columns in available_files_with_columns.items():
+        file_summary.append(f"**{filename}** ({len(columns)} columns) - {', '.join(columns[:5])}{'...' if len(columns) > 5 else ''}")
         
-        f"CONTEXT: {context}\n"
-        "Output shape:\n"
-        "{"
-        "\"success\": false,"
-        "\"suggestions\": [\"...\"],"
-        "\"message\": \"...\","
-        "\"reasoning\": \"...\","
-        "\"file_analysis\": {\"total_files\":\"number\",\"numeric_columns\":[\"...\"],\"categorical_columns\":[\"...\"],\"chart_tips\":[\"...\"]},"
-        "\"next_steps\": [\"...\"],"
-        "\"smart_response\": \"...\""
-        "}"
-    )
+        # Categorize columns (simple heuristic)
+        for col in columns:
+            col_lower = col.lower()
+            if any(word in col_lower for word in ['id', 'name', 'category', 'type', 'status', 'region', 'country', 'brand', 'product']):
+                categorical_columns.append(col)
+            elif any(word in col_lower for word in ['value', 'amount', 'price', 'cost', 'revenue', 'sales', 'count', 'number', 'quantity', 'score', 'rate']):
+                numeric_columns.append(col)
+    
+    file_analysis_text = f"""
+FILE ANALYSIS:
+- Total files: {len(available_files_with_columns)}
+- Numeric columns: {', '.join(set(numeric_columns)[:10])}{'...' if len(set(numeric_columns)) > 10 else ''}
+- Categorical columns: {', '.join(set(categorical_columns)[:10])}{'...' if len(set(categorical_columns)) > 10 else ''}
+- Available files: {', '.join(list(available_files_with_columns.keys())[:5])}{'...' if len(available_files_with_columns) > 5 else ''}
+"""
+    
+    return f"""You are an expert data visualization assistant with deep understanding of chart creation and data analysis. You have perfect memory of all previous conversations and can intelligently interpret user requests.
 
-def build_smart_prompt(user_prompt: str, available_files_with_columns: dict, context: str, file_analysis_data: dict = None) -> str:
-    logger.info(f"Building smart prompt for: {user_prompt[:1000]}...")
-    if _detect_chart_request(user_prompt):
-        return build_chart_prompt(user_prompt, available_files_with_columns, context, file_analysis_data)
-    return build_data_question_prompt(user_prompt, available_files_with_columns, context, file_analysis_data, "")
+CURRENT REQUEST: "{user_prompt}"
 
+CONVERSATION HISTORY:
+{context}
 
+AVAILABLE DATA FILES:
+{json.dumps(available_files_with_columns, indent=2)}
+{file_analysis_text}
 
-# ------------------------------------------------------------------------------
-# LLM call (unchanged shape; keep low temperature)
-# ------------------------------------------------------------------------------
+## YOUR TASK:
+Analyze the user's request and determine the most appropriate response. You must be context-aware and understand the user's intent.
 
-def call_chart_llm(api_url: str, model_name: str, bearer_token: str, prompt: str) -> str:
-    """
-    Call the LLM API to generate chart configuration (JSON-only prompted).
-    """
-    import requests
+## DECISION LOGIC:
 
+### 1. FILE LISTING REQUESTS (success: false)
+If user asks to "show files", "list files", "what files", "show columns", "available data", etc.:
+- Use GENERAL RESPONSE format
+- Provide comprehensive file information
+- Suggest chart possibilities
+- Be helpful and informative
+
+### 2. CHART CREATION REQUESTS (success: true)
+If user wants to create, make, generate, or visualize charts:
+- Use SUCCESS RESPONSE format
+- Generate proper chart configuration
+- Select appropriate file and columns
+- Create meaningful chart titles
+
+### 3. QUESTIONS/SUGGESTIONS (success: false)
+If user asks questions, needs help, or wants suggestions:
+- Use GENERAL RESPONSE format
+- Provide helpful guidance
+- Suggest next steps
+- Be conversational and supportive
+
+## RESPONSE FORMATS:
+
+### SUCCESS RESPONSE (Chart Creation):
+{{
+  "success": true,
+  "chart_json": [
+    {{
+      "chart_id": "1",
+      "chart_type": "bar|line|area|pie|scatter",
+      "title": "Clear, descriptive title based on data and user intent",
+      "traces": [
+        {{
+          "x_column": "exact_column_name_from_available_files",
+          "y_column": "exact_column_name_from_available_files",
+          "name": "Descriptive trace name",
+          "chart_type": "bar|line|area|pie|scatter",
+          "aggregation": "sum|mean|count|min|max",
+          "color": "#8884d8",
+          "filters": {{}} or {{"ColumnName": ["Value1", "Value2"]}}
+        }}
+      ],
+      "filters": {{}} or {{"ColumnName": ["Value1", "Value2"]}}
+    }}
+  ],
+  "file_name": "exact_filename_from_available_files",
+  "data_source": "exact_filename_from_available_files",
+  "message": "Chart configuration completed successfully",
+  "smart_response": "I've created a [chart_type] chart showing [specific description]. The chart visualizes [data insights] from [file_name] and you can now view it in the interface or modify the settings as needed.",
+  "reasoning": "Selected [file_name] because [reasoning]. Used [chart_type] because [reasoning]. Chose [x_column] and [y_column] because [reasoning].",
+  "used_memory": true
+}}
+
+### GENERAL RESPONSE (File Info, Questions, Suggestions):
+{{
+  "success": false,
+  "suggestions": [
+    "Here's what I found about your data:",
+    "Available files: {', '.join(list(available_files_with_columns.keys())[:3])}{'...' if len(available_files_with_columns) > 3 else ''}",
+    "Recommended chart types: Bar charts for comparisons, Line charts for trends, Pie charts for proportions",
+    "To create a chart, specify: file name + what you want to visualize + how",
+    "Or ask me to suggest the best visualization for your data"
+  ],
+  "message": "Here's what I can help you with",
+  "smart_response": "I'd be happy to help you create visualizations! Here are your available files: {', '.join([f'**{f}** ({len(cols)} columns)' for f, cols in list(available_files_with_columns.items())[:3]])}{'...' if len(available_files_with_columns) > 3 else ''}. I can help you create bar charts, line charts, pie charts, scatter plots, and more. What would you like to visualize?",
+  "reasoning": "Providing helpful information and guidance",
+  "file_analysis": {{
+    "total_files": {len(available_files_with_columns)},
+    "numeric_columns": {list(set(numeric_columns))[:10]},
+    "categorical_columns": {list(set(categorical_columns))[:10]},
+    "chart_tips": ["Use bar charts for comparing categories", "Use line charts for showing trends over time", "Use pie charts for showing proportions"]
+  }},
+  "next_steps": [
+    "Ask about specific files or columns",
+    "Request chart suggestions for your data",
+    "Specify what you want to visualize",
+    "Say 'create a chart' to get started"
+  ]
+}}
+
+## CRITICAL RULES:
+
+### FILE SELECTION:
+- MUST use exact filenames from AVAILABLE FILES
+- Choose the most relevant file based on user request
+- If user mentions specific file, use that file
+- If ambiguous, choose the file with most relevant columns
+
+### COLUMN SELECTION:
+- MUST use exact column names from the chosen file
+- For x-axis: prefer categorical columns (names, categories, regions, etc.)
+- For y-axis: prefer numeric columns (values, amounts, counts, etc.)
+- Choose columns that make sense for the chart type
+
+### CHART TYPE SELECTION:
+- Bar charts: For comparing categories or groups
+- Line charts: For showing trends over time or continuous data
+- Pie charts: For showing proportions of a whole
+- Scatter plots: For showing relationships between two numeric variables
+- Area charts: For showing cumulative data over time
+
+### TITLE CREATION:
+- Be specific and descriptive
+- Include the main data being visualized
+- Mention the file or data source if relevant
+- Examples: "Sales by Region", "Revenue Trends Over Time", "Product Category Distribution"
+
+### SMART RESPONSE:
+- Be conversational and helpful
+- Explain what was created and why
+- Mention key insights or data characteristics
+- Provide next steps or suggestions
+- Use natural language, not technical jargon
+
+### FILTERS:
+- Only add filters if user explicitly mentions filtering
+- Use exact column names from available files
+- Format: {{"ColumnName": ["Value1", "Value2"]}} for specific values
+- Format: {{"ColumnName": []}} for column filtering without specific values
+
+## EXAMPLES:
+
+User: "show all files" → GENERAL RESPONSE with file list
+User: "create a bar chart of sales by region" → SUCCESS RESPONSE with chart config
+User: "what can I visualize?" → GENERAL RESPONSE with suggestions
+User: "make a line chart showing revenue over time" → SUCCESS RESPONSE with chart config
+
+Remember: Be intelligent, context-aware, and always provide the most helpful response based on the user's actual intent and available data."""
+
+def call_llm(api_url: str, model_name: str, bearer_token: str, prompt: str) -> str:
+    """Call the LLM API to generate chart configuration."""
     logger.info("Calling Chart LLM...")
     headers = {
         "Authorization": f"Bearer {bearer_token}",
@@ -183,11 +208,8 @@ def call_chart_llm(api_url: str, model_name: str, bearer_token: str, prompt: str
     logger.info(f"LLM raw content length: {len(content)}")
     return content
 
-# ------------------------------------------------------------------------------
-# Robust extraction + sanitize + validate against schema
-# ------------------------------------------------------------------------------
-
 def _extract_outer_json_text(response: str) -> str:
+    """Extract JSON from response, handling markdown code blocks and thinking tags."""
     if not response:
         return ""
     
@@ -217,16 +239,13 @@ def _extract_outer_json_text(response: str) -> str:
     start = cleaned.find("{")
     end = cleaned.rfind("}")
     
-    if start == -1 or end == -1 or end <= start:
-        return cleaned
+    if start != -1 and end != -1 and end > start:
+        return cleaned[start:end+1]
     
-    return cleaned[start:end+1].strip()
+    return cleaned
 
 def extract_json(response: str, available_files_with_columns: dict = None, user_prompt: str = "") -> Optional[Dict[str, Any]]:
-    """
-    Simple JSON extraction from LLM response - no complex processing.
-    Works with DeepSeek-style responses that include thinking and reasoning.
-    """
+    """Extract JSON object from raw LLM response."""
     logger.info(f"Extracting JSON from LLM response (len={len(response) if response else 0})")
     
     if not response:
@@ -241,8 +260,7 @@ def extract_json(response: str, available_files_with_columns: dict = None, user_
     
     try:
         obj = json.loads(raw)
-        logger.info(f"✅ Successfully extracted JSON from LLM response")
-        logger.info(f"🔍 Extracted JSON: {json.dumps(obj, indent=2)}")
+        logger.info("✅ Successfully extracted JSON from LLM response")
         return obj
     except Exception as e:
         logger.error(f"❌ JSON parse failed: {e}")
@@ -254,7 +272,7 @@ def extract_json(response: str, available_files_with_columns: dict = None, user_
             end = response.rfind("}")
             if start != -1 and end != -1 and end > start:
                 obj = json.loads(response[start:end+1])
-                logger.info(f"✅ Successfully extracted JSON with fallback method")
+                logger.info("✅ Successfully extracted JSON with fallback method")
                 return obj
         except Exception as e2:
             logger.error(f"❌ Fallback JSON parse also failed: {e2}")

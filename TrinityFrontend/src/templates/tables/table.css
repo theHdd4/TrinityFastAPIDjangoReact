@@ -47,10 +47,13 @@
 
 .table-header-cell {
   @apply px-5 py-3 text-left font-bold text-black bg-white;
-  width: 120px !important; /* Default column width */
-  min-width: 120px !important;
-  max-width: 120px !important;
+  width: 150px; /* Default column width - removed !important to allow dynamic changes */
+  min-width: 50px;
+  max-width: 500px;
   font-weight: 700 !important; /* Ensure bold text */
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
 }
 
 .table-row {
@@ -59,9 +62,12 @@
 
 .table-cell {
   @apply px-5 py-3 text-slate-700;
-  width: 120px !important; /* Default column width */
-  min-width: 120px !important;
-  max-width: 120px !important;
+  width: 150px; /* Default column width - removed !important to allow dynamic changes */
+  min-width: 50px;
+  max-width: 500px;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
 }
 
 .table-cell-primary {
@@ -210,6 +216,50 @@
 .table-header-cell.frozen-column:last-child,
 .table-cell.frozen-column:last-child {
   border-right: 2px solid #22c55e !important;
+}
+
+/* Excel-like column resize handle styles */
+.column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 10;
+  transition: background-color 0.15s ease;
+}
+
+.column-resize-handle:hover {
+  background: #3b82f6;
+}
+
+.column-resize-handle:active {
+  background: #1d4ed8;
+}
+
+/* Excel-like cell content styling */
+.table-cell-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+}
+
+/* Excel-like header content styling */
+.table-header-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
 }
 
 /* Ensure consistent spacing and no gaps */

@@ -15,12 +15,12 @@ logger = logging.getLogger("trinity.groupby.app")
 # Standalone configuration functions (no circular imports)
 def get_llm_config():
     """Return LLM configuration from environment variables."""
-    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
+    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP"))
     llm_port = os.getenv("OLLAMA_PORT", "11434")
     api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
     return {
         "api_url": api_url,
-        "model_name": os.getenv("LLM_MODEL_NAME", "qwen3:30b"),
+        "model_name": os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b"),
         "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
     }
 
