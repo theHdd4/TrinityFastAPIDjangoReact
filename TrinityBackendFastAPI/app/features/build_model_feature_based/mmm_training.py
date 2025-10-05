@@ -323,6 +323,8 @@ class MMMTransformationEngine:
             # (k ⋅ L_t ⋅ (1 - L_t)) / (σ_A ⋅ (L_max - L_min))
             numerator = k * L_t * (1 - L_t)
             denominator = sigma_A * (L_max - L_min)
+
+            logger.info(f"Numerator: {numerator}, Denominator: {denominator}")
             
             if denominator != 0:
                 transformation_factor = numerator / denominator
@@ -547,46 +549,24 @@ class MMMModelTrainer:
     
     def _filter_last_12_months(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Filter dataframe to include only the last 12 months of data.
+        Filter dataframe to include only the last 12 data points.
         
         Args:
-            df: DataFrame with date information
+            df: DataFrame to filter
             
         Returns:
-            DataFrame filtered to last 12 months
+            DataFrame with last 12 rows
         """
         try:
-            # Common date column names to check
-            date_columns = ['date', 'Date', 'DATE', 'date_index', 'Date_Index', 'DATE_INDEX', 
-                          'month', 'Month', 'MONTH', 'year', 'Year', 'YEAR',
-                          'fiscal_year', 'Fiscal_Year', 'FISCAL_YEAR']
-            
-            date_col = None
-            for col in date_columns:
-                if col in df.columns:
-                    date_col = col
-                    break
-            
-            if date_col is None:
-                # If no date column found, return original dataframe
-                return df
-            
-            # Convert to datetime if not already
-            if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
-                try:
-                    df[date_col] = pd.to_datetime(df[date_col])
-                except:
-                    # If conversion fails, return original dataframe
-                    return df
-            
-            # Sort by date column and take the last 12 months worth of data
-            # Assuming monthly data, so we take the last 12 rows
-            filtered_df = df.sort_values(by=date_col).tail(12).copy()
-            
-            return filtered_df
+            # Simply return the last 12 rows without any date sorting
+            # This ensures consistent results every time
+            if len(df) <= 12:
+                return df.copy()
+            else:
+                return df.tail(12).copy()
             
         except Exception as e:
-            # If any error occurs, return original dataframe
+            logger.warning(f"Error filtering last 12 data points: {e}")
             return df
 
     def calculate_roi_for_features(
@@ -625,14 +605,7 @@ class MMMModelTrainer:
         # ===== NEW: Build features_config from roiVariables and costPerUnit if using new structure =====
         roi_variables = roi_config.get('roiVariables', [])
         global_cost_per_unit = roi_config.get('costPerUnit', {})
-        
-        logger.info(f"🔍 ROI Config Analysis for {combination_name}:")
-        logger.info(f"   roiVariables: {roi_variables}")
-        logger.info(f"   costPerUnit: {global_cost_per_unit}")
-        logger.info(f"   perCombinationCostPerUnit: {roi_config.get('perCombinationCostPerUnit', False)}")
-        logger.info(f"   combinationCostPerUnit: {roi_config.get('combinationCostPerUnit', {})}")
-        
-        # Check if using new structure (roiVariables + costPerUnit)
+
         if roi_variables and global_cost_per_unit:
             # Build features_config from new structure
             features_config = {}
@@ -667,14 +640,11 @@ class MMMModelTrainer:
                 combination_cprp_values[combo_name].update(costs)
             logger.info(f"Merged per-combination cost per unit into CPRP values for {len(combination_cost_per_unit_values)} combinations")
         
-        # Find matching combination name (case-insensitive and partial matching)
         matched_combination_name = None
         if per_combination_cprp and combination_cprp_values:
-            # Try exact match first
             if combination_name in combination_cprp_values:
                 matched_combination_name = combination_name
             else:
-                # Try case-insensitive match
                 for config_combination in combination_cprp_values.keys():
                     if config_combination.lower() == combination_name.lower():
                         matched_combination_name = config_combination
@@ -986,9 +956,24 @@ class MMMModelTrainer:
                             )
                             
                         elif model_name == "Custom Constrained Ridge":
-                            # Extract constraints from parameters object (same as database.py)
-                            negative_constraints = parameters.get('negative_constraints', [])
-                            positive_constraints = parameters.get('positive_constraints', [])
+                            # Extract constraints from parameters object - handle both old and new formats
+                            variable_constraints = parameters.get('variable_constraints', [])
+                            
+                            # Convert new format to old format for compatibility
+                            negative_constraints = []
+                            positive_constraints = []
+                            
+                            if variable_constraints:
+                                for constraint in variable_constraints:
+                                    if constraint.get('constraint_type') == 'negative':
+                                        negative_constraints.append(constraint.get('variable_name'))
+                                    elif constraint.get('constraint_type') == 'positive':
+                                        positive_constraints.append(constraint.get('variable_name'))
+                            else:
+                                # Fallback to old format if new format not available
+                                negative_constraints = parameters.get('negative_constraints', [])
+                                positive_constraints = parameters.get('positive_constraints', [])
+                            
                             logger.info(f"🔍 MMM Custom Constrained Ridge - Negative constraints: {negative_constraints}")
                             logger.info(f"🔍 MMM Custom Constrained Ridge - Positive constraints: {positive_constraints}")
                             
@@ -1039,9 +1024,24 @@ class MMMModelTrainer:
                                 models_dict[model_name] = ElasticNet(alpha=float(alpha), l1_ratio=float(l1_ratio), random_state=42)
                         
                             elif model_name == "Constrained Linear Regression":
-                                # Extract constraints from parameters object (same as database.py)
-                                negative_constraints = parameters.get('negative_constraints', [])
-                                positive_constraints = parameters.get('positive_constraints', [])
+                                # Extract constraints from parameters object - handle both old and new formats
+                                variable_constraints = parameters.get('variable_constraints', [])
+                                
+                                # Convert new format to old format for compatibility
+                                negative_constraints = []
+                                positive_constraints = []
+                                
+                                if variable_constraints:
+                                    for constraint in variable_constraints:
+                                        if constraint.get('constraint_type') == 'negative':
+                                            negative_constraints.append(constraint.get('variable_name'))
+                                        elif constraint.get('constraint_type') == 'positive':
+                                            positive_constraints.append(constraint.get('variable_name'))
+                                else:
+                                    # Fallback to old format if new format not available
+                                    negative_constraints = parameters.get('negative_constraints', [])
+                                    positive_constraints = parameters.get('positive_constraints', [])
+                                
                                 logger.info(f"🔍 MMM Constrained Linear Regression - Negative constraints: {negative_constraints}")
                                 logger.info(f"🔍 MMM Constrained Linear Regression - Positive constraints: {positive_constraints}")
                                 
@@ -1258,18 +1258,21 @@ class MMMModelTrainer:
                         logger.info(f"Full original dataframe columns: {list(df.columns)}")
                         logger.info(f"Full original dataframe shape: {df.shape}")
                         
-                        # Filter data to last 12 months for ROI calculation
-                        df_last_12_months = self._filter_last_12_months(df)
-                        
-                        # Apply transformations to the filtered 12-month data
-                        transformed_df_last_12_months, transformation_metadata = self.transformation_engine.apply_variable_transformations(
-                            df_last_12_months, combo_config
+                        # Apply transformations to FULL dataset first for consistent standardization
+                        transformed_df_full, transformation_metadata = self.transformation_engine.apply_variable_transformations(
+                            df, combo_config
                         )
+ 
+                        transformed_df_last_12_months = self._filter_last_12_months(transformed_df_full)
+                        
+                        df_last_12_months = self._filter_last_12_months(df)
+
+                        logger.info(f"Transformed dataframe last 12 months: {transformed_df_last_12_months[['region'] + x_variables_lower].head(12)}")
                         
                         roi_results = self.calculate_roi_for_features(
                             roi_config=roi_config,
                             x_variables=x_variables_lower,
-                            unstandardized_coefficients=unstandardized_coefficients,
+                            unstandardized_coefficients=coefficients,  # Use transformed coefficients
                             transformed_df=transformed_df_last_12_months,
                             X_original=df_last_12_months[x_variables_lower],
                             full_original_df=df_last_12_months,  # Pass the filtered original dataframe

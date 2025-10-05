@@ -912,10 +912,25 @@ class DataPooler:
                         )
                         
                     elif model_name == "Constrained Ridge":
-                        # Extract constraints from parameters object
+                        # Extract constraints from parameters object - handle both old and new formats
                         parameters = config.get('parameters', {})
-                        negative_constraints = parameters.get('negative_constraints', [])
-                        positive_constraints = parameters.get('positive_constraints', [])
+                        variable_constraints = parameters.get('variable_constraints', [])
+                        
+                        # Convert new format to old format for compatibility
+                        negative_constraints = []
+                        positive_constraints = []
+                        
+                        if variable_constraints:
+                            for constraint in variable_constraints:
+                                if constraint.get('constraint_type') == 'negative':
+                                    negative_constraints.append(constraint.get('variable_name'))
+                                elif constraint.get('constraint_type') == 'positive':
+                                    positive_constraints.append(constraint.get('variable_name'))
+                        else:
+                            # Fallback to old format if new format not available
+                            negative_constraints = parameters.get('negative_constraints', [])
+                            positive_constraints = parameters.get('positive_constraints', [])
+                        
                         print(f"🔍 Constrained Ridge - Negative constraints: {negative_constraints}")
                         print(f"🔍 Constrained Ridge - Positive constraints: {positive_constraints}")
                         
@@ -939,10 +954,25 @@ class DataPooler:
                             best_parameters[model_name] = {'tuning_mode': 'auto'}
                         
                     elif model_name == "Constrained Linear Regression":
-                        # Extract constraints from parameters object
+                        # Extract constraints from parameters object - handle both old and new formats
                         parameters = config.get('parameters', {})
-                        negative_constraints = parameters.get('negative_constraints', [])
-                        positive_constraints = parameters.get('positive_constraints', [])
+                        variable_constraints = parameters.get('variable_constraints', [])
+                        
+                        # Convert new format to old format for compatibility
+                        negative_constraints = []
+                        positive_constraints = []
+                        
+                        if variable_constraints:
+                            for constraint in variable_constraints:
+                                if constraint.get('constraint_type') == 'negative':
+                                    negative_constraints.append(constraint.get('variable_name'))
+                                elif constraint.get('constraint_type') == 'positive':
+                                    positive_constraints.append(constraint.get('variable_name'))
+                        else:
+                            # Fallback to old format if new format not available
+                            negative_constraints = parameters.get('negative_constraints', [])
+                            positive_constraints = parameters.get('positive_constraints', [])
+                        
                         print(f"🔍 Constrained Linear Regression - Negative constraints: {negative_constraints}")
                         print(f"🔍 Constrained Linear Regression - Positive constraints: {positive_constraints}")
                         from .models import StackConstrainedLinearRegression

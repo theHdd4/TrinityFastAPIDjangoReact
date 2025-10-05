@@ -99,7 +99,8 @@ class MMMStackDataPooler:
         pool_by_identifiers: List[str], 
         x_variables: List[str], 
         y_variable: str,
-        all_identifiers: List[str]
+        all_identifiers: List[str],
+        clustering_columns: List[str] = None
     ) -> Dict[str, pd.DataFrame]:
         """
         Pool data from multiple combinations based on selected identifiers.
@@ -134,8 +135,8 @@ class MMMStackDataPooler:
                     # Convert all column names to lowercase for consistent matching
                     df.columns = df.columns.str.lower()
                     
-                    # Filter data to only include identifiers, x_variables, and y_variable
-                    filtered_df = self._filter_combination_data(df, all_identifiers, x_variables, y_variable)
+                    # Filter data to include identifiers, x_variables, y_variable, and clustering columns
+                    filtered_df = self._filter_combination_data(df, all_identifiers, x_variables, y_variable, clustering_columns)
                     
                     if filtered_df is not None and not filtered_df.empty:
                         all_dataframes.append(filtered_df)
@@ -292,10 +293,21 @@ class MMMStackDataPooler:
         except Exception as e:
             return False
     
-    def _filter_combination_data(self, df: pd.DataFrame, filtered_identifiers: List[str], x_variables: List[str], y_variable: str) -> pd.DataFrame:
+    def _filter_combination_data(self, df: pd.DataFrame, filtered_identifiers: List[str], x_variables: List[str], y_variable: str, clustering_columns: List[str] = None) -> pd.DataFrame:
 
         try:
-            required_columns = filtered_identifiers + x_variables + [y_variable]
+            # Include clustering columns if provided, avoiding duplicates
+            clustering_cols = clustering_columns or []
+            # Combine all columns and remove duplicates while preserving order
+            all_columns = filtered_identifiers + x_variables + [y_variable] + clustering_cols
+            required_columns = list(dict.fromkeys(all_columns))  # Remove duplicates while preserving order
+            
+            # Log column information for debugging
+            if clustering_cols:
+                overlapping_cols = set(x_variables + [y_variable]) & set(clustering_cols)
+                if overlapping_cols:
+                    logger.info(f"Clustering columns overlap with model variables: {list(overlapping_cols)}")
+                logger.info(f"Total columns requested: {len(all_columns)}, Unique columns: {len(required_columns)}")
             
             available_columns = [col for col in required_columns if col in df.columns]
             missing_columns = [col for col in required_columns if col not in df.columns]
@@ -428,12 +440,16 @@ class MMMStackDataPooler:
                     continue
 
                 combination_aggregated = self._aggregate_combinations_for_clustering(pool_df, numerical_columns)
+                logger.info(f"Combination aggregated: {combination_aggregated}")
                 
                 if combination_aggregated is None or len(combination_aggregated) == 0:
                     clustered_pools[pool_key] = pool_df
                     continue
 
                 combination_clusters = self._cluster_combinations(combination_aggregated, numerical_columns, n_clusters)
+
+
+                logger.info(f"Combination clusters: {combination_clusters}")
 
                 clustered_df = self._merge_cluster_id_to_pool_data(pool_df, combination_clusters)
                 clustered_pools[pool_key] = clustered_df
@@ -631,6 +647,68 @@ class MMMStackModelDataProcessor:
     def __init__(self):
         pass
     
+    def _create_combination_aware_train_test_split(self, df: pd.DataFrame, test_size: float = 0.2, random_state: int = 42) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Create train/test split that ensures each combination is represented in both training and test sets.
+        
+        Strategy:
+        1. For each combination, split its data into train/test based on test_size
+        2. Ensure each combination has at least 1 sample in both train and test sets
+        3. Combine all combination splits into final train/test sets
+        
+        Args:
+            df: DataFrame with 'combination' column
+            test_size: Proportion of data to use for testing (0.0 to 1.0)
+            random_state: Random seed for reproducibility
+            
+        Returns:
+            Tuple of (X_train, X_test, y_train, y_test) arrays
+        """
+        import numpy as np
+        from sklearn.model_selection import KFold
+        
+        np.random.seed(random_state)
+        
+        # Get unique combinations
+        combinations = df['combination'].unique()
+        
+        train_indices = []
+        test_indices = []
+        
+        for combination in combinations:
+            # Get all indices for this combination
+            combination_mask = df['combination'] == combination
+            combination_indices = df[combination_mask].index.values
+            
+            # Shuffle the indices for this combination
+            np.random.shuffle(combination_indices)
+            
+            # Calculate split point for this combination
+            n_samples = len(combination_indices)
+            n_test = max(1, int(n_samples * test_size))  # Ensure at least 1 sample in test
+            n_train = n_samples - n_test
+            
+            # Ensure we have at least 1 sample in train set
+            if n_train < 1:
+                n_train = 1
+                n_test = n_samples - 1
+                
+            # Split indices
+            test_indices_combination = combination_indices[:n_test]
+            train_indices_combination = combination_indices[n_test:]
+            
+            train_indices.extend(train_indices_combination)
+            test_indices.extend(test_indices_combination)
+        
+        # Convert to numpy arrays
+        train_indices = np.array(train_indices)
+        test_indices = np.array(test_indices)
+            
+        # Convert to positional indices (0-based)
+        train_positions = np.searchsorted(df.index, train_indices)
+        test_positions = np.searchsorted(df.index, test_indices)
+            
+        return train_positions, test_positions
 
     
     def calculate_combination_betas(self, model_results: List[Dict[str, Any]], combinations: List[str], x_variables: List[str], numerical_columns_for_interaction: List[str], split_cluster_id: str = None, standardization: str = 'none', apply_interaction_terms: bool = True) -> Dict[str, Dict[str, float]]:
@@ -661,6 +739,26 @@ class MMMStackModelDataProcessor:
             
             logger.info(f"Available combinations for calculation: {available_combinations}")
             
+            # Debug: Log all coefficient keys to understand the structure
+            logger.info(f"🔍 DEBUG: All coefficient keys in model {model_name}:")
+            for key in sorted(coefficients.keys()):
+                logger.info(f"   {key}: {coefficients[key]}")
+            
+            # If no combinations found, try to extract from all coefficient keys
+            if not available_combinations:
+                logger.warning("No combinations found using standard method, trying alternative extraction")
+                for key in coefficients.keys():
+                    if key.startswith('Beta_encoded_combination_') and not key.endswith('_x_price') and not key.endswith('_x_d1'):
+                        combination_name = key.replace('Beta_encoded_combination_', '')
+                        # Remove any interaction suffixes
+                        if '_x_' in combination_name:
+                            combination_name = combination_name.split('_x_')[0]
+                        if combination_name in combinations and combination_name not in available_combinations:
+                            available_combinations.append(combination_name)
+                            logger.info(f"Found combination via alternative method: '{combination_name}'")
+            
+            logger.info(f"Final available combinations: {available_combinations}")
+            
             # Calculate final betas only for combinations that are available in this model
             for combination in available_combinations:
                 logger.info(f"Calculating final betas for combination: {combination}")
@@ -679,12 +777,22 @@ class MMMStackModelDataProcessor:
                     model_var_name = x_var
                     
                     # Common beta for this x_variable (use original variable name)
-                    common_beta = coefficients.get(f"Beta_{model_var_name}", 0.0)
+                    beta_key = f"Beta_{model_var_name}"
+                    common_beta = coefficients.get(beta_key, 0.0)
                     logger.info(f"Common beta for {x_var} (Beta_{model_var_name}): {common_beta}")
+                    logger.info(f"🔍 DEBUG: Looking for coefficient key '{beta_key}', found: {beta_key in coefficients}")
+                    if beta_key not in coefficients:
+                        logger.warning(f"❌ Coefficient key '{beta_key}' not found in coefficients!")
+                        logger.info(f"Available keys containing '{model_var_name}': {[k for k in coefficients.keys() if model_var_name in k]}")
 
-                    interaction_key = f"encoded_combination_{combination}_x_{x_var}"
-                    individual_beta = coefficients.get(f"Beta_{interaction_key}", 0.0)
-                    logger.info(f"Individual beta for {x_var} (Beta_{interaction_key}): {individual_beta}")
+                    # Individual beta for this combination and x_variable (only if interaction terms are enabled)
+                    if apply_interaction_terms:
+                        interaction_key = f"encoded_combination_{combination}_x_{x_var}"
+                        individual_beta = coefficients.get(f"Beta_{interaction_key}", 0.0)
+                        logger.info(f"Individual beta for {x_var} (Beta_{interaction_key}): {individual_beta}")
+                    else:
+                        individual_beta = 0.0
+                        logger.info(f"Individual beta for {x_var} (interaction terms disabled): {individual_beta}")
                     
                     final_beta = common_beta + individual_beta
                     final_betas[x_var] = final_beta
@@ -950,7 +1058,9 @@ class MMMStackModelDataProcessor:
         apply_interaction_terms: bool = True,
         numerical_columns_for_interaction: List[str] = None,
         test_size: float = 0.2,
-        price_column: Optional[str] = None
+        price_column: Optional[str] = None,
+        run_id: str = None,
+        training_progress: Dict = None
     ) -> List[Dict[str, Any]]:
         """
         Train stack models on pooled data to get betas (similar to stack_model_training.py approach).
@@ -982,6 +1092,15 @@ class MMMStackModelDataProcessor:
             for split_key, cluster_df in split_clustered_data.items():
                 logger.info(f"Processing split cluster: {split_key} with {len(cluster_df)} records")
                 
+                # Update progress for cluster processing
+                if run_id:
+                    progress_dict = get_training_progress()
+                    if run_id in progress_dict:
+                        progress_dict[run_id]["current_step"] = f"Training stack models on cluster: {split_key}"
+                        logger.info(f"📊 Progress: Training on cluster {split_key}")
+                    else:
+                        logger.warning(f"❌ Run ID {run_id} not found in progress tracking")
+                
                 # Extract unique combinations in this cluster
                 cluster_combinations = []
                 logger.info(f"Cluster {split_key} columns: {cluster_df.columns.tolist()}")
@@ -1008,13 +1127,23 @@ class MMMStackModelDataProcessor:
                 for combo_idx, combo_config in enumerate(parameter_combinations):
                     logger.info(f"Processing parameter combination {combo_idx + 1}/{len(parameter_combinations)} for {split_key}")
                     
+                    # Update progress for parameter combination
+                    if run_id:
+                        progress_dict = get_training_progress()
+                        if run_id in progress_dict:
+                            progress_dict[run_id]["current_step"] = f"Training models: Parameter combination {combo_idx + 1}/{len(parameter_combinations)}"
+                            logger.info(f"📊 Progress: Parameter combination {combo_idx + 1}/{len(parameter_combinations)}")
+                        else:
+                            logger.warning(f"❌ Run ID {run_id} not found in progress tracking")
+                    
                     try:
                         # Apply transformations and train models for this combination
                         model_results = await self._process_combination_for_stack(
                             cluster_df, combo_config, models_to_run, custom_configs,
                             x_variables_lower, y_variable_lower, test_size,
                             price_column, transformation_engine,
-                            apply_interaction_terms, numerical_columns_for_interaction
+                            apply_interaction_terms, numerical_columns_for_interaction,
+                            run_id, training_progress, split_key
                         )
                         
                         logger.info(f"Completed combination {combo_idx + 1} for {split_key}: {len(model_results)} models trained")
@@ -1164,8 +1293,8 @@ class MMMStackModelDataProcessor:
                     
                     # Use original X variables for predictions
                     x_variables_lower = [var.lower() for var in x_variables]
-                    X = df[x_variables_lower].values
-                    y_actual = df[y_variable.lower()].values
+                    X = df[x_variables_lower].values.astype(np.float64)
+                    y_actual = df[y_variable.lower()].values.astype(np.float64)
                     
                     combination_metrics = {}
                     
@@ -1173,30 +1302,15 @@ class MMMStackModelDataProcessor:
                     if not available_parameter_combinations:
                         continue
                     
-                    for param_index, param_models in available_parameter_combinations.items():
-                        
-                        for model_idx, (model_name, betas) in enumerate(param_models.items()):
-                            
-                            # Update progress for current model
-                            if run_id:
-                                progress_dict = get_training_progress()
-                                if run_id in progress_dict:
-                                    current_model_idx = model_idx + 1
-                                    total_models_in_combination = len(param_models)
-                                    progress_dict[run_id]["current_model"] = model_name
-                                    progress_dict[run_id]["status"] = f"Stack Modeling: {combination} - {model_name} ({current_model_idx}/{total_models_in_combination})"
-                                    logger.info(f"📊 Processing model: {model_name} ({current_model_idx}/{total_models_in_combination})")
-                            
-                            # Get the parameter combination configuration for this model
+                    for param_index, param_models in available_parameter_combinations.items():             
+                        for model_idx, (model_name, betas) in enumerate(param_models.items()):    
                             combo_config = betas.get('parameter_combination', {})
                             
-                            # Create a modified combo_config that removes standard and minmax transformations
-                            # This ensures we can use unstandardized betas on original data
                             modified_combo_config = {}
                             for var, config in combo_config.items():
                                 var_type = config.get('type', 'none')
                                 if var_type in ['standard', 'minmax']:
-                                    # Remove standard and minmax transformations
+
                                     modified_config = config.copy()
                                     modified_config['type'] = 'none'
                                     modified_combo_config[var] = modified_config
@@ -1262,11 +1376,7 @@ class MMMStackModelDataProcessor:
                             transformed_individual_df, individual_transformation_metadata = transformation_engine.apply_variable_transformations(
                                 df, combo_config
                             )
-                            
-                            logger.info(f"   Using TRANSFORMED coefficients for prediction:")
-                            logger.info(f"   Transformed coefficients: {combination_coefficients}")
-                            logger.info(f"   Transformed intercept: {combination_intercept}")
-                            logger.info(f"   Transformed data shape: {transformed_individual_df[x_variables_lower].shape}")
+                        
                             
                             # Use transformed coefficients with transformed data for prediction
                             y_pred = self._predict_with_betas(
@@ -1290,13 +1400,38 @@ class MMMStackModelDataProcessor:
                             stack_key = f"{combination}_{param_index}_{model_name}"
                             stack_metrics = stack_metrics_by_combination_model.get(stack_key, {})
                             
-                            # STEP 4: Calculate elasticities and contributions using unstandardized coefficients
+                            # STEP 4: Calculate variable averages for this combination
+                            variable_averages = {}
+                            logger.info(f"   Calculating variable averages for {combination}")
+                            logger.info(f"   DataFrame columns: {df.columns.tolist()}")
+                            logger.info(f"   DataFrame shape: {df.shape}")
+                            
+                            for var in x_variables_lower:
+                                if var in df.columns:
+                                    var_mean = float(df[var].mean())
+                                    variable_averages[var] = var_mean
+                                    logger.info(f"   {var}: mean = {var_mean}")
+                                else:
+                                    variable_averages[var] = 0.0
+                                    logger.warning(f"   {var}: column not found, setting to 0.0")
+                            
+                            # Add y_variable average
+                            if y_variable.lower() in df.columns:
+                                y_mean = float(df[y_variable.lower()].mean())
+                                variable_averages[y_variable.lower()] = y_mean
+                                logger.info(f"   {y_variable.lower()}: mean = {y_mean}")
+                            else:
+                                logger.warning(f"   {y_variable.lower()}: column not found")
+                            
+                            logger.info(f"   Final variable_averages: {variable_averages}")
+                            
+                            # STEP 5: Calculate elasticities and contributions using unstandardized coefficients
                             elasticities, contributions, individual_price_elasticity = self.calculate_elasticities_and_contributions(
                                 unstandardized_coefficients=unstandardized_coefficients,
                                 combo_config=modified_combo_config,  # Use modified config (without standard/minmax)
                                 transformation_metadata=transformation_metadata,
                                 X_original=df,  # Use individual combination data
-                                y_original=df[y_variable.lower()],  # Use individual combination target
+                                y_original=df[y_variable.lower()], 
                                 x_variables_lower=x_variables_lower,
                                 price_column=price_column
                             )
@@ -1307,23 +1442,26 @@ class MMMStackModelDataProcessor:
                                 logger.info(f"🎯 Starting ROI calculation for stack modeling - {combination}")
                                 logger.info(f"   Unstandardized coefficients: {unstandardized_coefficients}")
                                 
-                                # Filter data to last 12 months for ROI calculation
+                                # Apply transformations to FULL dataset first for consistent standardization
+                                transformed_df_full, transformation_metadata = transformation_engine.apply_variable_transformations(
+                                    df, combo_config
+                                )
+                                
+                                # Then filter to last 12 months of the transformed data
+                                transformed_df_last_12_months = self._filter_last_12_months(transformed_df_full)
+                                
+                                # Also filter the original data to last 12 months for ROI calculation
                                 df_last_12_months = self._filter_last_12_months(df)
                                 logger.info(f"   Last 12 months data shape: {df_last_12_months.shape}")
+
+                                logger.info(f"   Transformed last 12 months data shape: {transformed_df_last_12_months[['region'] + x_variables_lower].head(12)}")
                                 
-                                transformed_df_last_12_months, transformation_metadata = transformation_engine.apply_variable_transformations(
-                                    df_last_12_months, modified_combo_config
-                                )
-                                logger.info(f"   Transformed data shape: {transformed_df_last_12_months.shape}")
-                                logger.info(f"   Transformed data columns: {list(transformed_df_last_12_months.columns)}")
-                                
-                                # Import the ROI calculation function from mmm_training
                                 from .mmm_training import MMMModelTrainer
                                 trainer = MMMModelTrainer()
                                 roi_results = trainer.calculate_roi_for_features(
                                     roi_config=roi_config,
                                     x_variables=x_variables_lower,
-                                    unstandardized_coefficients=unstandardized_coefficients,
+                                    unstandardized_coefficients=betas.get('coefficients', {}),  # Use transformed coefficients
                                     transformed_df=transformed_df_last_12_months,
                                     X_original=df_last_12_months[x_variables_lower],
                                     full_original_df=df_last_12_months,
@@ -1341,7 +1479,7 @@ class MMMStackModelDataProcessor:
                                 'parameter_combination_index': param_index,
                                 'parameter_combination': betas.get('parameter_combination', {}),
                                 'model_name': model_name,
-                                'individual_samples': n,
+                                'individual_samples': len(x_variables_lower)+1,
                                 'mape_train': stack_metrics.get('mape_train', 0.0),  # From stack modeling
                                 'mape_test': individual_mape,  # From individual combination
                                 'r2_train': stack_metrics.get('r2_train', 0.0),  # From stack modeling
@@ -1358,8 +1496,11 @@ class MMMStackModelDataProcessor:
                                 'unstandardized_coefficients': unstandardized_coefficients,  # Unstandardized coefficients for individual combination
                                 'unstandardized_intercept': unstandardized_intercept,  # Unstandardized intercept for individual combination
                                 'roi_results': roi_results,  # ROI results for selected features
+                                'variable_configs': combo_config,  # Variable configuration for this combination
+                                'transformation_metadata': transformation_metadata,  # Transformation metadata for this combination
+                                'variable_averages': variable_averages,  # Variable averages for this combination
                                 'train_size': stack_metrics.get('train_size', 0),
-                                'test_size': n
+                                'test_size': stack_metrics.get('test_size', 0)
                             }
                     
                     individual_metrics[combination] = combination_metrics
@@ -1500,12 +1641,14 @@ class MMMStackModelDataProcessor:
     def _predict_with_betas(self, X: np.ndarray, coefficients: Dict[str, float], x_variables: List[str], intercept: float = 0.0) -> np.ndarray:
         """Make predictions using betas."""
         try:
-            y_pred = np.full(X.shape[0], intercept)
+            # Ensure input data is float64
+            X = X.astype(np.float64)
+            y_pred = np.full(X.shape[0], float(intercept), dtype=np.float64)
             
             for i, var in enumerate(x_variables):
                 if i < X.shape[1]:
                     beta_key = f"Beta_{var}"
-                    beta_val = coefficients.get(beta_key, 0.0)
+                    beta_val = float(coefficients.get(beta_key, 0.0))
                     y_pred += beta_val * X[:, i]
             
             return y_pred
@@ -1605,7 +1748,8 @@ class MMMStackModelDataProcessor:
                 pool_by_identifiers=pool_by_identifiers,
                 x_variables=x_variables,
                 y_variable=y_variable,
-                all_identifiers=filtered_identifiers
+                all_identifiers=filtered_identifiers,
+                clustering_columns=clustering_columns
             )
             
             if not pooled_data:
@@ -1619,14 +1763,14 @@ class MMMStackModelDataProcessor:
                 numerical_columns = [var.lower() for var in x_variables + [y_variable]]
             else:
                 numerical_columns = [var.lower() for var in clustering_columns]
-                # Validate that clustering columns are subset of available variables
-                available_variables = [var.lower() for var in x_variables + [y_variable]]
-                invalid_columns = [col for col in numerical_columns if col not in available_variables]
-                if invalid_columns:
-                    raise ValueError(f"Clustering columns {invalid_columns} are not available in x_variables + y_variable")
+                # Note: clustering columns can be any numerical columns from the dataset
+                # No restriction to x_variables + y_variable - clustering can use any available columns
             
             logger.info(f"Using columns for clustering: {numerical_columns}")
             clustered_pools = data_pooler.apply_clustering_to_pools(pooled_data, numerical_columns, n_clusters)
+
+
+            logger.info(f"Clustered pools: {clustered_pools}")
             
             split_clustered_data = data_pooler.split_clustered_data_by_clusters(clustered_pools)
             
@@ -1745,7 +1889,8 @@ class MMMStackModelDataProcessor:
             stack_model_results = await self._train_stack_models_for_betas(
                 split_clustered_data, x_variables, y_variable, variable_configs,
                 models_to_run, custom_configs, apply_interaction_terms,
-                numerical_columns_for_interaction, test_size, price_column
+                numerical_columns_for_interaction, test_size, price_column,
+                run_id, training_progress
             )
             
             # Step 2: Calculate individual combination metrics using stack betas
@@ -1825,7 +1970,10 @@ class MMMStackModelDataProcessor:
         price_column: Optional[str],
         transformation_engine,
         apply_interaction_terms: bool,
-        numerical_columns_for_interaction: List[str]
+        numerical_columns_for_interaction: List[str],
+        run_id: str = None,
+        training_progress: Dict = None,
+        cluster_info: str = None
     ) -> List[Dict[str, Any]]:
         """Process a single parameter combination for stack MMM training."""
         try:
@@ -1875,20 +2023,26 @@ class MMMStackModelDataProcessor:
             logger.info(f"Merged {len(transformed_combinations)} combinations into {len(merged_df)} records")
             logger.info(f"Merged dataframe columns: {list(merged_df.columns)}")
             
-            # Step 3: Create interaction terms if requested
+            # Step 3: Create encoded combination features (always needed for stack modeling)
+            if not apply_interaction_terms:
+                logger.info("Creating encoded combination features")
+                merged_df = self._create_encoded_combination_features(merged_df)
+            
+            # Step 4: Create interaction terms if requested
             if apply_interaction_terms and numerical_columns_for_interaction:
                 logger.info("Creating interaction terms")
                 merged_df = self._create_interaction_terms_for_stack(
                     merged_df, numerical_columns_for_interaction
                 )
             
-            # Step 4: Train models for this parameter combination
+            # Step 5: Train models for this parameter combination
             logger.info(f"About to train models for combination with {len(merged_df)} records")
             model_results = await self._train_models_for_combination_stack(
                 merged_df, combo_config, models_to_run, custom_configs,
                 x_variables_lower, y_variable_lower, test_size,
                 price_column, combination_metadata,
-                apply_interaction_terms, numerical_columns_for_interaction
+                apply_interaction_terms, numerical_columns_for_interaction,
+                run_id, training_progress, cluster_info
             )
             
             logger.info(f"Model training completed: {len(model_results)} models trained")
@@ -1897,6 +2051,43 @@ class MMMStackModelDataProcessor:
         except Exception as e:
             logger.error(f"Error in _process_combination_for_stack: {e}")
             return []
+    
+    def _create_encoded_combination_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create encoded combination features for stack MMM data."""
+        try:
+            logger.info("Creating encoded combination features")
+            
+            # Check if combination column exists
+            if 'combination' not in df.columns:
+                logger.warning("No 'combination' column found, skipping encoded combination features")
+                return df
+            
+            # Create a copy to avoid modifying original
+            enhanced_df = df.copy()
+            
+            # Get unique combinations
+            unique_combinations = df['combination'].unique()
+            logger.info(f"Found {len(unique_combinations)} unique combinations: {unique_combinations}")
+            
+            # Check if we have enough combinations
+            combination_unique_values = len(unique_combinations)
+            if combination_unique_values <= 1:
+                logger.info(f"Only {combination_unique_values} unique combination(s), skipping encoded combination features")
+                return enhanced_df
+            
+            # One-hot encode the combination column
+            combination_dummies = pd.get_dummies(df['combination'], prefix="encoded_combination", drop_first=False)
+            
+            # Add one-hot encoded combination columns to the dataframe
+            for dummy_col in combination_dummies.columns:
+                enhanced_df[dummy_col] = combination_dummies[dummy_col]
+            
+            logger.info(f"Created {len(combination_dummies.columns)} encoded combination features: {list(combination_dummies.columns)}")
+            return enhanced_df
+            
+        except Exception as e:
+            logger.error(f"Error creating encoded combination features: {e}")
+            return df
     
     def _create_interaction_terms_for_stack(
         self, 
@@ -1956,7 +2147,10 @@ class MMMStackModelDataProcessor:
         price_column: Optional[str],
         transformation_metadata: Dict[str, Any],
         apply_interaction_terms: bool = True,
-        numerical_columns_for_interaction: List[str] = None
+        numerical_columns_for_interaction: List[str] = None,
+        run_id: str = None,
+        training_progress: Dict = None,
+        cluster_info: str = None
     ) -> List[Dict[str, Any]]:
         """Train models for a specific parameter combination in stack MMM."""
         try:
@@ -2013,6 +2207,9 @@ class MMMStackModelDataProcessor:
             
             # Clean data - remove rows with missing values for ALL features
             all_columns = feature_columns + [y_variable_lower]
+            # Preserve combination column if it exists
+            if 'combination' in df.columns:
+                all_columns.append('combination')
             df_clean = df[all_columns].dropna()
             
             if df_clean.empty:
@@ -2030,8 +2227,8 @@ class MMMStackModelDataProcessor:
                 return []
             
             # Prepare data for modeling using ALL features
-            X = df_clean[feature_columns].values
-            y = df_clean[y_variable_lower].values
+            X = df_clean[feature_columns].values.astype(np.float64)
+            y = df_clean[y_variable_lower].values.astype(np.float64)
             
             # Store original data statistics for elasticity calculation (only for main x_variables)
             X_original = df_clean[x_variables_lower]
@@ -2044,13 +2241,25 @@ class MMMStackModelDataProcessor:
                 logger.error(f"❌ Insufficient data for stack MMM training: {len(X)} samples")
                 return []
             
-            # Train/test split
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=test_size, random_state=42, shuffle=True
-            )
+            # Train/test split - use combination-aware split if combination column exists
+            if 'combination' in df_clean.columns:
+                logger.info("Using combination-aware train/test split")
+                train_indices, test_indices = self._create_combination_aware_train_test_split(
+                    df_clean, test_size=test_size, random_state=42
+                )
+                X_train = X[train_indices]
+                X_test = X[test_indices]
+                y_train = y[train_indices]
+                y_test = y[test_indices]
+            else:
+                logger.info("Using standard train/test split (no combination column found)")
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=test_size, random_state=42, shuffle=True
+                )
             
             # Convert boolean columns to numeric (encoded combination variables)
             logger.info("Converting boolean columns to numeric for validation")
+            # Note: feature_columns does not include 'combination' column, so it's automatically excluded
             X_train_df = pd.DataFrame(X_train, columns=feature_columns)
             X_test_df = pd.DataFrame(X_test, columns=feature_columns)
             
@@ -2061,9 +2270,11 @@ class MMMStackModelDataProcessor:
                     X_test_df[col] = X_test_df[col].astype(int)
                     logger.info(f"Converted boolean column '{col}' to numeric")
             
-            # Convert back to numpy arrays
-            X_train = X_train_df.values
-            X_test = X_test_df.values
+            # Convert back to numpy arrays with explicit float64 dtype
+            X_train = X_train_df.values.astype(np.float64)
+            X_test = X_test_df.values.astype(np.float64)
+            y_train = y_train.astype(np.float64)
+            y_test = y_test.astype(np.float64)
             
             # Validate split data
             logger.info(f"X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
@@ -2114,34 +2325,115 @@ class MMMStackModelDataProcessor:
                             )
                         
                         # Handle constrained models (extract constraints from parameters, not variable_constraints)
-                        elif model_name == "Custom Constrained Ridge":
-                            from .models import CustomConstrainedRidge
-                            # Extract constraints from parameters object (same as individual MMM)
-                            negative_constraints = parameters.get('negative_constraints', [])
-                            positive_constraints = parameters.get('positive_constraints', [])
+                        elif model_name == "Constrained Ridge":
+                            # Check if we have interaction terms (stack modeling) or just base features (individual modeling)
+                            has_interaction_terms = any('_x_' in col for col in feature_columns)
                             
-                            models_dict[model_name] = CustomConstrainedRidge(
-                                l2_penalty=parameters.get('l2_penalty', 0.1),
-                                learning_rate=parameters.get('learning_rate', 0.001),
-                                iterations=parameters.get('iterations', 10000),
-                                adam=parameters.get('adam', False),
-                                negative_constraints=negative_constraints,
-                                positive_constraints=positive_constraints
-                            )
+                            if has_interaction_terms:
+                                # Stack modeling: use StackConstrainedRidge for interaction terms
+                                from .models import StackConstrainedRidge
+                                logger.info(f"🔍 Using StackConstrainedRidge for stack modeling with interaction terms")
+                            else:
+                                # Individual modeling: use CustomConstrainedRidge for base features only
+                                from .models import CustomConstrainedRidge
+                                logger.info(f"🔍 Using CustomConstrainedRidge for individual modeling with base features only")
+                            
+                            # Extract constraints from parameters object - handle both old and new formats
+                            variable_constraints = parameters.get('variable_constraints', [])
+                            
+                            # Convert new format to old format for compatibility
+                            negative_constraints = []
+                            positive_constraints = []
+                            
+                            if variable_constraints:
+                                for constraint in variable_constraints:
+                                    if constraint.get('constraint_type') == 'negative':
+                                        negative_constraints.append(constraint.get('variable_name'))
+                                    elif constraint.get('constraint_type') == 'positive':
+                                        positive_constraints.append(constraint.get('variable_name'))
+                            else:
+                                # Fallback to old format if new format not available
+                                negative_constraints = parameters.get('negative_constraints', [])
+                                positive_constraints = parameters.get('positive_constraints', [])
+                            
+                            # Debug logging for constraints
+                            logger.info(f"🔍 Constrained Model - Parameters: {parameters}")
+                            logger.info(f"🔍 Constrained Model - Variable constraints: {variable_constraints}")
+                            logger.info(f"🔍 Constrained Model - Negative constraints: {negative_constraints}")
+                            logger.info(f"🔍 Constrained Model - Positive constraints: {positive_constraints}")
+                            
+                            if has_interaction_terms:
+                                models_dict[model_name] = StackConstrainedRidge(
+                                    l2_penalty=parameters.get('l2_penalty', 0.1),
+                                    learning_rate=parameters.get('learning_rate', 0.001),
+                                    iterations=parameters.get('iterations', 10000),
+                                    adam=parameters.get('adam', False),
+                                    negative_constraints=negative_constraints,
+                                    positive_constraints=positive_constraints
+                                )
+                            else:
+                                models_dict[model_name] = CustomConstrainedRidge(
+                                    l2_penalty=parameters.get('l2_penalty', 0.1),
+                                    learning_rate=parameters.get('learning_rate', 0.001),
+                                    iterations=parameters.get('iterations', 10000),
+                                    adam=parameters.get('adam', False),
+                                    negative_constraints=negative_constraints,
+                                    positive_constraints=positive_constraints
+                                )
                         
                         elif model_name == "Constrained Linear Regression":
-                            from .models import ConstrainedLinearRegression
-                            # Extract constraints from parameters object (same as individual MMM)
-                            negative_constraints = parameters.get('negative_constraints', [])
-                            positive_constraints = parameters.get('positive_constraints', [])
+                            # Check if we have interaction terms (stack modeling) or just base features (individual modeling)
+                            has_interaction_terms = any('_x_' in col for col in feature_columns)
                             
-                            models_dict[model_name] = ConstrainedLinearRegression(
-                                learning_rate=parameters.get('learning_rate', 0.001),
-                                iterations=parameters.get('iterations', 10000),
-                                adam=parameters.get('adam', False),
-                                negative_constraints=negative_constraints,
-                                positive_constraints=positive_constraints
-                            )
+                            if has_interaction_terms:
+                                # Stack modeling: use StackConstrainedLinearRegression for interaction terms
+                                from .models import StackConstrainedLinearRegression
+                                logger.info(f"🔍 Using StackConstrainedLinearRegression for stack modeling with interaction terms")
+                            else:
+                                # Individual modeling: use ConstrainedLinearRegression for base features only
+                                from .models import ConstrainedLinearRegression
+                                logger.info(f"🔍 Using ConstrainedLinearRegression for individual modeling with base features only")
+                            
+                            # Extract constraints from parameters object - handle both old and new formats
+                            variable_constraints = parameters.get('variable_constraints', [])
+                            
+                            # Convert new format to old format for compatibility
+                            negative_constraints = []
+                            positive_constraints = []
+                            
+                            if variable_constraints:
+                                for constraint in variable_constraints:
+                                    if constraint.get('constraint_type') == 'negative':
+                                        negative_constraints.append(constraint.get('variable_name'))
+                                    elif constraint.get('constraint_type') == 'positive':
+                                        positive_constraints.append(constraint.get('variable_name'))
+                            else:
+                                # Fallback to old format if new format not available
+                                negative_constraints = parameters.get('negative_constraints', [])
+                                positive_constraints = parameters.get('positive_constraints', [])
+                            
+                            # Debug logging for constraints
+                            logger.info(f"🔍 Constrained Linear Model - Parameters: {parameters}")
+                            logger.info(f"🔍 Constrained Linear Model - Variable constraints: {variable_constraints}")
+                            logger.info(f"🔍 Constrained Linear Model - Negative constraints: {negative_constraints}")
+                            logger.info(f"🔍 Constrained Linear Model - Positive constraints: {positive_constraints}")
+                            
+                            if has_interaction_terms:
+                                models_dict[model_name] = StackConstrainedLinearRegression(
+                                    learning_rate=parameters.get('learning_rate', 0.001),
+                                    iterations=parameters.get('iterations', 10000),
+                                    adam=parameters.get('adam', False),
+                                    negative_constraints=negative_constraints,
+                                    positive_constraints=positive_constraints
+                                )
+                            else:
+                                models_dict[model_name] = ConstrainedLinearRegression(
+                                    learning_rate=parameters.get('learning_rate', 0.001),
+                                    iterations=parameters.get('iterations', 10000),
+                                    adam=parameters.get('adam', False),
+                                    negative_constraints=negative_constraints,
+                                    positive_constraints=positive_constraints
+                                )
                         
                         # Handle other models with manual parameter tuning
                         elif tuning_mode == 'manual' and parameters:
@@ -2158,13 +2450,25 @@ class MMMStackModelDataProcessor:
             model_results = []
             logger.info(f"Starting to train {len(models_dict)} models")
             
-            for model_name, model in models_dict.items():
+            for model_idx, (model_name, model) in enumerate(models_dict.items()):
                 logger.info(f"Training model: {model_name}")
+                
+                # Update progress for each model training
+                if run_id:
+                    progress_dict = get_training_progress()
+                    if run_id in progress_dict:
+                        cluster_display = cluster_info if cluster_info else "Unknown"
+                        progress_dict[run_id]["current_step"] = f"Training {model_name} on cluster: {cluster_display}"
+                        progress_dict[run_id]["status"] = f"Stack Modeling: {model_name} ({model_idx + 1}/{len(models_dict)})"
+                        logger.info(f"📊 Progress: Training {model_name} on cluster: {cluster_display} ({model_idx + 1}/{len(models_dict)})")
+                    else:
+                        logger.warning(f"❌ Run ID {run_id} not found in progress tracking")
+                
                 try:
                     # Train model
                     if hasattr(model, 'fit'):
-                        if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression"]:
-                            model.fit(X_train, y_train, feature_names=x_variables_lower)
+                        if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression", "Constrained Ridge"]:
+                            model.fit(X_train, y_train, feature_names=feature_columns)
                         else:
                             model.fit(X_train, y_train)
                         logger.info(f"Successfully trained {model_name}")
@@ -2262,6 +2566,15 @@ class MMMStackModelDataProcessor:
                     
                     model_results.append(model_result)
                     logger.info(f"Successfully added model result for {model_name}")
+                    
+                    # Update progress when model completes
+                    if run_id:
+                        progress_dict = get_training_progress()
+                        if run_id in progress_dict:
+                            cluster_display = cluster_info if cluster_info else "Unknown"
+                            progress_dict[run_id]["current_step"] = f"Completed {model_name} on cluster: {cluster_display}"
+                            progress_dict[run_id]["status"] = f"Stack Modeling: Completed {model_name} ({model_idx + 1}/{len(models_dict)})"
+                            logger.info(f"📊 Progress: Completed {model_name} on cluster: {cluster_display} ({model_idx + 1}/{len(models_dict)})")
             
                 except Exception as e:
                     logger.error(f"Error training model {model_name}: {e}")

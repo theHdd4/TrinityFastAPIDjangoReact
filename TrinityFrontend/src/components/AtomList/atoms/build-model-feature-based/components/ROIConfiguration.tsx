@@ -59,6 +59,8 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
   onROIConfigChange,
   yVariable
 }) => {
+  const [showRemoveButtons, setShowRemoveButtons] = useState(false);
+  const [enterPressed, setEnterPressed] = useState(false);
   
   const handlePriceColumnChange = (priceColumn: string) => {
     onROIConfigChange({
@@ -74,6 +76,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
       enabled: true,
       manualPriceEntry: enabled
     });
+    setEnterPressed(false); // Reset enter pressed state when toggling manual entry
   };
 
   const handleManualPriceValueChange = (value: string) => {
@@ -91,6 +94,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
       enabled: true,
       perCombinationManualPrice: enabled
     });
+    setEnterPressed(false); // Reset enter pressed state when toggling per-combination input
   };
 
   const handleCombinationManualPriceValueChange = (combination: string, value: string) => {
@@ -184,10 +188,15 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
 
   // Check if Part 1 is complete to show Part 2
   // Part 1 is complete when:
-  // - Average months is selected AND
-  // - Either manual entry is enabled OR price column is selected
-  const isPart1Complete = roiConfig.averageMonths && 
-    (roiConfig.manualPriceEntry || roiConfig.priceColumn);
+  // - Manual entry is enabled AND has a value AND Enter has been pressed, OR
+  // - Both price column and average months are selected (dropdown mode)
+  const hasManualValue = roiConfig.manualPriceEntry && enterPressed && (
+    (roiConfig.manualPriceValue && roiConfig.manualPriceValue > 0) || // Global manual value
+    (roiConfig.perCombinationManualPrice && Object.values(roiConfig.combinationManualPriceValues || {}).some(value => value > 0)) // Per-combination values
+  );
+  
+  const isPart1Complete = hasManualValue || 
+    (roiConfig.priceColumn && roiConfig.averageMonths);
 
   // Check if Part 2 has selected variables to show Part 3
   const isPart2Complete = (roiConfig.roiVariables || []).length > 0 && 
@@ -207,41 +216,15 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
       {/* Part 1: Sales Value Conversion */}
       <div className="space-y-3">
         <Label className="text-sm font-medium">ROI Specific Inputs</Label>
-        <div className="relative p-4 rounded-lg shadow-sm bg-white border border-gray-200">
-          {/* Clear Button - Right Center */}
-          <button
-            className="absolute top-1/2 right-2 transform -translate-y-1/2 h-6 w-6 flex items-center justify-center text-black hover:text-red-600 transition-colors"
-            onClick={() => {
-              onROIConfigChange({
-                enabled: true,
-                features: {},
-                priceColumn: '',
-                perCombinationCPRP: false,
-                combinationCPRPValues: {},
-                manualPriceEntry: false,
-                manualPriceValue: undefined,
-                perCombinationManualPrice: false,
-                combinationManualPriceValues: {},
-                averageMonths: undefined,
-                roiVariables: [],
-                perCombinationCostPerUnit: false,
-                costPerUnit: {},
-                combinationCostPerUnit: {}
-              });
-            }}
-            title="Clear all ROI configuration"
-          >
-            <X className="w-4 h-4" />
-          </button>
-          
+        <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
           {/* Header Text */}
-          <div className="mb-4 pr-8">
+          <div className="mb-4">
             <p className="text-sm font-medium text-gray-700">
-              "<span className="text-blue-600 font-semibold">{yVariable || 'y_variable'}</span>" is converted to salesvalue by multiplying with:
+              "<span className="text-orange-500 font-semibold">{yVariable || 'y_variable'}</span>" is converted to monetary metric by multiplying with:
             </p>
           </div>
 
-          {/* Dropdowns and Checkbox Row */}
+          {/* Top Row: Dropdowns and Checkboxes */}
           <div className="flex gap-4 items-center flex-wrap">
             {/* Price Column Dropdown or Manual Input */}
             {!roiConfig.manualPriceEntry ? (
@@ -256,9 +239,8 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                 />
               </div>
             ) : (
-              /* Manual Entry - Show either global or per-combination inputs */
-              !roiConfig.perCombinationManualPrice ? (
-                /* Global Manual Input */
+              /* Global Manual Input - Only show when manual entry is enabled but per-combination is disabled */
+              !roiConfig.perCombinationManualPrice && (
                 <div className="flex-shrink-0">
                   <Input
                     type="number"
@@ -266,32 +248,19 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                     min="0"
                     value={roiConfig.manualPriceValue || ''}
                     onChange={(e) => handleManualPriceValueChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        // Trigger Part 2 to appear by ensuring the value is processed
+                        const numericValue = parseFloat(e.currentTarget.value) || 0;
+                        if (numericValue > 0) {
+                          handleManualPriceValueChange(e.currentTarget.value);
+                          setEnterPressed(true);
+                        }
+                      }
+                    }}
                     className="w-48 h-8"
                     placeholder="Enter price value"
                   />
-                </div>
-              ) : (
-                /* Per-Combination Manual Inputs */
-                <div className="space-y-3">
-                  {availableCombinations.map((combination, index) => (
-                    <div key={index} className="flex items-center gap-3">
-                      <div 
-                        className="h-8 flex items-center text-xs text-gray-600 truncate pr-2 max-w-[180px] cursor-help hover:text-gray-800 transition-colors" 
-                        title={combination}
-                      >
-                        {combination}
-                      </div>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={roiConfig.combinationManualPriceValues?.[combination] || ''}
-                        onChange={(e) => handleCombinationManualPriceValueChange(combination, e.target.value)}
-                        className="w-32 h-8"
-                        placeholder="0.00"
-                      />
-                    </div>
-                  ))}
                 </div>
               )
             )}
@@ -336,103 +305,146 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
               </div>
             )}
           </div>
+
+          {/* Per-Combination Manual Inputs - Separate row when enabled */}
+          {roiConfig.manualPriceEntry && roiConfig.perCombinationManualPrice && (
+            <div className="mt-4 space-y-3">
+              {availableCombinations.map((combination, index) => (
+                <div key={index} className="flex items-center gap-3">
+                  <div 
+                    className="h-8 flex items-center text-xs text-gray-600 truncate pr-2 max-w-[180px] cursor-help hover:text-gray-800 transition-colors" 
+                    title={combination}
+                  >
+                    {combination}
+                  </div>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={roiConfig.combinationManualPriceValues?.[combination] || ''}
+                    onChange={(e) => handleCombinationManualPriceValueChange(combination, e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        // Trigger Part 2 to appear by ensuring the value is processed
+                        const numericValue = parseFloat(e.currentTarget.value) || 0;
+                        if (numericValue > 0) {
+                          handleCombinationManualPriceValueChange(combination, e.currentTarget.value);
+                          setEnterPressed(true);
+                        }
+                      }
+                    }}
+                    className="w-32 h-8"
+                    placeholder="0.00"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
        {/* Part 2: Determine Variables to Measure ROI */}
        {isPart1Complete && (
-         <div className="space-y-3 animate-in slide-in-from-top-4 duration-300 ease-out">
-           <div className="relative p-4 rounded-lg shadow-sm bg-white border border-gray-200">
-             {/* Clear Button - Right Center */}
-             <button
-               className="absolute top-1/2 right-2 transform -translate-y-1/2 h-6 w-6 flex items-center justify-center text-black hover:text-red-600 transition-colors"
-               onClick={() => {
-                 onROIConfigChange({
-                   ...roiConfig,
-                   enabled: true,
-                   roiVariables: []
-                 });
-               }}
-               title="Clear Part 2 selections"
-             >
-               <X className="w-4 h-4" />
-             </button>
-             
+         <div className="space-y-3 animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
+           <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200 transform transition-all duration-300 hover:shadow-md">
              {/* Header Text */}
-             <div className="mb-3 pr-8">
+             <div className="mb-3">
                <p className="text-sm font-medium text-gray-700">
                  Determine variables to measure ROI for:
                </p>
              </div>
 
-            {/* Variables Row */}
-            <div className="flex gap-2 items-start flex-wrap">
-              {/* Existing variable dropdowns */}
-              {(roiConfig.roiVariables || []).map((variable, index) => {
-                // Filter out already selected variables (except current dropdown's value)
-                const selectedVariables = (roiConfig.roiVariables || []).filter((v, i) => i !== index && v !== '');
-                const availableOptions = availableFeatures
-                  .filter(feature => !selectedVariables.includes(feature))
-                  .map(feature => ({ value: feature, label: feature }));
-                
-                return (
-                  <div key={index} className="flex items-start gap-1">
-                    <div className="flex-shrink-0">
-                      <SingleSelectDropdown
-                        label=""
-                        placeholder="Select variable"
-                        value={variable}
-                        onValueChange={(val) => handleVariableChange(index, val)}
-                        options={availableOptions}
-                        className="w-48 h-8"
-                      />
+            {/* Variables Section */}
+            <div 
+              className="space-y-3" 
+              onClick={() => setShowRemoveButtons(false)}
+            >
+              {/* Variables Row */}
+              <div className="flex gap-2 items-start flex-wrap">
+                {/* Existing variable dropdowns */}
+                {(roiConfig.roiVariables || []).map((variable, index) => {
+                  // Filter out already selected variables (except current dropdown's value)
+                  const selectedVariables = (roiConfig.roiVariables || []).filter((v, i) => i !== index && v !== '');
+                  const availableOptions = availableFeatures
+                    .filter(feature => !selectedVariables.includes(feature))
+                    .map(feature => ({ value: feature, label: feature }));
+                  
+                  return (
+                    <div key={index} className="flex items-start gap-1">
+                      <div className="flex-shrink-0">
+                        <SingleSelectDropdown
+                          label=""
+                          placeholder="Select variable"
+                          value={variable}
+                          onValueChange={(val) => handleVariableChange(index, val)}
+                          options={availableOptions}
+                          className="w-48 h-8"
+                        />
+                      </div>
+                       {/* Remove button (X) - only show when showRemoveButtons is true */}
+                       {showRemoveButtons && (
+                         <button
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             handleRemoveVariable(index);
+                           }}
+                           className="h-6 w-6 flex items-center justify-center rounded border border-orange-300 bg-orange-50 hover:bg-orange-100 text-black transition-all duration-200 hover:scale-110 active:scale-95 flex-shrink-0 mt-1"
+                           title="Remove variable"
+                         >
+                           <span className="text-sm font-bold leading-none">×</span>
+                         </button>
+                       )}
                     </div>
-                    {/* Remove button (X) - positioned slightly below dropdown center */}
-                    <button
-                      onClick={() => handleRemoveVariable(index)}
-                      className="h-6 w-6 flex items-center justify-center rounded border border-red-300 bg-red-50 hover:bg-red-100 text-red-600 transition-colors flex-shrink-0 mt-1"
-                      title="Remove variable"
-                    >
-                      <span className="text-sm font-bold leading-none">×</span>
-                    </button>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
 
-              {/* Add Variable Button - positioned slightly below dropdown center */}
-              <button
-                onClick={handleAddVariable}
-                className="h-6 px-2 flex items-center gap-1 rounded border border-blue-300 bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors text-xs font-medium whitespace-nowrap flex-shrink-0 mt-1"
-              >
-                <span className="text-sm leading-none font-bold">+</span>
-                Add Variable
-              </button>
-             </div>
+              {/* Add Variable Button with Cross - Below the dropdowns */}
+              <div className="flex justify-start items-center gap-2">
+                <button
+                  onClick={handleAddVariable}
+                  className="h-8 px-3 flex items-center gap-1 rounded border border-orange-300 bg-orange-300 hover:bg-orange-400 text-white transition-all duration-200 hover:scale-105 active:scale-95 hover:shadow-md text-xs font-medium whitespace-nowrap"
+                >
+                  <span className="text-sm leading-none font-bold transition-transform duration-200 group-hover:rotate-90">+</span>
+                  Add Variable
+                </button>
+                
+                {/* Minus button to show/hide remove buttons */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowRemoveButtons(!showRemoveButtons);
+                  }}
+                  className="h-8 w-8 flex items-center justify-center rounded border border-gray-300 bg-gray-50 hover:bg-gray-100 text-gray-600 transition-all duration-200 hover:scale-105 active:scale-95"
+                  title={showRemoveButtons ? "Hide remove buttons" : "Show remove buttons"}
+                >
+                  <span className="text-sm font-bold leading-none">−</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
        {/* Part 3: Enter Cost Per Unit for Each Variable */}
        {isPart2Complete && (
-         <div className="space-y-3 animate-in slide-in-from-top-4 duration-300 ease-out">
-          {/* Per Combination Cost Toggle */}
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="per-combination-cost"
-              checked={roiConfig.perCombinationCostPerUnit || false}
-              onCheckedChange={(checked) => handlePerCombinationCostToggle(!!checked)}
-            />
-            <Label htmlFor="per-combination-cost" className="text-sm font-medium cursor-pointer">
-              Enable per-combination cost per unit values
-            </Label>
-          </div>
-
+         <div className="space-y-3 animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
           <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
-            {/* Header Text */}
-            <div className="mb-4">
+            {/* Header Text and Per Combination Cost Toggle - Horizontal alignment */}
+            <div className="mb-4 flex items-center justify-between">
               <p className="text-sm font-medium text-gray-700">
                 For each selected variables enter cost per unit:
               </p>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="per-combination-cost"
+                  checked={roiConfig.perCombinationCostPerUnit || false}
+                  onCheckedChange={(checked) => handlePerCombinationCostToggle(!!checked)}
+                />
+                <Label htmlFor="per-combination-cost" className="text-sm font-medium cursor-pointer">
+                  Enable per-combination cost per unit values
+                </Label>
+              </div>
             </div>
 
             {!roiConfig.perCombinationCostPerUnit ? (

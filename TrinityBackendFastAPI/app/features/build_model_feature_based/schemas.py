@@ -295,6 +295,9 @@ class ModelResultDocument(BaseModel):
     variable_statistics: List[Dict[str, Any]] = Field(default_factory=list, description="Detailed statistics for each variable")
     variable_averages: Dict[str, float] = Field(default_factory=dict, description="Simple averages for quick access")
     
+    # MMM Configuration
+    combo_config: Optional[Dict[str, Any]] = Field(None, description="Combination configuration for MMM modeling")
+    
     # Fold results
     fold_results: List[Dict[str, Any]] = Field(default_factory=list, description="Detailed results for each fold")
     is_fold_result: bool = Field(False, description="False for aggregated, True for individual fold")

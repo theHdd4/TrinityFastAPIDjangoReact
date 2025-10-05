@@ -605,10 +605,25 @@ async def train_models_for_combination_enhanced(
                         )
                         
                     elif model_name == "Custom Constrained Ridge":
-                        # Extract constraints from parameters object
+                        # Extract constraints from parameters object - handle both old and new formats
                         parameters = config.get('parameters', {})
-                        negative_constraints = parameters.get('negative_constraints', [])
-                        positive_constraints = parameters.get('positive_constraints', [])
+                        variable_constraints = parameters.get('variable_constraints', [])
+                        
+                        # Convert new format to old format for compatibility
+                        negative_constraints = []
+                        positive_constraints = []
+                        
+                        if variable_constraints:
+                            for constraint in variable_constraints:
+                                if constraint.get('constraint_type') == 'negative':
+                                    negative_constraints.append(constraint.get('variable_name'))
+                                elif constraint.get('constraint_type') == 'positive':
+                                    positive_constraints.append(constraint.get('variable_name'))
+                        else:
+                            # Fallback to old format if new format not available
+                            negative_constraints = parameters.get('negative_constraints', [])
+                            positive_constraints = parameters.get('positive_constraints', [])
+                        
                         print(f"🔍 Custom Constrained Ridge - Negative constraints: {negative_constraints}")
                         print(f"🔍 Custom Constrained Ridge - Positive constraints: {positive_constraints}")
                         
@@ -650,10 +665,25 @@ async def train_models_for_combination_enhanced(
                             )
                         
                     elif model_name == "Constrained Linear Regression":
-                        # Extract constraints from parameters object
+                        # Extract constraints from parameters object - handle both old and new formats
                         parameters = config.get('parameters', {})
-                        negative_constraints = parameters.get('negative_constraints', [])
-                        positive_constraints = parameters.get('positive_constraints', [])
+                        variable_constraints = parameters.get('variable_constraints', [])
+                        
+                        # Convert new format to old format for compatibility
+                        negative_constraints = []
+                        positive_constraints = []
+                        
+                        if variable_constraints:
+                            for constraint in variable_constraints:
+                                if constraint.get('constraint_type') == 'negative':
+                                    negative_constraints.append(constraint.get('variable_name'))
+                                elif constraint.get('constraint_type') == 'positive':
+                                    positive_constraints.append(constraint.get('variable_name'))
+                        else:
+                            # Fallback to old format if new format not available
+                            negative_constraints = parameters.get('negative_constraints', [])
+                            positive_constraints = parameters.get('positive_constraints', [])
+                        
                         print(f"🔍 Constrained Linear Regression - Negative constraints: {negative_constraints}")
                         print(f"🔍 Constrained Linear Regression - Positive constraints: {positive_constraints}")
                         models_dict[model_name] = ConstrainedLinearRegression(
@@ -904,7 +934,8 @@ async def save_model_results_enhanced(
     standardization: str,
     test_size: float,
     run_id: str,
-    variable_data: Dict[str, Any]
+    variable_data: Dict[str, Any],
+    combo_config: Optional[Dict[str, Any]] = None  # ADD COMBO_CONFIG PARAMETER
 ) -> List[str]:
 
     """Save enhanced model results including fold details, variable statistics, and AIC/BIC."""
@@ -973,6 +1004,9 @@ async def save_model_results_enhanced(
                 # Variable statistics
                 "variable_statistics": variable_data.get("variable_statistics", []),
                 "variable_averages": variable_data.get("variable_averages", {}),
+                
+                # MMM Configuration
+                "combo_config": combo_config,
                 
                 # Fold results
                 "fold_results": model_result.get("fold_results", []),

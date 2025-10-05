@@ -99,6 +99,77 @@ async def save_build_config(
         logger.error(f"❌ MongoDB save error for build-model_featurebased_configs: {e}")
         return {"status": "error", "error": str(e)}
 
+async def save_mmm_model_results(
+    scope_id: str,
+    scope_name: str,
+    set_name: str,
+    combination_results: list,
+    x_variables: list,
+    y_variable: str,
+    price_column: str = None,
+    standardization: str = "mmm_per_variable",
+    test_size: float = 0.2,
+    run_id: str = None,
+    all_variable_stats: dict = None,
+    combo_config: dict = None
+):
+    """Save all MMM model results to MongoDB build-model_featurebased_configs collection in a single document"""
+    try:
+        # Create document ID based on scope (all combinations in one document)
+        document_id = f"{scope_id}_all_combinations"
+        
+        # Prepare the document structure with all combinations
+        document = {
+            "_id": document_id,
+            "scope_id": scope_id,
+            "scope_name": scope_name,
+            "set_name": set_name,
+            "combination_results": combination_results,  # All combinations in one document
+            "x_variables": x_variables,
+            "y_variable": y_variable,
+            "price_column": price_column,
+            "standardization": standardization,
+            "test_size": test_size,
+            "run_id": run_id,
+            "all_variable_stats": all_variable_stats or {},
+            "combo_config": combo_config or {},
+            "operation_type": "mmm_model_results",
+            "total_combinations": len(combination_results),
+            "total_models": sum(len(combo.get("model_results", [])) for combo in combination_results),
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+        
+        # Check if document already exists
+        existing_doc = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
+        
+        if existing_doc:
+            # Update existing document
+            result = await db["build-model_featurebased_configs"].replace_one(
+                {"_id": document_id},
+                document
+            )
+            operation = "updated"
+        else:
+            # Insert new document
+            result = await db["build-model_featurebased_configs"].insert_one(document)
+            operation = "inserted"
+        
+        logger.info(f"📦 Stored all MMM model results in build-model_featurebased_configs: {document_id}")
+        
+        return {
+            "status": "success",
+            "mongo_id": document_id,
+            "operation": operation,
+            "collection": "build-model_featurebased_configs",
+            "total_combinations": len(combination_results),
+            "total_models": sum(len(combo.get("model_results", [])) for combo in combination_results)
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ MongoDB save error for MMM model results: {e}")
+        return {"status": "error", "error": str(e)}
+
 async def get_build_config_from_mongo(client_name: str, app_name: str, project_name: str):
     """Retrieve saved build configuration."""
     try:

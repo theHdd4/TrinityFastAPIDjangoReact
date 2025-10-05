@@ -28,6 +28,9 @@ from ..scope_selector.deps import get_minio_client
 # Import get_object_prefix for dynamic path construction
 from ..data_upload_validate.app.routes import get_object_prefix
 
+# Import MMM model results saver
+from .mongodb_saver import save_mmm_model_results
+
 # Import MongoDB saver functions
 from .mongodb_saver import save_build_config, get_build_config_from_mongo, get_scope_config_from_mongo, get_combination_column_values
 
@@ -361,11 +364,10 @@ async def get_pool_identifiers(scope_id: str):
                     identifiers = scope_config['identifiers']
                     logger.info(f"✅ Retrieved identifiers: {identifiers}")
                 else:
-                    logger.warning("⚠️ No identifiers found in scope config")
-                    raise HTTPException(
-                        status_code=404,
-                        detail="No identifiers found in scope configuration"
-                    )
+                    logger.warning("⚠️ No identifiers found in scope config, using default identifiers")
+                    # Provide default identifiers as fallback
+                    identifiers = ["Channel", "Brand"]
+                    logger.info(f"📋 Using default identifiers: {identifiers}")
             else:
                 logger.warning(f"⚠️ Could not extract client/app/project from prefix: {prefix}")
                 raise HTTPException(
@@ -1027,7 +1029,12 @@ async def train_models_direct(request: dict):
                 # Get column values for this combination from source file
                 column_values = {}
                 
-                if identifiers and combo_result.get('file_key'):
+                # Check if this is a stack model (file_key starts with 'mmm_stack_model_')
+                if combo_result.get('file_key', '').startswith('mmm_stack_model_'):
+                    # For stack models, use default values since the file doesn't exist in MinIO
+                    logger.info(f"📊 Stack model detected for {combination_id}, using default column values")
+                    column_values = {identifier: "Stack Model" for identifier in identifiers}
+                elif identifiers and combo_result.get('file_key'):
                     try:
                         column_values = await get_combination_column_values(
                             minio_client, 
@@ -2041,11 +2048,8 @@ async def prepare_stack_model_data(request: dict):
             if not numerical_columns_for_clustering:
                 raise HTTPException(status_code=400, detail="numerical_columns_for_clustering is required when apply_clustering is true")
             
-            # Validate that numerical_columns_for_clustering is a subset of x_variables + y_variable
-            all_numerical_columns = x_variables + [y_variable]
-            invalid_clustering_columns = [col for col in numerical_columns_for_clustering if col not in all_numerical_columns]
-            if invalid_clustering_columns:
-                raise HTTPException(status_code=400, detail=f"numerical_columns_for_clustering must be a subset of x_variables + y_variable. Invalid columns: {invalid_clustering_columns}")
+            # Note: numerical_columns_for_clustering can be any numerical columns from the dataset
+            # No restriction to x_variables + y_variable - clustering can use any available columns
         
         # Validate interaction terms parameters if interaction terms are requested
         if apply_interaction_terms:
@@ -2195,11 +2199,8 @@ async def train_models_for_stacked_data(request: dict):
             if not numerical_columns_for_clustering:
                 raise HTTPException(status_code=400, detail="numerical_columns_for_clustering is required when apply_clustering is true")
             
-            # Validate that numerical_columns_for_clustering is a subset of x_variables + y_variable
-            all_numerical_columns = x_variables + [y_variable]
-            invalid_clustering_columns = [col for col in numerical_columns_for_clustering if col not in all_numerical_columns]
-            if invalid_clustering_columns:
-                raise HTTPException(status_code=400, detail=f"numerical_columns_for_clustering must be a subset of x_variables + y_variable. Invalid columns: {invalid_clustering_columns}")
+            # Note: numerical_columns_for_clustering can be any numerical columns from the dataset
+            # No restriction to x_variables + y_variable - clustering can use any available columns
         
         # Validate interaction terms parameters if interaction terms are requested
         if apply_interaction_terms:
@@ -2210,11 +2211,8 @@ async def train_models_for_stacked_data(request: dict):
             if not numerical_columns_for_interaction:
                 raise HTTPException(status_code=400, detail="numerical_columns_for_interaction is required when apply_interaction_terms is true")
             
-            # Validate that numerical_columns_for_interaction is a subset of x_variables + y_variable
-            all_numerical_columns = x_variables + [y_variable]
-            invalid_interaction_columns = [col for col in numerical_columns_for_interaction if col not in all_numerical_columns]
-            if invalid_interaction_columns:
-                raise HTTPException(status_code=400, detail=f"numerical_columns_for_interaction must be a subset of x_variables + y_variable. Invalid columns: {invalid_interaction_columns}")
+            # Note: numerical_columns_for_interaction can be any numerical columns from the dataset
+            # No restriction to x_variables + y_variable - interaction terms can use any available columns
         
         # Get MinIO client and bucket name
         minio_client = get_minio_client()
@@ -2521,6 +2519,8 @@ async def train_mmm_models(request: dict):
         n_clusters = request.get('n_clusters', None)
         apply_interaction_terms = request.get('apply_interaction_terms', True)
         numerical_columns_for_interaction = request.get('numerical_columns_for_interaction', [])
+        logger.info(f"🔍 apply_interaction_terms: {apply_interaction_terms}")
+        logger.info(f"🔍 numerical_columns_for_interaction: {numerical_columns_for_interaction}")
         
         price_column = request.get('price_column')
         
@@ -2586,6 +2586,7 @@ async def train_mmm_models(request: dict):
         
         # Get ROI configuration if provided
         roi_config = request.get('roi_config')
+        logger.info(f"🔍 ROI config: {roi_config}")
         
         # Get MinIO client and bucket
         minio_client = get_minio_client()
@@ -2699,38 +2700,12 @@ async def train_mmm_models(request: dict):
                                     combination_name=combination  # Pass the actual combination name
                             )
                             
-                                # Update pogress
+                                                    # Update pogress
                             training_progress[run_id]["current"] += individual_models_count
                             training_progress[run_id]["percentage"] = int((training_progress[run_id]["current"] / training_progress[run_id]["total"]) * 100)
                             
                             # Store variable statistics
                             all_variable_stats[combination] = variable_data
-                            
-                                                # Save results to MongoDB (same format as train-models-direct)
-                            try:
-                                saved_ids = await save_model_results_enhanced(
-                                    scope_id=f"scope_{scope_number}",
-                                    scope_name=f"Scope_{scope_number}",
-                                    set_name=f"Scope_{scope_number}",
-                                    combination={
-                                        "combination_id": combination,
-                                        "file_key": target_file_key,
-                                        "filename": target_file_key.split('/')[-1],
-                                        "set_name": f"Scope_{scope_number}",
-                                        "record_count": variable_data.get("original_data_shape", [0, 0])[0]
-                                    },
-                                    model_results=model_results,
-                                    x_variables=x_variables_lower,
-                                    y_variable=y_variable_lower,
-                                                        price_column=roi_price_column,  # Use ROI config price column
-                                    standardization="mmm_per_variable",  # Special marker for MMM
-                                                        test_size=individual_test_size,
-                                    run_id=run_id,
-                                    variable_data=variable_data
-                                )
-                                
-                            except Exception as e:
-                                                    pass  # Don't fail the entire request if MongoDB save fails
                             
                             # Add to results
                             combination_results.append({
@@ -2754,7 +2729,7 @@ async def train_mmm_models(request: dict):
                 except Exception as e:
                     logger.error(f"Error processing combination {combination}: {e}")
                     continue
-        
+            
         # Log completion of individual modeling
         if individual_modeling:
 
@@ -2763,15 +2738,6 @@ async def train_mmm_models(request: dict):
         # MMM Stack modeling integration (similar to general models)
         if stack_modeling:
             try:
-                
-                # Update training progress for UI
-                training_progress[run_id]["stage"] = "stack_modeling"
-                training_progress[run_id]["stage_description"] = "Training stack models"
-                training_progress[run_id]["current_step"] = "Starting stack modeling"
-                training_progress[run_id]["completed_combinations"] = 0  # Reset counter for stack modeling
-                training_progress[run_id]["current_combination"] = ""
-                training_progress[run_id]["current_model"] = ""
-                
                 # Import MMM stack trainer
                 from .mmm_stack_training import MMMStackModelDataProcessor
                 
@@ -2852,6 +2818,8 @@ async def train_mmm_models(request: dict):
                                 "contributions": model_result.get('contributions', {}),
                                 "transformation_metadata": model_result.get('transformation_metadata', {}),
                                 "variable_configs": model_result.get('variable_configs', {}),
+                                "combo_config": model_result.get('combo_config', {}),  # Include combo_config
+                                "variable_averages": model_result.get('variable_averages', {}),  # Include variable averages
                                 "roi_results": model_result.get('roi_results', {}),  # Include ROI results
                                 "model_type": "mmm_stack",  # Mark as stack model
                                 "best_alpha": model_result.get('best_alpha', None)
@@ -2869,6 +2837,8 @@ async def train_mmm_models(request: dict):
                             if existing_combination:
                                 # Merge stack models into existing combination's model_results
                                 existing_combination['model_results'].extend(stack_model_results_formatted)
+                                logger.info(f"Merged {len(stack_model_results_formatted)} MMM stack models into existing combination {combination}")
+                                # Note: Don't increment completed_combinations here as it was already counted for individual models
                             else:
                                 # If no existing combination found, create a new entry (fallback)
                                 combination_results.append({
@@ -2877,6 +2847,38 @@ async def train_mmm_models(request: dict):
                                     "total_records": 0,  # Individual metrics don't have total_records
                                     "model_results": stack_model_results_formatted
                                 })
+                                
+                                # Update progress - combination completed (for stack-only mode)
+                                training_progress[run_id]["completed_combinations"] += 1
+                                
+                                logger.info(f"Added {len(stack_model_results_formatted)} MMM stack models as new combination {combination} (no existing entry found)")
+                    
+                    # Store stack modeling results in all_variable_stats
+                    for combination, model_results_dict in stack_combination_results.items():
+                        # Create variable stats entry for this combination
+                        combination_variable_stats = {
+                            'combination_results': []
+                        }
+                        
+                        # Process each model result to extract variable averages
+                        for param_model_key, model_result in model_results_dict.items():
+                            if isinstance(model_result, dict):
+                                # Extract variable averages from the model result
+                                variable_averages = model_result.get('variable_averages', {})
+                                combo_config = model_result.get('combo_config', {})
+                                transformation_metadata = model_result.get('transformation_metadata', {})
+                                
+                                # Create combination result entry
+                                combination_result = {
+                                    'variable_averages': variable_averages,
+                                    'combo_config': combo_config,
+                                    'transformation_metadata': transformation_metadata
+                                }
+                                combination_variable_stats['combination_results'].append(combination_result)
+                        
+                        # Store in all_variable_stats
+                        all_variable_stats[combination] = combination_variable_stats
+                        logger.info(f"📊 Stored variable stats for stack combination {combination}: {len(combination_variable_stats['combination_results'])} results")
                     
                     training_progress[run_id]["current_step"] = "Stack modeling completed"
                 else:
@@ -2941,9 +2943,46 @@ async def train_mmm_models(request: dict):
                     }]
                 })
         
-        # Mark training as completed
-        training_progress[run_id]["status"] = "completed"
-        training_progress[run_id]["percentage"] = 100
+        # Save all results to MongoDB (both individual and stack MMM models) in a single document
+        if combination_results:
+            try:
+                logger.info(f"💾 Saving {len(combination_results)} combination results to MongoDB in a single document")
+                
+                # Filter out error combinations
+                valid_combination_results = []
+                for combo_result in combination_results:
+                    model_results = combo_result.get("model_results", [])
+                    if not any("error" in str(model.get("model_name", "")) for model in model_results):
+                        valid_combination_results.append(combo_result)
+                    else:
+                        logger.warning(f"Skipping error combination {combo_result.get('combination_id')} for MongoDB save")
+                
+                if valid_combination_results:
+                    saved_result = await save_mmm_model_results(
+                        scope_id=f"scope_{scope_number}",
+                        scope_name=f"Scope_{scope_number}",
+                        set_name=f"Scope_{scope_number}",
+                        combination_results=valid_combination_results,  # All combinations in one call
+                        x_variables=x_variables_lower,
+                        y_variable=y_variable_lower,
+                        price_column=roi_price_column,
+                        standardization="mmm_per_variable",  # Special marker for MMM
+                        test_size=individual_test_size,
+                        run_id=run_id,
+                        all_variable_stats=all_variable_stats,  # All variable stats
+                        combo_config=variable_configs_lower  # Pass combo_config for MMM
+                    )
+                    
+                    if saved_result.get("status") == "success":
+                        logger.info(f"✅ Saved {saved_result.get('total_combinations', 0)} combinations with {saved_result.get('total_models', 0)} models to MongoDB")
+                    else:
+                        logger.error(f"❌ Failed to save MMM results to MongoDB: {saved_result.get('error', 'Unknown error')}")
+                else:
+                    logger.warning("No valid combinations to save to MongoDB")
+                    
+            except Exception as e:
+                logger.error(f"❌ Failed to save MMM results to MongoDB: {e}")
+                # Don't fail the entire request if MongoDB save fails
         
         # Initialize filtered results
         filtered_combination_results = []
@@ -2970,6 +3009,7 @@ async def train_mmm_models(request: dict):
                 # Remove extra fields that don't match ModelResult schema
                 best_mape_model.pop("best_metric", None)
                 best_mape_model.pop("model_type", None)
+                best_mape_model["best_metric"] = "mape"  # Mark as best MAPE
                 best_models.append(best_mape_model)
                 
                 # Find best R² for this model type
@@ -2978,28 +3018,47 @@ async def train_mmm_models(request: dict):
                 # Remove extra fields that don't match ModelResult schema
                 best_r2_model.pop("best_metric", None)
                 best_r2_model.pop("model_type", None)
+                best_r2_model["best_metric"] = "r2"  # Mark as best R²
                 best_models.append(best_r2_model)
+            
+            # Remove duplicates (same model might be best for both MAPE and R²)
+            seen_models = set()
+            unique_best_models = []
+            for model in best_models:
+                # Create a unique identifier for the model
+                model_id = f"{model['model_name']}_{model.get('best_alpha', '')}_{model.get('best_l1_ratio', '')}"
+                if model_id not in seen_models:
+                    seen_models.add(model_id)
+                    unique_best_models.append(model)
+                else:
+                    # If duplicate, keep the one with more metrics marked as best
+                    existing_model = next(m for m in unique_best_models if f"{m['model_name']}_{m.get('best_alpha', '')}_{m.get('best_l1_ratio', '')}" == model_id)
+                    if model.get('best_metric') == 'r2' and existing_model.get('best_metric') == 'mape':
+                        # Replace with R² version (more comprehensive)
+                        unique_best_models.remove(existing_model)
+                        unique_best_models.append(model)
             
             # Add filtered combination result
             filtered_combination_results.append({
                 "combination_id": combo_id,
                 "file_key": combo_result.get("file_key", f"mmm_{combo_id}"),
                 "total_records": combo_result.get("total_records", 0),
-                "model_results": best_models
+                "model_results": unique_best_models
             })
         
         # Prepare summary after filtered results are created
+        total_best_models = sum(len(combo.get('model_results', [])) for combo in filtered_combination_results)
         summary = {
             "run_id": run_id,
             "total_combinations_processed": len(combination_results),
-            "total_models_returned": len(filtered_combination_results),  # Only best models in response
-            "note": "Response contains best MAPE and R² models for each model type per combination.",
+            "total_models_returned": total_best_models,  # Only best models in response
+            "note": "Response contains best MAPE and R² models for each model type per combination (deduplicated).",
             "variable_transformations_applied": len(variable_configs),
             "business_constraints_applied": len(individual_custom_model_configs) + len(stack_custom_model_configs),
             "transformation_types_used": list(set(config.get("type", "none") for config in variable_configs.values())),
             "best_models_by_type": {},
             "stack_modeling_enabled": stack_modeling,
-            "stack_models_count": sum(1 for combo in combination_results for model in combo.get('model_results', []) if model.get('model_type') == 'mmm_stack') if stack_modeling else 0
+            "stack_models_count": sum(1 for combo in filtered_combination_results for model in combo.get('model_results', []) if 'Stack_' in model.get('model_name', '')) if stack_modeling else 0
         }
         
         # Populate best model summaries by model type
@@ -3066,12 +3125,45 @@ async def train_mmm_models(request: dict):
             for combo_result in combination_results:
                 # Get variable averages for this combination
                 combination_id = combo_result['combination_id']
-                variable_averages = all_variable_stats.get(combination_id, {}).get('variable_averages', {})
+                
+                # Debug logging for variable averages
+                logger.info(f"🔍 Looking for combination_id: {combination_id}")
+                logger.info(f"🔍 all_variable_stats keys: {list(all_variable_stats.keys())}")
+                logger.info(f"🔍 all_variable_stats structure: {all_variable_stats}")
+                
+                # Fix: all_variable_stats contains final_variable_statistics for each combination
+                # We need to extract variable_averages from the combination_results
+                variable_averages = {}
+                
+                # Check if all_variable_stats[combination] has combination_results
+                if 'combination_results' in all_variable_stats.get(combination_id, {}):
+                    combination_results_list = all_variable_stats[combination_id]['combination_results']
+                    if combination_results_list and len(combination_results_list) > 0:
+                        # Get variable_averages from the first combination result
+                        variable_averages = combination_results_list[0].get('variable_averages', {})
+                
+                # Fallback: if no variable_averages found, try to get from any available combination
+                if not variable_averages:
+                    for combo_key, combo_data in all_variable_stats.items():
+                        if 'combination_results' in combo_data:
+                            combination_results_list = combo_data['combination_results']
+                            if combination_results_list and len(combination_results_list) > 0:
+                                variable_averages = combination_results_list[0].get('variable_averages', {})
+                                if variable_averages:
+                                    logger.info(f"🔍 Using fallback variable_averages from {combo_key}")
+                                    break
+                
+                logger.info(f"🔍 Final variable_averages: {variable_averages}")
                 
                 # Get column values for this combination from source file
                 column_values = {}
                 
-                if identifiers and combo_result.get('file_key'):
+                # Check if this is a stack model (file_key starts with 'mmm_stack_model_')
+                if combo_result.get('file_key', '').startswith('mmm_stack_model_'):
+                    # For stack models, use default values since the file doesn't exist in MinIO
+                    logger.info(f"📊 Stack model detected for {combination_id}, using default column values")
+                    column_values = {identifier: "Stack Model" for identifier in identifiers}
+                elif identifiers and combo_result.get('file_key'):
                     try:
                         column_values = await get_combination_column_values(
                             minio_client, 
@@ -3149,10 +3241,22 @@ async def train_mmm_models(request: dict):
                     for feature_name, roi_data in roi_results.items():
                         summary_row[f"{feature_name}_roi"] = roi_data.get('roi', 0)
                         summary_row[f"{feature_name}_cprp_value"] = roi_data.get('cprp_value', 0)
-                        summary_row[f"{feature_name}_beta_coefficient"] = roi_data.get('beta_coefficient', 0)
-                        summary_row[f"{feature_name}_beta_transformed_sum"] = roi_data.get('beta_transformed_sum', 0)
-                        summary_row[f"{feature_name}_cprp_original_sum"] = roi_data.get('cprp_original_sum', 0)
-                        summary_row[f"{feature_name}_avg_price_column"] = roi_data.get('avg_price_column', 0)
+                    
+                    # Add parameter_combination column for MMM modeling
+                    # Convert combo_config to JSON string for storage in Arrow file
+                    import json
+                    combo_config = model_result.get('variable_configs', {})  # Use 'variable_configs' instead of 'combo_config'
+                    
+                    # Debug logging
+                    logger.info(f"🔍 Model result keys: {list(model_result.keys())}")
+                    logger.info(f"🔍 variable_configs found: {combo_config}")
+                    
+                    if combo_config:
+                        summary_row['parameter_combination'] = json.dumps(combo_config, default=str)
+                        logger.info(f"✅ Added parameter_combination: {summary_row['parameter_combination'][:100]}...")
+                    else:
+                        summary_row['parameter_combination'] = ""
+                        logger.warning(f"⚠️ No variable_configs found in model_result")
                     
                     summary_data.append(summary_row)
             
