@@ -1,0 +1,64 @@
+import React, { useState } from 'react';
+import { X, StickyNote } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+
+interface SlideNotesProps {
+  currentSlide: number;
+  notes: Record<number, string>;
+  onNotesChange: (slideIndex: number, notes: string) => void;
+  onClose: () => void;
+}
+
+export const SlideNotes: React.FC<SlideNotesProps> = ({
+  currentSlide,
+  notes,
+  onNotesChange,
+  onClose,
+}) => {
+  const [localNotes, setLocalNotes] = useState(notes[currentSlide] || '');
+
+  React.useEffect(() => {
+    setLocalNotes(notes[currentSlide] || '');
+  }, [currentSlide, notes]);
+
+  const handleBlur = () => {
+    onNotesChange(currentSlide, localNotes);
+  };
+
+  return (
+    <div className="fixed right-0 top-0 h-full w-96 bg-background border-l border-border shadow-xl z-40 animate-slide-in-right">
+      <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30">
+        <div className="flex items-center gap-2">
+          <StickyNote className="h-5 w-5 text-primary" />
+          <h3 className="font-semibold text-lg">Speaker Notes</h3>
+        </div>
+        <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8">
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="p-4">
+        <div className="mb-2 text-sm text-muted-foreground">Slide {currentSlide + 1} Notes</div>
+        <Textarea
+          value={localNotes}
+          onChange={(e) => setLocalNotes(e.target.value)}
+          onBlur={handleBlur}
+          placeholder="Add speaker notes for this slide..."
+          className="min-h-[200px] resize-none"
+        />
+      </div>
+
+      <div className="px-4 pb-4">
+        <div className="p-3 bg-muted/50 rounded-lg border border-border">
+          <h4 className="text-xs font-semibold mb-2 text-muted-foreground uppercase">Tips</h4>
+          <ul className="text-xs text-muted-foreground space-y-1">
+            <li>• Use notes to remember key points</li>
+            <li>• Notes are visible only to you</li>
+            <li>• Navigate slides to see their notes</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+};
