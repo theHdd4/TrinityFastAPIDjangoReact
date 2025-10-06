@@ -677,19 +677,15 @@ class RAGRetriever:
         self.setup_rag_system()
 
     def setup_rag_system(self):
-        print("🔄 Setting up RAG system...")
         if os.path.exists(self.embeddings_file):
             try:
                 self._load_embeddings()
-                print("✅ Loaded existing RAG embeddings")
             except Exception as e:
-                print(f"⚠️ Failed to load embeddings: {e}, recreating...")
                 self._create_embeddings()
         else:
             self._create_embeddings()
 
     def _create_embeddings(self):
-        print("🔄 Creating RAG embeddings and indexes...")
         self.atom_texts = []
         self.keyword_index = {}
         self.semantic_index = {}
@@ -734,10 +730,8 @@ class RAGRetriever:
                 self.function_type_index[canon_ft] = []
             self.function_type_index[canon_ft].append(canon_name)
 
-        print("🔄 Generating embeddings...")
         self.atom_embeddings = self.vectorizer.fit_transform(self.atom_texts)
         self._save_embeddings()
-        print("✅ Created and saved RAG system")
 
     def _save_embeddings(self):
         try:
@@ -752,9 +746,8 @@ class RAGRetriever:
                     'function_type_index': self.function_type_index,
                     'created_at': datetime.now().isoformat()
                 }, f)
-            print("✅ Saved RAG embeddings and indexes")
         except Exception as e:
-            print(f"⚠️ Failed to save embeddings: {e}")
+            pass
 
     def _load_embeddings(self):
         with open(self.embeddings_file, 'rb') as f:
@@ -769,16 +762,13 @@ class RAGRetriever:
 
     def retrieve_relevant_atoms(self, query: str, top_k: int = 5, min_score: float = 0.1) -> List[Dict]:
         if self.atom_embeddings is None:
-            print("❌ RAG system not initialized")
             return []
 
-        print(f"🔍 Retrieving atoms for query: '{query}'")
         query_lower = query.lower()
         query_words = set(re.findall(r'\b\w+\b', query_lower))
         all_matches = {}
 
         # Strategy 1: Exact keyword matching (case/space-insensitive)
-        print("🎯 Strategy 1: Exact keyword matching")
         for word in query_words:
             canon_word = canonicalize(word)
             if canon_word in self.keyword_index:
@@ -793,10 +783,8 @@ class RAGRetriever:
                             'matched_term': word,
                             'strategy': 'keyword_matching'
                         }
-                        print(f"  ✅ Found exact match: {canon_atom} (score: {score:.3f}, keyword: {word})")
 
         # Strategy 2: Semantic marker matching
-        print("🎯 Strategy 2: Semantic marker matching")
         for marker in self.semantic_index:
             marker_words = set(re.findall(r'\b\w+\b', marker))
             if marker_words.intersection({canonicalize(w) for w in query_words}):
@@ -811,10 +799,8 @@ class RAGRetriever:
                             'matched_term': marker,
                             'strategy': 'semantic_matching'
                         }
-                        print(f"  ✅ Found semantic match: {canon_atom} (score: {score:.3f}, marker: {marker})")
 
         # Strategy 3: Category matching
-        print("🎯 Strategy 3: Category matching")
         for category in self.category_index:
             category_words = set(re.findall(r'\b\w+\b', category))
             if category_words.intersection({canonicalize(w) for w in query_words}):
@@ -829,10 +815,8 @@ class RAGRetriever:
                             'matched_term': category,
                             'strategy': 'category_matching'
                         }
-                        print(f"  ✅ Found category match: {canon_atom} (score: {score:.3f}, category: {category})")
 
         # Strategy 4: Embedding similarity
-        print("🎯 Strategy 4: Embedding similarity")
         query_embedding = self.vectorizer.transform([query])
         similarities = cosine_similarity(query_embedding, self.atom_embeddings)[0]
         atom_names = AtomKnowledgeBase.get_all_atoms()
@@ -849,7 +833,6 @@ class RAGRetriever:
                         'matched_term': f'semantic_similarity_{similarity:.3f}',
                         'strategy': 'embedding_matching'
                     }
-                    print(f"  ✅ Found embedding match: {canon_atom} (score: {score:.3f}, similarity: {similarity:.3f})")
 
         sorted_matches = sorted(all_matches.values(), key=lambda x: x['score'], reverse=True)
         top_matches = sorted_matches[:top_k]
@@ -875,7 +858,6 @@ class RAGRetriever:
             }
             enriched_results.append(enriched_match)
 
-        print(f"🎯 Final results: {len(enriched_results)} atoms retrieved")
         return enriched_results
 
     def get_system_stats(self) -> Dict:

@@ -37,8 +37,14 @@ class SmartMergeAgent:
             object_prefix=prefix
         )
         
-        # Load files on initialization using standardized method
-        self._load_files()
+        # Files will be loaded lazily when needed
+        self._files_loaded = False
+
+    def _ensure_files_loaded(self) -> None:
+        """Ensure files are loaded before processing requests"""
+        if not self._files_loaded:
+            self._load_files()
+            self._files_loaded = True
 
     def _maybe_update_prefix(self) -> None:
         """Dynamically updates the MinIO prefix using the data_upload_validate API endpoint."""
@@ -239,6 +245,9 @@ class SmartMergeAgent:
         
         # Check if MinIO prefix needs an update (and files need reloading)
         self._maybe_update_prefix()
+        
+        # Load files lazily only when needed
+        self._ensure_files_loaded()
         
         if not self.files_with_columns:
             logger.warning("No files are loaded. Cannot process merge request.")

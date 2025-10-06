@@ -88,17 +88,6 @@ def dataframe_operations(request: DataFrameOperationsRequest):
     """
     start = time.time()
     
-    print("=" * 80)
-    print("🔍 DATAFRAME OPERATIONS REQUEST RECEIVED:")
-    print("=" * 80)
-    print(f"📝 Prompt: {request.prompt}")
-    print(f"🆔 Session ID: {request.session_id}")
-    print(f"📊 Current DF ID: {request.current_df_id}")
-    print(f"🔧 Client Name: {request.client_name}")
-    print(f"🔧 App Name: {request.app_name}")
-    print(f"🔧 Project Name: {request.project_name}")
-    print(f"📋 Full Request: {request.dict()}")
-    print("=" * 80)
     
     logger.info(f"DataFrame operations request: {request.prompt[:100]}... (Session: {request.session_id})")
     logger.info(f"Request fields: prompt='{request.prompt}', session_id='{request.session_id}', client_name='{request.client_name}', app_name='{request.app_name}', project_name='{request.project_name}', current_df_id='{request.current_df_id}'")
@@ -164,11 +153,6 @@ def dataframe_operations(request: DataFrameOperationsRequest):
         # Clean logging
         logger.info(f"DataFrame operations request completed: {result.get('success')} ({result.get('processing_time')}s)")
         
-        print("=" * 80)
-        print("📤 SENDING RESPONSE TO FRONTEND:")
-        print("=" * 80)
-        print(f"📋 Response Data: {result}")
-        print("=" * 80)
         
         return DataFrameOperationsResponse(**result)
         
@@ -258,17 +242,6 @@ def chat_endpoint(request: ChatRequest):
     """
     start_time = time.time()
     
-    print("=" * 80)
-    print("🔍 DATAFRAME OPERATIONS CHAT REQUEST RECEIVED:")
-    print("=" * 80)
-    print(f"📝 Query: {request.query}")
-    print(f"🆔 Session ID: {request.session_id}")
-    print(f"📊 Current DF ID: {request.current_df_id}")
-    print(f"🔧 Client Name: {request.client_name}")
-    print(f"🔧 App Name: {request.app_name}")
-    print(f"🔧 Project Name: {request.project_name}")
-    print(f"📋 Full Request: {request.dict()}")
-    print("=" * 80)
     
     logger.info(f"DATAFRAME OPERATIONS CHAT REQUEST RECEIVED:")
     logger.info(f"Query: {request.query}")
@@ -327,11 +300,6 @@ def chat_endpoint(request: ChatRequest):
                 "processing_time": processing_time
             }
             
-            print("=" * 80)
-            print("📤 SENDING RESPONSE TO FRONTEND:")
-            print("=" * 80)
-            print(f"📋 Response Data: {response_data}")
-            print("=" * 80)
             
             return response_data
         else:
@@ -357,11 +325,6 @@ def chat_endpoint(request: ChatRequest):
                 "processing_time": processing_time
             }
             
-            print("=" * 80)
-            print("📤 SENDING ERROR/SUGGESTION RESPONSE TO FRONTEND:")
-            print("=" * 80)
-            print(f"📋 Response Data: {response_data}")
-            print("=" * 80)
             
             return response_data
         
@@ -383,12 +346,6 @@ def chat_endpoint(request: ChatRequest):
             "processing_time": round(time.time() - start_time, 2)
         }
         
-        print("=" * 80)
-        print("📤 SENDING ERROR RESPONSE TO FRONTEND:")
-        print("=" * 80)
-        print(f"❌ Error: {str(e)}")
-        print(f"📋 Error Response: {error_result}")
-        print("=" * 80)
         
         return error_result
 

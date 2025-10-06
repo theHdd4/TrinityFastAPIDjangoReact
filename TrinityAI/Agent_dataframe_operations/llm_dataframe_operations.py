@@ -123,22 +123,10 @@ class DataFrameOperationsAgent:
             llm_response = call_dataframe_operations_llm(self.api_url, self.model_name, self.bearer_token, prompt)
             logger.info(f"🔍 DataFrame Operations Process - LLM response length: {len(llm_response)}")
             
-            # 🔧 PRINT AI OUTPUT FOR DEBUGGING
-            print("=" * 80)
-            print("🤖 DATAFRAME OPERATIONS AI LLM RESPONSE:")
-            print("=" * 80)
-            print(llm_response)
-            print("=" * 80)
             
             result = extract_dataframe_operations_json(llm_response, self.files_with_columns)
             logger.info(f"🔍 DataFrame Operations Process - Extracted result: {json.dumps(result, indent=2) if result else 'None'}")
             
-            # 🔧 PRINT PARSED JSON FOR DEBUGGING
-            print("=" * 80)
-            print("📋 PARSED DATAFRAME OPERATIONS JSON RESULT:")
-            print("=" * 80)
-            print(json.dumps(result, indent=2) if result else "None")
-            print("=" * 80)
             
             if not result:
                 logger.error("❌ Failed to extract valid JSON from LLM response")

@@ -53,8 +53,8 @@ class SmartCreateTransformAgent:
             object_prefix=prefix
         )
         
-        # Load files on initialization using standardized method
-        self._load_files()
+        # Files will be loaded lazily when needed
+        self._files_loaded = False
     
     def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
         """
@@ -71,6 +71,12 @@ class SmartCreateTransformAgent:
             logger.info(f"🔧 Environment context set for dynamic path resolution: {client_name}/{app_name}/{project_name}")
         else:
             logger.info("🔧 Using existing environment context for dynamic path resolution")
+
+    def _ensure_files_loaded(self) -> None:
+        """Ensure files are loaded before processing requests"""
+        if not self._files_loaded:
+            self._load_files()
+            self._files_loaded = True
 
     def _maybe_update_prefix(self) -> None:
         """Dynamically updates the MinIO prefix using the data_upload_validate API endpoint."""
@@ -233,8 +239,9 @@ class SmartCreateTransformAgent:
         # Check if MinIO prefix needs an update (and files need reloading)
         self._maybe_update_prefix()
         
-        if not self.files_with_columns:
-            self._load_files()
+        # Load files lazily only when needed
+        self._ensure_files_loaded()
+        
         if not self.files_with_columns:
             return {
                 "success": False,
@@ -254,33 +261,10 @@ class SmartCreateTransformAgent:
         supported_ops = json.dumps(self.supported_operations, indent=2)
         prompt = build_prompt_create_transform(user_prompt, session_id, self.files_with_columns, supported_ops, self.operation_format, history_str)
 
-        # 🔍 DETAILED LOGGING: Print what we're sending to LLM
-        print("\n" + "="*80)
-        print("🚀 SENDING TO LLM (CREATE TRANSFORM AGENT):")
-        print("="*80)
-        print(f"📝 User Prompt: {user_prompt}")
-        print(f"🆔 Session ID: {session_id}")
-        print(f"📁 Files with Columns: {json.dumps(self.files_with_columns, indent=2)}")
-        print(f"⚙️ Supported Operations: {supported_ops}")
-        print(f"📋 Operation Format: {self.operation_format}")
-        print(f"📚 History: {history_str}")
-        print("="*80)
-        print("📤 FULL PROMPT SENT TO LLM:")
-        print("="*80)
-        print(prompt)
-        print("="*80)
 
         raw = call_llm_create_transform(self.api_url, self.model_name, self.bearer_token, prompt)
         
-        # 🔍 DETAILED LOGGING: Print what LLM returned
-        print("\n" + "="*80)
-        print("🤖 LLM RESPONSE RECEIVED:")
-        print("="*80)
-        print(f"📥 Raw Response: {raw}")
-        print("="*80)
-        
         if not raw:
-            print("❌ LLM returned NO response!")
             return {
                 "success": False,
                 "message": "LLM returned no response.",
@@ -289,11 +273,8 @@ class SmartCreateTransformAgent:
             }
         
         parsed = extract_json_from_response(raw) or {}
-        print(f"🔍 Parsed JSON: {json.dumps(parsed, indent=2)}")
         
         result = self._enforce_allowed_keys(parsed, session_id)
-        print(f"✅ Final Result: {json.dumps(result, indent=2)}")
-        print("="*80)
         
         memory.save_context({"input": user_prompt}, {"output": json.dumps(result)})
         return result

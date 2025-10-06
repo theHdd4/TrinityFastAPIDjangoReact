@@ -64,8 +64,8 @@ class ChartMakerAgent:
             secure=False
         )
         
-        # Load files on initialization
-        self._load_files()
+        # Files will be loaded lazily when needed
+        self._files_loaded = False
     
     def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
         """
@@ -82,6 +82,12 @@ class ChartMakerAgent:
             logger.info(f"🔧 Environment context set for dynamic path resolution: {client_name}/{app_name}/{project_name}")
         else:
             logger.info("🔧 Using existing environment context for dynamic path resolution")
+
+    def _ensure_files_loaded(self) -> None:
+        """Ensure files are loaded before processing requests"""
+        if not self._files_loaded:
+            self._load_files()
+            self._files_loaded = True
 
     def _maybe_update_prefix(self) -> None:
         """Dynamically updates the MinIO prefix and reloads files."""
@@ -753,8 +759,8 @@ class ChartMakerAgent:
         # Check if MinIO prefix needs an update (and files need reloading) - like Merge agent
         self._maybe_update_prefix()
         
-        # Check file loading
-        # logger.info(f"Files loaded: {len(self.files_with_columns)} files")
+        # Load files lazily only when needed
+        self._ensure_files_loaded()
         
         if not self.files_with_columns:
             logger.warning("No files are loaded. Cannot process chart request.")

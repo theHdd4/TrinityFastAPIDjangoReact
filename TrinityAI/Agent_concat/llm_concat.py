@@ -47,9 +47,9 @@ class SmartConcatAgent:
             object_prefix=prefix
         )
         
-        # Load files on initialization
+        # Files will be loaded lazily when needed
         self.files_with_columns = {}
-        self._load_files()
+        self._files_loaded = False
     
     def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
         """
@@ -66,6 +66,12 @@ class SmartConcatAgent:
             logger.info(f"🔧 Environment context set for dynamic path resolution: {client_name}/{app_name}/{project_name}")
         else:
             logger.info("🔧 Using existing environment context for dynamic path resolution")
+
+    def _ensure_files_loaded(self) -> None:
+        """Ensure files are loaded before processing requests"""
+        if not self._files_loaded:
+            self._load_files()
+            self._files_loaded = True
 
     def _maybe_update_prefix(self) -> None:
         """Dynamically updates the MinIO prefix using the data_upload_validate API endpoint."""
@@ -239,8 +245,9 @@ class SmartConcatAgent:
         
         session = self.get_session(session_id)
         self._maybe_update_prefix()
-        if not self.files_with_columns:
-            self._load_files()
+        
+        # Load files lazily only when needed
+        self._ensure_files_loaded()
         
         # Build rich conversation context with complete JSON history
         context = self._build_rich_context(session_id)

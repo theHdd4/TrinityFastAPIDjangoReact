@@ -11,4 +11,3 @@ from pathlib import Path
 
 TARGET_DIR = Path("./models")
 TARGET_DIR.mkdir(parents=True, exist_ok=True)
-print("✅ No model download required – directory created.")
