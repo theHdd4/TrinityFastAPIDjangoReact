@@ -150,18 +150,124 @@ const replaceNextColPlaceholderWithContent = (expression: string, newContent: st
   return { newExpression: expression, newCursorPosition: cursorPosition };
 };
 
-// Helper function to validate column names in formula - ONLY validate Col1, Col2, etc. placeholders
-const validateFormulaColumns = (expression: string, availableColumns: string[]): string | null => {
-  // Don't validate if user is still typing Col placeholders
-  if (expression.includes('Col')) {
-    return null; // Still has placeholders, don't validate yet
+// Enhanced validation system for Excel-like behavior
+interface ValidationResult {
+  isValid: boolean;
+  error: string | null;
+  suggestions: string[];
+  errorType: 'syntax' | 'column' | 'operation' | 'parenthesis' | null;
+}
+
+// Helper function to find similar column names (fuzzy matching)
+const findSimilarColumns = (invalidColumn: string, availableColumns: string[]): string[] => {
+  const similarities = availableColumns.map(col => ({
+    column: col,
+    similarity: calculateSimilarity(invalidColumn.toLowerCase(), col.toLowerCase())
+  }));
+  
+  return similarities
+    .filter(s => s.similarity > 0.3) // Only return columns with >30% similarity
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, 3) // Top 3 suggestions
+    .map(s => s.column);
+};
+
+// Simple similarity calculation (Levenshtein distance based)
+const calculateSimilarity = (str1: string, str2: string): number => {
+  const longer = str1.length > str2.length ? str1 : str2;
+  const shorter = str1.length > str2.length ? str2 : str1;
+  
+  if (longer.length === 0) return 1.0;
+  
+  const distance = levenshteinDistance(longer, shorter);
+  return (longer.length - distance) / longer.length;
+};
+
+const levenshteinDistance = (str1: string, str2: string): number => {
+  const matrix = Array(str2.length + 1).fill(null).map(() => Array(str1.length + 1).fill(null));
+  
+  for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
+  for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
+  
+  for (let j = 1; j <= str2.length; j++) {
+    for (let i = 1; i <= str1.length; i++) {
+      const indicator = str1[i - 1] === str2[j - 1] ? 0 : 1;
+      matrix[j][i] = Math.min(
+        matrix[j][i - 1] + 1,     // deletion
+        matrix[j - 1][i] + 1,     // insertion
+        matrix[j - 1][i - 1] + indicator // substitution
+      );
+    }
   }
   
-  // Don't validate if formula is incomplete (missing closing parenthesis)
-  const openParens = (expression.match(/\(/g) || []).length;
-  const closeParens = (expression.match(/\)/g) || []).length;
-  if (openParens > closeParens) {
-    return null; // Formula is incomplete, don't validate yet
+  return matrix[str2.length][str1.length];
+};
+
+// Enhanced syntax validation
+const validateFormulaSyntax = (expression: string): ValidationResult => {
+  const trimmed = expression.trim();
+  
+  // Check if formula starts with =
+  if (!trimmed.startsWith('=')) {
+    return {
+      isValid: false,
+      error: 'Formula must start with =',
+      suggestions: ['Add = at the beginning'],
+      errorType: 'syntax'
+    };
+  }
+  
+  // Check for balanced parentheses
+  const openParens = (trimmed.match(/\(/g) || []).length;
+  const closeParens = (trimmed.match(/\)/g) || []).length;
+  if (openParens !== closeParens) {
+    const missing = openParens > closeParens ? 'closing' : 'opening';
+    return {
+      isValid: false,
+      error: `Missing ${missing} parenthesis`,
+      suggestions: [openParens > closeParens ? 'Add ) to close the function' : 'Add ( to open the function'],
+      errorType: 'parenthesis'
+    };
+  }
+  
+  // Check for basic syntax errors
+  if (trimmed.match(/[=]{2,}/)) {
+    return {
+      isValid: false,
+      error: 'Multiple = signs not allowed',
+      suggestions: ['Remove extra = signs'],
+      errorType: 'syntax'
+    };
+  }
+  
+  // Check for invalid characters in function names
+  if (trimmed.match(/=[^A-Za-z_\(]/)) {
+    return {
+      isValid: false,
+      error: 'Invalid character after =',
+      suggestions: ['Start with a function name or column reference'],
+      errorType: 'syntax'
+    };
+  }
+  
+  return {
+    isValid: true,
+    error: null,
+    suggestions: [],
+    errorType: null
+  };
+};
+
+// Enhanced column validation with suggestions
+const validateFormulaColumns = (expression: string, availableColumns: string[]): ValidationResult => {
+  // Don't validate if user is still typing Col placeholders
+  if (expression.includes('Col')) {
+    return {
+      isValid: true,
+      error: null,
+      suggestions: [],
+      errorType: null
+    };
   }
   
   // First, remove all quoted strings from the expression to avoid false positives
@@ -183,16 +289,109 @@ const validateFormulaColumns = (expression: string, availableColumns: string[]):
   
   // If no column references found, no validation needed
   if (columnReferences.length === 0) {
-    return null;
+    return {
+      isValid: true,
+      error: null,
+      suggestions: [],
+      errorType: null
+    };
   }
   
-  // ONLY validate column references against actual dataframe columns
+  // Validate column references against actual dataframe columns
   const invalidColumns = columnReferences.filter(col => !availableColumns.includes(col));
   if (invalidColumns.length > 0) {
-    return `Invalid columns: ${invalidColumns.join(', ')}`;
+    const suggestions: string[] = [];
+    invalidColumns.forEach(invalidCol => {
+      const similar = findSimilarColumns(invalidCol, availableColumns);
+      if (similar.length > 0) {
+        suggestions.push(`Did you mean: ${similar.join(', ')}?`);
+      }
+    });
+    
+    return {
+      isValid: false,
+      error: `Invalid columns: ${invalidColumns.join(', ')}`,
+      suggestions,
+      errorType: 'column'
+    };
   }
   
-  return null;
+  return {
+    isValid: true,
+    error: null,
+    suggestions: [],
+    errorType: null
+  };
+};
+
+// Enhanced operation validation
+const validateFormulaOperation = (expression: string): ValidationResult => {
+  const trimmed = expression.trim();
+  
+  // Check for common operation errors
+  if (trimmed.match(/[+\-*/]{2,}/)) {
+    return {
+      isValid: false,
+      error: 'Multiple operators in sequence',
+      suggestions: ['Remove duplicate operators'],
+      errorType: 'operation'
+    };
+  }
+  
+  // Check for operators at the beginning or end
+  if (trimmed.match(/^[+\-*/]/) || trimmed.match(/[+\-*/]$/)) {
+    return {
+      isValid: false,
+      error: 'Operator at beginning or end of formula',
+      suggestions: ['Add operands before/after operators'],
+      errorType: 'operation'
+    };
+  }
+  
+  // Check for division by zero patterns
+  if (trimmed.match(/\/\s*0/)) {
+    return {
+      isValid: false,
+      error: 'Division by zero',
+      suggestions: ['Use a non-zero divisor'],
+      errorType: 'operation'
+    };
+  }
+  
+  return {
+    isValid: true,
+    error: null,
+    suggestions: [],
+    errorType: null
+  };
+};
+
+// Main validation function
+const validateFormula = (expression: string, availableColumns: string[]): ValidationResult => {
+  // First check syntax
+  const syntaxResult = validateFormulaSyntax(expression);
+  if (!syntaxResult.isValid) {
+    return syntaxResult;
+  }
+  
+  // Then check columns
+  const columnResult = validateFormulaColumns(expression, availableColumns);
+  if (!columnResult.isValid) {
+    return columnResult;
+  }
+  
+  // Finally check operations
+  const operationResult = validateFormulaOperation(expression);
+  if (!operationResult.isValid) {
+    return operationResult;
+  }
+  
+  return {
+    isValid: true,
+    error: null,
+    suggestions: [],
+    errorType: null
+  };
 };
 
 const isFunctionStyleExample = (formula: FormulaItem) => {
@@ -675,6 +874,19 @@ const FormularBar: React.FC<FormularBarProps> = ({
   const formulaInputRef = useRef<HTMLInputElement>(null);
   const preservedColumnRef = useRef<string | null>(null);
   
+  // Real-time validation state
+  const [validationResult, setValidationResult] = useState<ValidationResult>({
+    isValid: true,
+    error: null,
+    suggestions: [],
+    errorType: null
+  });
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [autoCompleteSuggestions, setAutoCompleteSuggestions] = useState<string[]>([]);
+  const [showAutoComplete, setShowAutoComplete] = useState(false);
+  const [cursorPosition, setCursorPosition] = useState(0);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  
   // Custom undo/redo system
   const [formulaHistory, setFormulaHistory] = useState<string[]>(['']);
   const [historyIndex, setHistoryIndex] = useState(0);
@@ -746,13 +958,43 @@ const FormularBar: React.FC<FormularBarProps> = ({
     }
   }, [isFormulaMode]);
 
+  // Real-time validation effect
   useEffect(() => {
     const trimmed = formulaInput.trim();
     if (!trimmed) {
       setSelectedFormula(null);
       setActiveTab('all');
+      setValidationResult({
+        isValid: true,
+        error: null,
+        suggestions: [],
+        errorType: null
+      });
+      setShowSuggestions(false);
+      onValidationError?.(null);
       return;
     }
+    
+    // Run validation
+    const availableColumns = data?.headers || [];
+    const result = validateFormula(trimmed, availableColumns);
+    setValidationResult(result);
+    
+    // Show suggestions for column errors
+    if (!result.isValid && result.errorType === 'column' && result.suggestions.length > 0) {
+      setShowSuggestions(true);
+    } else {
+      setShowSuggestions(false);
+    }
+    
+    // Update parent component with validation error
+    if (!result.isValid) {
+      onValidationError?.(result.error);
+    } else {
+      onValidationError?.(null);
+    }
+    
+    // Update selected formula
     const match = matchFormula(trimmed);
     if (match) {
       setSelectedFormula(match);
@@ -760,7 +1002,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
     } else {
       setSelectedFormula(null);
     }
-  }, [formulaInput]);
+  }, [formulaInput, data?.headers, onValidationError]);
 
   const columnIndex = selectedCell && data ? data.headers.indexOf(selectedCell.col) : -1;
   const cellReference = selectedCell && columnIndex >= 0 ? getCellReference(selectedCell.row, columnIndex) : '';
@@ -886,9 +1128,32 @@ const FormularBar: React.FC<FormularBarProps> = ({
     }, 0);
   };
 
+  // Auto-completion for column names
+  const getAutoCompleteSuggestions = (text: string, cursorPos: number): string[] => {
+    const availableColumns = data?.headers || [];
+    if (!availableColumns.length) return [];
+    
+    // Find the word at cursor position
+    const beforeCursor = text.slice(0, cursorPos);
+    const afterCursor = text.slice(cursorPos);
+    
+    // Match word boundaries
+    const wordMatch = beforeCursor.match(/\b([A-Za-z_][A-Za-z0-9_]*)$/);
+    if (!wordMatch) return [];
+    
+    const partialWord = wordMatch[1].toLowerCase();
+    if (partialWord.length < 1) return [];
+    
+    // Filter columns that start with the partial word
+    return availableColumns
+      .filter(col => col.toLowerCase().startsWith(partialWord))
+      .slice(0, 5); // Limit to 5 suggestions
+  };
+
   const handleInputChange = (value: string) => {
     const inputElement = formulaInputRef.current;
     const cursorPosition = inputElement?.selectionStart || 0;
+    setCursorPosition(cursorPosition);
     
     // Check if we're replacing a ColX placeholder (Excel-like behavior)
     if (formulaInput.includes('Col') && value.length > formulaInput.length) {
@@ -909,10 +1174,55 @@ const FormularBar: React.FC<FormularBarProps> = ({
       return;
     }
     
+    // Check for auto-completion
+    const suggestions = getAutoCompleteSuggestions(value, cursorPosition);
+    if (suggestions.length > 0) {
+      setAutoCompleteSuggestions(suggestions);
+      setShowAutoComplete(true);
+      setSelectedSuggestionIndex(0); // Reset selection
+    } else {
+      setShowAutoComplete(false);
+      setAutoCompleteSuggestions([]);
+      setSelectedSuggestionIndex(0);
+    }
+    
+    
     // Normal input handling
     onFormulaInputChange(value);
     onFormulaModeChange(true);
+  };
+
+
+  // Handle auto-completion selection
+  const selectAutoCompleteSuggestion = (suggestion: string) => {
+    const inputElement = formulaInputRef.current;
+    if (!inputElement) return;
     
+    const beforeCursor = formulaInput.slice(0, cursorPosition);
+    const afterCursor = formulaInput.slice(cursorPosition);
+    
+    // Find the partial word to replace
+    const wordMatch = beforeCursor.match(/\b([A-Za-z_][A-Za-z0-9_]*)$/);
+    if (!wordMatch) return;
+    
+    const partialWord = wordMatch[1];
+    const wordStart = beforeCursor.lastIndexOf(partialWord);
+    
+    const newValue = 
+      formulaInput.slice(0, wordStart) + 
+      suggestion + 
+      formulaInput.slice(wordStart + partialWord.length);
+    
+    onFormulaInputChange(newValue);
+    setShowAutoComplete(false);
+    setAutoCompleteSuggestions([]);
+    
+    // Set cursor position after the inserted suggestion
+    setTimeout(() => {
+      const newCursorPosition = wordStart + suggestion.length;
+      inputElement.setSelectionRange(newCursorPosition, newCursorPosition);
+      inputElement.focus();
+    }, 0);
   };
 
   const handleTabCompletion = () => {
@@ -965,7 +1275,8 @@ const FormularBar: React.FC<FormularBarProps> = ({
     console.log('[FormularBar] Submit attempt:', { 
       selectedColumn, 
       formulaInput, 
-      hasData: !!data?.headers 
+      hasData: !!data?.headers,
+      validationResult
     });
 
     if (!selectedColumn) {
@@ -976,6 +1287,13 @@ const FormularBar: React.FC<FormularBarProps> = ({
 
     if (!formulaInput.trim()) {
       onValidationError?.('Please enter a formula');
+      return;
+    }
+
+    // Check validation result
+    if (!validationResult.isValid) {
+      console.log('[FormularBar] Validation failed:', validationResult.error);
+      onValidationError?.(validationResult.error);
       return;
     }
 
@@ -1220,26 +1538,60 @@ const FormularBar: React.FC<FormularBarProps> = ({
                   </Tabs>
                 </PopoverContent>
               </Popover>
-              <Input
-                ref={formulaInputRef}
-                value={formulaInput}
-                onChange={(e) => handleInputChange(e.target.value)}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  console.log('[FormularBar] Formula input clicked, state:', { selectedColumn, isFormulaMode });
-                  // Always activate formula bar when input is clicked
-                  if (selectedColumn) {
-                    onFormulaModeChange(true);
-                  }
-                  formulaInputRef.current?.focus();
-                }}
-                placeholder='=SUM(Col1,Col2), =IF(Col1 > 10, Col2, Col3), =DATE_DIFF(Col1, Col2)'
-                className={`h-8 shadow-sm pl-10 font-mono transition-all duration-200 w-full min-w-0 focus:ring-2 ${
-                  formulaValidationError 
-                    ? 'border-red-500 bg-red-50 focus:ring-red-200 focus:border-red-500' 
-                    : 'border-primary/50 bg-primary/5 focus:ring-primary/20 focus:border-primary'
-                }`}
+              <div className="relative w-full">
+                <Input
+                  ref={formulaInputRef}
+                  value={formulaInput}
+                  onChange={(e) => handleInputChange(e.target.value)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    console.log('[FormularBar] Formula input clicked, state:', { selectedColumn, isFormulaMode });
+                    // Always activate formula bar when input is clicked
+                    if (selectedColumn) {
+                      onFormulaModeChange(true);
+                    }
+                    formulaInputRef.current?.focus();
+                  }}
+                  placeholder='=SUM(Col1,Col2), =IF(Col1 > 10, Col2, Col3), =DATE_DIFF(Col1, Col2)'
+                  className={`h-8 shadow-sm pl-10 font-mono transition-all duration-200 w-full min-w-0 focus:ring-2 ${
+                    !validationResult.isValid
+                      ? validationResult.errorType === 'column'
+                        ? 'border-yellow-500 bg-yellow-50 focus:ring-yellow-200 focus:border-yellow-500'
+                        : 'border-red-500 bg-red-50 focus:ring-red-200 focus:border-red-500'
+                      : formulaValidationError 
+                        ? 'border-red-500 bg-red-50 focus:ring-red-200 focus:border-red-500' 
+                        : 'border-primary/50 bg-primary/5 focus:ring-primary/20 focus:border-primary'
+                  }`}
                 onKeyDown={(e) => {
+                  // Handle auto-completion navigation
+                  if (showAutoComplete && autoCompleteSuggestions.length > 0) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setSelectedSuggestionIndex(prev => 
+                        prev < autoCompleteSuggestions.length - 1 ? prev + 1 : 0
+                      );
+                      return;
+                    }
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setSelectedSuggestionIndex(prev => 
+                        prev > 0 ? prev - 1 : autoCompleteSuggestions.length - 1
+                      );
+                      return;
+                    }
+                    if (e.key === 'Enter' || e.key === 'Tab') {
+                      e.preventDefault();
+                      selectAutoCompleteSuggestion(autoCompleteSuggestions[selectedSuggestionIndex]);
+                      return;
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      setShowAutoComplete(false);
+                      setAutoCompleteSuggestions([]);
+                      return;
+                    }
+                  }
+                  
                   // Handle Ctrl+Z (undo) with custom implementation
                   if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
                     e.preventDefault();
@@ -1280,11 +1632,49 @@ const FormularBar: React.FC<FormularBarProps> = ({
                     }
                   }
                 }}
-              />
-              {/* Error message display */}
-              {formulaValidationError && (
-                <div className="absolute top-full left-0 right-0 mt-1 px-2 py-1 bg-red-50 border border-red-200 rounded text-xs text-red-700 z-50">
-                  {formulaValidationError}
+                />
+              </div>
+              {/* Enhanced error message and suggestions display */}
+              {(formulaValidationError || !validationResult.isValid) && (
+                <div className="absolute top-full left-0 right-0 mt-1 z-50">
+                  <div className={`px-3 py-2 rounded-lg border shadow-lg ${
+                    validationResult.errorType === 'column' 
+                      ? 'bg-yellow-50 border-yellow-200 text-yellow-800'
+                      : 'bg-red-50 border-red-200 text-red-700'
+                  }`}>
+                    <div className="text-xs font-medium mb-1">
+                      {validationResult.error || formulaValidationError}
+                    </div>
+                    {validationResult.suggestions.length > 0 && (
+                      <div className="text-xs space-y-1">
+                        {validationResult.suggestions.map((suggestion, index) => (
+                          <div key={index} className="flex items-center space-x-1">
+                            <span className="text-yellow-600">💡</span>
+                            <span>{suggestion}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              
+              {/* Auto-completion dropdown */}
+              {showAutoComplete && autoCompleteSuggestions.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 z-50">
+                  <div className="bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                    {autoCompleteSuggestions.map((suggestion, index) => (
+                      <div
+                        key={suggestion}
+                        className={`px-3 py-2 text-sm cursor-pointer hover:bg-gray-100 ${
+                          index === selectedSuggestionIndex ? 'bg-blue-100 text-blue-800' : 'text-gray-700'
+                        }`}
+                        onClick={() => selectAutoCompleteSuggestion(suggestion)}
+                      >
+                        <span className="font-mono">{suggestion}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -1298,7 +1688,10 @@ const FormularBar: React.FC<FormularBarProps> = ({
             size='sm'
             className='h-8 px-3 shadow-sm'
             onClick={handleSubmit}
-            disabled={!selectedColumn}
+            disabled={!selectedColumn || !validationResult.isValid || !formulaInput.trim()}
+            title={!selectedColumn ? 'Select a target column first' : 
+                   !validationResult.isValid ? validationResult.error || 'Fix formula errors' : 
+                   !formulaInput.trim() ? 'Enter a formula' : 'Apply formula'}
           >
             <Check className='w-4 h-4 mr-1' />
             Apply

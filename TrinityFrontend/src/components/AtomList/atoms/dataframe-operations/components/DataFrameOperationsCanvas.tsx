@@ -274,7 +274,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // Track mapping from duplicated columns to their original source
   const [duplicateMap, setDuplicateMap] = useState<{ [key: string]: string }>({});
   const previousSelectedColumnRef = useRef<string | null>(null);
-  const previousStoredFormulaRef = useRef<string | undefined>(undefined);
 
   // Ref to store header cell elements for context-menu positioning
   const headerRefs = useRef<{ [key: string]: HTMLTableCellElement | null }>({});
@@ -459,36 +458,22 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   }, [data?.headers, selectedColumn]);
 
   useEffect(() => {
-    const stored = selectedColumn ? columnFormulas[selectedColumn] : undefined;
+    // Only clear formula input when column changes, don't restore previous formulas
     if (selectedColumn !== previousSelectedColumnRef.current) {
       previousSelectedColumnRef.current = selectedColumn;
-      previousStoredFormulaRef.current = stored;
       if (selectedColumn) {
-        if (stored !== undefined) {
-          setFormulaInput(stored);
-        } else {
-          setFormulaInput('');
-        }
+        // Always start with empty formula input when selecting a new column
+        setFormulaInput('');
         setFormulaValidationError(null);
       }
       return;
     }
 
-    if (selectedColumn && stored !== previousStoredFormulaRef.current) {
-      previousStoredFormulaRef.current = stored;
-      if (stored !== undefined) {
-        setFormulaInput(stored);
-      } else {
-        setFormulaInput('');
-      }
-      setFormulaValidationError(null);
-    }
-
     if (!selectedColumn) {
-      previousStoredFormulaRef.current = undefined;
+      previousSelectedColumnRef.current = undefined;
       setFormulaValidationError(null);
     }
-  }, [selectedColumn, columnFormulas]);
+  }, [selectedColumn]);
   // 1. Add state for filter range
   const [filterRange, setFilterRange] = useState<{ min: number; max: number; value: [number, number] } | null>(null);
 
