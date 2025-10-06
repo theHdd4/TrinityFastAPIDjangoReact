@@ -58,6 +58,14 @@ interface DataFrameOperationsCanvasProps {
   originalData?: DataFrameData | null;
 }
 
+interface NumberFilterComponentProps {
+  column: string;
+  data: DataFrameData;
+  onApplyFilter: (column: string, filterValue: string[] | [number, number]) => void;
+  onClearFilter: (column: string) => void;
+  onClose: () => void;
+}
+
 function safeToString(val: any): string {
   if (val === undefined || val === null) return '';
   try {
@@ -66,6 +74,326 @@ function safeToString(val: any): string {
     return '';
   }
 }
+
+const NumberFilterComponent: React.FC<NumberFilterComponentProps> = ({
+  column,
+  data,
+  onApplyFilter,
+  onClearFilter,
+  onClose
+}) => {
+  const [filterType, setFilterType] = useState<'values' | 'conditions'>('values');
+  const [selectedValues, setSelectedValues] = useState<string[]>([]);
+  const [conditionType, setConditionType] = useState<string>('equals');
+  const [conditionValue1, setConditionValue1] = useState<string>('');
+  const [conditionValue2, setConditionValue2] = useState<string>('');
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [showCustomFilter, setShowCustomFilter] = useState<boolean>(false);
+
+  // Get unique values for this column
+  const uniqueValues = useMemo(() => {
+    const values = data.rows
+      .map(row => Number(row[column]))
+      .filter(v => !isNaN(v))
+      .sort((a, b) => a - b);
+    return [...new Set(values)].map(v => v.toString());
+  }, [data.rows, column]);
+
+  // Get statistics for this column
+  const stats = useMemo(() => {
+    const values = data.rows
+      .map(row => Number(row[column]))
+      .filter(v => !isNaN(v));
+    if (values.length === 0) return null;
+    
+    const sorted = values.sort((a, b) => a - b);
+    const sum = values.reduce((a, b) => a + b, 0);
+    const avg = sum / values.length;
+    
+    return {
+      min: sorted[0],
+      max: sorted[sorted.length - 1],
+      average: avg,
+      count: values.length
+    };
+  }, [data.rows, column]);
+
+  // Filter values based on search term
+  const filteredValues = useMemo(() => {
+    if (!searchTerm) return uniqueValues;
+    return uniqueValues.filter(value => 
+      value.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [uniqueValues, searchTerm]);
+
+  const handleValueToggle = (value: string) => {
+    setSelectedValues(prev => 
+      prev.includes(value) 
+        ? prev.filter(v => v !== value)
+        : [...prev, value]
+    );
+  };
+
+  const handleSelectAll = () => {
+    setSelectedValues(filteredValues);
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedValues([]);
+  };
+
+  const handleApplyValuesFilter = () => {
+    if (selectedValues.length > 0) {
+      onApplyFilter(column, selectedValues);
+    }
+    onClose();
+  };
+
+  const handleApplyConditionFilter = () => {
+    if (!conditionValue1 && !['above_average', 'below_average', 'top_10'].includes(conditionType)) return;
+    
+    const val1 = Number(conditionValue1);
+    const val2 = Number(conditionValue2);
+    
+    if (isNaN(val1) && !['above_average', 'below_average', 'top_10'].includes(conditionType)) return;
+    
+    let filterValue: [number, number] | string[];
+    
+    switch (conditionType) {
+      case 'equals':
+        onApplyFilter(column, [val1, val1]);
+        break;
+      case 'not_equals':
+        // For not equals, we'll need to handle this differently in the filter logic
+        onApplyFilter(column, [val1, val1]);
+        break;
+      case 'greater_than':
+        onApplyFilter(column, [val1 + 0.0001, Infinity]);
+        break;
+      case 'greater_than_equal':
+        onApplyFilter(column, [val1, Infinity]);
+        break;
+      case 'less_than':
+        onApplyFilter(column, [-Infinity, val1 - 0.0001]);
+        break;
+      case 'less_than_equal':
+        onApplyFilter(column, [-Infinity, val1]);
+        break;
+      case 'between':
+        if (!isNaN(val2)) {
+          onApplyFilter(column, [val1, val2]);
+        }
+        break;
+      case 'above_average':
+        if (stats) {
+          onApplyFilter(column, [stats.average, Infinity]);
+        }
+        break;
+      case 'below_average':
+        if (stats) {
+          onApplyFilter(column, [-Infinity, stats.average]);
+        }
+        break;
+      case 'top_10':
+        if (stats) {
+          const sorted = data.rows
+            .map(row => Number(row[column]))
+            .filter(v => !isNaN(v))
+            .sort((a, b) => b - a);
+          const top10Value = sorted[Math.min(9, sorted.length - 1)];
+          onApplyFilter(column, [top10Value, Infinity]);
+        }
+        break;
+    }
+    onClose();
+  };
+
+  const handleClearFilter = () => {
+    onClearFilter(column);
+    onClose();
+  };
+
+  const allSelected = filteredValues.length > 0 && filteredValues.every(v => selectedValues.includes(v));
+  const someSelected = selectedValues.some(v => filteredValues.includes(v));
+
+  return (
+    <div className="w-80" onMouseDown={e => e.stopPropagation()}>
+      {/* Header */}
+      <div className="border-b border-gray-200 pb-2 mb-3">
+        <h3 className="text-sm font-semibold text-gray-800">Number Filters</h3>
+      </div>
+
+      {/* Filter Type Tabs */}
+      <div className="flex mb-3">
+        <button
+          className={`px-3 py-1 text-xs rounded-l border ${
+            filterType === 'values' 
+              ? 'bg-blue-100 border-blue-300 text-blue-700' 
+              : 'bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100'
+          }`}
+          onClick={() => setFilterType('values')}
+        >
+          Values
+        </button>
+        <button
+          className={`px-3 py-1 text-xs rounded-r border-l-0 border ${
+            filterType === 'conditions' 
+              ? 'bg-blue-100 border-blue-300 text-blue-700' 
+              : 'bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100'
+          }`}
+          onClick={() => setFilterType('conditions')}
+        >
+          Conditions
+        </button>
+      </div>
+
+      {filterType === 'values' ? (
+        /* Values Filter */
+        <div>
+          {/* Search */}
+          <div className="mb-3">
+            <input
+              type="text"
+              placeholder="Search values..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full text-xs border border-gray-300 rounded px-2 py-1"
+            />
+          </div>
+
+          {/* Select All */}
+          <div className="border-b border-gray-200 pb-2 mb-2">
+            <label className="flex items-center space-x-2 text-xs cursor-pointer font-medium">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                ref={(input) => {
+                  if (input) input.indeterminate = someSelected && !allSelected;
+                }}
+                onChange={() => allSelected ? handleDeselectAll() : handleSelectAll()}
+                className="rounded"
+              />
+              <span className="truncate font-semibold">
+                {allSelected ? 'Deselect All' : 'Select All'}
+              </span>
+            </label>
+          </div>
+
+          {/* Values List */}
+          <div className="max-h-48 overflow-y-auto space-y-1 mb-3">
+            {filteredValues.map((value) => (
+              <label key={value} className="flex items-center space-x-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selectedValues.includes(value)}
+                  onChange={() => handleValueToggle(value)}
+                  className="rounded"
+                />
+                <span className="truncate">{value}</span>
+              </label>
+            ))}
+          </div>
+
+          {/* Action Buttons - Excel-like (Apply/Clear) */}
+          <div className="flex gap-2">
+            <button
+              className="px-3 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white flex-1"
+              onClick={handleApplyValuesFilter}
+              disabled={selectedValues.length === 0}
+            >
+              Apply
+            </button>
+            <button
+              className="px-3 py-1 text-xs rounded bg-blue-500 hover:bg-blue-600 text-white flex-1"
+              onClick={handleClearFilter}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      ) : (
+        /* Conditions Filter */
+        <div>
+          {/* Condition Type */}
+          <div className="mb-3">
+            <select
+              value={conditionType}
+              onChange={(e) => setConditionType(e.target.value)}
+              className="w-full text-xs border border-gray-300 rounded px-2 py-1"
+            >
+              <option value="equals">Equals</option>
+              <option value="not_equals">Does Not Equal</option>
+              <option value="greater_than">Greater Than</option>
+              <option value="greater_than_equal">Greater Than Or Equal To</option>
+              <option value="less_than">Less Than</option>
+              <option value="less_than_equal">Less Than Or Equal To</option>
+              <option value="between">Between</option>
+              <option value="above_average">Above Average</option>
+              <option value="below_average">Below Average</option>
+              <option value="top_10">Top 10</option>
+            </select>
+          </div>
+
+          {/* Condition Values */}
+          {!['above_average', 'below_average', 'top_10'].includes(conditionType) && (
+            <div className="mb-3">
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  placeholder="Value"
+                  value={conditionValue1}
+                  onChange={(e) => setConditionValue1(e.target.value)}
+                  className="flex-1 text-xs border border-gray-300 rounded px-2 py-1"
+                />
+                {conditionType === 'between' && (
+                  <>
+                    <span className="text-xs text-gray-500">and</span>
+                    <input
+                      type="number"
+                      placeholder="Value"
+                      value={conditionValue2}
+                      onChange={(e) => setConditionValue2(e.target.value)}
+                      className="flex-1 text-xs border border-gray-300 rounded px-2 py-1"
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Statistics Info */}
+          {stats && ['above_average', 'below_average', 'top_10'].includes(conditionType) && (
+            <div className="mb-3 p-2 bg-gray-50 rounded text-xs">
+              <div>Min: {stats.min}</div>
+              <div>Max: {stats.max}</div>
+              <div>Average: {stats.average.toFixed(2)}</div>
+              <div>Count: {stats.count}</div>
+            </div>
+          )}
+
+          {/* Action Buttons - Excel-like (Apply/Clear) */}
+          <div className="flex gap-2">
+            <button
+              className="px-3 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white flex-1"
+              onClick={handleApplyConditionFilter}
+              disabled={!conditionValue1 && !['above_average', 'below_average', 'top_10'].includes(conditionType)}
+            >
+              Apply
+            </button>
+            <button
+              className="px-3 py-1 text-xs rounded bg-blue-500 hover:bg-blue-600 text-white flex-1"
+              onClick={handleClearFilter}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* No separate footer clear; use inline Apply/Clear buttons */}
+    </div>
+  );
+};
 
 // Debounce function
 function debounce<T extends (...args: any[]) => any>(
@@ -1024,9 +1352,23 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         
         if (Array.isArray(filterValue)) {
           if (typeof filterValue[0] === 'number') {
-            // Range filter for numbers
+            // Range filter for numbers - handle special cases for Infinity
             const num = Number(cellValue);
-            return num >= filterValue[0] && num <= filterValue[1];
+            if (isNaN(num)) return false;
+            
+            const minVal = filterValue[0];
+            const maxVal = filterValue[1];
+            
+            // Handle Infinity values for greater than/less than filters
+            if (minVal === -Infinity && maxVal === Infinity) {
+              return true; // Show all values
+            } else if (minVal === -Infinity) {
+              return num <= maxVal;
+            } else if (maxVal === Infinity) {
+              return num >= minVal;
+            } else {
+              return num >= minVal && num <= maxVal;
+            }
           } else {
             // Multi-select filter for strings
             return filterValue.includes(safeToString(cellValue));
@@ -1034,9 +1376,20 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         } else if (filterValue && typeof filterValue === 'object' && 'min' in filterValue && 'max' in filterValue) {
           // Range filter object
           const num = Number(cellValue);
+          if (isNaN(num)) return false;
+          
           const minVal = Number((filterValue as any).min);
           const maxVal = Number((filterValue as any).max);
-          return num >= minVal && num <= maxVal;
+          
+          if (minVal === -Infinity && maxVal === Infinity) {
+            return true;
+          } else if (minVal === -Infinity) {
+            return num <= maxVal;
+          } else if (maxVal === Infinity) {
+            return num >= minVal;
+          } else {
+            return num >= minVal && num <= maxVal;
+          }
         } else {
           // Single value filter
           return safeToString(cellValue) === safeToString(filterValue);
@@ -3345,133 +3698,18 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
              </button>
             {openDropdown === 'filter' && (
               <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md min-w-[180px] z-50 p-2">
-                {/* Filter UI (same as before) */}
+                {/* Excel-like Number Filter UI */}
                 {data && data.columnTypes[contextMenu.col] === 'number' ? (
-                  (() => {
-                    const values = data.rows.map(row => Number(row[contextMenu.col])).filter(v => !isNaN(v));
-                    const min = Math.min(...values);
-                    const max = Math.max(...values);
-                    const range: [number, number] = (filterRange && filterRange.min === min && filterRange.max === max ? filterRange.value : [min, max]) as [number, number];
-                    return (
-                      <div className="flex flex-col gap-2" onMouseDown={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs">{min}</span>
-                          <input
-                            type="number"
-                            min={min}
-                            max={range[1]}
-                            value={filterMinInput === '' ? '' : filterMinInput}
-                            onChange={e => {
-                              const raw = e.target.value;
-                              setFilterMinInput(raw);
-                              if (raw !== '') {
-                                let val = Number(raw);
-                                if (isNaN(val)) return;
-                                if (val < min) val = min;
-                                if (val > range[1]) val = range[1];
-                                setFilterRange({ min, max, value: [val, range[1]] });
-                              }
-                            }}
-                            onBlur={e => {
-                              let raw = e.target.value;
-                              if (raw === '') {
-                                setFilterMinInput(min);
-                                setFilterRange({ min, max, value: [min, range[1]] });
-                              } else {
-                                let val = Number(raw);
-                                if (val > range[1]) val = range[1];
-                                if (val < min) val = min;
-                                setFilterMinInput(val);
-                                setFilterRange({ min, max, value: [val, range[1]] });
-                              }
-                            }}
-                            className="w-16 text-xs border rounded px-1 py-0.5 mr-1"
-                            onMouseDown={e => e.stopPropagation()}
-                          />
-                          <input
-                            type="range"
-                            step={1}
-                            min={min}
-                            max={range[1]}
-                            value={range[0]}
-                            onChange={e => {
-                              let val = Number(e.target.value);
-                              if (val > range[1]) val = range[1];
-                              setFilterMinInput(val);
-                              setFilterRange({ min, max, value: [val, range[1]] });
-                            }}
-                            className="mx-1"
-                            onMouseDown={e => e.stopPropagation()}
-                          />
-                          <span className="mx-1 text-xs">to</span>
-                          <input
-                            type="range"
-                            step={1}
-                            min={range[0]}
-                            max={max}
-                            value={range[1]}
-                            onChange={e => {
-                              let val = Number(e.target.value);
-                              if (val < range[0]) val = range[0];
-                              setFilterMaxInput(val);
-                              setFilterRange({ min, max, value: [range[0], val] });
-                            }}
-                            className="mx-1"
-                            onMouseDown={e => e.stopPropagation()}
-                          />
-                          <input
-                            type="number"
-                            min={range[0]}
-                            max={max}
-                            value={filterMaxInput === '' ? '' : filterMaxInput}
-                            onChange={e => {
-                              const raw = e.target.value;
-                              setFilterMaxInput(raw);
-                              if (raw !== '') {
-                                let val = Number(raw);
-                                if (isNaN(val)) return;
-                                if (val > max) val = max;
-                                if (val < range[0]) val = range[0];
-                                setFilterRange({ min, max, value: [range[0], val] });
-                              }
-                            }}
-                            onBlur={e => {
-                              let raw = e.target.value;
-                              if (raw === '') {
-                                setFilterMaxInput(max);
-                                setFilterRange({ min, max, value: [range[0], max] });
-                              } else {
-                                let val = Number(raw);
-                                if (val < range[0]) val = range[0];
-                                if (val > max) val = max;
-                                setFilterMaxInput(val);
-                                setFilterRange({ min, max, value: [range[0], val] });
-                              }
-                            }}
-                            className="w-16 text-xs border rounded px-1 py-0.5 ml-1"
-                            onMouseDown={e => e.stopPropagation()}
-                          />
-                          <span className="text-xs">{max}</span>
-                        </div>
-                        <div className="flex items-center gap-2 mt-2">
-                          <button
-                            className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white"
-                            onClick={() => { handleColumnFilter(contextMenu.col, range as [number, number]); setContextMenu(null); setOpenDropdown(null); }}
-                          >Apply Filter</button>
-                          <button
-                            className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white"
-                            onClick={e => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              handleClearFilter(contextMenu.col);
-                              setContextMenu(null);
-                              setOpenDropdown(null);
-                            }}
-                          >Clear Filter</button>
-                        </div>
-                      </div>
-                    );
-                  })()
+                  <NumberFilterComponent
+                    column={contextMenu.col}
+                    data={data}
+                    onApplyFilter={handleColumnFilter}
+                    onClearFilter={handleClearFilter}
+                    onClose={() => {
+                      setContextMenu(null);
+                      setOpenDropdown(null);
+                    }}
+                  />
                  ) : (
                    <div className="max-h-48 overflow-y-auto space-y-1">
                      {/* Select All / Deselect All */}
