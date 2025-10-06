@@ -1499,14 +1499,6 @@ const handleClearFilter = async (col: string) => {
 };
 
 const handleCellClick = (rowIndex: number, column: string) => {
-  // If formula bar is frozen, only select the column without activating formula bar
-  if (isFormulaBarFrozen) {
-    setSelectedColumn(column);
-    setSelectedCell(null);
-    console.log('[DataFrameOperations] Column selected (formula bar frozen):', column);
-    return;
-  }
-  
   // When clicking on a cell, activate formula bar for that column (like small screen behavior)
   activateFormulaBar(column);
   console.log('[DataFrameOperations] Column selected:', column, 'Formula bar activated');
@@ -1518,7 +1510,7 @@ const resetFormulaBar = () => {
   setSelectedColumn(null);
   setSelectedCell(null);
   setIsFormulaMode(false); // Disable formula bar after reset
-  setIsFormulaBarFrozen(true); // Freeze formula bar after application
+  setIsFormulaBarFrozen(false); // Don't freeze formula bar - allow continued use
   showValidationError(null);
   console.log('[DataFrameOperations] Formula bar completely reset and frozen');
 };
@@ -1613,22 +1605,15 @@ const insertColumnIntoFormula = (columnName: string) => {
 const handleHeaderClick = (header: string) => {
   resetSaveSuccess();
   
-  // If formula bar is frozen, only select the column without activating formula bar
-  if (isFormulaBarFrozen) {
-    setSelectedColumn(header);
-    setSelectedCell(null);
-    console.log('[DataFrameOperations] Header clicked (formula bar frozen):', header);
-    return;
-  }
-  
   // Check if we're in formula mode (formula input starts with =)
   if (formulaInput.trim().startsWith('=')) {
     // Insert column name into formula at cursor position
     insertColumnIntoFormula(header);
-  } else {
-    // Normal column selection behavior - activate formula bar
-    activateFormulaBar(header);
+    return;
   }
+  
+  // Normal column selection behavior - activate formula bar
+  activateFormulaBar(header);
 };
 
   const handleFormulaSubmit = async () => {

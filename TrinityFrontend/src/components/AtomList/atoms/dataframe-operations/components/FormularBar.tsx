@@ -674,6 +674,42 @@ const FormularBar: React.FC<FormularBarProps> = ({
   const [isUsageGuideOpen, setIsUsageGuideOpen] = useState(false);
   const formulaInputRef = useRef<HTMLInputElement>(null);
   const preservedColumnRef = useRef<string | null>(null);
+  
+  // Custom undo/redo system
+  const [formulaHistory, setFormulaHistory] = useState<string[]>(['']);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const isUndoRedoOperation = useRef(false);
+
+  // Add current formula to history when it changes (but not during undo/redo)
+  useEffect(() => {
+    if (!isUndoRedoOperation.current && formulaInput !== formulaHistory[historyIndex]) {
+      const newHistory = formulaHistory.slice(0, historyIndex + 1);
+      newHistory.push(formulaInput);
+      setFormulaHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
+    }
+    isUndoRedoOperation.current = false;
+  }, [formulaInput]);
+
+  // Undo function
+  const handleUndo = () => {
+    if (historyIndex > 0) {
+      isUndoRedoOperation.current = true;
+      const newIndex = historyIndex - 1;
+      setHistoryIndex(newIndex);
+      onFormulaInputChange(formulaHistory[newIndex]);
+    }
+  };
+
+  // Redo function
+  const handleRedo = () => {
+    if (historyIndex < formulaHistory.length - 1) {
+      isUndoRedoOperation.current = true;
+      const newIndex = historyIndex + 1;
+      setHistoryIndex(newIndex);
+      onFormulaInputChange(formulaHistory[newIndex]);
+    }
+  };
 
 
   // Preserve selected column to prevent it from disappearing
@@ -807,10 +843,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
       onFormulaModeChange(true);
       
       
-      // If no target column is selected, set the inserted column as the target
-      if (!selectedColumn) {
-        onSelectedColumnChange(column);
-      }
+      // Don't automatically set the inserted column as target - let user explicitly select target
       return;
     }
 
@@ -824,10 +857,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
     onFormulaModeChange(true);
     
     
-    // If no target column is selected, set the inserted column as the target
-    if (!selectedColumn) {
-      onSelectedColumnChange(column);
-    }
+    // Don't automatically set the inserted column as target - let user explicitly select target
     
     // Set cursor position after the inserted column
     setTimeout(() => {
@@ -984,9 +1014,9 @@ const FormularBar: React.FC<FormularBarProps> = ({
             className='flex items-center space-x-2 bg-primary/10 rounded-lg px-3 py-1.5 border border-primary/20 shadow-sm cursor-pointer hover:bg-primary/15 transition-colors'
             onClick={(e) => {
               e.stopPropagation();
-              console.log('[FormularBar] Target column clicked, state:', { selectedColumn, isFormulaMode, isFormulaBarFrozen });
-              // Only activate formula bar if not frozen and we have a selected column
-              if (selectedColumn && !isFormulaBarFrozen) {
+              console.log('[FormularBar] Target column clicked, state:', { selectedColumn, isFormulaMode });
+              // Always activate formula bar when target column is clicked
+              if (selectedColumn) {
                 onFormulaModeChange(true);
               }
             }}
@@ -1177,9 +1207,9 @@ const FormularBar: React.FC<FormularBarProps> = ({
                 onChange={(e) => handleInputChange(e.target.value)}
                 onClick={(e) => {
                   e.stopPropagation();
-                  console.log('[FormularBar] Formula input clicked, state:', { selectedColumn, isFormulaMode, isFormulaBarFrozen });
-                  // Only activate formula bar if not frozen and we have a selected column
-                  if (selectedColumn && !isFormulaBarFrozen) {
+                  console.log('[FormularBar] Formula input clicked, state:', { selectedColumn, isFormulaMode });
+                  // Always activate formula bar when input is clicked
+                  if (selectedColumn) {
                     onFormulaModeChange(true);
                   }
                   formulaInputRef.current?.focus();
@@ -1191,6 +1221,31 @@ const FormularBar: React.FC<FormularBarProps> = ({
                     : 'border-primary/50 bg-primary/5 focus:ring-primary/20 focus:border-primary'
                 }`}
                 onKeyDown={(e) => {
+                  // Handle Ctrl+Z (undo) with custom implementation
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleUndo();
+                    return;
+                  }
+                  
+                  // Handle Ctrl+Y or Ctrl+Shift+Z (redo) with custom implementation
+                  if (((e.ctrlKey || e.metaKey) && e.key === 'y') || 
+                      ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey)) {
+                    e.preventDefault();
+                    handleRedo();
+                    return;
+                  }
+                  
+                  // Handle Ctrl+A (select all) - let browser handle this
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+                    return;
+                  }
+                  
+                  // Handle Ctrl+C, Ctrl+V, Ctrl+X - let browser handle these
+                  if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'v' || e.key === 'x')) {
+                    return;
+                  }
+                  
                   if (e.key === 'Enter') {
                     e.preventDefault();
                     handleSubmit();
