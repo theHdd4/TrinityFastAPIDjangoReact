@@ -682,13 +682,32 @@ const FormularBar: React.FC<FormularBarProps> = ({
 
   // Add current formula to history when it changes (but not during undo/redo)
   useEffect(() => {
-    if (!isUndoRedoOperation.current && formulaInput !== formulaHistory[historyIndex]) {
-      const newHistory = formulaHistory.slice(0, historyIndex + 1);
-      newHistory.push(formulaInput);
-      setFormulaHistory(newHistory);
-      setHistoryIndex(newHistory.length - 1);
+    if (!isUndoRedoOperation.current) {
+      // If the formula input is different from current history position
+      if (formulaInput !== formulaHistory[historyIndex]) {
+        const newHistory = formulaHistory.slice(0, historyIndex + 1);
+        newHistory.push(formulaInput);
+        setFormulaHistory(newHistory);
+        setHistoryIndex(newHistory.length - 1);
+      }
     }
     isUndoRedoOperation.current = false;
+  }, [formulaInput]);
+
+  // Preserve history even when formula input is cleared externally
+  // This allows users to undo back to previous formulas even after applying one
+  useEffect(() => {
+    if (formulaInput === '' && !isUndoRedoOperation.current) {
+      // Add empty string to history if it's not already there
+      if (formulaHistory[formulaHistory.length - 1] !== '') {
+        const newHistory = [...formulaHistory, ''];
+        setFormulaHistory(newHistory);
+        setHistoryIndex(newHistory.length - 1);
+      } else {
+        // Just update the index to point to the last empty entry
+        setHistoryIndex(formulaHistory.length - 1);
+      }
+    }
   }, [formulaInput]);
 
   // Undo function

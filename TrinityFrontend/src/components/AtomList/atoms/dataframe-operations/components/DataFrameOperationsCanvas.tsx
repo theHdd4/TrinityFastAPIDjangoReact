@@ -45,6 +45,7 @@ import {
 import { toast } from '@/components/ui/use-toast';
 import '@/templates/tables/table.css';
 import FormularBar from './FormularBar';
+import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 
 interface DataFrameOperationsCanvasProps {
   data: DataFrameData | null;
@@ -513,6 +514,13 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // Loading indicator for server-side operations
   const [operationLoading, setOperationLoading] = useState(false);
   const [formulaLoading, setFormulaLoading] = useState(false);
+  const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
+  const [columnOperationLoading, setColumnOperationLoading] = useState(false);
+  const [sortLoading, setSortLoading] = useState(false);
+  const [filterLoading, setFilterLoading] = useState(false);
+  const [convertLoading, setConvertLoading] = useState(false);
+  const [duplicateLoading, setDuplicateLoading] = useState(false);
+  const [insertLoading, setInsertLoading] = useState(false);
   
   // Undo/Redo state management
   const [undoStack, setUndoStack] = useState<DataFrameData[]>([]);
@@ -1145,7 +1153,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     // Save current state before making changes
     saveToUndoStack(data);
     
-    setOperationLoading(true);
+    setSortLoading(true);
     try {
       console.log('[DataFrameOperations] sort', column, direction);
       const resp = await apiSort(fileId, column, direction);
@@ -1170,7 +1178,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     } catch (err) {
       handleApiError('Sort failed', err);
     } finally {
-      setOperationLoading(false);
+      setSortLoading(false);
     }
   };
 
@@ -1946,6 +1954,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     // Save current state before making changes
     saveToUndoStack(data);
     
+    setDuplicateLoading(true);
     const col = data.headers[colIdx];
     let newName = `${col}_copy`;
     while (data.headers.includes(newName)) {
@@ -1978,6 +1987,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     } catch (err) {
       handleApiError('Duplicate column failed', err);
       addToHistory('Duplicate Column', `Failed to duplicate column "${col}"`, 'error');
+    } finally {
+      setDuplicateLoading(false);
     }
   };
 
@@ -1988,6 +1999,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     // Save current state before making changes
     saveToUndoStack(data);
     
+    setInsertLoading(true);
     try {
       const resp = await apiInsertRow(fileId, rowIdx, position);
       
@@ -2013,6 +2025,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     } catch (err) {
       handleApiError('Insert row failed', err);
       addToHistory('Insert Row', `Failed to insert row ${position} row ${rowIdx + 1}`, 'error');
+    } finally {
+      setInsertLoading(false);
     }
   };
 
@@ -2022,6 +2036,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     // Save current state before making changes
     saveToUndoStack(data);
     
+    setDuplicateLoading(true);
     try {
       const resp = await apiDuplicateRow(fileId, rowIdx);
       
@@ -2047,6 +2062,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     } catch (err) {
       handleApiError('Duplicate row failed', err);
       addToHistory('Duplicate Row', `Failed to duplicate row ${rowIdx + 1}`, 'error');
+    } finally {
+      setDuplicateLoading(false);
     }
   };
 
@@ -2056,6 +2073,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     // Save current state before making changes
     saveToUndoStack(data);
     
+    setConvertLoading(true);
     try {
       console.log('[DataFrameOperations] Retype column:', col, 'to', newType);
       const resp = await apiRetypeColumn(fileId, col, newType === 'text' ? 'string' : newType);
@@ -2090,6 +2108,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     } catch (err) {
       handleApiError('Retype column failed', err);
       addToHistory('Retype Column', `Failed to retype column "${col}"`, 'error');
+    } finally {
+      setConvertLoading(false);
     }
   };
 
@@ -2098,6 +2118,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     
     const fileId = settings.fileId;
     
+    setConvertLoading(true);
     try {
       console.log('[DataFrameOperations] Retype multiple columns:', columns, 'to', newType);
       
@@ -2120,6 +2141,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           frozenColumns: currentData.frozenColumns,
           cellColors: currentData.cellColors,
           hiddenColumns: currentHiddenColumns,
+          deletedColumns: currentDeletedColumns,
         };
       }
       
@@ -2136,6 +2158,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     } catch (err) {
       handleApiError('Multi-column retype failed', err);
       addToHistory('Multi-Column Retype', `Failed to convert ${columns.length} columns`, 'error');
+    } finally {
+      setConvertLoading(false);
     }
   };
 
@@ -2144,6 +2168,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     
     const fileId = settings.fileId;
     
+    setConvertLoading(true);
     try {
       console.log('[DataFrameOperations] Round columns:', columns, 'to', decimalPlaces, 'decimal places');
       
@@ -2177,6 +2202,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           frozenColumns: currentData.frozenColumns,
           cellColors: currentData.cellColors,
           hiddenColumns: currentHiddenColumns,
+          deletedColumns: currentDeletedColumns,
         };
       }
       
@@ -2194,6 +2220,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       console.error('[DataFrameOperations] Round columns error:', err);
       handleApiError('Round columns failed', err);
       addToHistory('Round Columns', `Failed to round ${columns.length} columns`, 'error');
+    } finally {
+      setConvertLoading(false);
     }
   };
 
@@ -2500,6 +2528,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     // Save current state before making changes
     saveToUndoStack(data);
     
+    setBulkDeleteLoading(true);
     try {
       // ALWAYS do frontend-only delete - no API calls
       // This avoids backend sync issues and 404 errors
@@ -2555,6 +2584,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       console.error('[DataFrameOperations] Bulk delete error:', err);
       handleApiError('Bulk delete failed', err);
     } finally {
+      setBulkDeleteLoading(false);
       setDeleteConfirmModal({ isOpen: false, columnsToDelete: [] });
     }
   };
@@ -2562,6 +2592,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleConfirmRowDelete = async () => {
     if (!data || rowDeleteConfirmModal.rowsToDelete.length === 0) return;
     
+    setBulkDeleteLoading(true);
     try {
       // Mark rows as permanently deleted (local only)
       setPermanentlyDeletedRows(prev => {
@@ -2583,6 +2614,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     } catch (err) {
       handleApiError('Bulk row delete failed', err);
     } finally {
+      setBulkDeleteLoading(false);
       setRowDeleteConfirmModal({ isOpen: false, rowsToDelete: [] });
     }
   };
@@ -2790,6 +2822,31 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         </div>
                       </div>
                     </div>
+                  )}
+                  
+                  {/* Bulk Delete Loading */}
+                  {bulkDeleteLoading && (
+                    <LoadingAnimation status="Deleting rows..." />
+                  )}
+                  
+                  {/* Sort Loading */}
+                  {sortLoading && (
+                    <LoadingAnimation status="Sorting data..." />
+                  )}
+                  
+                  {/* Duplicate Loading */}
+                  {duplicateLoading && (
+                    <LoadingAnimation status="Duplicating..." />
+                  )}
+                  
+                  {/* Insert Loading */}
+                  {insertLoading && (
+                    <LoadingAnimation status="Inserting..." />
+                  )}
+                  
+                  {/* Convert Loading */}
+                  {convertLoading && (
+                    <LoadingAnimation status="Converting columns..." />
                   )}
                   
                   <Table className="table-base w-full" maxHeight="max-h-[500px]">
