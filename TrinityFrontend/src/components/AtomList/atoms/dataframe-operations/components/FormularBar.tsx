@@ -25,6 +25,8 @@ interface FormularBarProps {
   selectedColumn: string | null;
   formulaInput: string;
   isFormulaMode: boolean;
+  isFormulaBarFrozen?: boolean;
+  formulaValidationError?: string | null;
   onSelectedCellChange: (cell: { row: number; col: string } | null) => void;
   onSelectedColumnChange: (col: string | null) => void;
   onFormulaInputChange: (value: string) => void;
@@ -656,6 +658,8 @@ const FormularBar: React.FC<FormularBarProps> = ({
   selectedColumn,
   formulaInput,
   isFormulaMode,
+  isFormulaBarFrozen = false,
+  formulaValidationError,
   onSelectedCellChange,
   onSelectedColumnChange,
   onFormulaInputChange,
@@ -671,36 +675,20 @@ const FormularBar: React.FC<FormularBarProps> = ({
   const formulaInputRef = useRef<HTMLInputElement>(null);
   const preservedColumnRef = useRef<string | null>(null);
 
+
   // Preserve selected column to prevent it from disappearing
   useEffect(() => {
     if (selectedColumn) {
       preservedColumnRef.current = selectedColumn;
-      console.log('[FormularBar] Column preserved:', selectedColumn);
     }
   }, [selectedColumn]);
 
-  // Ensure selected column and formula input work together
+
+  // Ensure input is focusable and working (simplified)
   useEffect(() => {
-    // If we have a formula input but no selected column, restore it
-    if (formulaInput.trim() && !selectedColumn && preservedColumnRef.current) {
-      console.log('[FormularBar] Restoring selected column for formula:', preservedColumnRef.current);
-      onSelectedColumnChange(preservedColumnRef.current);
+    if (isFormulaMode && formulaInputRef.current) {
+      formulaInputRef.current.focus();
     }
-  }, [formulaInput, selectedColumn, onSelectedColumnChange]);
-
-  // Ensure input is focusable and working when maximized
-  useEffect(() => {
-    const handleResize = () => {
-      // Re-focus input after window resize (maximize/restore)
-      if (formulaInputRef.current && isFormulaMode) {
-        setTimeout(() => {
-          formulaInputRef.current?.focus();
-        }, 100);
-      }
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
   }, [isFormulaMode]);
 
   useEffect(() => {
@@ -754,18 +742,6 @@ const FormularBar: React.FC<FormularBarProps> = ({
   };
 
   const handleFormulaSelect = (formula: FormulaItem) => {
-    console.log('[FormularBar] Formula selected:', {
-      formulaName: formula.name,
-      currentSelectedColumn: selectedColumn,
-      isFormulaMode,
-      windowWidth: window.innerWidth,
-      windowHeight: window.innerHeight
-    });
-    
-    // Preserve the selected column BEFORE any state changes
-    const preservedColumn = preservedColumnRef.current || selectedColumn;
-    console.log('[FormularBar] Preserving column:', preservedColumn);
-    
     setSelectedFormula(formula);
     setActiveTab(formula.category);
     const expression = formatExampleExpression(formula);
@@ -776,43 +752,14 @@ const FormularBar: React.FC<FormularBarProps> = ({
     onFormulaInputChange(expressionWithColNumbers);
     onFormulaModeChange(true);
     
-    // Ensure selected column is maintained
-    if (preservedColumn) {
-      onSelectedColumnChange(preservedColumn);
-    }
-    
     setIsLibraryOpen(false);
     onValidationError?.(null);
-    
-    console.log('[FormularBar] Formula selection completed:', {
-      formulaApplied: expressionWithColNumbers,
-      selectedColumn: preservedColumn,
-      isFormulaMode: true
-    });
   };
 
   const handleLibraryOpenChange = (open: boolean) => {
-    console.log('[FormularBar] Library open change:', {
-      open,
-      currentSelectedColumn: selectedColumn,
-      isFormulaMode,
-      windowWidth: window.innerWidth,
-      windowHeight: window.innerHeight
-    });
-    
-    // Preserve selected column when opening library
-    const preservedColumn = preservedColumnRef.current || selectedColumn;
-    
-    // Prevent state conflicts in maximized mode
+    // Always activate formula mode when opening library
     if (open && !isFormulaMode) {
-      console.log('[FormularBar] Activating formula mode before opening library');
       onFormulaModeChange(true);
-    }
-    
-    // Ensure selected column is maintained when opening library
-    if (open && preservedColumn && !selectedColumn) {
-      console.log('[FormularBar] Restoring selected column when opening library:', preservedColumn);
-      onSelectedColumnChange(preservedColumn);
     }
     
     setIsLibraryOpen(open);
@@ -827,10 +774,9 @@ const FormularBar: React.FC<FormularBarProps> = ({
       onFormulaInputChange(newValue);
       onFormulaModeChange(true);
       
-      // If no target column is selected, set the inserted column as the target
-      if (!selectedColumn) {
-        onSelectedColumnChange(column);
-      }
+      // Don't change target column when inserting columns into formula
+      // The target column should remain stable during formula editing
+      
       
       // Set cursor position after the inserted column
       setTimeout(() => {
@@ -860,6 +806,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
       onFormulaInputChange(next);
       onFormulaModeChange(true);
       
+      
       // If no target column is selected, set the inserted column as the target
       if (!selectedColumn) {
         onSelectedColumnChange(column);
@@ -875,6 +822,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
     
     onFormulaInputChange(newValue);
     onFormulaModeChange(true);
+    
     
     // If no target column is selected, set the inserted column as the target
     if (!selectedColumn) {
@@ -901,13 +849,6 @@ const FormularBar: React.FC<FormularBarProps> = ({
       onFormulaInputChange(newExpression);
       onFormulaModeChange(true);
       
-      // Validate column names if we have data available
-      if (data?.headers) {
-        const validationError = validateFormulaColumns(newExpression, data.headers);
-        onValidationError?.(validationError);
-      } else {
-        onValidationError?.(null);
-      }
       
       // Set cursor position after the replacement
       setTimeout(() => {
@@ -923,13 +864,6 @@ const FormularBar: React.FC<FormularBarProps> = ({
     onFormulaInputChange(value);
     onFormulaModeChange(true);
     
-    // Validate column names if we have data available
-    if (data?.headers) {
-      const validationError = validateFormulaColumns(value, data.headers);
-      onValidationError?.(validationError);
-    } else {
-      onValidationError?.(null);
-    }
   };
 
   const handleTabCompletion = () => {
@@ -979,25 +913,24 @@ const FormularBar: React.FC<FormularBarProps> = ({
   };
 
   const handleSubmit = () => {
+    console.log('[FormularBar] Submit attempt:', { 
+      selectedColumn, 
+      formulaInput, 
+      hasData: !!data?.headers 
+    });
+
     if (!selectedColumn) {
+      console.log('[FormularBar] No selected column');
       onValidationError?.('Please select a target column first');
       return;
     }
 
-    if (!isValidFormulaInput(formulaInput)) {
-      onValidationError?.('Please enter a valid formula and then hit Apply');
+    if (!formulaInput.trim()) {
+      onValidationError?.('Please enter a formula');
       return;
     }
 
-    // Validate column names if we have data available
-    if (data?.headers) {
-      const validationError = validateFormulaColumns(formulaInput, data.headers);
-      if (validationError) {
-        onValidationError?.(validationError);
-        return;
-      }
-    }
-
+    console.log('[FormularBar] Submitting formula');
     onValidationError?.(null);
     onFormulaSubmit();
   };
@@ -1007,10 +940,21 @@ const FormularBar: React.FC<FormularBarProps> = ({
     return (
       <div
         key={formula.key}
+        data-formula-card={formula.key}
         className={`p-3 rounded-lg border transition-colors cursor-pointer ${
           active ? 'border-primary bg-primary/5' : 'hover:bg-accent'
         }`}
-        onClick={() => handleFormulaSelect(formula)}
+        onClick={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          console.log('[FormularBar] Formula card clicked:', formula.name);
+          handleFormulaSelect(formula);
+        }}
+        style={{ 
+          position: 'relative',
+          zIndex: 1,
+          pointerEvents: 'auto'
+        }}
       >
         <div className='flex items-center space-x-2 mb-1'>
           {categoryLabels[formula.category].icon}
@@ -1040,10 +984,9 @@ const FormularBar: React.FC<FormularBarProps> = ({
             className='flex items-center space-x-2 bg-primary/10 rounded-lg px-3 py-1.5 border border-primary/20 shadow-sm cursor-pointer hover:bg-primary/15 transition-colors'
             onClick={(e) => {
               e.stopPropagation();
-              console.log('[FormularBar] Target column clicked, isFormulaMode:', isFormulaMode, 'selectedColumn:', selectedColumn);
-              // Activate formula bar if it's not already active and we have a selected column
-              if (!isFormulaMode && selectedColumn) {
-                console.log('[FormularBar] Activating formula bar via target column for:', selectedColumn);
+              console.log('[FormularBar] Target column clicked, state:', { selectedColumn, isFormulaMode, isFormulaBarFrozen });
+              // Only activate formula bar if not frozen and we have a selected column
+              if (selectedColumn && !isFormulaBarFrozen) {
                 onFormulaModeChange(true);
               }
             }}
@@ -1078,13 +1021,13 @@ const FormularBar: React.FC<FormularBarProps> = ({
               </Button>
             </PopoverTrigger>
             <PopoverContent
-              className='w-[520px] p-0 shadow-lg border border-border bg-popover overflow-hidden z-[99999]'
+              className='w-[520px] p-0 shadow-lg border border-border bg-popover overflow-hidden z-[9999]'
               align='start'
               side='bottom'
               sideOffset={8}
               style={{ 
-                zIndex: 99999,
-                position: 'fixed',
+                zIndex: 9999,
+                position: 'absolute',
                 maxHeight: '80vh',
                 overflow: 'auto'
               }}
@@ -1149,7 +1092,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
             </PopoverContent>
           </Popover>
 
-          <div className='flex flex-col flex-1 min-w-0 relative'>
+          <div className='flex flex-col flex-1 min-w-0 relative' style={{ position: 'relative', zIndex: 1 }}>
             <div className='relative w-full' style={{ position: 'relative', zIndex: 1 }}>
               <Popover open={isLibraryOpen} onOpenChange={handleLibraryOpenChange}>
                 <PopoverTrigger asChild>
@@ -1166,29 +1109,34 @@ const FormularBar: React.FC<FormularBarProps> = ({
                     onClick={(e) => {
                       e.stopPropagation();
                       e.preventDefault();
-                      console.log('[FormularBar] Sigma button clicked, isLibraryOpen:', isLibraryOpen, 'isFormulaMode:', isFormulaMode);
+                      console.log('[FormularBar] Sigma button clicked, current state:', { isLibraryOpen, isFormulaMode, selectedColumn });
                       handleLibraryOpenChange(!isLibraryOpen);
                     }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onMouseUp={(e) => e.stopPropagation()}
                   >
                     <Sigma className='w-4 h-4 text-primary' />
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent 
-                  className='w-96 p-0 shadow-lg z-[99999]' 
+                  className='w-96 p-0 shadow-lg z-[9999]' 
                   align='start' 
                   side='bottom' 
                   sideOffset={4}
                   style={{ 
-                    zIndex: 99999,
-                    position: 'fixed',
+                    zIndex: 9999,
+                    position: 'absolute',
                     maxHeight: '80vh',
-                    overflow: 'auto'
+                    overflow: 'auto',
+                    pointerEvents: 'auto'
                   }}
                   avoidCollisions={true}
                   collisionPadding={10}
                   onOpenAutoFocus={(e) => e.preventDefault()}
+                  onInteractOutside={(e) => {
+                    // Allow interaction with formula cards
+                    if (e.target && (e.target as Element).closest('[data-formula-card]')) {
+                      e.preventDefault();
+                    }
+                  }}
                 >
                   <div className='border-b p-3'>
                     <div className='flex items-center space-x-2'>
@@ -1229,16 +1177,19 @@ const FormularBar: React.FC<FormularBarProps> = ({
                 onChange={(e) => handleInputChange(e.target.value)}
                 onClick={(e) => {
                   e.stopPropagation();
-                  console.log('[FormularBar] Formula input clicked, isFormulaMode:', isFormulaMode, 'selectedColumn:', selectedColumn);
-                  // Activate formula bar if it's not already active and we have a selected column
-                  if (!isFormulaMode && selectedColumn) {
-                    console.log('[FormularBar] Activating formula bar for column:', selectedColumn);
+                  console.log('[FormularBar] Formula input clicked, state:', { selectedColumn, isFormulaMode, isFormulaBarFrozen });
+                  // Only activate formula bar if not frozen and we have a selected column
+                  if (selectedColumn && !isFormulaBarFrozen) {
                     onFormulaModeChange(true);
                   }
                   formulaInputRef.current?.focus();
                 }}
                 placeholder='=SUM(Col1,Col2), =IF(Col1 > 10, Col2, Col3), =DATE_DIFF(Col1, Col2)'
-                className='h-8 shadow-sm pl-10 font-mono border-primary/50 bg-primary/5 transition-all duration-200 w-full min-w-0 focus:ring-2 focus:ring-primary/20 focus:border-primary'
+                className={`h-8 shadow-sm pl-10 font-mono transition-all duration-200 w-full min-w-0 focus:ring-2 ${
+                  formulaValidationError 
+                    ? 'border-red-500 bg-red-50 focus:ring-red-200 focus:border-red-500' 
+                    : 'border-primary/50 bg-primary/5 focus:ring-primary/20 focus:border-primary'
+                }`}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
@@ -1256,6 +1207,12 @@ const FormularBar: React.FC<FormularBarProps> = ({
                   }
                 }}
               />
+              {/* Error message display */}
+              {formulaValidationError && (
+                <div className="absolute top-full left-0 right-0 mt-1 px-2 py-1 bg-red-50 border border-red-200 rounded text-xs text-red-700 z-50">
+                  {formulaValidationError}
+                </div>
+              )}
             </div>
           </div>
         </div>

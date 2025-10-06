@@ -223,6 +223,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     };
   }, []);
   const [isFormulaMode, setIsFormulaMode] = useState(false); // Start with formula bar disabled
+  const [isFormulaBarFrozen, setIsFormulaBarFrozen] = useState(false); // Track if formula bar should be frozen after application
   const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter' | 'operation' | 'round'>(null);
   const [convertSubmenuOpen, setConvertSubmenuOpen] = useState(false);
   const [roundDecimalPlaces, setRoundDecimalPlaces] = useState(2);
@@ -386,16 +387,17 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // Clear column selection when clicking outside the selected column
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (selectedColumn) {
+      if (selectedColumn && !isFormulaMode) {
         const target = e.target as HTMLElement;
         if (!target.closest(`[data-col="${selectedColumn}"]`)) {
+          console.log('[DataFrameOperations] Clearing selectedColumn due to outside click:', { selectedColumn, isFormulaMode, target: target.tagName });
           setSelectedColumn(null);
         }
       }
     };
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
-  }, [selectedColumn]);
+  }, [selectedColumn, isFormulaMode]);
 
   useEffect(() => {
     const incoming = settings.columnFormulas || {};
@@ -437,6 +439,23 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       return next;
     });
   }, [headersKey, data?.headers, onSettingsChange, isProcessingOperation]);
+
+  // Handle selectedColumn state when data changes (e.g., when columns are inserted/deleted)
+  useEffect(() => {
+    if (!data?.headers || !selectedColumn) {
+      return;
+    }
+
+    // Check if the selected column still exists in the new data
+    const columnStillExists = data.headers.includes(selectedColumn);
+    
+    if (!columnStillExists) {
+      console.log('[DataFrameOperations] Selected column no longer exists, clearing selection:', selectedColumn);
+      setSelectedColumn(null);
+      setFormulaInput('');
+      setFormulaValidationError(null);
+    }
+  }, [data?.headers, selectedColumn]);
 
   useEffect(() => {
     const stored = selectedColumn ? columnFormulas[selectedColumn] : undefined;
@@ -657,7 +676,11 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       setSaveSuccess(true);
       if (saveSuccessTimeout.current) clearTimeout(saveSuccessTimeout.current);
       saveSuccessTimeout.current = setTimeout(() => setSaveSuccess(false), 2000);
-      fetchSavedDataFrames(); // Refresh the saved dataframes list in the UI
+      
+      // Add a small delay to allow MinIO eventual consistency to catch up
+      setTimeout(() => {
+        fetchSavedDataFrames(); // Refresh the saved dataframes list in the UI
+      }, 500);
       // Simple update like the old file - only update settings, not data
       onSettingsChange({
         tableData: { ...data, fileName: filename },
@@ -1311,8 +1334,13 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     saveToUndoStack(data);
     
     const newColumnName = `Column_${data.headers.length + 1}`;
+    
+    // Calculate the correct backend index for adding at the end
+    const frontendEndIndex = data.headers.length;
+    const backendEndIndex = getBackendColumnIndex(frontendEndIndex);
+    
     try {
-      const resp = await apiInsertColumn(fileId, data.headers.length, newColumnName, '');
+      const resp = await apiInsertColumn(fileId, backendEndIndex, newColumnName, '');
       
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -1330,6 +1358,12 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
          hiddenColumns: currentHiddenColumns,
          deletedColumns: currentDeletedColumns,
        });
+      
+      // Auto-select the newly added column for formula operations
+      if (filtered.headers.includes(newColumnName)) {
+        setSelectedColumn(newColumnName);
+        console.log('[DataFrameOperations] Auto-selected newly added column:', newColumnName);
+      }
     } catch (err) {
       handleApiError('Insert column failed', err);
     }
@@ -1372,8 +1406,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       saveToUndoStack(data);
       
       const toIndex = data.headers.indexOf(draggedCol);
+      const backendToIndex = getBackendColumnIndex(toIndex);
       try {
-        const resp = await apiMoveColumn(fileId, draggedCol, toIndex);
+        const resp = await apiMoveColumn(fileId, draggedCol, backendToIndex);
         
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -1464,22 +1499,17 @@ const handleClearFilter = async (col: string) => {
 };
 
 const handleCellClick = (rowIndex: number, column: string) => {
-  // When clicking on a cell, select the column
-  setSelectedColumn(column);
-  setSelectedCell(null);
-  
-  // Only clear formula bar if clicking on a different column
-  // This allows working with the same column without interference
-  if (selectedColumn !== column) {
-    // Clear formula bar when switching to a different column
-    setIsFormulaMode(false);
-    setFormulaInput('');
-    showValidationError(null);
-    console.log('[DataFrameOperations] Column changed to:', column, 'Formula bar cleared');
-  } else {
-    // Keep formula bar state when clicking on the same column
-    console.log('[DataFrameOperations] Same column clicked:', column, 'Formula bar state preserved');
+  // If formula bar is frozen, only select the column without activating formula bar
+  if (isFormulaBarFrozen) {
+    setSelectedColumn(column);
+    setSelectedCell(null);
+    console.log('[DataFrameOperations] Column selected (formula bar frozen):', column);
+    return;
   }
+  
+  // When clicking on a cell, activate formula bar for that column (like small screen behavior)
+  activateFormulaBar(column);
+  console.log('[DataFrameOperations] Column selected:', column, 'Formula bar activated');
 };
 
 // Function to completely reset the formula bar to a clean state
@@ -1488,8 +1518,9 @@ const resetFormulaBar = () => {
   setSelectedColumn(null);
   setSelectedCell(null);
   setIsFormulaMode(false); // Disable formula bar after reset
+  setIsFormulaBarFrozen(true); // Freeze formula bar after application
   showValidationError(null);
-  console.log('[DataFrameOperations] Formula bar completely reset and disabled');
+  console.log('[DataFrameOperations] Formula bar completely reset and frozen');
 };
 
 // Function to activate formula bar for a specific column
@@ -1497,42 +1528,61 @@ const activateFormulaBar = (column: string) => {
   setSelectedColumn(column);
   setSelectedCell(null);
   setIsFormulaMode(true);
+  setIsFormulaBarFrozen(false); // Unfreeze formula bar when explicitly activated
   setFormulaInput('');
   showValidationError(null);
   console.log('[DataFrameOperations] Formula bar activated for column:', column);
 };
 
+// Helper function to replace next ColX with column name (Excel-like behavior)
+const replaceNextColPlaceholder = (expression: string, columnName: string): string => {
+  const colMatch = expression.match(/Col\d+/);
+  if (colMatch) {
+    const colIndex = expression.indexOf(colMatch[0]);
+    const colLength = colMatch[0].length;
+    return expression.slice(0, colIndex) + columnName + expression.slice(colIndex + colLength);
+  }
+  return expression;
+};
+
 const insertColumnIntoFormula = (columnName: string) => {
   // Only insert column into formula if formula bar is already active
   if (!isFormulaMode) {
-    console.log('[DataFrameOperations] Formula bar not active - cannot insert column');
     return;
   }
   
+  console.log('[DataFrameOperations] insertColumnIntoFormula called:', { columnName, selectedColumn, isFormulaMode });
+  
+  // Use the same logic as FormularBar's handleColumnInsert function
+  const inputElement = document.querySelector('input[placeholder*="=SUM"]') as HTMLInputElement;
+  
   // Check if there are ColX placeholders to replace (Excel-like behavior)
   if (formulaInput.includes('Col')) {
-    const colMatch = formulaInput.match(/Col\d+/);
-    if (colMatch) {
-      const colIndex = formulaInput.indexOf(colMatch[0]);
-      const newFormula = formulaInput.slice(0, colIndex) + columnName + formulaInput.slice(colIndex + colMatch[0].length);
-      setFormulaInput(newFormula);
-      
-      // If no target column is selected, set the clicked column as the target
-      if (!selectedColumn) {
-        setSelectedColumn(columnName);
-      }
-      
-      // Set cursor position after the inserted column name
-      setTimeout(() => {
-        const formulaInputElement = document.querySelector('input[placeholder*="=SUM"]') as HTMLInputElement;
-        if (formulaInputElement) {
+    // Use the exact same replaceNextColPlaceholder function as FormularBar
+    const newValue = replaceNextColPlaceholder(formulaInput, columnName);
+    
+    // Use the same state update pattern as FormularBar
+    setFormulaInput(newValue);
+    setIsFormulaMode(true);
+    
+    console.log('[DataFrameOperations] Column inserted into formula:', { columnName, newValue, selectedColumn });
+    
+    // Don't change target column when inserting columns into formula
+    // The target column should remain stable during formula editing
+    
+    // Set cursor position after the inserted column name (same as FormularBar)
+    setTimeout(() => {
+      if (inputElement) {
+        const colMatch = formulaInput.match(/Col\d+/);
+        if (colMatch) {
+          const colIndex = formulaInput.indexOf(colMatch[0]);
           const newCursorPosition = colIndex + columnName.length;
-          formulaInputElement.setSelectionRange(newCursorPosition, newCursorPosition);
-          formulaInputElement.focus();
+          inputElement.setSelectionRange(newCursorPosition, newCursorPosition);
+          inputElement.focus();
         }
-      }, 0);
-      return;
-    }
+      }
+    }, 0);
+    return;
   }
   
   // Fallback to original behavior if no ColX placeholders found
@@ -1563,14 +1613,21 @@ const insertColumnIntoFormula = (columnName: string) => {
 const handleHeaderClick = (header: string) => {
   resetSaveSuccess();
   
+  // If formula bar is frozen, only select the column without activating formula bar
+  if (isFormulaBarFrozen) {
+    setSelectedColumn(header);
+    setSelectedCell(null);
+    console.log('[DataFrameOperations] Header clicked (formula bar frozen):', header);
+    return;
+  }
+  
   // Check if we're in formula mode (formula input starts with =)
   if (formulaInput.trim().startsWith('=')) {
     // Insert column name into formula at cursor position
     insertColumnIntoFormula(header);
   } else {
-    // Normal column selection behavior
-    setSelectedColumn(header);
-    setSelectedCell(null);
+    // Normal column selection behavior - activate formula bar
+    activateFormulaBar(header);
   }
 };
 
@@ -1737,6 +1794,48 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
   // Add a ref to each column header and store its bounding rect when right-clicked
 
+  // Helper function to map frontend column index to backend column index
+  const getBackendColumnIndex = useCallback((frontendIndex: number) => {
+    if (!data) return frontendIndex;
+    
+    // Get the column at the frontend index
+    const targetColumn = data.headers[frontendIndex];
+    if (!targetColumn) return frontendIndex;
+    
+    // Find the position of this column in the original data structure
+    // We need to account for hidden and deleted columns
+    const allColumns = [...data.headers];
+    
+    // Add back hidden columns to get the full original structure
+    if (data.hiddenColumns) {
+      data.hiddenColumns.forEach(hiddenCol => {
+        if (!allColumns.includes(hiddenCol)) {
+          allColumns.push(hiddenCol);
+        }
+      });
+    }
+    
+    // Add back deleted columns to get the full original structure  
+    if (data.deletedColumns) {
+      data.deletedColumns.forEach(deletedCol => {
+        if (!allColumns.includes(deletedCol)) {
+          allColumns.push(deletedCol);
+        }
+      });
+    }
+    
+    // Find the index of the target column in the full structure
+    const backendIndex = allColumns.indexOf(targetColumn);
+    console.log('[DataFrameOperations] Mapping frontend index to backend:', {
+      frontendIndex,
+      targetColumn,
+      backendIndex,
+      allColumns: allColumns.length
+    });
+    
+    return backendIndex >= 0 ? backendIndex : frontendIndex;
+  }, [data]);
+
   // 1. Fix column insert/delete logic
   const handleInsertColumn = async (colIdx: number) => {
     resetSaveSuccess();
@@ -1745,9 +1844,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     // Save current state before making changes
     saveToUndoStack(data);
     
+    // Map frontend index to backend index
+    const backendIndex = getBackendColumnIndex(colIdx);
+    
     const newColKey = getNextColKey(data.headers);
     try {
-      const resp = await apiInsertColumn(fileId, colIdx, newColKey, '');
+      const resp = await apiInsertColumn(fileId, backendIndex, newColKey, '');
       
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -1765,6 +1867,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
          hiddenColumns: currentHiddenColumns,
          deletedColumns: currentDeletedColumns,
        });
+      
+      // Auto-select the newly inserted column for formula operations
+      if (filtered.headers.includes(newColKey)) {
+        setSelectedColumn(newColKey);
+        console.log('[DataFrameOperations] Auto-selected newly inserted column:', newColKey);
+      }
       
       // Add to history
       addToHistory('Insert Column', `Inserted column "${newColKey}" at position ${colIdx + 1}`);
@@ -2636,13 +2744,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             {data && (
               <div className="flex items-center border-b border-slate-200 min-h-0">
                 <div className="flex-1 min-w-0">
-                  <div className="relative w-full">
+                  <div className="relative w-full" style={{ position: 'relative', zIndex: 1 }}>
                     <FormularBar
                       data={data}
                       selectedCell={selectedCell}
                       selectedColumn={selectedColumn}
                       formulaInput={formulaInput}
                       isFormulaMode={isFormulaMode}
+                      isFormulaBarFrozen={isFormulaBarFrozen}
+                      formulaValidationError={formulaValidationError}
                       onSelectedCellChange={setSelectedCell}
                       onSelectedColumnChange={setSelectedColumn}
                       onFormulaInputChange={setFormulaInput}
@@ -2801,7 +2911,10 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         setRowContextMenu(null);
                       }}
                       onClick={(e) => {
-                        handleColumnMultiSelect(header, e);
+                        // Only handle multi-select if not in formula mode
+                        if (!isFormulaMode || !formulaInput.trim().startsWith('=')) {
+                          handleColumnMultiSelect(header, e);
+                        }
                         handleHeaderClick(header);
                       }}
                       onDoubleClick={() => {
