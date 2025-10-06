@@ -142,6 +142,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [saving, setSaving] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [draggedCol, setDraggedCol] = useState<string | null>(null);
+  const [targetPosition, setTargetPosition] = useState<number | null>(null);
+  const [columnOrder, setColumnOrder] = useState<string[]>([]);
   // 1. Add state for selected cell and selected column
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: string } | null>(null);
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
@@ -474,6 +476,56 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       setFormulaValidationError(null);
     }
   }, [selectedColumn]);
+  
+  // Initialize column order when data changes
+  useEffect(() => {
+    if (data?.headers) {
+      // Always update column order when data changes to ensure it's current
+      console.log('[DataFrameOperations] Updating column order:', {
+        currentColumnOrder: columnOrder,
+        newHeaders: data.headers,
+        headersMatch: JSON.stringify(columnOrder) === JSON.stringify(data.headers)
+      });
+      
+      // Only update if the headers are different from current column order
+      if (JSON.stringify(columnOrder) !== JSON.stringify(data.headers)) {
+        setColumnOrder(data.headers);
+      }
+    }
+  }, [data?.headers, columnOrder]);
+  
+  // Helper function to preserve column order when applying backend responses
+  const preserveColumnOrder = useCallback((backendHeaders: string[], currentHeaders: string[]) => {
+    console.log('[DataFrameOperations] Preserving column order:', {
+      columnOrderLength: columnOrder.length,
+      backendHeadersLength: backendHeaders.length,
+      currentHeadersLength: currentHeaders.length,
+      columnOrder: columnOrder,
+      backendHeaders: backendHeaders
+    });
+    
+    if (columnOrder.length === 0) {
+      console.log('[DataFrameOperations] No tracked column order, using backend order');
+      return backendHeaders;
+    }
+    
+    // Use the tracked column order, but only include columns that exist in the backend response
+    const orderedHeaders = columnOrder.filter(header => backendHeaders.includes(header));
+    
+    // Add any new columns from backend that aren't in our tracked order
+    const newColumns = backendHeaders.filter(header => !columnOrder.includes(header));
+    
+    const result = [...orderedHeaders, ...newColumns];
+    
+    console.log('[DataFrameOperations] Column order preserved:', {
+      orderedHeaders,
+      newColumns,
+      result
+    });
+    
+    return result;
+  }, [columnOrder]);
+  
   // 1. Add state for filter range
   const [filterRange, setFilterRange] = useState<{ min: number; max: number; value: [number, number] } | null>(null);
 
@@ -731,7 +783,11 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
      // Combine hidden and deleted columns to filter out
      const columnsToFilter = [...currentHiddenColumns, ...currentDeletedColumns];
      
-     const filteredHeaders = resp.headers.filter((header: string) => !columnsToFilter.includes(header));
+     // First filter out hidden/deleted columns
+     const availableHeaders = resp.headers.filter((header: string) => !columnsToFilter.includes(header));
+     
+     // Then preserve column order if we have a tracked order
+     const filteredHeaders = preserveColumnOrder(availableHeaders, data?.headers || []);
     
     const filteredRows = resp.rows.map((row: any) => {
       const filteredRow: any = {};
@@ -756,7 +812,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       rows: filteredRows,
       columnTypes: filteredColumnTypes
     };
-  }, [normalizeBackendColumnTypes]);
+  }, [normalizeBackendColumnTypes, preserveColumnOrder, data?.headers]);
 
   const buildFilterPayload = useCallback((value: any) => {
     if (Array.isArray(value)) {
@@ -1376,6 +1432,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
 
   const handleDragStart = (col: string) => {
     setDraggedCol(col);
+    setTargetPosition(null);
   };
 
   const handleDragOver = (e: React.DragEvent, col: string) => {
@@ -1386,6 +1443,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const targetIndex = headers.indexOf(col);
 
     if (draggedIndex !== -1 && targetIndex !== -1) {
+      // Store the target position for use in handleDragEnd
+      setTargetPosition(targetIndex);
+      
       const newHeaders = [...headers];
       newHeaders.splice(draggedIndex, 1);
       newHeaders.splice(targetIndex, 0, draggedCol || '');
@@ -1394,19 +1454,41 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   };
 
   const handleDragEnd = async () => {
-    if (draggedCol && data && fileId) {
+    if (draggedCol && data && fileId && targetPosition !== null) {
       // Save current state before making changes
       saveToUndoStack(data);
       
-      const toIndex = data.headers.indexOf(draggedCol);
+      // Use the stored target position instead of current position
+      const toIndex = targetPosition;
       const backendToIndex = getBackendColumnIndex(toIndex);
+      
+      console.log('[DataFrameOperations] Moving column with backend update:', {
+        draggedCol,
+        targetPosition,
+        toIndex,
+        backendToIndex,
+        currentHeaders: data.headers
+      });
+      
       try {
+        // Call the backend API to update the column order
         const resp = await apiMoveColumn(fileId, draggedCol, backendToIndex);
         
-       // Preserve deleted columns by filtering out columns that were previously deleted
-       const currentHiddenColumns = data.hiddenColumns || [];
-       const currentDeletedColumns = data.deletedColumns || [];
-       const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+        console.log('[DataFrameOperations] Move column API response:', {
+          responseHeaders: resp.headers,
+          responseHeadersLength: resp.headers?.length,
+          currentHeadersLength: data.headers.length
+        });
+        
+        // Preserve deleted columns by filtering out columns that were previously deleted
+        const currentHiddenColumns = data.hiddenColumns || [];
+        const currentDeletedColumns = data.deletedColumns || [];
+        const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+        
+        console.log('[DataFrameOperations] After filtering:', {
+          filteredHeaders: filtered.headers,
+          filteredHeadersLength: filtered.headers?.length
+        });
         
         onDataChange({
           headers: filtered.headers,
@@ -1416,18 +1498,30 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
           pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
           frozenColumns: data.frozenColumns,
           cellColors: data.cellColors,
-         hiddenColumns: currentHiddenColumns,
-         deletedColumns: currentDeletedColumns,
-       });
+          hiddenColumns: currentHiddenColumns,
+          deletedColumns: currentDeletedColumns,
+        });
+        
+        // Track the new column order
+        setColumnOrder(filtered.headers);
         
         // Add to history
         addToHistory('Move Column', `Moved column "${draggedCol}" to position ${toIndex + 1}`);
+        
+        // Show success message
+        toast({
+          title: "Column Moved",
+          description: `Column "${draggedCol}" moved to position ${toIndex + 1}`,
+        });
+        
       } catch (err) {
+        console.error('[DataFrameOperations] Move column failed:', err);
         handleApiError('Move column failed', err);
         addToHistory('Move Column', `Failed to move column "${draggedCol}"`, 'error');
       }
     }
     setDraggedCol(null);
+    setTargetPosition(null);
   };
 
 
@@ -1776,42 +1870,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const getBackendColumnIndex = useCallback((frontendIndex: number) => {
     if (!data) return frontendIndex;
     
-    // Get the column at the frontend index
-    const targetColumn = data.headers[frontendIndex];
-    if (!targetColumn) return frontendIndex;
-    
-    // Find the position of this column in the original data structure
-    // We need to account for hidden and deleted columns
-    const allColumns = [...data.headers];
-    
-    // Add back hidden columns to get the full original structure
-    if (data.hiddenColumns) {
-      data.hiddenColumns.forEach(hiddenCol => {
-        if (!allColumns.includes(hiddenCol)) {
-          allColumns.push(hiddenCol);
-        }
-      });
-    }
-    
-    // Add back deleted columns to get the full original structure  
-    if (data.deletedColumns) {
-      data.deletedColumns.forEach(deletedCol => {
-        if (!allColumns.includes(deletedCol)) {
-          allColumns.push(deletedCol);
-        }
-      });
-    }
-    
-    // Find the index of the target column in the full structure
-    const backendIndex = allColumns.indexOf(targetColumn);
-    console.log('[DataFrameOperations] Mapping frontend index to backend:', {
+    // For move operations, we can use the frontend index directly
+    // since the backend should have the same column structure as frontend
+    // (excluding hidden/deleted columns which are handled by the backend)
+    console.log('[DataFrameOperations] Using frontend index as backend index:', {
       frontendIndex,
-      targetColumn,
-      backendIndex,
-      allColumns: allColumns.length
+      totalColumns: data.headers.length
     });
     
-    return backendIndex >= 0 ? backendIndex : frontendIndex;
+    return frontendIndex;
   }, [data]);
 
   // 1. Fix column insert/delete logic
