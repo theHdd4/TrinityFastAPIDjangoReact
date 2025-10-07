@@ -56,10 +56,10 @@ const BackgroundVideo: React.FC<BackgroundVideoProps> = ({ hidden }) => {
       aria-hidden
     >
       <div
-        className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#1e1f23]/80 via-[#1f2024]/65 to-transparent"
+        className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#2b2c32]/70 via-[#2e3036]/50 to-transparent"
       />
       <div
-        className={`pointer-events-none absolute inset-0 bg-[#1c1d21] transition-opacity duration-700 ${
+        className={`pointer-events-none absolute inset-0 bg-[#2c2d33]/70 transition-opacity duration-700 ${
           isReady ? 'opacity-0' : 'opacity-100'
         }`}
       />
