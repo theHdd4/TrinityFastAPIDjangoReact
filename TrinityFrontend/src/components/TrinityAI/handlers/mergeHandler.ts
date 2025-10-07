@@ -1,187 +1,240 @@
 import { MERGE_API, VALIDATE_API } from '@/lib/api';
 import { AtomHandler, AtomHandlerContext, AtomHandlerResponse, Message } from './types';
 import { 
-  getFilename,
-  createMessage,
-  createSuccessMessage,
-  createErrorMessage
+  getEnvironmentContext, 
+  getFilename, 
+  createMessage, 
+  createSuccessMessage, 
+  createErrorMessage,
+  processSmartResponse,
+  executePerformOperation,
+  validateFileInput 
 } from './utils';
 
 export const mergeHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
-    const { atomId, updateAtomSettings, setMessages } = context;
+    console.log('🚀🚀🚀 MERGE HANDLER - handleSuccess START');
+    console.log('📥 Data received:', JSON.stringify(data, null, 2));
+    console.log('🆔 AtomId:', context.atomId);
+    console.log('🔢 SessionId:', context.sessionId);
     
-    console.log('🔍 MERGE HANDLER - FULL DATA RECEIVED:');
-    console.log('='.repeat(80));
-    console.log(JSON.stringify(data, null, 2));
-    console.log('='.repeat(80));
+    const { atomId, updateAtomSettings, setMessages, sessionId } = context;
     
-    // 🔧 SIMPLIFIED: smart_response is now displayed directly in main component
-    // Handlers only handle UI updates, not message display
+    // 🔧 FIX: Show smart_response in handleSuccess for success cases
+    // handleFailure will handle failure cases
+    const smartResponseText = processSmartResponse(data);
+    console.log('💬 Smart response text available:', smartResponseText ? 'Yes' : 'No');
+    console.log('🔍 Has merge_json:', !!data.merge_json);
+    
+    // Show smart_response for success cases (when merge_json exists)
+    if (smartResponseText) {
+      const smartMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        content: smartResponseText,
+        sender: 'ai',
+        timestamp: new Date(),
+      };
+      console.log('📤 Sending smart response message to chat...');
+      setMessages(prev => [...prev, smartMsg]);
+      console.log('✅ Displayed smart_response to user:', smartResponseText);
+    }
     
     if (!data.merge_json) {
-      return { success: false };
+      return { success: false, error: 'No merge configuration found in AI response' };
     }
 
     const cfg = data.merge_json;
+    console.log('🤖 AI MERGE CONFIG EXTRACTED:', cfg, 'Session:', sessionId);
+    
+    // Extract configuration
     const file1 = Array.isArray(cfg.file1) ? cfg.file1[0] : cfg.file1;
     const file2 = Array.isArray(cfg.file2) ? cfg.file2[0] : cfg.file2;
-    let joinColumns = Array.isArray(cfg.join_columns) ? cfg.join_columns : [];
+    const joinColumns = Array.isArray(cfg.join_columns) ? cfg.join_columns : [];
     const joinType = cfg.join_type || 'inner';
     const bucketName = cfg.bucket_name || 'trinity';
     
-    // 🔧 FIX: If LLM sends empty join_columns, we'll let the UI handle "Select All" default
-    // The UI will show all available columns and user can select what they want
-    console.log('🔍 LLM sent join_columns:', joinColumns);
-    if (joinColumns.length === 0) {
-      console.log('⚠️ LLM sent empty join_columns, will let UI handle default selection');
-    }
+    console.log('🔍 Extracted merge config:', { file1, file2, joinColumns, joinType, bucketName });
     
-    console.log('🤖 AI MERGE CONFIG EXTRACTED:', { file1, file2, joinColumns, joinType, bucketName });
-    
-    // Validate required fields
-    if (!file1 || !file2) {
-      const errorMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        content: `❌ Invalid merge configuration: Missing file paths\n\nFile1: ${file1 || 'Missing'}\nFile2: ${file2 || 'Missing'}\n\nPlease ensure both files are specified in your request.`,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
+    // Validate file inputs
+    const file1Validation = validateFileInput(file1, 'File 1');
+    if (!file1Validation.isValid) {
+      const errorMsg = createErrorMessage(
+        'Merge configuration',
+        file1Validation.message || 'Invalid file 1',
+        'File 1 validation'
+      );
       setMessages(prev => [...prev, errorMsg]);
-      return { success: false };
+      return { success: false, error: 'Invalid file 1' };
     }
     
-    if (joinColumns.length === 0) {
-      const errorMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        content: `❌ Invalid merge configuration: No join columns specified\n\nPlease specify which columns to use for joining the files.`,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
+    const file2Validation = validateFileInput(file2, 'File 2');
+    if (!file2Validation.isValid) {
+      const errorMsg = createErrorMessage(
+        'Merge configuration',
+        file2Validation.message || 'Invalid file 2',
+        'File 2 validation'
+      );
       setMessages(prev => [...prev, errorMsg]);
-      return { success: false };
+      return { success: false, error: 'Invalid file 2' };
     }
     
-    // Map AI file paths to object_name values for UI dropdown compatibility (using shared utility)
+    // Validate join columns
+    if (joinColumns.length === 0) {
+      const errorMsg = createErrorMessage(
+        'Merge configuration',
+        'No join columns specified',
+        'Join columns validation'
+      );
+      errorMsg.content += '\n\n💡 Please specify which columns to use for joining the files.';
+      setMessages(prev => [...prev, errorMsg]);
+      return { success: false, error: 'No join columns specified' };
+    }
+    
+    console.log('✅ Validation passed');
+    
+    // Get environment context
+    const envContext = getEnvironmentContext();
+    console.log('🔍 Environment context loaded:', envContext);
+    
+    // Map AI file paths to correct file paths for UI compatibility (same as create-column)
     let mappedFile1 = file1;
     let mappedFile2 = file2;
     
     try {
       console.log('🔄 Fetching frames to map AI file paths for merge...');
-      
-      // Fetch available files directly from VALIDATE_API
-      const response = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const availableFiles = await response.json();
-      
-      if (availableFiles && availableFiles.length > 0) {
-        console.log('📋 Available frames for merge:', availableFiles.map((f: any) => ({ object_name: f.object_name, csv_name: f.csv_name })));
+      const framesResponse = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+      if (framesResponse.ok) {
+        const framesData = await framesResponse.json();
+        const frames = Array.isArray(framesData.files) ? framesData.files : [];
         
-        // Map file paths to object names
-        const mapFilePathToObjectName = (filePath: string, files: any[]) => {
-          if (!filePath) return filePath;
+        console.log('📋 Available frames for merge:', frames.map(f => ({ object_name: f.object_name, csv_name: f.csv_name })));
+        
+        // Map AI file path to correct file path for merge UI (same logic as create-column)
+        const mapFilePathToObjectName = (aiFilePath: string) => {
+          if (!aiFilePath) return aiFilePath;
           
-          // Extract filename from path
-          const filename = filePath.includes('/') ? filePath.split('/').pop() : filePath;
+          // Try exact match first
+          let exactMatch = frames.find(f => f.object_name === aiFilePath);
+          if (exactMatch) {
+            console.log(`✅ Exact match found for merge ${aiFilePath}: ${exactMatch.object_name}`);
+            return exactMatch.object_name;
+          }
           
-          // Find matching file
-          const matchedFile = files.find(f => 
-            f.csv_name === filename || 
-            f.object_name === filename ||
-            f.csv_name?.toLowerCase() === filename?.toLowerCase() ||
-            f.object_name?.toLowerCase() === filename?.toLowerCase()
+          // Try matching by filename
+          const aiFileName = aiFilePath.includes('/') ? aiFilePath.split('/').pop() : aiFilePath;
+          let filenameMatch = frames.find(f => {
+            const frameFileName = f.csv_name.split('/').pop() || f.csv_name;
+            return frameFileName === aiFileName;
+          });
+          
+          if (filenameMatch) {
+            console.log(`✅ Filename match found for merge ${aiFilePath} -> ${filenameMatch.object_name}`);
+            return filenameMatch.object_name;
+          }
+          
+          // Try partial match
+          let partialMatch = frames.find(f => 
+            f.object_name.includes(aiFileName) || 
+            f.csv_name.includes(aiFileName) ||
+            aiFilePath.includes(f.object_name) ||
+            aiFilePath.includes(f.csv_name)
           );
           
-          return matchedFile ? matchedFile.object_name : filePath;
+          if (partialMatch) {
+            console.log(`✅ Partial match found for merge ${aiFilePath} -> ${partialMatch.object_name}`);
+            return partialMatch.object_name;
+          }
+          
+          console.log(`⚠️ No match found for merge ${aiFilePath}, using original value`);
+          return aiFilePath;
         };
         
-        mappedFile1 = mapFilePathToObjectName(file1, availableFiles);
-        mappedFile2 = mapFilePathToObjectName(file2, availableFiles);
+        mappedFile1 = mapFilePathToObjectName(file1);
+        mappedFile2 = mapFilePathToObjectName(file2);
         
-        console.log('🔧 File path mapping results:', {
+        console.log('🔧 Merge file path mapping results:', {
           original_file1: file1,
           mapped_file1: mappedFile1,
           original_file2: file2,
           mapped_file2: mappedFile2
         });
       } else {
-        console.warn('⚠️ No files available for mapping, using original file paths');
+        console.warn('⚠️ Failed to fetch frames for merge mapping, using original file paths');
       }
     } catch (error) {
-      console.error('❌ Error fetching frames for mapping:', error);
+      console.error('❌ Error fetching frames for merge mapping:', error);
     }
     
-    // 🔧 FIX: If LLM sent empty join_columns, we need to get available columns
-    // and either use them all or let the UI handle the default
-    if (joinColumns.length === 0) {
-      console.log('⚠️ LLM sent empty join_columns, will let UI handle default selection');
-      // The UI will show all available columns and user can select what they want
-      // We'll keep joinColumns as empty array and let the MultiSelectDropdown handle it
-    }
-    
-    // Update atom settings with mapped file names
-    updateAtomSettings(atomId, { 
+    // Update atom settings with mapped file names (same structure as create-column)
+    const settingsToUpdate = {
       file1: mappedFile1,  // Use mapped values for UI
       file2: mappedFile2,  // Use mapped values for UI
       joinColumns, 
       joinType, 
       availableColumns: joinColumns,
       aiConfig: cfg,
-      aiMessage: data.message
+      aiMessage: data.message,
+      operationCompleted: false,
+      // Include environment context
+      envContext,
+      lastUpdateTime: Date.now()
+    };
+    
+    console.log('🔧 Updating atom settings with:', {
+      atomId,
+      file1: mappedFile1,
+      file2: mappedFile2,
+      joinColumns,
+      joinType,
+      fullSettings: settingsToUpdate
     });
     
-    // Add AI success message
-    const aiSuccessMsg: Message = {
-      id: (Date.now() + 1).toString(),
-      content: `✅ ${data.message || 'AI merge configuration completed'}\n\nFiles: ${file1} + ${file2}\nJoin Type: ${joinType}\nJoin Columns: ${joinColumns.join(', ')}\n\n🔄 Operation completed! You can now configure the merge or proceed with the current settings.`,
-      sender: 'ai',
-      timestamp: new Date(),
-    };
-    setMessages(prev => [...prev, aiSuccessMsg]);
+    updateAtomSettings(atomId, settingsToUpdate);
     
-    // Auto-execute merge operation
-    const getFilename = (filePath: string) => {
-      if (!filePath) return "";
-      return filePath.includes("/") ? filePath.split("/").pop() || filePath : filePath;
-    };
-    
-    const lowercaseJoinColumns = joinColumns.map((col: string) => col.toLowerCase());
-    
+    // 🔧 FIX: No need for duplicate success message - smart_response already shown at the top
+    console.log('📋 Merge configuration:', {
+      file1: mappedFile1,
+      file2: mappedFile2,
+      joinColumns,
+      joinType,
+      session: sessionId
+    });
+
+    // 🔧 CRITICAL FIX: Call perform endpoint immediately (like create-column)
     try {
-      const performEndpoint = `${MERGE_API}/perform`;
-      console.log('🚀 Calling merge perform endpoint with AI config:', { file1, file2, joinColumns, joinType });
+      console.log('🚀 Calling Merge perform endpoint immediately (like create-column)');
+      console.log('📋 Configuration to execute:', { file1: mappedFile1, file2: mappedFile2, joinColumns, joinType });
+      
+      // Extract just the filename if it's a full path
+      const filename1 = getFilename(file1);
+      const filename2 = getFilename(file2);
+      
+      // Convert join columns to lowercase (backend requirement)
+      const lowercaseJoinColumns = joinColumns.map((col: string) => col.toLowerCase());
       
       const formData = new URLSearchParams({
-        file1: getFilename(file1),
-        file2: getFilename(file2),
+        file1: filename1,
+        file2: filename2,
         bucket_name: bucketName,
         join_columns: JSON.stringify(lowercaseJoinColumns),
         join_type: joinType,
       });
       
-      console.log('📁 Sending filenames to merge backend:', { 
-        file1: getFilename(file1), 
-        file2: getFilename(file2),
+      console.log('📁 Auto-executing with form data:', {
+        file1: filename1,
+        file2: filename2,
         bucket_name: bucketName,
-        join_columns: JSON.stringify(lowercaseJoinColumns),
+        join_columns: lowercaseJoinColumns,
         join_type: joinType
       });
       
-      console.log('🔄 Column case conversion:', {
-        original: joinColumns,
-        lowercase: lowercaseJoinColumns
-      });
-      
-      console.log('🔍 AI Config Debug:', {
-        original_file1: file1,
-        original_file2: file2,
-        extracted_file1: getFilename(file1),
-        extracted_file2: getFilename(file2),
+      const performEndpoint = `${MERGE_API}/perform`;
+      console.log('📡 Calling perform endpoint:', performEndpoint);
+      console.log('📦 FormData payload:', {
+        file1: filename1,
+        file2: filename2,
         bucket_name: bucketName,
-        join_columns_original: joinColumns,
-        join_columns_lowercase: lowercaseJoinColumns,
+        join_columns: JSON.stringify(lowercaseJoinColumns),
         join_type: joinType
       });
       
@@ -191,13 +244,16 @@ export const mergeHandler: AtomHandler = {
         body: formData,
       });
       
+      console.log('📨 Perform endpoint response status:', res2.status);
+      
       if (res2.ok) {
         const result = await res2.json();
-        console.log('✅ Merge operation successful:', result);
+        console.log('✅ Auto-execution successful:', result);
         
+        // Update atom settings with results
         updateAtomSettings(atomId, {
-          file1,
-          file2,
+          file1: mappedFile1,
+          file2: mappedFile2,
           joinColumns,
           joinType,
           availableColumns: joinColumns,
@@ -206,109 +262,125 @@ export const mergeHandler: AtomHandler = {
             result_file: null,
             unsaved_data: result.data,
           },
-          operationCompleted: true
+          operationCompleted: true,
+          lastUpdateTime: Date.now()
         });
         
-        const completionMsg: Message = {
-          id: (Date.now() + 1).toString(),
-          content: `🎉 Merge operation completed successfully!\n\nResult ID: ${result.merge_id}\nShape: ${result.result_shape}\nColumns: ${result.columns?.length || 0}`,
-          sender: 'ai',
-          timestamp: new Date(),
+        // Add success message
+        const completionDetails = {
+          'Files': `${mappedFile1} + ${mappedFile2}`,
+          'Join Type': joinType,
+          'Join Columns': joinColumns.join(', '),
+          'Result ID': result.merge_id || 'N/A',
+          'Shape': result.result_shape || 'N/A',
+          'Columns': result.columns?.length || 0
         };
+        const completionMsg = createSuccessMessage('Merge operation', completionDetails);
+        completionMsg.content += '\n\n📊 Results are ready! The files have been merged.\n\n💡 You can now view the merged data in the Merge interface.';
         setMessages(prev => [...prev, completionMsg]);
         
       } else {
-        console.error('❌ Merge operation failed:', res2.status, res2.statusText);
-        console.error('❌ Request details:', {
-          endpoint: performEndpoint,
-          file1: getFilename(file1),
-          file2: getFilename(file2),
-          bucket_name: bucketName,
-          join_columns: lowercaseJoinColumns,
-          join_type: joinType
-        });
+        console.error('❌ Auto-execution failed:', res2.status, res2.statusText);
         
+        // Try to get detailed error message
         let errorDetail = res2.statusText;
-        let errorData = null;
         try {
-          errorData = await res2.json();
+          const errorData = await res2.json();
           errorDetail = errorData.detail || errorData.message || res2.statusText;
-          console.error('❌ Backend error details:', errorData);
         } catch (e) {
-          console.error('❌ Could not parse error response:', e);
-          // Use status text if can't parse error response
+          // If we can't parse error response, use status text
         }
         
-        // Enhanced error message with more debugging info
-        let errorContent = `❌ Merge operation failed: ${res2.status}\n\nError: ${errorDetail}\n\n`;
-        errorContent += `Files: ${file1} + ${file2}\n`;
-        errorContent += `Extracted: ${getFilename(file1)} + ${getFilename(file2)}\n`;
-        errorContent += `Join Columns: ${joinColumns.join(', ')} (${lowercaseJoinColumns.join(', ')})\n`;
-        errorContent += `Join Type: ${joinType}\n`;
-        errorContent += `Bucket: ${bucketName}\n\n`;
-        
-        if (res2.status === 404) {
-          errorContent += `💡 This might be a file not found error. Check if the files exist in the specified bucket.`;
-        } else if (res2.status === 400) {
-          errorContent += `💡 This might be a configuration error. Check the join columns and file formats.`;
-        } else if (res2.status === 500) {
-          errorContent += `💡 This is a server error. Please try again or contact support.`;
-        }
-        
-        const errorMsg: Message = {
-          id: (Date.now() + 1).toString(),
-          content: errorContent,
-          sender: 'ai',
-          timestamp: new Date(),
-        };
+        const errorMsg = createErrorMessage(
+          'Merge auto-execution',
+          errorDetail,
+          `Files: ${mappedFile1} + ${mappedFile2}, Join Columns: ${joinColumns.join(', ')}, Join Type: ${joinType}`
+        );
+        errorMsg.content += '\n\n💡 Please try clicking the Perform button manually.';
         setMessages(prev => [...prev, errorMsg]);
         
         updateAtomSettings(atomId, {
-          file1,
-          file2,
-          joinColumns,
-          joinType,
-          availableColumns: joinColumns,
-          operationCompleted: false
+          operationCompleted: false,
+          lastError: errorDetail
         });
       }
     } catch (error) {
-      console.error('❌ Error calling merge perform endpoint:', error);
-      console.error('❌ Error details:', {
-        message: (error as Error).message,
-        stack: (error as Error).stack,
-        file1: getFilename(file1),
-        file2: getFilename(file2),
-        bucket_name: bucketName,
-        join_columns: lowercaseJoinColumns,
-        join_type: joinType
-      });
+      console.error('❌ Error during perform operation:', error);
       
-      const errorMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        content: `❌ Error: ${(error as Error).message || 'Unknown error occurred'}\n\nFiles: ${file1} + ${file2}\nJoin Columns: ${joinColumns.join(', ')}\nJoin Type: ${joinType}\n\n💡 Please check your network connection and try again.`,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
+      const errorMsg = createErrorMessage(
+        'Merge auto-execution',
+        error,
+        `Files: ${mappedFile1} + ${mappedFile2}, Join Columns: ${joinColumns.join(', ')}, Join Type: ${joinType}`
+      );
+      errorMsg.content += '\n\n💡 Please try clicking the Perform button manually.';
       setMessages(prev => [...prev, errorMsg]);
       
       updateAtomSettings(atomId, {
-        file1,
-        file2,
-        joinColumns,
-        joinType,
-        availableColumns: joinColumns,
-        operationCompleted: false
+        operationCompleted: false,
+        lastError: (error as Error).message
       });
     }
-
+    
+    console.log('🏁 MERGE HANDLER - handleSuccess COMPLETE');
     return { success: true };
   },
 
   handleFailure: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
-    // 🔧 SIMPLIFIED: smart_response is now displayed directly in main component
-    // Handlers only handle UI updates, not message display
-    console.log('💡 Merge handler failure - smart_response already displayed in main component');
+    const { setMessages, atomId, updateAtomSettings } = context;
+    
+    // 🔧 FIX: This function now handles BOTH success and failure cases
+    // Always show the smart_response message once, regardless of success/failure
+    let aiText = '';
+    if (data.smart_response) {
+      aiText = data.smart_response;
+    } else if (data.suggestions && Array.isArray(data.suggestions)) {
+      aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
+      
+      if (data.file_analysis) {
+        aiText += `\n\n📊 File Analysis:\n`;
+        if (data.file_analysis.total_files) {
+          aiText += `• Total files available: ${data.file_analysis.total_files}\n`;
+        }
+        if (data.file_analysis.merge_tips && data.file_analysis.merge_tips.length > 0) {
+          aiText += `• Tips: ${data.file_analysis.merge_tips.join(', ')}\n`;
+        }
+      }
+      
+      if (data.next_steps && data.next_steps.length > 0) {
+        aiText += `\n\n🎯 Next Steps:\n${data.next_steps.map((step: string, idx: number) => `${idx + 1}. ${step}`).join('\n')}`;
+      }
+    } else {
+      aiText = data.smart_response || data.message || 'AI response received';
+    }
+    
+    // Only add the message if we have content
+    if (aiText) {
+      const aiMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        content: aiText,
+        sender: 'ai',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, aiMsg]);
+      console.log('📤 Added AI message to chat:', aiText.substring(0, 100) + '...');
+    }
+    
+    // 🔧 CRITICAL FIX: Load available files into atom settings for dropdown population
+    // This ensures files appear in the merge interface even for failure cases
+    if (data.available_files && typeof data.available_files === 'object') {
+      console.log('📁 Loading available files into atom settings for merge interface');
+      console.log('📋 Available files:', Object.keys(data.available_files));
+      
+      // Update atom settings with available files
+      updateAtomSettings(atomId, {
+        availableFiles: data.available_files,
+        fileSuggestions: data.suggestions || [],
+        nextSteps: data.next_steps || [],
+        lastUpdateTime: Date.now()
+      });
+      
+      console.log('✅ Files loaded into merge interface');
+    }
     
     return { success: true };
   }

@@ -89,37 +89,59 @@ def merge_files(request: MergeRequest):
         logger.info(f"MERGE REQUEST COMPLETED:")
         logger.info(f"Success: {result.get('success', False)}")
         logger.info(f"Processing Time: {processing_time}s")
-        logger.info(f"🔍 RESULT BEFORE FALLBACK: {json.dumps(result, indent=2)}")
-        logger.info(f"🔍 SMART_RESPONSE BEFORE FALLBACK: {'smart_response' in result}")
+        logger.info(f"🔍 RESULT FROM LLM: {json.dumps(result, indent=2)}")
+        logger.info(f"🔍 SMART_RESPONSE IN RESULT: {'smart_response' in result}")
         if 'smart_response' in result:
-            logger.info(f"🔍 SMART_RESPONSE VALUE BEFORE FALLBACK: '{result['smart_response']}'")
+            logger.info(f"🔍 SMART_RESPONSE VALUE: '{result['smart_response']}'")
 
-        # 🔧 CONSISTENCY FIX: Always ensure merge_json is present (like concat does)
-        if "merge_json" not in result:
-            result["merge_json"] = None
-        
-        # 🔧 SMART RESPONSE FALLBACK: Only add fallback if smart_response is completely missing
-        if "smart_response" not in result:
-            if result.get("success") and result.get("merge_json"):
-                # Merge configuration success - create smart response
+        # 🔧 FALLBACK: If smart_response is missing, construct it from other fields
+        if "smart_response" not in result or not result.get("smart_response"):
+            logger.warning("⚠️ smart_response missing from result, constructing fallback...")
+            
+            # Build smart_response from suggestions if available
+            if result.get("suggestions") and isinstance(result["suggestions"], list):
+                smart_text = result.get("message", "Here's what I can help you with") + "\n\n"
+                smart_text += "\n".join(result["suggestions"])
+                
+                # Add file analysis if available
+                if result.get("file_analysis"):
+                    file_analysis = result["file_analysis"]
+                    smart_text += "\n\n📊 File Analysis:\n"
+                    if file_analysis.get("total_files"):
+                        smart_text += f"• Total files: {file_analysis['total_files']}\n"
+                    if file_analysis.get("recommended_pairs"):
+                        smart_text += f"• Recommended pairs: {', '.join(file_analysis['recommended_pairs'])}\n"
+                    if file_analysis.get("merge_tips"):
+                        smart_text += f"• Tips: {', '.join(file_analysis['merge_tips'])}\n"
+                
+                # Add next steps if available
+                if result.get("next_steps") and isinstance(result["next_steps"], list):
+                    smart_text += "\n\n🎯 Next Steps:\n"
+                    for i, step in enumerate(result["next_steps"], 1):
+                        smart_text += f"{i}. {step}\n"
+                
+                result["smart_response"] = smart_text
+                logger.info(f"✅ Constructed smart_response from suggestions: {smart_text[:200]}...")
+            
+            # Fallback for success case with merge_json
+            elif result.get("success") and result.get("merge_json"):
                 cfg = result["merge_json"]
                 file1 = cfg.get("file1", "")
                 file2 = cfg.get("file2", "")
-                join_columns = cfg.get("join_columns", [])
-                join_type = cfg.get("join_type", "inner")
-                
                 if isinstance(file1, list):
                     file1 = file1[0] if file1 else ""
                 if isinstance(file2, list):
                     file2 = file2[0] if file2 else ""
+                join_columns = cfg.get("join_columns", [])
+                join_type = cfg.get("join_type", "inner")
                 
                 result["smart_response"] = f"I've configured the merge operation for you. The files '{file1}' and '{file2}' will be joined using {join_columns} columns with {join_type} join. You can now proceed with the merge or make adjustments as needed."
+                logger.info(f"✅ Constructed smart_response for success case")
+            
+            # Final fallback - generic message
             else:
-                # Suggestions or error - create smart response
-                if result.get("suggestions"):
-                    result["smart_response"] = "I can help you merge your data files! Based on your available files, I can suggest the best file combinations and join strategies. What would you like to merge?"
-                else:
-                    result["smart_response"] = "I'm here to help you merge your data files. Please describe what files you'd like to merge or ask me for suggestions."
+                result["smart_response"] = result.get("message") or result.get("error") or "I'm here to help you merge your data files. Please describe what files you'd like to merge or ask me for suggestions."
+                logger.info(f"✅ Using final fallback smart_response")
 
         # If merge configuration was successful, return the configuration for frontend to handle
         if result.get("success") and result.get("merge_json"):
@@ -162,7 +184,8 @@ def merge_files(request: MergeRequest):
         error_result = {
             "success": False,
             "error": str(e),
-            "processing_time": round(time.time() - start_time, 2)
+            "processing_time": round(time.time() - start_time, 2),
+            "smart_response": f"I encountered an error while processing your request: {str(e)}\n\nPlease try again or rephrase your request. I'm here to help you merge your data files!"
         }
         return error_result
 

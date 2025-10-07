@@ -270,21 +270,14 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           }
         }
 
-        // 🔧 SIMPLIFIED: Always display smart_response directly first
-        if (data.smart_response) {
-          const aiMsg: Message = { 
-            id: (Date.now() + 1).toString(), 
-            content: data.smart_response, 
-            sender: 'ai', 
-            timestamp: new Date() 
-          };
-          setMessages(prev => [...prev, aiMsg]);
-        }
+        // 🔧 FIX: Don't display smart_response here - let handlers manage ALL message display
+        // This prevents duplicate messages across all atom types
+        console.log('🔍 Smart response available:', !!data.smart_response);
 
-        // Use modular handlers ONLY for UI updates (not for displaying messages)
+        // Use modular handlers for BOTH UI updates AND message display
         if (handler && data.success && hasSpecificHandler) {
-          // 🔧 Call handleSuccess ONLY for UI population (messages already displayed above)
-          console.log(`🎯 Using modular handler for ${atomType} (success=true) - UI only`);
+          // 🔧 Call handleSuccess for UI population AND message display
+          console.log(`🎯 Using modular handler for ${atomType} (success=true)`);
           console.log(`🔍 Handler data:`, { atomType, hasData: !!data.json, data });
           try {
             await handler.handleSuccess(data, handlerContext);
@@ -300,8 +293,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             setMessages(prev => [...prev, errorMsg]);
           }
         } else if (handler && !data.success) {
-          // 🔧 Call handleFailure ONLY for UI updates (messages already displayed above)
-          console.log(`💡 Calling handleFailure for ${atomType} (success=false) - UI only`);
+          // 🔧 Call handleFailure for UI updates AND message display
+          console.log(`💡 Calling handleFailure for ${atomType} (success=false)`);
           try {
             await handler.handleFailure(data, handlerContext);
             console.log(`✅ HandleFailure completed for ${atomType}`);

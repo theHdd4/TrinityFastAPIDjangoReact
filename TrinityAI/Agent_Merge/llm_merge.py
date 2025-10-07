@@ -38,7 +38,24 @@ class SmartMergeAgent:
         )
         
         # Files will be loaded lazily when needed
+        self.files_with_columns = {}
         self._files_loaded = False
+
+    def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
+        """
+        Set environment context for dynamic path resolution.
+        This ensures the API call will fetch the correct path for the current project.
+        """
+        if client_name or app_name or project_name:
+            if client_name:
+                os.environ["CLIENT_NAME"] = client_name
+            if app_name:
+                os.environ["APP_NAME"] = app_name
+            if project_name:
+                os.environ["PROJECT_NAME"] = project_name
+            logger.info(f"🔧 Environment context set for dynamic path resolution: {client_name}/{app_name}/{project_name}")
+        else:
+            logger.info("🔧 Using existing environment context for dynamic path resolution")
 
     def _ensure_files_loaded(self) -> None:
         """Ensure files are loaded before processing requests"""
@@ -128,7 +145,7 @@ class SmartMergeAgent:
             # Update prefix to current path before loading files
             self._maybe_update_prefix()
             
-            # logger.info(f"Loading files with prefix: {self.prefix}")
+            logger.info(f"Loading files with prefix: {self.prefix}")
             
             # Initialize MinIO client
             minio_client = Minio(
@@ -156,7 +173,7 @@ class SmartMergeAgent:
                             columns = table.column_names
                             files_with_columns[obj.object_name] = {"columns": columns}
                             
-                        # logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
+                        logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
                     
                     elif obj.object_name.endswith(('.csv', '.xlsx', '.xls')):
                         # For CSV/Excel files, try to read headers
@@ -173,7 +190,7 @@ class SmartMergeAgent:
                             columns = list(df_sample.columns)
                         
                         files_with_columns[obj.object_name] = {"columns": columns}
-                        # logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
+                        logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
                         
                 except Exception as e:
                     logger.warning(f"Failed to load file {obj.object_name}: {e}")
@@ -238,8 +255,8 @@ class SmartMergeAgent:
         if not user_prompt or not user_prompt.strip():
             return {"success": False, "error": "Prompt cannot be empty.", "session_id": session_id}
         
-        # Set environment context for dynamic path resolution (like explore agent)
-        self.file_loader.set_context(client_name, app_name, project_name)
+        # Set environment context for dynamic path resolution (like concat agent)
+        self.set_context(client_name, app_name, project_name)
             
         session_id = self.create_session(session_id)
         
@@ -273,8 +290,45 @@ class SmartMergeAgent:
             llm_response_str = call_merge_llm(self.api_url, self.model_name, self.bearer_token, prompt)
             result = extract_json(llm_response_str)
             
+            # LENIENT HANDLING: If JSON extraction fails, create a helpful fallback response
             if not result:
-                raise ValueError("LLM response did not contain valid JSON.")
+                logger.warning("JSON extraction failed, creating fallback response")
+                # Build file list for suggestions
+                file_list = []
+                for name, data in self.files_with_columns.items():
+                    col_count = len(data.get('columns', []))
+                    file_list.append(f"{name} ({col_count} columns)")
+                
+                # Build detailed file info for smart_response
+                file_details = []
+                for name, data in self.files_with_columns.items():
+                    columns = data.get('columns', [])
+                    col_count = len(columns)
+                    sample_cols = ', '.join(columns[:8])
+                    if col_count > 8:
+                        sample_cols += '...'
+                    file_details.append(f"**{name}** ({col_count} columns) - {sample_cols}")
+                
+                result = {
+                    "success": False,
+                    "suggestions": [
+                        "Here's what I found about your files:",
+                        f"Available files for merge: {', '.join(file_list)}",
+                        "To complete merge, specify: files + join columns + join type",
+                        "Or say 'yes' to use my suggestions"
+                    ],
+                    "message": "Here's what I can help you with",
+                    "smart_response": f"I'd be happy to help you with Merge operations! Here are your available files and their columns:\n" + 
+                                   "\n".join(file_details) +
+                                   "\n\nI can help you merge these files by specifying which files to join and which columns to use for the merge operation.",
+                    "available_files": self.files_with_columns,
+                    "next_steps": [
+                        "Tell me which files you want to merge",
+                        "Specify the join columns for merging",
+                        "Choose the join type (inner, left, right, outer)",
+                        "Ask me to suggest the best merge configuration"
+                    ]
+                }
 
             logger.info(f"🔍 EXTRACTED RESULT: {json.dumps(result, indent=2)}")
             logger.info(f"🔍 RESULT KEYS: {list(result.keys())}")
@@ -297,7 +351,46 @@ class SmartMergeAgent:
             
         except Exception as e:
             logger.error(f"Error during LLM call or JSON processing: {e}", exc_info=True)
-            return {"success": False, "error": f"A system error occurred: {e}", "session_id": session_id}
+            # Create helpful error response instead of generic error
+            # Build file list for error response
+            file_list = []
+            for name, data in self.files_with_columns.items():
+                col_count = len(data.get('columns', []))
+                file_list.append(f"{name} ({col_count} columns)")
+            
+            # Build detailed file info for error smart_response
+            file_details = []
+            for name, data in self.files_with_columns.items():
+                columns = data.get('columns', [])
+                col_count = len(columns)
+                sample_cols = ', '.join(columns[:8])
+                if col_count > 8:
+                    sample_cols += '...'
+                file_details.append(f"**{name}** ({col_count} columns) - {sample_cols}")
+            
+            error_result = {
+                "success": False,
+                "suggestions": [
+                    "Here's what I found about your files:",
+                    f"Available files for merge: {', '.join(file_list)}",
+                    "To complete merge, specify: files + join columns + join type",
+                    "Or say 'yes' to use my suggestions"
+                ],
+                "message": "Here's what I can help you with",
+                "smart_response": f"I'd be happy to help you with Merge operations! Here are your available files and their columns:\n" + 
+                               "\n".join(file_details) +
+                               "\n\nI can help you merge these files by specifying which files to join and which columns to use for the merge operation.",
+                "available_files": self.files_with_columns,
+                "next_steps": [
+                    "Tell me which files you want to merge",
+                    "Specify the join columns for merging", 
+                    "Choose the join type (inner, left, right, outer)",
+                    "Ask me to suggest the best merge configuration"
+                ],
+                "error": str(e),
+                "session_id": session_id
+            }
+            return error_result
 
     # --- Session Management Methods ---
     def get_session_history(self, session_id):
