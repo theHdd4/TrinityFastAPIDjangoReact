@@ -49,71 +49,81 @@ function clearHeavyCacheEntries(additionalKeys: string[] = []): void {
   });
 }
 
+const sanitizeAtom = (atom: any): any => {
+  const info = allAtoms.find(a => a.id === atom.atomId);
+  if (atom.type === 'dataframe-operations' && atom.settings) {
+    const { tableData, data, ...rest } = atom.settings;
+    return {
+      ...atom,
+      settings: rest,
+      color: atom.color || info?.color || 'bg-gray-400',
+    };
+  }
+
+  if (atom.atomId === 'chart-maker' && atom.settings) {
+    const { charts = [], ...restSettings } = atom.settings;
+    const sanitizedCharts = Array.isArray(charts)
+      ? charts.map((chart: any) => {
+          const { chartLoading, filteredData, lastUpdateTime, ...chartRest } = chart;
+          return chartRest;
+        })
+      : charts;
+    return {
+      ...atom,
+      settings: { ...restSettings, charts: sanitizedCharts },
+      color: atom.color || info?.color || 'bg-gray-400',
+    };
+  }
+
+  if (atom.atomId === 'data-upload-validate' && atom.settings) {
+    const {
+      uploadedFiles = [],
+      fileMappings = {},
+      filePathMap = {},
+      fileSizeMap = {},
+      fileKeyMap = {},
+      validations,
+      columnConfig,
+      ...restSettings
+    } = atom.settings;
+    const saved = uploadedFiles.filter((name: string) => {
+      const p = filePathMap[name];
+      return !p || !p.includes('/tmp/');
+    });
+    const filterMap = (map: Record<string, any>) =>
+      Object.fromEntries(
+        Object.entries(map).filter(([n]) => saved.includes(n))
+      );
+    return {
+      ...atom,
+      settings: {
+        ...restSettings,
+        uploadedFiles: saved,
+        fileMappings: filterMap(fileMappings),
+        filePathMap: filterMap(filePathMap),
+        fileSizeMap: filterMap(fileSizeMap),
+        fileKeyMap: filterMap(fileKeyMap),
+      },
+      color: atom.color || info?.color || 'bg-gray-400',
+    };
+  }
+
+  return { ...atom, color: atom.color || info?.color || 'bg-gray-400' };
+};
+
 function stripCards(cards: any[]): any[] {
-  return cards.map(card => ({
-    ...card,
-    atoms: card.atoms.map((atom: any) => {
-      const info = allAtoms.find(a => a.id === atom.atomId);
-      if (atom.type === 'dataframe-operations' && atom.settings) {
-        const { tableData, data, ...rest } = atom.settings;
-        return {
-          ...atom,
-          settings: rest,
-          color: atom.color || info?.color || 'bg-gray-400',
-        };
-      }
+  return cards.map(card => {
+    const sanitized: any = {
+      ...card,
+      atoms: Array.isArray(card.atoms) ? card.atoms.map(sanitizeAtom) : [],
+    };
 
-      if (atom.atomId === 'chart-maker' && atom.settings) {
-        const { charts = [], ...restSettings } = atom.settings;
-        const sanitizedCharts = Array.isArray(charts)
-          ? charts.map((chart: any) => {
-              const { chartLoading, filteredData, lastUpdateTime, ...chartRest } = chart;
-              return chartRest;
-            })
-          : charts;
-        return {
-          ...atom,
-          settings: { ...restSettings, charts: sanitizedCharts },
-          color: atom.color || info?.color || 'bg-gray-400',
-        };
-      }
+    if (Array.isArray(card.catalogueAtoms)) {
+      sanitized.catalogueAtoms = card.catalogueAtoms.map(sanitizeAtom);
+    }
 
-      if (atom.atomId === 'data-upload-validate' && atom.settings) {
-        const {
-          uploadedFiles = [],
-          fileMappings = {},
-          filePathMap = {},
-          fileSizeMap = {},
-          fileKeyMap = {},
-          validations,
-          columnConfig,
-          ...restSettings
-        } = atom.settings;
-        const saved = uploadedFiles.filter(name => {
-          const p = filePathMap[name];
-          return !p || !p.includes('/tmp/');
-        });
-        const filterMap = (map: Record<string, any>) =>
-          Object.fromEntries(
-            Object.entries(map).filter(([n]) => saved.includes(n))
-          );
-        return {
-          ...atom,
-          settings: {
-            ...restSettings,
-            uploadedFiles: saved,
-            fileMappings: filterMap(fileMappings),
-            filePathMap: filterMap(filePathMap),
-            fileSizeMap: filterMap(fileSizeMap),
-            fileKeyMap: filterMap(fileKeyMap),
-          },
-          color: atom.color || info?.color || 'bg-gray-400',
-        };
-      }
-
-      return { ...atom, color: atom.color || info?.color || 'bg-gray-400' };
-    }),
-  }));
+    return sanitized;
+  });
 }
 
 export function sanitizeLabConfig(config: any): any {

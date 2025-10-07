@@ -28,6 +28,7 @@ export interface DroppedAtom {
 export interface LayoutCard {
   id: string;
   atoms: DroppedAtom[];
+  catalogueAtoms?: DroppedAtom[];
   isExhibited: boolean;
   moleculeId?: string;
   moleculeTitle?: string;
@@ -48,6 +49,34 @@ interface ExhibitionStore {
 
 const FALLBACK_COLOR = 'bg-gray-400';
 
+const dedupeAtoms = (atoms: DroppedAtom[]): DroppedAtom[] => {
+  const seen = new Set<string>();
+  const result: DroppedAtom[] = [];
+
+  atoms.forEach(atom => {
+    const key = atom.id ?? atom.atomId;
+    if (!key) {
+      return;
+    }
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    result.push(atom);
+  });
+
+  return result;
+};
+
+const mergeCatalogueAtoms = (
+  base: DroppedAtom[] | undefined,
+  additions: DroppedAtom[] | undefined = [],
+): DroppedAtom[] => {
+  const start = Array.isArray(base) ? base : [];
+  const extra = Array.isArray(additions) ? additions : [];
+  return dedupeAtoms([...start, ...extra]);
+};
+
 export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   cardColor: 'default',
   cardWidth: 'L',
@@ -56,14 +85,21 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   cardLayout: 'content-right',
 };
 
-const withPresentationDefaults = (card: LayoutCard): LayoutCard => ({
-  ...card,
-  exhibitionControlEnabled: card.exhibitionControlEnabled ?? false,
-  presentationSettings: {
-    ...DEFAULT_PRESENTATION_SETTINGS,
-    ...card.presentationSettings,
-  },
-});
+const withPresentationDefaults = (card: LayoutCard): LayoutCard => {
+  const slideAtoms = Array.isArray(card.atoms) ? card.atoms : [];
+  const catalogueAtoms = mergeCatalogueAtoms(card.catalogueAtoms, slideAtoms);
+
+  return {
+    ...card,
+    atoms: slideAtoms,
+    catalogueAtoms,
+    exhibitionControlEnabled: card.exhibitionControlEnabled ?? false,
+    presentationSettings: {
+      ...DEFAULT_PRESENTATION_SETTINGS,
+      ...card.presentationSettings,
+    },
+  };
+};
 
 const normalizeAtom = (atom: any): DroppedAtom | null => {
   if (!atom) {
@@ -101,10 +137,14 @@ const normalizeCard = (card: any): LayoutCard | null => {
   const atoms = Array.isArray(card.atoms)
     ? (card.atoms.map(normalizeAtom).filter(Boolean) as DroppedAtom[])
     : [];
+  const catalogueAtoms = Array.isArray(card.catalogueAtoms)
+    ? (card.catalogueAtoms.map(normalizeAtom).filter(Boolean) as DroppedAtom[])
+    : undefined;
 
   const normalized: LayoutCard = {
     id: String(identifier),
     atoms,
+    catalogueAtoms,
     isExhibited: Boolean(card.isExhibited),
     moleculeId: card.moleculeId ? String(card.moleculeId) : undefined,
     moleculeTitle: typeof card.moleculeTitle === 'string' ? card.moleculeTitle : undefined,
@@ -189,6 +229,9 @@ const applyFeatureOverviewSelections = (
     }
 
     const baseAtoms = card.atoms.filter(atom => atom.atomId !== SKU_ATOM_ID);
+    const baseCatalogue = (card.catalogueAtoms ?? card.atoms).filter(
+      atom => atom.atomId !== SKU_ATOM_ID,
+    );
     const skuAtoms = Array.isArray(config.skus)
       ? config.skus.map((sku, index) => ({
           id: `${config.atomId}-sku-${sku.id ?? index}`,
@@ -202,7 +245,8 @@ const applyFeatureOverviewSelections = (
 
     return withPresentationDefaults({
       ...card,
-      atoms: [...baseAtoms, ...skuAtoms],
+      atoms: baseAtoms,
+      catalogueAtoms: mergeCatalogueAtoms(baseCatalogue, skuAtoms),
     });
   });
 };
@@ -275,6 +319,11 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
         if (updatedCard.atoms) {
           nextCard.atoms = updatedCard.atoms;
+          nextCard.catalogueAtoms = mergeCatalogueAtoms(nextCard.catalogueAtoms, updatedCard.atoms);
+        }
+
+        if (updatedCard.catalogueAtoms) {
+          nextCard.catalogueAtoms = mergeCatalogueAtoms([], updatedCard.catalogueAtoms);
         }
 
         if (updatedCard.presentationSettings) {
@@ -314,6 +363,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       const newCard = withPresentationDefaults({
         id: `exhibition-slide-${uniqueSuffix}`,
         atoms: [],
+        catalogueAtoms: [],
         isExhibited: true,
         moleculeTitle: 'Untitled Slide',
         exhibitionControlEnabled: true,

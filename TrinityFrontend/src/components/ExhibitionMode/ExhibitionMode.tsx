@@ -24,7 +24,10 @@ const ExhibitionMode = () => {
 
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [draggedAtom, setDraggedAtom] = useState<{ atom: DroppedAtom; cardId: string } | null>(null);
+  const [draggedAtom, setDraggedAtom] = useState<
+    { atom: DroppedAtom; cardId: string; origin: 'catalogue' | 'slide' }
+    | null
+  >(null);
   const [showThumbnails, setShowThumbnails] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [showGridView, setShowGridView] = useState(false);
@@ -145,9 +148,9 @@ const ExhibitionMode = () => {
     setIsFullscreen(prev => !prev);
   };
 
-  const handleDragStart = (atom: DroppedAtom, cardId: string) => {
+  const handleDragStart = (atom: DroppedAtom, cardId: string, origin: 'catalogue' | 'slide' = 'catalogue') => {
     if (!canEdit) return;
-    setDraggedAtom({ atom, cardId });
+    setDraggedAtom({ atom, cardId, origin });
   };
 
   const handleDragEnd = () => {
@@ -159,16 +162,16 @@ const ExhibitionMode = () => {
   }, [currentSlide]);
 
   const handleDrop = useCallback(
-    (atom: DroppedAtom, sourceCardId: string, targetCardId: string) => {
+    (
+      atom: DroppedAtom,
+      sourceCardId: string,
+      targetCardId: string,
+      origin: 'catalogue' | 'slide' = 'catalogue',
+    ) => {
       const sourceCard = cards.find(card => card.id === sourceCardId);
       const destinationCard = cards.find(card => card.id === targetCardId);
 
       if (!sourceCard || !destinationCard) {
-        setDraggedAtom(null);
-        return;
-      }
-
-      if (sourceCard.id === destinationCard.id) {
         setDraggedAtom(null);
         return;
       }
@@ -183,11 +186,14 @@ const ExhibitionMode = () => {
         return;
       }
 
-      const sourceAtoms = sourceCard.atoms.filter(a => a.id !== atom.id);
       const destinationAtoms = [...destinationCard.atoms, atom];
 
-      updateCard(sourceCard.id, { atoms: sourceAtoms });
       updateCard(destinationCard.id, { atoms: destinationAtoms });
+
+      if (origin === 'slide' && sourceCard.id !== destinationCard.id) {
+        const sourceAtoms = sourceCard.atoms.filter(a => a.id !== atom.id);
+        updateCard(sourceCard.id, { atoms: sourceAtoms });
+      }
 
       const targetIndex = exhibitedCards.findIndex(card => card.id === destinationCard.id);
       if (targetIndex !== -1) {

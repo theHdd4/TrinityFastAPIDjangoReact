@@ -41,8 +41,13 @@ interface SlideCanvasProps {
   card: LayoutCard;
   slideNumber: number;
   totalSlides: number;
-  onDrop: (atom: DroppedAtom, sourceCardId: string, targetCardId: string) => void;
-  draggedAtom?: { atom: DroppedAtom; cardId: string } | null;
+  onDrop: (
+    atom: DroppedAtom,
+    sourceCardId: string,
+    targetCardId: string,
+    origin: 'catalogue' | 'slide',
+  ) => void;
+  draggedAtom?: { atom: DroppedAtom; cardId: string; origin: 'catalogue' | 'slide' } | null;
   canEdit?: boolean;
   onPresentationChange?: (settings: PresentationSettings, cardId: string) => void;
   onRemoveAtom?: (atomId: string) => void;
@@ -181,7 +186,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
     e.preventDefault();
     setIsDragOver(false);
-    onDrop(draggedAtom.atom, draggedAtom.cardId, card.id);
+    onDrop(draggedAtom.atom, draggedAtom.cardId, card.id, draggedAtom.origin);
   };
 
   const getSlideTitle = () => {

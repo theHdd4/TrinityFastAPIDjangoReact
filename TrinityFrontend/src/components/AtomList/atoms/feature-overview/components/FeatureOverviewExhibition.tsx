@@ -82,8 +82,12 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
         )}
       </Card>
 
-      <div className="flex justify-end">
-        <Button onClick={onExhibit} disabled={isSubmitting || selectedSkus.length === 0}>
+      <div>
+        <Button
+          className="w-full"
+          onClick={onExhibit}
+          disabled={isSubmitting || selectedSkus.length === 0}
+        >
           {isSubmitting ? 'Exhibiting…' : 'Exhibit'}
         </Button>
       </div>
