@@ -16,8 +16,23 @@ export const chartMakerHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { atomId, updateAtomSettings, setMessages, sessionId } = context;
     
+    // 🔧 CRITICAL FIX: Show smart_response FIRST (user-friendly message)
+    const smartResponseText = processSmartResponse(data);
+    if (smartResponseText) {
+      const smartMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        content: smartResponseText,
+        sender: 'ai',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, smartMsg]);
+      console.log('✅ Displayed smart_response to user:', smartResponseText);
+    }
+    
+    // 🔧 CRITICAL FIX: Handle non-chart requests (file listing, suggestions, etc.)
     if (!data.chart_json) {
-      return { success: false, error: 'No chart configuration found in AI response' };
+      console.log('ℹ️ No chart configuration found - this is likely a file listing or suggestion request');
+      return { success: true }; // This is not an error for file listing requests
     }
 
     console.log('🔍 ===== CHART MAKER AI RESPONSE =====');
@@ -41,17 +56,80 @@ export const chartMakerHandler: AtomHandler = {
       console.log('⚠️ No file name found in AI response');
     }
     
-    // Validate target file
-    const fileValidation = validateFileInput(targetFile, 'AI Chart Maker');
-    if (!fileValidation.isValid) {
-      const errorMsg = createErrorMessage(
-        'Chart generation',
-        fileValidation.message || 'No valid file found',
-        `AI provided: ${data.file_name || 'N/A'}, Context: ${data.file_context?.available_files?.join(', ') || 'N/A'}`
-      );
-      errorMsg.content += '\n\n💡 Please ensure you have selected a data file before using AI Chart Maker.';
-      setMessages(prev => [...prev, errorMsg]);
-      return { success: false, error: 'Invalid file input' };
+    // 🔧 CRITICAL: Find the correct object_name for the dropdown
+    // The dropdown expects object_name (full path), not just filename
+    let dataSourceObjectName = targetFile; // Default fallback
+    
+    try {
+       // Try to fetch the frames list to match the filename to object_name
+       const framesResponse = await fetch(`${CHART_MAKER_API.replace('/chart-maker', '')}/data-upload-validate/list_saved_dataframes`);
+      if (framesResponse.ok) {
+        const framesData = await framesResponse.json();
+        const frames = framesData.files || [];
+        
+         console.log('🔍 Available frames:', frames.map((f: any) => ({ object_name: f.object_name, arrow_name: f.arrow_name })));
+         
+         // Find the frame that matches our target file - improved matching logic
+         const matchingFrame = frames.find((f: any) => {
+           const arrowName = f.arrow_name || '';
+           const objectName = f.object_name || '';
+           
+           // Check exact matches first
+           if (arrowName === targetFile) return true;
+           if (arrowName === targetFile.replace('.arrow', '') + '.arrow') return true;
+           if (arrowName.includes(targetFile.replace('.arrow', ''))) return true;
+           
+           // Check if object_name ends with our target file
+           if (objectName.endsWith('/' + targetFile)) return true;
+           if (objectName.endsWith('/' + targetFile.replace('.arrow', '') + '.arrow')) return true;
+           
+           return false;
+         });
+        
+        if (matchingFrame) {
+          dataSourceObjectName = matchingFrame.object_name;
+          console.log('✅ Found matching frame:', { 
+            targetFile, 
+            object_name: dataSourceObjectName,
+            arrow_name: matchingFrame.arrow_name 
+          });
+        } else {
+          console.log('⚠️ No matching frame found for:', targetFile);
+          console.log('Available frames:', frames.map((f: any) => f.arrow_name));
+        }
+      }
+    } catch (error) {
+      console.log('⚠️ Failed to fetch frames list, using targetFile as fallback:', error);
+    }
+    
+    console.log('🔍 Setting dataSource properties:', {
+      targetFile,
+      dataSourceObjectName,
+      dataSource: dataSourceObjectName,
+      selectedDataSource: dataSourceObjectName,
+      fileName: targetFile
+    });
+    
+    // 🔧 CRITICAL: Update settings with correct dataSource immediately
+    updateAtomSettings(atomId, {
+      dataSource: dataSourceObjectName, // 🔧 CRITICAL: Use object_name for dropdown compatibility
+      selectedDataSource: dataSourceObjectName, // 🔧 FIX: Use object_name for dropdown
+      fileName: targetFile, // 🔧 FIX: Add fileName property for visibility in properties section
+    });
+    
+    // 🔧 CRITICAL FIX: Only validate file input for actual chart generation requests
+    if (targetFile) {
+      const fileValidation = validateFileInput(targetFile, 'AI Chart Maker');
+      if (!fileValidation.isValid) {
+        const errorMsg = createErrorMessage(
+          'Chart generation',
+          fileValidation.message || 'No valid file found',
+          `AI provided: ${data.file_name || 'N/A'}, Context: ${data.file_context?.available_files?.join(', ') || 'N/A'}`
+        );
+        errorMsg.content += '\n\n💡 Please ensure you have selected a data file before using AI Chart Maker.';
+        setMessages(prev => [...prev, errorMsg]);
+        return { success: false, error: 'Invalid file input' };
+      }
     }
     
     // Get environment context
@@ -88,16 +166,16 @@ export const chartMakerHandler: AtomHandler = {
         title: title,
         type: chartType as 'line' | 'bar' | 'area' | 'pie' | 'scatter',
         chart_type: chartType, // 🔧 CRITICAL FIX: Add chart_type field for backend compatibility
-        xAxis: traces[0]?.x_column || '',
-        yAxis: traces[0]?.y_column || '',
+        xAxis: traces[0]?.x_column || '', // 🔧 FIX: Keep original case for backend validation
+        yAxis: traces[0]?.y_column || '', // 🔧 FIX: Keep original case for backend validation
         filters: filters, // 🔧 FILTER INTEGRATION: Use AI-generated filters
         chartRendered: false,
         isAdvancedMode: traces.length > 1,
         traces: traces.map((trace: any, traceIndex: number) => ({
           id: `trace_${traceIndex}`,
-          x_column: trace.x_column || '', // 🔧 FIX: Use correct property name
-          y_column: trace.y_column || '', // 🔧 FIX: Use correct property name
-          yAxis: trace.y_column || '', // Keep for backward compatibility
+          x_column: trace.x_column || '', // 🔧 FIX: Keep original case for backend validation
+          y_column: trace.y_column || '', // 🔧 FIX: Keep original case for backend validation
+          yAxis: trace.y_column || '', // Keep for backward compatibility, original case
           name: trace.name || `Trace ${traceIndex + 1}`,
           color: trace.color || undefined,
           aggregation: trace.aggregation || 'sum',
@@ -116,8 +194,10 @@ export const chartMakerHandler: AtomHandler = {
       // Add the AI-generated charts to the charts array
       charts: charts,
       // 🔧 CRITICAL: Set proper data source and file ID for chart rendering
-      dataSource: targetFile,
+      dataSource: dataSourceObjectName, // 🔧 CRITICAL: Use object_name for dropdown compatibility
       fileId: targetFile,
+      fileName: targetFile, // 🔧 FIX: Add fileName property for visibility in properties section
+      selectedDataSource: dataSourceObjectName, // 🔧 FIX: Use object_name for dropdown
       // Set the first chart as active
       currentChart: charts[0],
       // Mark that AI has configured the chart(s)
@@ -154,8 +234,10 @@ export const chartMakerHandler: AtomHandler = {
         console.log('✅ File data loaded successfully:', fileData);
         
         updateAtomSettings(atomId, {
-          dataSource: targetFile,
+          dataSource: dataSourceObjectName, // 🔧 CRITICAL: Use object_name for dropdown compatibility
           fileId: fileData.file_id,
+          fileName: targetFile, // 🔧 FIX: Add fileName property for visibility in properties section
+          selectedDataSource: dataSourceObjectName, // 🔧 FIX: Use object_name for dropdown
           uploadedData: {
             columns: fileData.columns,
             rows: fileData.sample_data,
@@ -225,8 +307,8 @@ export const chartMakerHandler: AtomHandler = {
             file_id: fileData.file_id,
             chart_type: chartType,
             traces: traces.map((trace: any, traceIndex: number) => ({
-              x_column: trace.x_column || chart.xAxis,
-              y_column: trace.y_column || chart.yAxis,
+              x_column: (trace.x_column || chart.xAxis) || '', // 🔧 FIX: Keep original case for backend validation
+              y_column: (trace.y_column || chart.yAxis) || '', // 🔧 FIX: Keep original case for backend validation
               name: trace.name || `Trace ${traceIndex + 1}`,
               chart_type: trace.chart_type || chartType,
               aggregation: trace.aggregation || 'sum',
@@ -391,41 +473,7 @@ export const chartMakerHandler: AtomHandler = {
       setMessages(prev => [...prev, errorMsg]);
     }
     
-    // Add smart response message
-    let aiContent = '';
-    
-    if (data.smart_response) {
-      aiContent = data.smart_response;
-    } else if (numberOfCharts > 1) {
-      aiContent = `💡 ${data.message || 'Multiple chart configuration completed successfully'}\n\n`;
-      
-      if (data.suggestions && Array.isArray(data.suggestions)) {
-        aiContent += `${data.suggestions.join('\n')}\n\n`;
-      }
-      
-      if (data.next_steps && Array.isArray(data.next_steps)) {
-        aiContent += `🎯 Next Steps:\n${data.next_steps.join('\n')}`;
-      }
-      
-    } else {
-      aiContent = `💡 ${data.message || 'Chart configuration completed successfully'}\n\n`;
-      
-      if (data.suggestions && Array.isArray(data.suggestions)) {
-        aiContent += `${data.suggestions.join('\n')}\n\n`;
-      }
-      
-      if (data.next_steps && Array.isArray(data.next_steps)) {
-        aiContent += `🎯 Next Steps:\n${data.next_steps.join('\n')}`;
-      }
-    }
-    
-    const aiMsg: Message = {
-      id: (Date.now() + 1).toString(),
-      content: aiContent,
-      sender: 'ai',
-      timestamp: new Date(),
-    };
-    setMessages(prev => [...prev, aiMsg]);
+    // Smart response is already displayed above using processSmartResponse
 
     return { success: true };
   },
@@ -433,26 +481,18 @@ export const chartMakerHandler: AtomHandler = {
   handleFailure: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { setMessages } = context;
     
-    let aiText = '';
-    if (data.smart_response) {
-      aiText = data.smart_response;
-    } else if (data.suggestions && Array.isArray(data.suggestions)) {
-      aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
-      
-      if (data.next_steps && data.next_steps.length > 0) {
-        aiText += `\n\n🎯 Next Steps:\n${data.next_steps.map((step: string, idx: number) => `${idx + 1}. ${step}`).join('\n')}`;
-      }
-    } else {
-      aiText = data.smart_response || data.message || 'AI response received';
+    // Use processSmartResponse for consistent smart response handling
+    const smartResponseText = processSmartResponse(data);
+    if (smartResponseText) {
+      const smartMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        content: smartResponseText,
+        sender: 'ai',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, smartMsg]);
+      console.log('✅ Displayed smart_response to user (failure):', smartResponseText);
     }
-    
-    const aiMsg: Message = {
-      id: (Date.now() + 1).toString(),
-      content: aiText,
-      sender: 'ai',
-      timestamp: new Date(),
-    };
-    setMessages(prev => [...prev, aiMsg]);
     
     return { success: true };
   }

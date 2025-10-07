@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from typing import Dict, Optional, Any, List
 
-from .ai_logic import build_prompt, call_llm, extract_json
+from .ai_logic import build_chart_prompt, call_chart_llm, extract_json
 from file_loader import FileLoader
 
 # Import the file analyzer
@@ -64,8 +64,8 @@ class ChartMakerAgent:
             secure=False
         )
         
-        # Files will be loaded lazily when needed
-        self._files_loaded = False
+        # Load files on initialization
+        self._load_files()
     
     def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
         """
@@ -82,12 +82,6 @@ class ChartMakerAgent:
             logger.info(f"🔧 Environment context set for dynamic path resolution: {client_name}/{app_name}/{project_name}")
         else:
             logger.info("🔧 Using existing environment context for dynamic path resolution")
-
-    def _ensure_files_loaded(self) -> None:
-        """Ensure files are loaded before processing requests"""
-        if not self._files_loaded:
-            self._load_files()
-            self._files_loaded = True
 
     def _maybe_update_prefix(self) -> None:
         """Dynamically updates the MinIO prefix and reloads files."""
@@ -424,9 +418,11 @@ class ChartMakerAgent:
         try:
             # Check if this is a multiple charts response
             if isinstance(chart_json, dict) and chart_json.get("multiple_charts") and chart_json.get("charts"):
+                logger.info("🔍 Processing multiple charts configuration")
                 return self._transform_multiple_charts_to_backend_format(chart_json)
             
-            # Single chart processing
+            # Single chart processing (existing logic)
+            logger.info("🔍 Processing single chart configuration")
             
             # Ensure required fields are present
             backend_request = {
@@ -439,7 +435,9 @@ class ChartMakerAgent:
             for columns in self.files_with_columns.values():
                 all_available_columns.update(columns)
             
-            # Get available files and columns
+            # 🔧 CRITICAL FIX: Log available files and columns for debugging
+            logger.info(f"🔍 Available files: {list(self.files_with_columns.keys())}")
+            logger.info(f"🔍 Available columns: {list(all_available_columns)[:20]}...")
             
             # Transform traces to match backend ChartTrace schema
             for trace in chart_json.get("traces", []):
@@ -513,7 +511,7 @@ class ChartMakerAgent:
         This creates a structure that the frontend can use to configure multiple charts.
         """
         try:
-            # Transform multiple charts to backend format
+            logger.info("🔍 Transforming multiple charts to backend format")
             
             # Extract the charts array
             charts = multi_chart_response.get("charts", [])
@@ -531,7 +529,7 @@ class ChartMakerAgent:
             for columns in self.files_with_columns.values():
                 all_available_columns.update(columns)
             
-            # Get available columns for multiple charts
+            logger.info(f"🔍 Available columns for multiple charts: {list(all_available_columns)[:20]}...")
             
             # Transform each chart
             for chart in charts:
@@ -609,7 +607,8 @@ class ChartMakerAgent:
         """
         try:
             if result.get("success"):
-                # Process charts for frontend
+                # 🔧 UNIFIED APPROACH: chart_json is always a list
+                logger.info("🔍 Processing charts for frontend (unified approach)")
                 
                 # Check if we have chart_json
                 if "chart_json" in result and isinstance(result["chart_json"], list):
@@ -688,7 +687,11 @@ class ChartMakerAgent:
                 else:
                     logger.warning("⚠️ No files available for file context")
                 
-                # Return frontend response
+                # 🔧 CRITICAL DEBUG: Log the complete frontend response before returning
+                logger.info("🔍 ===== COMPLETE FRONTEND RESPONSE BEFORE RETURN =====")
+                logger.info(f"📊 Frontend Response Keys: {list(frontend_response.keys())}")
+                logger.info(f"📊 Frontend Response:\n{json.dumps(frontend_response, indent=2)}")
+                logger.info(f"🔍 ===== END FRONTEND RESPONSE =====")
                 
                 return frontend_response
             else:
@@ -752,15 +755,22 @@ class ChartMakerAgent:
         if not user_prompt or not user_prompt.strip():
             return {"success": False, "error": "Prompt cannot be empty.", "session_id": session_id}
 
-        # Process chart request
+        # 🔍 COMPREHENSIVE LOGGING: Show what we're receiving
+        # logger.info("🔍 ===== CHART MAKER AI AGENT - INPUT ANALYSIS =====")
+        # logger.info(f"📝 User Prompt: {user_prompt}")
+        # logger.info(f"🆔 Session ID: {session_id}")
+        # logger.info(f"📁 Available Files: {list(self.files_with_columns.keys())}")
+        # logger.info(f"📊 Files with Columns: {json.dumps(self.files_with_columns, indent=2)}")
+        # logger.info(f"🔍 ===== END INPUT ANALYSIS =====")
 
         session_id = self.create_session(session_id)
         
         # Check if MinIO prefix needs an update (and files need reloading) - like Merge agent
         self._maybe_update_prefix()
         
-        # Load files lazily only when needed
-        self._ensure_files_loaded()
+        # Debug logging for file loading
+        logger.info(f"🔍 Files loaded: {len(self.files_with_columns)} files")
+        logger.info(f"🔍 File names: {list(self.files_with_columns.keys())}")
         
         if not self.files_with_columns:
             logger.warning("No files are loaded. Cannot process chart request.")
@@ -772,27 +782,41 @@ class ChartMakerAgent:
         
         # 1. Build context from history
         context = self._build_context(session_id)
+        logger.info(f"📚 Session Context Built: {len(context)} characters")
         
         # 2. Enhance context with file/column info
         context = self._enhance_context_with_columns(context, user_prompt)
+        logger.info(f"📁 Enhanced Context Built: {len(context)} characters")
         
         # 3. Get detailed file analysis data for the LLM
         file_analysis_data = self.file_analyzer.get_all_analyses()
         
         # 4. Build the final prompt for the LLM with complete file analysis
-        prompt = build_prompt(user_prompt, self.files_with_columns, context, file_analysis_data)
+        prompt = build_chart_prompt(user_prompt, self.files_with_columns, context, file_analysis_data)
         
-        # Send prompt to LLM
-        logger.info("🚀 Sending prompt to LLM...")
+        # 🔍 COMPREHENSIVE LOGGING: Show what we're sending to LLM
+        logger.info("🔍 ===== LLM INPUT - COMPLETE PROMPT =====")
+        logger.info(f"📤 Prompt Length: {len(prompt)} characters")
+        logger.info(f"📤 Complete Prompt:\n{prompt}")
+        logger.info(f"🔍 ===== END LLM INPUT =====")
+        
+        logger.info("🚀 Sending final prompt to LLM...")
         
         try:
-            llm_response = call_llm(self.api_url, self.model_name, self.bearer_token, prompt)
+            llm_response = call_chart_llm(self.api_url, self.model_name, self.bearer_token, prompt)
+            
+            # 🔍 COMPREHENSIVE LOGGING: Show what we received from LLM
+            logger.info("🔍 ===== LLM OUTPUT - COMPLETE RESPONSE =====")
+            logger.info(f"📥 Response Length: {len(llm_response)} characters")
+            logger.info(f"📥 Complete LLM Response:\n{llm_response}")
+            logger.info(f"🔍 ===== END LLM OUTPUT =====")
             
             # Enhanced JSON extraction with better error handling
             result = extract_json(llm_response, self.files_with_columns, user_prompt)
             
             if not result:
                 logger.error("❌ Failed to extract valid JSON from LLM response")
+                logger.error(f"🔍 Raw LLM response that failed JSON extraction:\n{llm_response}")
                 
                 # Return a helpful error response instead of raising an exception
                 return {
@@ -809,11 +833,38 @@ class ChartMakerAgent:
                     "used_memory": False
                 }
             
-            # Use LLM response directly
-            if result.get("success") and "chart_json" in result:
-                logger.info("✅ Chart configuration successful")
+            # 🔍 COMPREHENSIVE LOGGING: Show extracted JSON
+            logger.info("🔍 ===== EXTRACTED JSON FROM LLM =====")
+            logger.info(f"📊 Extracted JSON:\n{json.dumps(result, indent=2)}")
+            logger.info(f"🔍 ===== END EXTRACTED JSON =====")
+            
+            # 🔍 DEBUG: Check if smart_response is present
+            if "smart_response" in result:
+                logger.info(f"✅ Smart response found: {result['smart_response']}")
             else:
-                logger.info("ℹ️ Processing LLM response")
+                logger.warning("⚠️ Smart response NOT found in LLM response")
+            
+            # 🔧 USE LLM RESPONSE DIRECTLY - NO MANUAL PROCESSING
+            if result.get("success") and "chart_json" in result:
+                logger.info("🔍 Chart configuration successful, using LLM response directly...")
+                
+                # Use LLM response exactly as generated - no modifications
+                logger.info("🔍 Using LLM response directly - no manual processing")
+                for i, chart in enumerate(result["chart_json"]):
+                    chart_title = chart.get("title", f"Chart {i+1}")
+                    chart_filters = chart.get("filters", {})
+                    logger.info(f"🔍 Chart {i+1} ({chart_title}): LLM chart filters = {chart_filters}")
+                    
+                    # Log trace filters - no modifications
+                    for j, trace in enumerate(chart.get("traces", [])):
+                        trace_filters = trace.get("filters", {})
+                        logger.info(f"🔍 Chart {i+1}, Trace {j+1}: LLM trace filters = {trace_filters}")
+                
+                logger.info("🔍 LLM generated chart configuration successfully")
+                logger.info(f"📊 Number of charts: {len(result['chart_json']) if isinstance(result['chart_json'], list) else 1}")
+                
+            else:
+                logger.info("🔍 LLM response processed (may be suggestions or error)")
                 
         except Exception as e:
             logger.error(f"❌ Error in LLM processing: {e}", exc_info=True)
@@ -839,9 +890,17 @@ class ChartMakerAgent:
         self.sessions[session_id].append(interaction)
         result["session_id"] = session_id
         
-        # Use result directly
-        final_result = result
+        # 🔧 SIMPLIFIED: No transformation needed with unified approach
+        # final_result = self._transform_to_frontend_format(result, user_prompt)
+        final_result = result  # Use result directly
         final_result["session_id"] = session_id
+        
+        # 🔍 COMPREHENSIVE LOGGING: Show final response
+        logger.info("🔍 ===== FINAL AI AGENT RESPONSE =====")
+        logger.info(f"✅ Success: {final_result.get('success')}")
+        logger.info(f"📝 Message: {final_result.get('message')}")
+        logger.info(f"📊 Final Response:\n{json.dumps(final_result, indent=2)}")
+        logger.info(f"🔍 ===== END FINAL RESPONSE =====")
         
         logger.info(f"Request processed successfully. Success: {final_result.get('success', False)}")
         return final_result
