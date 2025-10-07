@@ -13,14 +13,34 @@ DEFAULT_COLLECTION = os.getenv("EXHIBITION_COLLECTION", "Exhibition_Configuratio
 
 
 def _default_mongo_uri() -> str:
-    auth_source = os.getenv("MONGO_AUTH_SOURCE")
-    options: dict[str, str] = {}
-    if auth_source:
-        options["authSource"] = auth_source
+    """Construct the exhibition Mongo URI using runtime configuration."""
+
+    username_env = os.getenv("MONGO_USERNAME")
+    password_env = os.getenv("MONGO_PASSWORD")
+
+    username = (
+        username_env.strip()
+        if isinstance(username_env, str) and username_env.strip()
+        else "admin_dev"
+    )
+    password = (
+        password_env.strip()
+        if isinstance(password_env, str) and password_env.strip()
+        else "pass_dev"
+    )
+
+    auth_source_env = os.getenv("MONGO_AUTH_SOURCE")
+    auth_source = (
+        auth_source_env.strip()
+        if isinstance(auth_source_env, str) and auth_source_env.strip()
+        else "admin"
+    )
 
     return build_host_mongo_uri(
+        username=username,
+        password=password,
+        auth_source=auth_source,
         database=DEFAULT_DATABASE,
-        options=options or None,
     )
 
 
