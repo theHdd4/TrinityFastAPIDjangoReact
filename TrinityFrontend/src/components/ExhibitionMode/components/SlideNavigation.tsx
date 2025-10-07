@@ -1,5 +1,15 @@
 import React from 'react';
-import { ChevronLeft, ChevronRight, Grid3x3, Maximize2, Download, Presentation } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Grid3x3,
+  Maximize2,
+  Download,
+  Presentation,
+  Plus,
+  ArrowUpDown,
+  ArrowLeftRight,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
@@ -12,6 +22,10 @@ interface SlideNavigationProps {
   onFullscreen: () => void;
   onExport: () => void;
   isFullscreen: boolean;
+  onAddSlide: () => void;
+  onToggleViewMode: () => void;
+  viewMode: 'horizontal' | 'vertical';
+  canEdit?: boolean;
 }
 
 export const SlideNavigation: React.FC<SlideNavigationProps> = ({
@@ -23,9 +37,38 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
   onFullscreen,
   onExport,
   isFullscreen,
+  onAddSlide,
+  onToggleViewMode,
+  viewMode,
+  canEdit = true,
 }) => {
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-background/95 backdrop-blur-lg border border-border rounded-full px-4 py-2 shadow-elegant">
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onAddSlide}
+        disabled={!canEdit}
+        className="rounded-full h-9 w-9"
+        title="Add new slide"
+      >
+        <Plus className="h-4 w-4" />
+      </Button>
+
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onToggleViewMode}
+        className="rounded-full h-9 w-9"
+        title={viewMode === 'vertical' ? 'Switch to horizontal view' : 'Switch to vertical view'}
+      >
+        {viewMode === 'vertical' ? (
+          <ArrowLeftRight className="h-4 w-4" />
+        ) : (
+          <ArrowUpDown className="h-4 w-4" />
+        )}
+      </Button>
+
       <Button
         variant="ghost"
         size="icon"

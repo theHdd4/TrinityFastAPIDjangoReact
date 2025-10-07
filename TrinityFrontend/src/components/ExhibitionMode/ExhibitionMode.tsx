@@ -17,7 +17,7 @@ import { useAuth } from '@/contexts/AuthContext';
 const NOTES_STORAGE_KEY = 'exhibition-notes';
 
 const ExhibitionMode = () => {
-  const { exhibitedCards, cards, loadSavedConfiguration, updateCard } = useExhibitionStore();
+  const { exhibitedCards, cards, loadSavedConfiguration, updateCard, addBlankSlide } = useExhibitionStore();
   const { toast } = useToast();
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('exhibition:edit');
@@ -29,6 +29,7 @@ const ExhibitionMode = () => {
   const [showNotes, setShowNotes] = useState(false);
   const [showGridView, setShowGridView] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'horizontal' | 'vertical'>('horizontal');
   const [notes, setNotes] = useState<Record<number, string>>(() => {
     if (typeof window === 'undefined') {
       return {};
@@ -43,6 +44,7 @@ const ExhibitionMode = () => {
   });
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const verticalSlideRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -157,22 +159,16 @@ const ExhibitionMode = () => {
   }, [currentSlide]);
 
   const handleDrop = useCallback(
-    (atom: DroppedAtom, sourceCardId: string) => {
-      const targetCard = exhibitedCards[currentSlide];
-      if (!targetCard) {
-        setDraggedAtom(null);
-        return;
-      }
-
-      if (sourceCardId === targetCard.id) {
-        setDraggedAtom(null);
-        return;
-      }
-
+    (atom: DroppedAtom, sourceCardId: string, targetCardId: string) => {
       const sourceCard = cards.find(card => card.id === sourceCardId);
-      const destinationCard = cards.find(card => card.id === targetCard.id);
+      const destinationCard = cards.find(card => card.id === targetCardId);
 
       if (!sourceCard || !destinationCard) {
+        setDraggedAtom(null);
+        return;
+      }
+
+      if (sourceCard.id === destinationCard.id) {
         setDraggedAtom(null);
         return;
       }
@@ -192,22 +188,40 @@ const ExhibitionMode = () => {
 
       updateCard(sourceCard.id, { atoms: sourceAtoms });
       updateCard(destinationCard.id, { atoms: destinationAtoms });
-      toast({
-        title: 'Component added',
-        description: `${atom.title} moved to slide ${currentSlide + 1}.`,
-      });
+
+      const targetIndex = exhibitedCards.findIndex(card => card.id === destinationCard.id);
+      if (targetIndex !== -1) {
+        toast({
+          title: 'Component added',
+          description: `${atom.title} moved to slide ${targetIndex + 1}.`,
+        });
+        setCurrentSlide(targetIndex);
+      } else {
+        toast({
+          title: 'Component added',
+          description: `${atom.title} moved to a slide.`,
+        });
+      }
+
       setDraggedAtom(null);
     },
-    [cards, currentSlide, exhibitedCards, toast, updateCard]
+    [cards, exhibitedCards, toast, updateCard]
   );
 
   const handlePresentationChange = useCallback(
-    (settings: PresentationSettings) => {
-      const targetCard = exhibitedCards[currentSlide];
-      if (!targetCard) {
+    (settings: PresentationSettings, cardId?: string) => {
+      let targetId = cardId;
+
+      if (!targetId) {
+        const targetCard = exhibitedCards[currentSlide];
+        targetId = targetCard?.id;
+      }
+
+      if (!targetId) {
         return;
       }
-      updateCard(targetCard.id, { presentationSettings: settings });
+
+      updateCard(targetId, { presentationSettings: settings });
     },
     [currentSlide, exhibitedCards, updateCard]
   );
@@ -249,6 +263,48 @@ const ExhibitionMode = () => {
       return next;
     });
   };
+
+  const handleAddSlide = useCallback(() => {
+    if (!canEdit) {
+      return;
+    }
+
+    const created = addBlankSlide(exhibitedCards.length > 0 ? currentSlide : undefined);
+    if (!created) {
+      return;
+    }
+
+    const nextCards = useExhibitionStore.getState().exhibitedCards;
+    const newIndex = nextCards.findIndex(card => card.id === created.id);
+    if (newIndex !== -1) {
+      setCurrentSlide(newIndex);
+    }
+
+    toast({
+      title: 'Blank slide added',
+      description: 'A new slide has been added to your presentation.',
+    });
+  }, [addBlankSlide, canEdit, currentSlide, exhibitedCards.length, toast]);
+
+  const handleToggleViewMode = useCallback(() => {
+    setViewMode(prev => (prev === 'horizontal' ? 'vertical' : 'horizontal'));
+  }, []);
+
+  useEffect(() => {
+    if (viewMode !== 'vertical') {
+      return;
+    }
+
+    const activeCard = exhibitedCards[currentSlide];
+    if (!activeCard) {
+      return;
+    }
+
+    const element = verticalSlideRefs.current[activeCard.id];
+    if (element && typeof element.scrollIntoView === 'function') {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [currentSlide, exhibitedCards, viewMode]);
 
   if (exhibitedCards.length === 0) {
     return (
@@ -304,16 +360,46 @@ const ExhibitionMode = () => {
           />
         )}
 
-        <SlideCanvas
-          card={currentCard}
-          slideNumber={currentSlide + 1}
-          totalSlides={exhibitedCards.length}
-          onDrop={handleDrop}
-          draggedAtom={draggedAtom}
-          canEdit={canEdit}
-          onPresentationChange={handlePresentationChange}
-          onRemoveAtom={handleRemoveAtom}
-        />
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {viewMode === 'horizontal' ? (
+            <SlideCanvas
+              card={currentCard}
+              slideNumber={currentSlide + 1}
+              totalSlides={exhibitedCards.length}
+              onDrop={handleDrop}
+              draggedAtom={draggedAtom}
+              canEdit={canEdit}
+              onPresentationChange={handlePresentationChange}
+              onRemoveAtom={handleRemoveAtom}
+              viewMode="horizontal"
+              isActive
+            />
+          ) : (
+            <div className="flex-1 overflow-y-auto bg-muted/10 px-6 py-6 space-y-6">
+              {exhibitedCards.map((card, index) => (
+                <div
+                  key={card.id}
+                  ref={element => {
+                    verticalSlideRefs.current[card.id] = element;
+                  }}
+                >
+                  <SlideCanvas
+                    card={card}
+                    slideNumber={index + 1}
+                    totalSlides={exhibitedCards.length}
+                    onDrop={handleDrop}
+                    draggedAtom={draggedAtom}
+                    canEdit={canEdit}
+                    onPresentationChange={handlePresentationChange}
+                    onRemoveAtom={handleRemoveAtom}
+                    viewMode="vertical"
+                    isActive={currentSlide === index}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {!isFullscreen && (
           <OperationsPalette
@@ -336,6 +422,10 @@ const ExhibitionMode = () => {
           onFullscreen={toggleFullscreen}
           onExport={() => setIsExportOpen(true)}
           isFullscreen={isFullscreen}
+          onAddSlide={handleAddSlide}
+          onToggleViewMode={handleToggleViewMode}
+          viewMode={viewMode}
+          canEdit={canEdit}
         />
       )}
 

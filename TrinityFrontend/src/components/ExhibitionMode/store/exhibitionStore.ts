@@ -41,6 +41,7 @@ interface ExhibitionStore {
   loadSavedConfiguration: () => Promise<void>;
   toggleCardExhibition: (cardId: string) => void;
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => void;
+  addBlankSlide: (afterSlideIndex?: number) => LayoutCard | null;
   setCards: (cards: LayoutCard[] | unknown) => void;
   reset: () => void;
 }
@@ -303,6 +304,46 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         exhibitedCards,
       };
     });
+  },
+
+  addBlankSlide: (afterSlideIndex?: number) => {
+    let createdCard: LayoutCard | null = null;
+
+    set(state => {
+      const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const newCard = withPresentationDefaults({
+        id: `exhibition-slide-${uniqueSuffix}`,
+        atoms: [],
+        isExhibited: true,
+        moleculeTitle: 'Untitled Slide',
+        exhibitionControlEnabled: true,
+      });
+
+      createdCard = newCard;
+
+      const cards = [...state.cards];
+
+      let insertPosition = cards.length;
+      if (typeof afterSlideIndex === 'number' && afterSlideIndex >= 0) {
+        const referenceSlide = state.exhibitedCards[afterSlideIndex];
+        if (referenceSlide) {
+          const referenceIndex = cards.findIndex(card => card.id === referenceSlide.id);
+          if (referenceIndex !== -1) {
+            insertPosition = referenceIndex + 1;
+          }
+        }
+      }
+
+      cards.splice(insertPosition, 0, newCard);
+      const exhibitedCards = cards.filter(card => card.isExhibited);
+
+      return {
+        cards,
+        exhibitedCards,
+      };
+    });
+
+    return createdCard;
   },
 
   setCards: (cards: LayoutCard[] | unknown) => {

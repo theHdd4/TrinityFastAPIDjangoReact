@@ -41,11 +41,13 @@ interface SlideCanvasProps {
   card: LayoutCard;
   slideNumber: number;
   totalSlides: number;
-  onDrop: (atom: DroppedAtom, sourceCardId: string) => void;
+  onDrop: (atom: DroppedAtom, sourceCardId: string, targetCardId: string) => void;
   draggedAtom?: { atom: DroppedAtom; cardId: string } | null;
   canEdit?: boolean;
-  onPresentationChange?: (settings: PresentationSettings) => void;
+  onPresentationChange?: (settings: PresentationSettings, cardId: string) => void;
   onRemoveAtom?: (atomId: string) => void;
+  viewMode?: 'horizontal' | 'vertical';
+  isActive?: boolean;
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -57,6 +59,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   canEdit = true,
   onPresentationChange,
   onRemoveAtom,
+  viewMode = 'horizontal',
+  isActive = false,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -64,6 +68,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     ...DEFAULT_PRESENTATION_SETTINGS,
     ...card.presentationSettings,
   }));
+
+  const cardWidthClass = settings.cardWidth === 'M' ? 'max-w-4xl' : 'max-w-6xl';
 
   useEffect(() => {
     setSettings({
@@ -84,7 +90,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         return prev;
       }
       const next = { ...prev, ...partial };
-      onPresentationChange?.(next);
+      onPresentationChange?.(next, card.id);
       return next;
     });
   };
@@ -95,7 +101,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
     const defaults = { ...DEFAULT_PRESENTATION_SETTINGS };
     setSettings(defaults);
-    onPresentationChange?.(defaults);
+    onPresentationChange?.(defaults, card.id);
   };
 
   const layoutConfig = useMemo(() => {
@@ -175,7 +181,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
     e.preventDefault();
     setIsDragOver(false);
-    onDrop(draggedAtom.atom, draggedAtom.cardId);
+    onDrop(draggedAtom.atom, draggedAtom.cardId, card.id);
   };
 
   const getSlideTitle = () => {
@@ -208,14 +214,37 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     bottom: 'justify-end',
   };
 
+  const containerClasses =
+    viewMode === 'horizontal'
+      ? 'flex-1 h-full bg-muted/20 overflow-auto'
+      : cn(
+          'w-full bg-muted/20 overflow-hidden border rounded-3xl transition-all duration-300 shadow-sm',
+          isActive
+            ? 'border-primary shadow-elegant ring-1 ring-primary/30'
+            : 'border-border hover:border-primary/40'
+        );
+
   return (
-    <div className="flex-1 h-full bg-muted/20 overflow-auto">
+    <div className={containerClasses}>
       <div
         className={cn(
           'mx-auto transition-all duration-300 p-8',
-          settings.cardWidth === 'M' ? 'max-w-4xl' : 'max-w-6xl'
+          cardWidthClass
         )}
       >
+        {viewMode === 'vertical' && (
+          <div className="mb-4 flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Slide {slideNumber}
+            </span>
+            {isActive && (
+              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary">
+                Current
+              </span>
+            )}
+          </div>
+        )}
+
         <div
           className={cn(
             'bg-card shadow-2xl transition-all duration-300 relative',
@@ -587,11 +616,13 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           </div>
         </div>
 
-        <div className="mt-6 text-center">
-          <span className="inline-block px-4 py-2 bg-muted rounded-full text-sm font-medium text-muted-foreground">
-            Slide {slideNumber} of {totalSlides}
-          </span>
-        </div>
+        {viewMode === 'horizontal' && (
+          <div className="mt-6 text-center">
+            <span className="inline-block px-4 py-2 bg-muted rounded-full text-sm font-medium text-muted-foreground">
+              Slide {slideNumber} of {totalSlides}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
