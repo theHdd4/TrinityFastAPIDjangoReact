@@ -24,7 +24,7 @@ _client = Minio(
 )
 
 _admin_client = MinioAdmin(
-    MINIO_ENDPOINT,
+    endpoint=MINIO_ENDPOINT,
     credentials=StaticProvider(MINIO_ACCESS_KEY, MINIO_SECRET_KEY),
     secure=False,
 )
