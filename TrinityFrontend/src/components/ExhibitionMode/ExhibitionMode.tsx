@@ -89,13 +89,18 @@ const ExhibitionMode = () => {
   }, [loadSavedConfiguration]);
 
   useEffect(() => {
-    if (currentSlide >= exhibitedCards.length && exhibitedCards.length > 0) {
-      setCurrentSlide(exhibitedCards.length - 1);
-    }
-    if (exhibitedCards.length === 0 && currentSlide !== 0) {
-      setCurrentSlide(0);
-    }
-  }, [currentSlide, exhibitedCards.length]);
+    setCurrentSlide((previous) => {
+      if (exhibitedCards.length === 0) {
+        return previous === 0 ? previous : 0;
+      }
+
+      if (previous >= exhibitedCards.length) {
+        return exhibitedCards.length - 1;
+      }
+
+      return previous;
+    });
+  }, [exhibitedCards.length]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
