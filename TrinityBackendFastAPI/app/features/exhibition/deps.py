@@ -10,6 +10,7 @@ from app.core.mongo import build_host_mongo_uri
 
 DEFAULT_DATABASE = os.getenv("MONGO_DB", "trinity_db")
 DEFAULT_COLLECTION = os.getenv("EXHIBITION_COLLECTION", "Exhibition_Configuration")
+DEFAULT_CATALOGUE_COLLECTION = os.getenv("EXHIBITION_CATALOGUE_COLLECTION", "Exhibition_Catalogue")
 
 
 def _default_mongo_uri() -> str:
@@ -87,3 +88,9 @@ def get_exhibition_collection(
     database: AsyncIOMotorDatabase = Depends(get_database),
 ) -> AsyncIOMotorCollection:
     return database[DEFAULT_COLLECTION]
+
+
+def get_exhibition_catalogue_collection(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+) -> AsyncIOMotorCollection:
+    return database[DEFAULT_CATALOGUE_COLLECTION]

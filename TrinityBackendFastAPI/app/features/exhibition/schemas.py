@@ -6,12 +6,25 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+class ExhibitionCatalogueComponent(BaseModel):
+    type: str = Field(..., description="Type of the exhibited component")
+    title: str = Field(..., description="Unique display title for the catalogue entry")
+    label: Optional[str] = Field(default=None, description="Human readable label for the component")
+    catalogue_id: Optional[str] = Field(
+        default=None, description="Stable identifier for the catalogue entry"
+    )
+
+
 class ExhibitionSku(BaseModel):
     id: str = Field(..., description="Unique identifier for the SKU")
     title: str = Field(..., description="Display name for the SKU")
     details: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Additional metadata captured for the SKU",
+    )
+    catalogue_components: Optional[List[ExhibitionCatalogueComponent]] = Field(
+        default=None,
+        description="Catalogue entries generated for this SKU",
     )
 
 

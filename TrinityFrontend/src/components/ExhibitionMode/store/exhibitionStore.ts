@@ -203,9 +203,21 @@ const loadCardsFromStorage = (): LayoutCard[] => {
 
 const SKU_ATOM_ID = 'feature-overview-sku';
 
+const COMPONENT_COLORS: Record<string, string> = {
+  overview: 'bg-emerald-500',
+  skuStatistics: 'bg-amber-500',
+  trendAnalysis: 'bg-blue-500',
+};
+
+const DEFAULT_COMPONENT_LABELS: Record<string, string> = {
+  overview: 'Overview Insight',
+  skuStatistics: 'SKU Statistics',
+  trendAnalysis: 'Trend Analysis',
+};
+
 const applyFeatureOverviewSelections = (
   cards: LayoutCard[],
-  selections?: ExhibitionFeatureOverviewPayload[]
+  selections?: ExhibitionFeatureOverviewPayload[],
 ): LayoutCard[] => {
   if (!Array.isArray(selections) || selections.length === 0) {
     return cards;
@@ -232,15 +244,58 @@ const applyFeatureOverviewSelections = (
     const baseCatalogue = (card.catalogueAtoms ?? card.atoms).filter(
       atom => atom.atomId !== SKU_ATOM_ID,
     );
+
+    const enabledComponents = Object.entries(config.components ?? {})
+      .filter(([, value]) => Boolean(value))
+      .map(([key]) => key);
+
     const skuAtoms = Array.isArray(config.skus)
-      ? config.skus.map((sku, index) => ({
-          id: `${config.atomId}-sku-${sku.id ?? index}`,
-          atomId: SKU_ATOM_ID,
-          title: sku.title || `SKU ${sku.id ?? index + 1}`,
-          category: 'Feature Overview',
-          color: 'bg-amber-500',
-          metadata: sku.details,
-        }))
+      ? config.skus.flatMap((sku, index) => {
+          const skuId = String(sku?.id ?? `${config.atomId ?? 'sku'}-${index}`);
+          const baseTitle = typeof sku?.title === 'string' && sku.title.trim().length > 0
+            ? sku.title.trim()
+            : `SKU ${index + 1}`;
+          const components = Array.isArray(sku?.catalogue_components)
+            ? sku.catalogue_components.filter(component => component && component.title)
+            : [];
+
+          const componentEntries = components.length > 0
+            ? components
+            : (enabledComponents.length > 0
+                ? enabledComponents.map((componentType, componentIndex) => ({
+                    type: componentType,
+                    title: `${baseTitle} • ${DEFAULT_COMPONENT_LABELS[componentType] ?? componentType}`,
+                    catalogue_id: `${config.atomId ?? 'atom'}-${componentType}-${skuId}-${componentIndex}`,
+                    label: DEFAULT_COMPONENT_LABELS[componentType] ?? componentType,
+                  }))
+                : [{
+                    type: 'overview',
+                    title: `${baseTitle} • ${DEFAULT_COMPONENT_LABELS.overview}`,
+                    catalogue_id: `${config.atomId ?? 'atom'}-overview-${skuId}`,
+                    label: DEFAULT_COMPONENT_LABELS.overview,
+                  }]);
+
+          return componentEntries.map((component, componentIndex) => {
+            const componentType = component.type ?? 'overview';
+            const catalogueId = component.catalogue_id
+              ?? `${config.atomId ?? 'atom'}-${componentType}-${skuId}-${componentIndex}`;
+
+            return {
+              id: catalogueId,
+              atomId: SKU_ATOM_ID,
+              title: component.title ?? `${baseTitle} • ${componentType}`,
+              category: 'Feature Overview',
+              color: COMPONENT_COLORS[componentType] ?? COMPONENT_COLORS.skuStatistics,
+              metadata: {
+                ...((sku.details && typeof sku.details === 'object') ? sku.details : {}),
+                componentType,
+                componentLabel: component.label ?? DEFAULT_COMPONENT_LABELS[componentType] ?? componentType,
+                skuId,
+                skuTitle: baseTitle,
+              },
+            } as DroppedAtom;
+          });
+        })
       : [];
 
     return withPresentationDefaults({

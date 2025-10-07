@@ -1,9 +1,17 @@
 import { EXHIBITION_API } from '@/lib/api';
 
+export interface ExhibitionCatalogueComponentPayload {
+  type: string;
+  title: string;
+  label?: string;
+  catalogue_id?: string;
+}
+
 export interface ExhibitionSkuPayload {
   id: string;
   title: string;
   details?: Record<string, any>;
+  catalogue_components?: ExhibitionCatalogueComponentPayload[];
 }
 
 export interface ExhibitionFeatureOverviewPayload {
