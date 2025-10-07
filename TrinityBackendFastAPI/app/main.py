@@ -49,7 +49,22 @@ def _default_cors_origins() -> List[str]:
 def _load_cors_origins() -> List[str]:
     configured = os.getenv("FASTAPI_CORS_ORIGINS")
     if configured:
-        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+        # Honour the explicit list but still append HOST_IP-derived origins so
+        # deployments that override FASTAPI_CORS_ORIGINS keep the automatic
+        # host_ip handling behaviour users rely on.
+        origins = [origin.strip() for origin in configured.split(",") if origin.strip()]
+
+        host_ip = os.getenv("HOST_IP", "").strip()
+        if host_ip:
+            for candidate in (
+                f"http://{host_ip}:8080",
+                f"http://{host_ip}:8081",
+                f"https://{host_ip}",
+            ):
+                if candidate and candidate not in origins:
+                    origins.append(candidate)
+
+        return origins
     return _default_cors_origins()
 
 
