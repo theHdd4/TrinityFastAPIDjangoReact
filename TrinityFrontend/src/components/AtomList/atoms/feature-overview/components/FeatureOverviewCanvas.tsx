@@ -1929,7 +1929,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                               </Card>
                                             </td>
                                           </tr>
-                )})
+                                        )}
                                       </React.Fragment>
                                     ))}
                                   </tbody>
