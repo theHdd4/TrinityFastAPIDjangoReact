@@ -1,0 +1,209 @@
+.login-background {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #0b1420;
+}
+
+.login-background__gradient,
+.login-background__grid,
+.login-background__line,
+.login-background__bars,
+.login-background__particles {
+  position: absolute;
+  inset: 0;
+}
+
+.login-background__gradient {
+  background:
+    radial-gradient(circle at 20% 20%, rgba(0, 255, 200, 0.35), transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(0, 180, 255, 0.25), transparent 55%),
+    linear-gradient(135deg, rgba(12, 30, 45, 0.9) 0%, rgba(8, 20, 32, 0.9) 100%);
+  filter: saturate(120%);
+  animation: gradientShift 16s ease-in-out infinite alternate;
+}
+
+.login-background__grid::before,
+.login-background__grid::after {
+  content: '';
+  position: absolute;
+  inset: -20%;
+  background-size: 48px 48px;
+  opacity: 0.18;
+}
+
+.login-background__grid::before {
+  background-image:
+    linear-gradient(transparent 46px, rgba(0, 255, 200, 0.18) 48px),
+    linear-gradient(90deg, transparent 46px, rgba(0, 255, 200, 0.18) 48px);
+  animation: gridDrift 26s linear infinite;
+}
+
+.login-background__grid::after {
+  background-image: radial-gradient(rgba(0, 255, 200, 0.25) 1px, transparent 1px);
+  animation: particlesFlicker 18s ease-in-out infinite;
+}
+
+.login-background__bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: clamp(1.5rem, 4vw, 3.5rem);
+  padding: 0 10%;
+  bottom: 12%;
+  height: 40%;
+}
+
+.login-background__bar {
+  position: relative;
+  flex: 0 0 clamp(0.6rem, 1.8vw, 1.2rem);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(0, 255, 200, 0.8), rgba(0, 255, 180, 0));
+  height: var(--bar-height);
+  opacity: 0.85;
+  box-shadow:
+    0 0 20px rgba(0, 255, 200, 0.4),
+    0 10px 30px rgba(0, 0, 0, 0.35);
+  animation: barPulse var(--bar-duration) ease-in-out infinite;
+  animation-delay: var(--bar-delay);
+}
+
+.login-background__bar::after {
+  content: '';
+  position: absolute;
+  inset: 15% 25% auto;
+  height: 40%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.45), transparent);
+}
+
+.login-background__line {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 5% 10%;
+  pointer-events: none;
+}
+
+.login-background__line svg {
+  width: 100%;
+  height: 55%;
+  filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.45));
+}
+
+.login-background__line path {
+  fill: none;
+  stroke: rgba(0, 255, 200, 0.75);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 8;
+  animation: linePulse 6.5s ease-in-out infinite;
+}
+
+.login-background__line-points circle {
+  fill: rgba(0, 255, 200, 0.9);
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 2;
+  animation: pulse 4s ease-in-out infinite;
+}
+
+.login-background__line-points circle:nth-child(odd) {
+  animation-delay: 1.5s;
+}
+
+.login-background__particles span {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(0, 255, 200, 0.65);
+  box-shadow: 0 0 12px rgba(0, 255, 200, 0.7);
+  animation: float var(--particle-duration) ease-in-out infinite;
+  animation-delay: var(--particle-delay);
+}
+
+.login-background__particles span::after {
+  content: '';
+  position: absolute;
+  inset: -150% 50% 150% -200%;
+  background: linear-gradient(90deg, rgba(0, 255, 200, 0.2), transparent);
+  opacity: 0.7;
+  transform: rotate(12deg);
+}
+
+@keyframes gradientShift {
+  0% {
+    transform: scale(1);
+    filter: hue-rotate(0deg);
+  }
+  100% {
+    transform: scale(1.05);
+    filter: hue-rotate(-12deg);
+  }
+}
+
+@keyframes gridDrift {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(48px, 48px, 0);
+  }
+}
+
+@keyframes particlesFlicker {
+  0%,
+  100% {
+    opacity: 0.18;
+  }
+  50% {
+    opacity: 0.32;
+  }
+}
+
+@keyframes barPulse {
+  0%,
+  100% {
+    transform: scaleY(0.75);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes linePulse {
+  0%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.7;
+  }
+  50% {
+    stroke-dashoffset: -40;
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.75;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(-6px) scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: translateY(6px) scale(1.15);
+    opacity: 1;
+  }
+}
