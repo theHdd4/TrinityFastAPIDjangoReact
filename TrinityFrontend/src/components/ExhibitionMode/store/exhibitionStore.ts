@@ -1,6 +1,5 @@
 
 import { create } from 'zustand';
-import { safeStringify } from '@/utils/safeStringify';
 
 interface DroppedAtom {
   id: string;
@@ -28,13 +27,100 @@ interface ExhibitionStore {
   reset: () => void;
 }
 
-export const useExhibitionStore = create<ExhibitionStore>((set, get) => ({
+const FALLBACK_COLOR = 'bg-gray-400';
+
+const normalizeAtom = (atom: any): DroppedAtom | null => {
+  if (!atom) {
+    return null;
+  }
+
+  const id = atom.id ?? atom.atomId;
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id: String(id),
+    atomId: String(atom.atomId ?? atom.id ?? ''),
+    title: typeof atom.title === 'string' && atom.title.trim().length > 0 ? atom.title : 'Untitled Atom',
+    category:
+      typeof atom.category === 'string' && atom.category.trim().length > 0
+        ? atom.category
+        : 'General',
+    color: typeof atom.color === 'string' && atom.color.trim().length > 0 ? atom.color : FALLBACK_COLOR,
+  };
+};
+
+const normalizeCard = (card: any): LayoutCard | null => {
+  if (!card) {
+    return null;
+  }
+
+  const identifier = card.id ?? card.moleculeId ?? card.moleculeTitle;
+  if (!identifier) {
+    return null;
+  }
+
+  const atoms = Array.isArray(card.atoms)
+    ? (card.atoms.map(normalizeAtom).filter(Boolean) as DroppedAtom[])
+    : [];
+
+  return {
+    id: String(identifier),
+    atoms,
+    isExhibited: Boolean(card.isExhibited),
+    moleculeId: card.moleculeId ? String(card.moleculeId) : undefined,
+    moleculeTitle: typeof card.moleculeTitle === 'string' ? card.moleculeTitle : undefined,
+  };
+};
+
+const extractCards = (raw: unknown): LayoutCard[] => {
+  if (Array.isArray(raw)) {
+    return raw.map(normalizeCard).filter(Boolean) as LayoutCard[];
+  }
+
+  if (raw && typeof raw === 'object' && Array.isArray((raw as any).cards)) {
+    return ((raw as any).cards as unknown[]).map(normalizeCard).filter(Boolean) as LayoutCard[];
+  }
+
+  return [];
+};
+
+const parseStoredCards = (value: string | null): LayoutCard[] => {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return extractCards(parsed);
+  } catch (error) {
+    console.warn('Failed to parse stored exhibition cards', error);
+    return [];
+  }
+};
+
+const loadCardsFromStorage = (): LayoutCard[] => {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  const configCards = parseStoredCards(window.localStorage.getItem('laboratory-config'));
+  if (configCards.length > 0) {
+    return configCards;
+  }
+
+  return parseStoredCards(window.localStorage.getItem('laboratory-layout-cards'));
+};
+
+export const useExhibitionStore = create<ExhibitionStore>(set => ({
   cards: [],
   exhibitedCards: [],
-  
+
   loadSavedConfiguration: () => {
-    // Load from global store instead of localStorage
-    set({ cards: [], exhibitedCards: [] });
+    const loadedCards = loadCardsFromStorage();
+    const exhibitedCards = loadedCards.filter(card => card.isExhibited);
+    set({ cards: loadedCards, exhibitedCards });
   },
   
   toggleCardExhibition: (cardId: string) => {
@@ -77,8 +163,8 @@ export const useExhibitionStore = create<ExhibitionStore>((set, get) => ({
   },
 
   setCards: (cards: LayoutCard[] | unknown) => {
-    const safeCards = Array.isArray(cards) ? cards : [];
-    const exhibitedCards = safeCards.filter(card => (card as any).isExhibited);
+    const safeCards = extractCards(cards);
+    const exhibitedCards = safeCards.filter(card => card.isExhibited);
     const newState = { cards: safeCards, exhibitedCards };
     set(newState);
   },
