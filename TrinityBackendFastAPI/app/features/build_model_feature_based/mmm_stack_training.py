@@ -1667,29 +1667,38 @@ class MMMStackModelDataProcessor:
             return 0.0
     
     async def get_column_classifier_config(self) -> Dict[str, Any]:
-        """Get column classifier configuration using hardcoded _id for testing."""
+        """Get column classifier configuration using the same pattern as routes."""
         try:
             from .mongodb_saver import get_column_classifier_config_from_mongo
+            from ..data_upload_validate.app.routes import get_object_prefix
             
-            # Hardcoded _id for testing: Quant_Matrix_AI_Schema/marketing-mix/New Marketing Mix Modeling Project
-            hardcoded_id = "Quant_Matrix_AI_Schema/marketing-mix/New Marketing Mix Modeling Project"
-            prefix_parts = hardcoded_id.strip('/').split('/')
-            client_name = prefix_parts[0]
-            app_name = prefix_parts[1]
-            project_name = prefix_parts[2]   
+            # Get the current prefix
+            prefix = await get_object_prefix()
             
-            # Use the hardcoded _id to get the config
-            config = await get_column_classifier_config_from_mongo(client_name, app_name, project_name)
-            
-            if config:
-                logger.info(f"✅ Retrieved column classifier config for hardcoded _id: {hardcoded_id}")
-                logger.info(f"   Config keys: {list(config.keys())}")
-                if 'identifiers' in config:
-                    logger.info(f"   Identifiers: {config['identifiers']}")
-                return config
+            # Extract client/app/project from prefix
+            prefix_parts = prefix.strip('/').split('/')
+            if len(prefix_parts) >= 2:
+                client_name = prefix_parts[0]
+                app_name = prefix_parts[1]
+                project_name = prefix_parts[2] if len(prefix_parts) > 2 else "default_project"
+                
+                # Use the same function as routes
+                config = await get_column_classifier_config_from_mongo(client_name, app_name, project_name)
+                
+                if config:
+                    logger.info(f"✅ Retrieved column classifier config for {client_name}/{app_name}/{project_name}")
+                    return config
+                else:
+                    logger.warning(f"No column classifier config found for {client_name}/{app_name}/{project_name}")
+                    return {}
             else:
-                logger.warning(f"❌ No column classifier config found for hardcoded _id: {hardcoded_id}")
+                logger.error(f"Invalid prefix format: {prefix}")
                 return {}
+                
+        except Exception as e:
+            logger.error(f"Error fetching column classifier config: {e}")
+            return {}
+
             
         except Exception as e:
             logger.error(f"Error fetching column classifier config: {e}")

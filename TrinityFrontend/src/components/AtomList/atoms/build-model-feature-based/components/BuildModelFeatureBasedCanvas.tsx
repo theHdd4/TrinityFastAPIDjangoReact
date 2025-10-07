@@ -1055,13 +1055,13 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
           </div>
         </div>
         {modelingSectionExpanded && (
-          <div className="p-6 space-y-6">
+          <div className="p-6 space-y-5">
             {/* Part 1: Select Y Variable */}
             <div className="space-y-3">
               <div className="p-4 rounded-lg shadow-[2px_0_8px_rgba(0,0,0,0.1)] bg-white border border-gray-200 transform transition-all duration-300 hover:shadow-[4px_0_12px_rgba(0,0,0,0.15)]">
-                <div className="mb-4">
+                <div className="mb-2">
                   <p className="text-sm font-medium text-gray-700">
-                    Select your dependent variable (Y-Variable) - the outcome you want to predict:
+                    <span className="text-orange-500 font-semibold text-sm">(1/4)</span> Select your dependent variable (Y-Variable) - the outcome you want to predict:
                   </p>
           </div>
 
@@ -1070,33 +1070,30 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                       <SingleSelectDropdown
                         label=""
                         placeholder={isLoadingColumns ? "Loading..." : "Select Y-Variable"}
-                        value={finalData?.yVariable || ''}
-                        onValueChange={(value) => handleDataChange({ yVariable: value })}
-                        options={isLoadingColumns ? [] : numericalColumns
-                          .filter(col => {
-                          // Exclude any X-variables that are selected
-                            const isSelectedAsXVariable = finalData?.xVariables?.some(xVar => 
-                              Array.isArray(xVar) ? xVar.includes(col) : xVar === col
-                            );
-                            return !isSelectedAsXVariable;
-                          })
-                          .map(col => ({ value: col, label: col }))
-                        }
+                        value={finalData?.yVariable || 'none'}
+                        onValueChange={(value) => {
+                          if (value === 'none') {
+                            handleDataChange({ yVariable: '' });
+                          } else {
+                            handleDataChange({ yVariable: value });
+                          }
+                        }}
+                        options={isLoadingColumns ? [] : [
+                          { value: 'none', label: 'None' },
+                          ...numericalColumns
+                            .filter(col => {
+                            // Exclude any X-variables that are selected
+                              const isSelectedAsXVariable = finalData?.xVariables?.some(xVar => 
+                                Array.isArray(xVar) ? xVar.includes(col) : xVar === col
+                              );
+                              return !isSelectedAsXVariable;
+                            })
+                            .map(col => ({ value: col, label: col }))
+                        ]}
                         disabled={isLoadingColumns}
                       className="w-full"
                       />
                     </div>
-                  
-                  {/* Clear Y Variable Button */}
-                  {finalData?.yVariable && (
-                    <button
-                      onClick={() => handleDataChange({ yVariable: '' })}
-                      className="h-10 w-10 flex items-center justify-center text-black hover:text-red-600 transition-colors flex-shrink-0"
-                      title="Clear Y-Variable"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
                 </div>
               </div>
             </div>
@@ -1105,14 +1102,14 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             {finalData?.yVariable && (
               <div className="space-y-3 animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
                 <div className="p-4 rounded-lg shadow-[2px_0_8px_rgba(0,0,0,0.1)] bg-white border border-gray-200 transform transition-all duration-300 hover:shadow-[4px_0_12px_rgba(0,0,0,0.15)]">
-                  <div className="mb-4">
+                  <div className="mb-2">
                     <p className="text-sm font-medium text-gray-700">
-                      Select independent variables (X-Variables) and their transformations - the factors that influence your outcome:
+                      <span className="text-orange-500 font-semibold text-sm">(2/4)</span> Select independent variables (X-Variables) and their transformations - the factors that influence your outcome:
                     </p>
                     
                     {/* Display selected X-variables */}
                     {finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && (
-                      <div className="mt-3 flex flex-wrap gap-2">
+                      <div className="mt-2 flex flex-wrap gap-2">
                         {finalData.xVariables
                           .filter(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar)
                           .map((xVar, index) => {
@@ -1132,7 +1129,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                   </div>
 
                   {/* X-Variables Selection */}
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     {/* Dropdowns row */}
                     <div className="flex items-end gap-1">
                 {/* X-variable select */}
@@ -1390,14 +1387,14 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             </div>
           )}
 
-
             {/* Part 3: Configuration Options - Show when X variables are selected */}
-          {finalData?.yVariable && 
-             finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && (
-            <div className="space-y-3 animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
-                {/* Constraint Configuration Checkbox Container - Always show */}
+            {finalData?.yVariable && 
+               finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && (
+              <div className="space-y-3 animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
+                {/* Constraint Configuration Container - Always show */}
               <div className="p-4 rounded-lg shadow-[2px_0_8px_rgba(0,0,0,0.1)] bg-white border border-gray-200 transform transition-all duration-300 hover:shadow-[4px_0_12px_rgba(0,0,0,0.15)]">
                   <div className="flex items-center space-x-3">
+                    <span className="text-orange-500 font-semibold text-sm">(3/4)</span>
                             <Checkbox
                       id="constraint-option"
                       checked={enableConstraintSetup}
@@ -1416,70 +1413,77 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                       Set Constraint
                           </Label>
                         </div>
-                        </div>
                 
                 {/* Constraint Configuration Box - Show when checkbox is enabled */}
                 {enableConstraintSetup && (
-                  <div ref={constraintConfigRef} className="p-4 rounded-lg shadow-[2px_0_8px_rgba(0,0,0,0.1)] bg-white border border-gray-200 transform transition-all duration-300 hover:shadow-[4px_0_12px_rgba(0,0,0,0.15)] animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
-                  <div className="mb-4">
-                    <p className="text-sm font-medium text-gray-700">
-                        Configure constraints for your model - set which variables should have non-positive or non-negative effects:
-                    </p>
-                  </div>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                      {/* Non-Positive Constraints */}
-                      <div className="space-y-3">
-                        <h4 className="text-sm font-medium text-gray-900">Non-Positive Constraints</h4>
-                        <MultiSelectDropdown
-                          label=""
-                          placeholder="Select Variables"
-                          selectedValues={data?.negativeConstraints || []}
-                          onSelectionChange={(selectedValues) => {
-                            // If adding to negative constraints, remove from positive constraints
-                            const currentPositive = data?.positiveConstraints || [];
-                            const updatedPositive = currentPositive.filter(v => !selectedValues.includes(v));
-                            handleDataChange({ 
-                              negativeConstraints: selectedValues,
-                              positiveConstraints: updatedPositive
-                            });
-                          }}
-                          options={(data?.xVariables?.flat() || []).map(variable => ({ value: variable, label: variable }))}
-                          showTrigger={true}
-                          className="w-full min-w-0"
-                          triggerClassName="w-full max-w-none"
-                        />
+                  <div ref={constraintConfigRef} className="mt-4 animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
+                    <div className="p-4 rounded-lg bg-white border border-gray-200">
+                      <div className="mb-4">
+                        <p className="text-sm font-medium text-gray-700">
+                            Configure constraints for your model - set which variables should have non-positive or non-negative effects:
+                        </p>
                       </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          {/* Non-Positive Constraints */}
+                          <div className="space-y-3">
+                            <h4 className="text-sm font-medium text-gray-900">Non-Positive Constraints</h4>
+                            <MultiSelectDropdown
+                              label=""
+                              placeholder="Select Variables"
+                              selectedValues={data?.negativeConstraints || []}
+                              onSelectionChange={(selectedValues) => {
+                                // If adding to negative constraints, remove from positive constraints
+                                const currentPositive = data?.positiveConstraints || [];
+                                const updatedPositive = currentPositive.filter(v => !selectedValues.includes(v));
+                                handleDataChange({ 
+                                  negativeConstraints: selectedValues,
+                                  positiveConstraints: updatedPositive
+                                });
+                              }}
+                              options={(data?.xVariables?.flat() || [])
+                                .filter(variable => !(data?.positiveConstraints || []).includes(variable))
+                                .map(variable => ({ value: variable, label: variable }))}
+                              showTrigger={true}
+                              className="w-full min-w-0"
+                              triggerClassName="w-full max-w-none"
+                            />
+                          </div>
 
-                      {/* Non-Negative Constraints */}
-                      <div className="space-y-3">
-                        <h4 className="text-sm font-medium text-gray-900">Non-Negative Constraints</h4>
-                        <MultiSelectDropdown
-                          label=""
-                          placeholder="Select Variables"
-                          selectedValues={data?.positiveConstraints || []}
-                          onSelectionChange={(selectedValues) => {
-                            // If adding to positive constraints, remove from negative constraints
-                            const currentNegative = data?.negativeConstraints || [];
-                            const updatedNegative = currentNegative.filter(v => !selectedValues.includes(v));
-                            handleDataChange({ 
-                              positiveConstraints: selectedValues,
-                              negativeConstraints: updatedNegative
-                            });
-                          }}
-                          options={(data?.xVariables?.flat() || []).map(variable => ({ value: variable, label: variable }))}
-                          showTrigger={true}
-                          className="w-full min-w-0"
-                          triggerClassName="w-full max-w-none"
-                        />
-                      </div>
+                          {/* Non-Negative Constraints */}
+                          <div className="space-y-3">
+                            <h4 className="text-sm font-medium text-gray-900">Non-Negative Constraints</h4>
+                            <MultiSelectDropdown
+                              label=""
+                              placeholder="Select Variables"
+                              selectedValues={data?.positiveConstraints || []}
+                              onSelectionChange={(selectedValues) => {
+                                // If adding to positive constraints, remove from negative constraints
+                                const currentNegative = data?.negativeConstraints || [];
+                                const updatedNegative = currentNegative.filter(v => !selectedValues.includes(v));
+                                handleDataChange({ 
+                                  positiveConstraints: selectedValues,
+                                  negativeConstraints: updatedNegative
+                                });
+                              }}
+                              options={(data?.xVariables?.flat() || [])
+                                .filter(variable => !(data?.negativeConstraints || []).includes(variable))
+                                .map(variable => ({ value: variable, label: variable }))}
+                              showTrigger={true}
+                              className="w-full min-w-0"
+                              triggerClassName="w-full max-w-none"
+                            />
+                          </div>
+                        </div>
                     </div>
+                  </div>
+                )}
               </div>
-            )}
 
-                {/* ROI Configuration Checkbox Container - Only show for MMM models */}
+                {/* ROI Configuration Container - Only show for MMM models */}
                 {finalData?.modelType === 'mmm' && (
-                <div className="p-4 rounded-lg shadow-[2px_0_8px_rgba(0,0,0,0.1)] bg-white border border-gray-200 transform transition-all duration-300 hover:shadow-[4px_0_12px_rgba(0,0,0,0.15)]">
+                <div className="mt-2 p-4 rounded-lg shadow-[2px_0_8px_rgba(0,0,0,0.1)] bg-white border border-gray-200 transform transition-all duration-300 hover:shadow-[4px_0_12px_rgba(0,0,0,0.15)]">
                     <div className="flex items-center space-x-3">
+                      <span className="text-orange-500 font-semibold text-sm">(4/4)</span>
                       <Checkbox
                         id="roi-option"
                         checked={enableROICalculation}
@@ -1497,22 +1501,22 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                       <Label htmlFor="roi-option" className="text-sm font-medium cursor-pointer">
                         ROI specific input
                       </Label>
-                </div>
-              </div>
-            )}
+                    </div>
 
-                {/* ROI Configuration Box - Show when checkbox is enabled for MMM models */}
-                {finalData?.modelType === 'mmm' && enableROICalculation && (
-                  <div ref={roiConfigRef} className="p-4 rounded-lg shadow-[2px_0_8px_rgba(0,0,0,0.1)] bg-white border border-gray-200 transform transition-all duration-300 hover:shadow-[4px_0_12px_rgba(0,0,0,0.15)] animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
-                  <ROIConfiguration
-                    availableFeatures={data?.xVariables?.flat() || []}
-                    availableColumns={numericalColumns || []}
-                    availableCombinations={data?.selectedCombinations || []}
-                    roiConfig={roiConfig}
-                    onROIConfigChange={setRoiConfig}
-                    yVariable={data?.yVariable}
-                  />
-              </div>
+                    {/* ROI Configuration Box - Show when checkbox is enabled */}
+                    {enableROICalculation && (
+                      <div ref={roiConfigRef} className="mt-4 animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
+                        <ROIConfiguration
+                          availableFeatures={data?.xVariables?.flat() || []}
+                          availableColumns={numericalColumns || []}
+                          availableCombinations={data?.selectedCombinations || []}
+                          roiConfig={roiConfig}
+                          onROIConfigChange={setRoiConfig}
+                          yVariable={data?.yVariable}
+                        />
+                      </div>
+                    )}
+                </div>
             )}
               </div>
             )}

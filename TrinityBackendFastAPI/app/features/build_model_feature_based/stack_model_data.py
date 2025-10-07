@@ -1,3 +1,4 @@
+
 import pandas as pd
 import numpy as np
 import io
@@ -8,67 +9,25 @@ from minio.error import S3Error
 import re
 from motor.motor_asyncio import AsyncIOMotorClient
 from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import r2_score
 
 logger = logging.getLogger("stack-model-data")
 
-class CombinationParser:
-    """Parse combination strings to extract identifier values."""
-    
-    @staticmethod
-    def parse_combination_string(combination: str, identifier_names: List[str]) -> Dict[str, str]:
-        try:
-            # Split the combination string by underscores
-            values = combination.split('_')
+# Import global training_progress for progress tracking
+def get_training_progress():
+    """Import and return the global training_progress dictionary from routes."""
+    try:
+        from .routes import training_progress
+        return training_progress
+    except ImportError:
+        logger.warning("Could not import training_progress from routes")
+        return {}
             
-            if len(values) != len(identifier_names):
-                pass
-
-                return {}
-            
-            # Map identifier names to values
-            parsed_values = {}
-            for i, identifier_name in enumerate(identifier_names):
-                if i < len(values):
-                    parsed_values[identifier_name] = values[i]
-            
-            return parsed_values
-            
-        except Exception as e:
-            return {}
-    
-
-    
-    @staticmethod
-    def get_identifier_values(combinations: List[str], identifier: str, identifier_names: List[str]) -> List[str]:
-
-        values = set()
-        
-        for combination in combinations:
-            parsed = CombinationParser.parse_combination_string(combination, identifier_names)
-            if identifier in parsed:
-                values.add(parsed[identifier])
-        
-        return sorted(list(values))
-    
-    @staticmethod
-    def get_available_identifiers(combinations: List[str]) -> List[str]:
-
-        if not combinations:
-            return []
-        
-        # Use the first combination to determine identifier names
-        # This assumes all combinations have the same structure
-        first_combination = combinations[0]
-        identifier_count = len(first_combination.split('_'))
-        
-        # Generate generic identifier names
-        identifier_names = [f"identifier_{i+1}" for i in range(identifier_count)]
-        
-        return identifier_names
 
 
-class DataPooler:
+class MMMStackDataPooler:
     """Handle pooling of data from multiple combinations."""
     
     def __init__(self, minio_client: Minio, bucket_name: str):
@@ -76,7 +35,7 @@ class DataPooler:
         self.bucket_name = bucket_name
     
     def read_combination_file(self, file_key: str) -> Optional[pd.DataFrame]:
-
+        """Read combination file from MinIO and return as DataFrame."""
         try:
             response = self.minio_client.get_object(self.bucket_name, file_key)
             file_data = response.read()
@@ -141,7 +100,7 @@ class DataPooler:
         x_variables: List[str],
         y_variable: str,
         all_identifiers: List[str],
-        standardization: str = 'none'
+        clustering_columns: List[str] = None
     ) -> Dict[str, pd.DataFrame]:
         """
         Pool data from multiple combinations based on selected identifiers.
@@ -176,24 +135,15 @@ class DataPooler:
                     # Convert all column names to lowercase for consistent matching
                     df.columns = df.columns.str.lower()
                     
-                    # Filter data to only include identifiers, x_variables, and y_variable
-                    filtered_df = self._filter_combination_data(df, all_identifiers, x_variables, y_variable)
+                    # Filter data to include identifiers, x_variables, y_variable, and clustering columns
+                    filtered_df = self._filter_combination_data(df, all_identifiers, x_variables, y_variable, clustering_columns)
                     
-                    # Apply standardization if specified
-                    if standardization != 'none':
-                        filtered_df = self._apply_standardization(filtered_df, x_variables, standardization)
-                    
-                    # Validate required variables exist
-                    if self._validate_variables(filtered_df, x_variables, y_variable):
+                    if filtered_df is not None and not filtered_df.empty:
                         all_dataframes.append(filtered_df)
                         combination_info.append({
                             'combination': combination,
-                            'records': len(filtered_df),
-                            'columns': list(filtered_df.columns)
+                            'file_path': f"scope_{scope_number}/combination_{combination}"
                         })
-                    else:
-                        pass
-            
             if not all_dataframes:
                 raise ValueError("No valid data found for any combination")
             
@@ -211,7 +161,6 @@ class DataPooler:
                 merged_df, combinations, pool_by_identifiers
             )
             
-            
             return pooled_data
             
         except Exception as e:
@@ -227,11 +176,11 @@ class DataPooler:
             # Search for files containing both Scope_X and the combination
             all_objects = list(self.minio_client.list_objects(self.bucket_name, recursive=True))
             
+            scope_pattern = f"Scope_{scope_number}"
             for obj in all_objects:
                 obj_name = obj.object_name
                 
                 # Check if file contains the scope number
-                scope_pattern = f"Scope_{scope_number}"
                 has_scope = scope_pattern in obj_name
                 
                 # Check if file contains the combination string
@@ -241,17 +190,16 @@ class DataPooler:
                     matching_objects.append(obj_name)
             
             if not matching_objects:
-                pass
                 return None
             
             # Use the first matching file
             target_file_key = matching_objects[0]
             
             # Read the file using the existing method
-            return self.read_combination_file(target_file_key)
+            df = self.read_combination_file(target_file_key)
+            return df
             
         except Exception as e:
-            pass
             return None
     
     def _filter_by_pool_identifiers(
@@ -345,10 +293,21 @@ class DataPooler:
         except Exception as e:
             return False
     
-    def _filter_combination_data(self, df: pd.DataFrame, filtered_identifiers: List[str], x_variables: List[str], y_variable: str) -> pd.DataFrame:
+    def _filter_combination_data(self, df: pd.DataFrame, filtered_identifiers: List[str], x_variables: List[str], y_variable: str, clustering_columns: List[str] = None) -> pd.DataFrame:
 
         try:
-            required_columns = filtered_identifiers + x_variables + [y_variable]
+            # Include clustering columns if provided, avoiding duplicates
+            clustering_cols = clustering_columns or []
+            # Combine all columns and remove duplicates while preserving order
+            all_columns = filtered_identifiers + x_variables + [y_variable] + clustering_cols
+            required_columns = list(dict.fromkeys(all_columns))  # Remove duplicates while preserving order
+            
+            # Log column information for debugging
+            if clustering_cols:
+                overlapping_cols = set(x_variables + [y_variable]) & set(clustering_cols)
+                if overlapping_cols:
+                    logger.info(f"Clustering columns overlap with model variables: {list(overlapping_cols)}")
+                logger.info(f"Total columns requested: {len(all_columns)}, Unique columns: {len(required_columns)}")
             
             available_columns = [col for col in required_columns if col in df.columns]
             missing_columns = [col for col in required_columns if col not in df.columns]
@@ -364,68 +323,7 @@ class DataPooler:
             pass
             return df
     
-    def _apply_standardization(self, df: pd.DataFrame, x_variables: List[str], standardization: str) -> pd.DataFrame:
-        """
-        Apply standardization to x_variables in the DataFrame.
-        
-        Args:
-            df: DataFrame with data
-            x_variables: List of variables to standardize
-            standardization: Type of standardization ('standard_scaler' or 'minmax_scaler')
-            
-        Returns:
-            DataFrame with standardized variables (original variables kept for clustering)
-        """
-        try:
-            from sklearn.preprocessing import StandardScaler, MinMaxScaler
-            
-            df_standardized = df.copy()
-            
-            # Check which x_variables exist in the DataFrame
-            available_x_variables = [var for var in x_variables if var in df.columns]
-            
-            if not available_x_variables:
-                pass
-                return df_standardized
-            
-            # Apply standardization
-            if standardization == 'standard':
-                scaler = StandardScaler()
-                prefix = 'standard_'
-            elif standardization == 'minmax':
-                scaler = MinMaxScaler()
-                prefix = 'minmax_'
-            else:
-                pass
-                return df_standardized
-            
-            # Fit and transform the x_variables
-            scaled_data = scaler.fit_transform(df[available_x_variables])
-            
-            # Create new column names with prefix
-            scaled_columns = [f"{prefix}{var}" for var in available_x_variables]
-            
-            # Add scaled columns to DataFrame
-            for i, scaled_col in enumerate(scaled_columns):
-                df_standardized[scaled_col] = scaled_data[:, i]
-            
-            
-            return df_standardized
-            
-        except Exception as e:
-            return df
-    
-    def _validate_variables(self, df: pd.DataFrame, x_variables: List[str], y_variable: str) -> bool:
-        """Validate that required variables exist in the DataFrame."""
-        available_columns = df.columns.tolist()
-        all_variables = x_variables + [y_variable]
-        missing_vars = [var for var in all_variables if var not in available_columns]
-        
-        if missing_vars:
-            pass
-            return False
-        
-        return True
+
     
     def find_optimal_clusters_elbow(self, data: pd.DataFrame, max_clusters: int = 10) -> int:
         """
@@ -468,7 +366,6 @@ class DataPooler:
             return optimal_k
             
         except Exception as e:
-            logger.error(f"Error finding optimal clusters: {e}")
             return 2  # Default fallback
     
     def perform_kmeans_clustering(self, df: pd.DataFrame, numerical_columns: List[str], n_clusters: Optional[int] = None) -> pd.DataFrame:
@@ -543,13 +440,16 @@ class DataPooler:
                     continue
 
                 combination_aggregated = self._aggregate_combinations_for_clustering(pool_df, numerical_columns)
+                logger.info(f"Combination aggregated: {combination_aggregated}")
                 
                 if combination_aggregated is None or len(combination_aggregated) == 0:
-                    logger.warning(f"No valid aggregated data for clustering in {pool_key}")
                     clustered_pools[pool_key] = pool_df
                     continue
 
                 combination_clusters = self._cluster_combinations(combination_aggregated, numerical_columns, n_clusters)
+
+
+                logger.info(f"Combination clusters: {combination_clusters}")
 
                 clustered_df = self._merge_cluster_id_to_pool_data(pool_df, combination_clusters)
                 clustered_pools[pool_key] = clustered_df
@@ -573,7 +473,6 @@ class DataPooler:
             missing_columns = [col for col in required_columns if col not in pool_df.columns]
             
             if missing_columns:
-                logger.warning(f"Missing columns for aggregation: {missing_columns}")
                 return None
             
             # Group by combination and aggregate numerical columns
@@ -586,7 +485,6 @@ class DataPooler:
             return aggregated_df
             
         except Exception as e:
-            logger.error(f"Error aggregating combinations for clustering: {e}")
             return None
     
     def _cluster_combinations(self, aggregated_df: pd.DataFrame, numerical_columns: List[str], n_clusters: Optional[int] = None) -> Dict[str, int]:
@@ -596,7 +494,6 @@ class DataPooler:
             clustering_data = aggregated_df[numerical_columns].copy()
             clustering_data = clustering_data.dropna()
             if len(clustering_data) == 0:
-                logger.warning("No valid data for clustering after removing NaN values")
                 return {}
             
             valid_combinations = aggregated_df.loc[clustering_data.index, 'combination'].tolist()
@@ -623,7 +520,6 @@ class DataPooler:
             return combination_clusters
             
         except Exception as e:
-            logger.error(f"Error clustering combinations: {e}")
             return {}
     
     def _merge_cluster_id_to_pool_data(self, pool_df: pd.DataFrame, combination_clusters: Dict[str, int]) -> pd.DataFrame:
@@ -670,31 +566,6 @@ class DataPooler:
             logger.error(f"Error merging cluster_id to pool data: {e}")
             return pool_df
     
-    def get_pool_summary(self, pooled_data: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
-
-        summary = {
-            'total_pools': len(pooled_data),
-            'pool_details': {}
-        }
-        
-        for pool_key, df in pooled_data.items():
-            pool_summary = {
-                'rows': int(len(df)),  # Convert to int to avoid numpy.int64
-                'columns': int(len(df.columns))  # Convert to int to avoid numpy.int64
-            }           
-            # Add identifier value counts
-            for col in df.columns:
-                if col.startswith('pool_') and col != 'pool_combination' and col != 'pool_size':
-                    identifier = col.replace('pool_', '')
-                    # Convert numpy types to Python types for JSON serialization
-                    unique_values = df[col].unique().tolist()
-                    # Convert any numpy types to Python types
-                    unique_values = [str(val) if hasattr(val, 'item') else val for val in unique_values]
-                    pool_summary[f'{identifier}_values'] = unique_values
-            
-            summary['pool_details'][pool_key] = pool_summary
-        
-        return summary
     
     def split_clustered_data_by_clusters(self, clustered_pools: Dict[str, pd.DataFrame], minio_client=None, bucket_name=None) -> Dict[str, pd.DataFrame]:
 
@@ -763,690 +634,11 @@ class DataPooler:
         
         return split_data
     
-    def create_interaction_terms(self, 
-                                pooled_data: Dict[str, pd.DataFrame], 
-                                identifiers: List[str], 
-                                numerical_columns_for_interaction: List[str],
-                                column_classifier_identifiers: List[str] = None,
-                                standardization: str = 'none') -> Dict[str, pd.DataFrame]:
-        """
-        Create interaction terms by encoding combinations and interacting with numerical columns.
-        
-        Process:
-        1. One-hot encode the 'combination' column (not individual identifiers)
-        2. Create interaction terms between encoded combinations and numerical columns
-        
-        Args:
-            pooled_data: Dictionary of DataFrames with combination column
-            identifiers: Not used (kept for compatibility)
-            numerical_columns_for_interaction: List of numerical columns to create interactions with
-            column_classifier_identifiers: Not used (kept for compatibility)
-            
-        Returns:
-            Dictionary of enhanced DataFrames with interaction terms
-        """
-        enhanced_pools = {}
-        for pool_key, df in pooled_data.items():
-            # Make a copy to avoid modifying original data
-            enhanced_df = df.copy()
-            
-            # Check if combination column exists and has more than 1 unique value
-            if 'combination' not in df.columns:
-                enhanced_pools[pool_key] = enhanced_df
-                continue
-            
-            combination_unique_values = df['combination'].nunique()
-            
-            if combination_unique_values <= 1:
-                enhanced_pools[pool_key] = enhanced_df
-                continue
-            
-            # One-hot encode the combination column
-            combination_dummies = pd.get_dummies(df['combination'], prefix="encoded_combination", drop_first=False)
-            
-            # Add one-hot encoded combination columns to the dataframe
-            for dummy_col in combination_dummies.columns:
-                enhanced_df[dummy_col] = combination_dummies[dummy_col]
-            
-            
-            # Create interaction terms
-            interaction_columns_created = []
-            
-            # Get all one-hot encoded combination columns
-            encoded_combination_columns = [col for col in enhanced_df.columns if col.startswith("encoded_combination_")]
-            
-            # Create interactions between encoded combinations and numerical columns
-            for encoded_combination_col in encoded_combination_columns:
-                for numerical_col in numerical_columns_for_interaction:
-                    # Use scaled variables if standardization is applied
-                    if standardization == 'standard':
-                        scaled_col = f"standard_{numerical_col}"
-                    elif standardization == 'minmax':
-                        scaled_col = f"minmax_{numerical_col}"
-                    else:
-                        scaled_col = numerical_col
-                    
-                    # Check if the column (scaled or original) exists
-                    if scaled_col in enhanced_df.columns:
-                        # Create interaction term: encoded_combination_col * numerical_col (scaled if available)
-                        interaction_col_name = f"{encoded_combination_col}_x_{scaled_col}"
-                        enhanced_df[interaction_col_name] = enhanced_df[encoded_combination_col] * enhanced_df[scaled_col]
-                        interaction_columns_created.append(interaction_col_name)
-                    elif numerical_col in enhanced_df.columns:
-                        # Fallback to original column if scaled version doesn't exist
-                        interaction_col_name = f"{encoded_combination_col}_x_{numerical_col}"
-                        enhanced_df[interaction_col_name] = enhanced_df[encoded_combination_col] * enhanced_df[numerical_col]
-                        interaction_columns_created.append(interaction_col_name)
-            
-            
-            enhanced_pools[pool_key] = enhanced_df
-        return enhanced_pools
-    
-    async def _train_models_with_dataframe(
-        self,
-        df: pd.DataFrame,
-        x_variables: List[str],
-        y_variable: str,
-        price_column: Optional[str],
-        standardization: str,
-        k_folds: int,
-        models_to_run: Optional[List[str]],
-        custom_configs: Optional[Dict[str, Any]],
-        test_size: float = 0.2
-    ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
-        """
-        Train models directly with a DataFrame instead of reading from MinIO.
-        This is a simplified version of train_models_for_combination_enhanced that works with DataFrames.
-        """
-        from .models import get_models
-        from sklearn.model_selection import KFold, train_test_split
-        from sklearn.linear_model import RidgeCV, LassoCV, ElasticNetCV, Ridge, Lasso, ElasticNet
-        from sklearn.preprocessing import StandardScaler, MinMaxScaler
-        from sklearn.metrics import mean_absolute_percentage_error, r2_score
-        from sklearn.base import clone
-        import numpy as np
-        
-        # Get models
-        all_models = get_models()
-        print(f"🔍 All available models: {list(all_models.keys())}")
-        logger.info(f"🔍 All available models: {list(all_models.keys())}")
-        
-        if models_to_run:
-            models_dict = {name: model for name, model in all_models.items() if name in models_to_run}
-            print(f"🔍 Filtered models to run: {list(models_dict.keys())}")
-            logger.info(f"🔍 Filtered models to run: {list(models_dict.keys())}")
-        else:
-            models_dict = all_models
-            print(f"🔍 Using all models: {list(models_dict.keys())}")
-            logger.info(f"🔍 Using all models: {list(models_dict.keys())}")
-        
-        # Store best parameters for models that use auto-tuning
-        best_parameters = {}
-        
-        # Apply custom configurations and handle auto/manual parameter tuning
-        if custom_configs:
-            for model_name, config in custom_configs.items():
-                if model_name in models_dict:
-                    parameters = config.get('parameters', {})
-                    tuning_mode = config.get('tuning_mode', 'manual')  # 'auto' or 'manual'
-                    
-                    if model_name == "Ridge Regression" and tuning_mode == 'auto':
-                        # Use RidgeCV for automatic alpha tuning with reasonable alpha range
-                        alphas = np.logspace(-2, 3, 50)  # 0.01 to 1000 (reasonable range)
-                        logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values)")
-                        models_dict[model_name] = RidgeCV(alphas=alphas, cv=k_folds)
-                        
-                    elif model_name == "Lasso Regression" and tuning_mode == 'auto':
-                        # Use LassoCV for automatic alpha tuning with reasonable alpha range
-                        alphas = np.logspace(-3, 2, 50)  # 0.001 to 100 (reasonable range for Lasso)
-                        logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values)")
-                        models_dict[model_name] = LassoCV(alphas=alphas, cv=k_folds, random_state=42)
-                        
-                    elif model_name == "ElasticNet Regression" and tuning_mode == 'auto':
-                        # Use ElasticNetCV for automatic alpha and l1_ratio tuning with reasonable ranges
-                        alphas = np.logspace(-3, 2, 50)  # 0.001 to 100 (reasonable range for ElasticNet)
-                        l1_ratios = np.linspace(0.1, 0.9, 9)  # Default l1_ratio range
-                        logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values), l1_ratio range: {l1_ratios[0]:.2f} to {l1_ratios[-1]:.2f} ({len(l1_ratios)} values)")
-                        models_dict[model_name] = ElasticNetCV(
-                            alphas=alphas, l1_ratio=l1_ratios, cv=k_folds, random_state=42
-                        )
-                        
-                    elif model_name == "Constrained Ridge":
-                        # Extract constraints from parameters object - handle both old and new formats
-                        parameters = config.get('parameters', {})
-                        variable_constraints = parameters.get('variable_constraints', [])
-                        
-                        # Convert new format to old format for compatibility
-                        negative_constraints = []
-                        positive_constraints = []
-                        
-                        if variable_constraints:
-                            for constraint in variable_constraints:
-                                if constraint.get('constraint_type') == 'negative':
-                                    negative_constraints.append(constraint.get('variable_name'))
-                                elif constraint.get('constraint_type') == 'positive':
-                                    positive_constraints.append(constraint.get('variable_name'))
-                        else:
-                            # Fallback to old format if new format not available
-                            negative_constraints = parameters.get('negative_constraints', [])
-                            positive_constraints = parameters.get('positive_constraints', [])
-                        
-                        print(f"🔍 Constrained Ridge - Negative constraints: {negative_constraints}")
-                        print(f"🔍 Constrained Ridge - Positive constraints: {positive_constraints}")
-                        
-                        # For Constrained Ridge, we'll handle auto-tuning during training
-                        # Create the model with a placeholder l2_penalty that will be updated during training
-                        l2_penalty = parameters.get('l2_penalty', 0.1)  # Default value
-                        logger.info(f"🔧 {model_name} - Created with l2_penalty: {l2_penalty} (will be auto-tuned during training if needed)")
-                        
-                        from .models import StackConstrainedRidge
-                        models_dict[model_name] = StackConstrainedRidge(
-                            l2_penalty=float(l2_penalty),
-                            learning_rate=parameters.get('learning_rate', 0.001),
-                            iterations=parameters.get('iterations', 10000),
-                            adam=parameters.get('adam', False),
-                            negative_constraints=negative_constraints,
-                            positive_constraints=positive_constraints
-                        )
-                        
-                        # Store tuning mode for later use
-                        if tuning_mode == 'auto':
-                            best_parameters[model_name] = {'tuning_mode': 'auto'}
-                        
-                    elif model_name == "Constrained Linear Regression":
-                        # Extract constraints from parameters object - handle both old and new formats
-                        parameters = config.get('parameters', {})
-                        variable_constraints = parameters.get('variable_constraints', [])
-                        
-                        # Convert new format to old format for compatibility
-                        negative_constraints = []
-                        positive_constraints = []
-                        
-                        if variable_constraints:
-                            for constraint in variable_constraints:
-                                if constraint.get('constraint_type') == 'negative':
-                                    negative_constraints.append(constraint.get('variable_name'))
-                                elif constraint.get('constraint_type') == 'positive':
-                                    positive_constraints.append(constraint.get('variable_name'))
-                        else:
-                            # Fallback to old format if new format not available
-                            negative_constraints = parameters.get('negative_constraints', [])
-                            positive_constraints = parameters.get('positive_constraints', [])
-                        
-                        print(f"🔍 Constrained Linear Regression - Negative constraints: {negative_constraints}")
-                        print(f"🔍 Constrained Linear Regression - Positive constraints: {positive_constraints}")
-                        from .models import StackConstrainedLinearRegression
-                        models_dict[model_name] = StackConstrainedLinearRegression(
-                            learning_rate=parameters.get('learning_rate', 0.001),
-                            iterations=parameters.get('iterations', 10000),
-                            adam=parameters.get('adam', False),
-                            negative_constraints=negative_constraints,
-                            positive_constraints=positive_constraints
-                        )
-                    else:
-                        # Manual parameter tuning - use provided parameters
-                        if model_name == "Ridge Regression":
-                            alpha = parameters.get('Alpha', 1.0)
-                            logger.info(f"🔧 {model_name} - Manual tuning with alpha: {alpha}")
-                            models_dict[model_name] = Ridge(alpha=float(alpha))
-                        elif model_name == "Lasso Regression":
-                            alpha = parameters.get('Alpha', 0.1)
-                            logger.info(f"🔧 {model_name} - Manual tuning with alpha: {alpha}")
-                            models_dict[model_name] = Lasso(alpha=float(alpha), random_state=42)
-                        elif model_name == "ElasticNet Regression":
-                            alpha = parameters.get('Alpha', 0.1)
-                            l1_ratio = parameters.get('L1 Ratio', 0.5)
-                            logger.info(f"🔧 {model_name} - Manual tuning with alpha: {alpha}, l1_ratio: {l1_ratio}")
-                            models_dict[model_name] = ElasticNet(
-                                alpha=float(alpha), 
-                                l1_ratio=float(l1_ratio),
-                                random_state=42
-                        )
-        
-        # Prepare data
-        X = df[x_variables].values
-        y = df[y_variable].values
-        
-        # Convert boolean values to numerical (0/1) for constraint models
-        # This is needed because encoded variables contain True/False values
-        if X.dtype == object:
-            print(f"🔍 Converting object dtype to numerical (boolean True/False -> 1/0)")
-            try:
-                # First try direct conversion
-                X = X.astype(float)
-                print(f"🔍 After conversion - X dtype: {X.dtype}, shape: {X.shape}")
-            except (ValueError, TypeError):
-                # If direct conversion fails, handle mixed types
-                print(f"🔍 Direct conversion failed, handling mixed types...")
-                X_converted = np.zeros_like(X, dtype=float)
-                for i in range(X.shape[1]):
-                    for j in range(X.shape[0]):
-                        val = X[j, i]
-                        if isinstance(val, bool):
-                            X_converted[j, i] = 1.0 if val else 0.0
-                        elif isinstance(val, (int, float)):
-                            X_converted[j, i] = float(val)
-                        else:
-                            X_converted[j, i] = 0.0
-                X = X_converted
-                print(f"🔍 After mixed type conversion - X dtype: {X.dtype}, shape: {X.shape}")
-        
-        # Ensure X is numerical
-        if not np.issubdtype(X.dtype, np.number):
-            print(f"🔍 Final conversion to numerical type")
-            X = X.astype(float)
- 
-        
-        # Standardization is already applied earlier in the pipelin     # No need to apply it again during modeling
-        
-        # Check if we have combination column for combination-aware splitting
-        has_combination_column = 'combination' in df.columns
-        
-        if has_combination_column:
-            # Use combination-aware train/test split
-            train_positions, test_positions = self._create_combination_aware_train_test_split(
-                df, test_size=test_size, random_state=42
-            )
-            X_train, X_test = X[train_positions], X[test_positions]
-            y_train, y_test = y[train_positions], y[test_positions]
-            print(f"🔍 Using combination-aware train/test split: {len(train_positions)} train, {len(test_positions)} test")
-            
-            # Debug: Check combination distribution in train/test sets
-            train_combinations = df.iloc[train_positions]['combination'].unique()
-            test_combinations = df.iloc[test_positions]['combination'].unique()
-            print(f"🔍 Train combinations: {len(train_combinations)} - {train_combinations}")
-            print(f"🔍 Test combinations: {len(test_combinations)} - {test_combinations}")
-            
-            # Check if all combinations are represented in both sets
-            all_combinations = df['combination'].unique()
-            train_has_all = all(combo in train_combinations for combo in all_combinations)
-            test_has_all = all(combo in test_combinations for combo in all_combinations)
-            print(f"🔍 All combinations in train: {train_has_all}, All combinations in test: {test_has_all}")
-        else:
-            # Use standard train/test split
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=test_size, random_state=42, shuffle=True
-            )
-            print(f"🔍 Using standard train/test split: {len(X_train)} train, {len(X_test)} test")
-        
-        model_results = []
-        variable_data = {
-            'x_variables': x_variables,
-            'y_variable': y_variable,
-            'total_samples': len(df),
-            'feature_means': df[x_variables].mean().to_dict(),
-            'feature_stds': df[x_variables].std().to_dict(),
-            'target_mean': df[y_variable].mean(),
-            'target_std': df[y_variable].std()
-        }
-        
-        for model_name, model in models_dict.items():
-            print(f"🔍 Processing model: {model_name}")
-            logger.info(f"🔍 Processing model: {model_name}")
-            
-            # Check if this is a constraint model
 
-            
-            model = clone(model)
-            print(f"🔍 Model cloned successfully for: {model_name}")
-            logger.info(f"🔍 Model cloned successfully for: {model_name}")
-            # Train model
-            try:
-                if model_name in ["Constrained Ridge", "Constrained Linear Regression"]:
-                    print(f"🔍 Training constraint model: {model_name} with feature names")
-                    logger.info(f"🔍 Training constraint model: {model_name} with feature names")
-                    
-                    # Handle auto-tuning for Constrained Ridge
-                    if model_name == "Constrained Ridge" and model_name in best_parameters and best_parameters[model_name].get('tuning_mode') == 'auto':
-                        print(f"🔍 Auto-tuning Constrained Ridge: Running RidgeCV to find optimal l2_penalty")
-                        logger.info(f"🔍 Auto-tuning Constrained Ridge: Running RidgeCV to find optimal l2_penalty")
-                        
-                        # Run RidgeCV to find optimal alpha
-                        alphas = np.logspace(-2, 3, 50)  # Same range as Ridge Regression
-                        ridge_cv = RidgeCV(alphas=alphas, cv=k_folds)
-                        ridge_cv.fit(X_train, y_train)
-                        optimal_l2_penalty = ridge_cv.alpha_
-                        
-                        print(f"🎯 Constrained Ridge - Optimal l2_penalty from RidgeCV: {optimal_l2_penalty:.6f}")
-                        logger.info(f"🎯 Constrained Ridge - Optimal l2_penalty from RidgeCV: {optimal_l2_penalty:.6f}")
-                        
-                        # Update the model's l2_penalty (only for Constrained Ridge)
-                        model.l2_penalty = optimal_l2_penalty
-                        
-                        # Store the best alpha for later display
-                        best_parameters[model_name] = {
-                            'best_alpha': optimal_l2_penalty,
-                            'best_cv_score': ridge_cv.best_score_
-                        }
-                    
-                    model.fit(X_train, y_train, x_variables)
-                    print(f"✅ Constraint model trained successfully: {model_name}")
-                    logger.info(f"✅ Constraint model trained successfully: {model_name}")
-                else:
-                    print(f"🔍 Training standard model: {model_name}")
-                    logger.info(f"🔍 Training standard model: {model_name}")
-                    model.fit(X_train, y_train)
-                    print(f"✅ Standard model trained successfully: {model_name}")
-                    logger.info(f"✅ Standard model trained successfully: {model_name}")
-            except Exception as e:
-                print(f"❌ Error training model {model_name}: {str(e)}")
-                logger.error(f"❌ Error training model {model_name}: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                logger.error(f"❌ Traceback for {model_name}: {traceback.format_exc()}")
-                continue
-            
-            # Log best alpha for CV models
-            if hasattr(model, 'alpha_') and hasattr(model, 'best_score_'):
-                logger.info(f"🎯 {model_name} - Best Alpha: {model.alpha_:.6f}, Best CV Score: {model.best_score_:.6f}")
-            elif hasattr(model, 'alpha_'):
-                logger.info(f"🎯 {model_name} - Best Alpha: {model.alpha_:.6f}")
-            elif hasattr(model, 'l1_ratio_') and hasattr(model, 'alpha_'):
-                logger.info(f"🎯 {model_name} - Best Alpha: {model.alpha_:.6f}, Best L1 Ratio: {model.l1_ratio_:.6f}")
-            
-            # Predictions
-            try:
-                print(f"🔍 Making predictions for: {model_name}")
-                logger.info(f"🔍 Making predictions for: {model_name}")
-                y_train_pred = model.predict(X_train)
-                y_test_pred = model.predict(X_test)
-                print(f"✅ Predictions made successfully for: {model_name}")
-                logger.info(f"✅ Predictions made successfully for: {model_name}")
-            except Exception as e:
-                print(f"❌ Error making predictions for {model_name}: {str(e)}")
-                logger.error(f"❌ Error making predictions for {model_name}: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                logger.error(f"❌ Traceback for predictions {model_name}: {traceback.format_exc()}")
-                continue
-            
-            # Calculate metrics
-            from .models import safe_mape
-            mape_train = safe_mape(y_train, y_train_pred)
-            mape_test = safe_mape(y_test, y_test_pred)
-            r2_train = r2_score(y_train, y_train_pred)
-            r2_test = r2_score(y_test, y_test_pred)
-            
-            # Get coefficients
-            try:
-                if model_name in ["Constrained Ridge", "Constrained Linear Regression"]:
-                    print(f"🔍 Extracting coefficients for constraint model: {model_name}")
-                    logger.info(f"🔍 Extracting coefficients for constraint model: {model_name}")
-                    if hasattr(model, 'W') and model.W is not None:
-                        coefficients = {name: float(coef) for name, coef in zip(x_variables, model.W)}
-                        intercept = float(model.b) if hasattr(model, 'b') else 0.0
-                        print(f"✅ Constraint model coefficients extracted: {len(coefficients)} features, intercept={intercept}")
-                        logger.info(f"✅ Constraint model coefficients extracted: {len(coefficients)} features, intercept={intercept}")
-                    else:
-                        coefficients = {name: 0.0 for name in x_variables}
-                        intercept = 0.0
-                        print(f"⚠️ Constraint model has no W attribute or W is None")
-                        logger.warning(f"⚠️ Constraint model has no W attribute or W is None")
-                else:
-                    print(f"🔍 Extracting coefficients for standard model: {model_name}")
-                    logger.info(f"🔍 Extracting coefficients for standard model: {model_name}")
-                    if hasattr(model, 'coef_'):
-                        coefficients = {name: float(coef) for name, coef in zip(x_variables, model.coef_)}
-                        intercept = float(model.intercept_) if hasattr(model, 'intercept_') else 0.0
-                        print(f"✅ Standard model coefficients extracted: {len(coefficients)} features, intercept={intercept}")
-                        logger.info(f"✅ Standard model coefficients extracted: {len(coefficients)} features, intercept={intercept}")
-                    else:
-                        coefficients = {name: 0.0 for name in x_variables}
-                        intercept = 0.0
-                        print(f"⚠️ Standard model has no coef_ attribute")
-                        logger.warning(f"⚠️ Standard model has no coef_ attribute")
-            except Exception as e:
-                print(f"❌ Error extracting coefficients for {model_name}: {str(e)}")
-                logger.error(f"❌ Error extracting coefficients for {model_name}: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                logger.error(f"❌ Traceback for coefficients {model_name}: {traceback.format_exc()}")
-                continue
-            
-            # Calculate AIC and BIC
-            n_parameters = len(coefficients) + 1  # +1 for intercept
-            n_samples = len(y_train)
-            mse_train = np.mean((y_train - y_train_pred) ** 2)
-            aic = n_samples * np.log(mse_train) + 2 * n_parameters
-            bic = n_samples * np.log(mse_train) + np.log(n_samples) * n_parameters
-            
-            # Create result dictionary
-            result = {
-                "model_name": model_name,
-                "mape_train": mape_train,
-                "mape_test": mape_test,
-                "r2_train": r2_train,
-                "r2_test": r2_test,
-                "mape_train_std": 0.0,  # No std for single train/test split
-                "mape_test_std": 0.0,   # No std for single train/test split
-                "r2_train_std": 0.0,    # No std for single train/test split
-                "r2_test_std": 0.0,     # No std for single train/test split
-                "coefficients": coefficients,
-                "standardized_coefficients": coefficients,  # Same as unstandardized for now
-                "intercept": intercept,
-                "fold_results": [],  # Empty for train/test split
-                "aic": aic,
-                "bic": bic,
-                "n_parameters": n_parameters,
-                "train_size": len(y_train),
-                "test_size": len(y_test)
-            }
-            
-            # Add best parameters for CV models
-            if hasattr(model, 'alpha_'):
-                result["best_alpha"] = float(model.alpha_)
-            if hasattr(model, 'best_score_'):
-                result["best_cv_score"] = float(model.best_score_)
-            if hasattr(model, 'l1_ratio_'):
-                result["best_l1_ratio"] = float(model.l1_ratio_)
-            
-            # Add best parameters from stored values (for Constrained Ridge with auto-tuning)
-            if model_name in best_parameters:
-                if 'best_alpha' in best_parameters[model_name]:
-                    result["best_alpha"] = float(best_parameters[model_name]['best_alpha'])
-                if 'best_cv_score' in best_parameters[model_name]:
-                    result["best_cv_score"] = float(best_parameters[model_name]['best_cv_score'])
-            
-            model_results.append(result)
-            print(f"✅ Model {model_name} completed - Train MAPE: {mape_train:.4f}, Test MAPE: {mape_test:.4f}")
-            logger.info(f"✅ Model {model_name} completed - Train MAPE: {mape_train:.4f}, Test MAPE: {mape_test:.4f}")
-            print(f"🔍 Total models completed so far: {len(model_results)}")
-            logger.info(f"🔍 Total models completed so far: {len(model_results)}")
-        
-        return model_results, variable_data
-    
-    
-    def _create_combination_aware_train_test_split(self, df: pd.DataFrame, test_size: float = 0.2, random_state: int = 42) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Create train/test split that ensures each combination is represented in both training and test sets.
-        
-        Strategy:
-        1. For each combination, split its data into train/test based on test_size
-        2. Ensure each combination has at least 1 sample in both train and test sets
-        3. Combine all combination splits into final train/test sets
-        
-        Args:
-            df: DataFrame with 'combination' column
-            test_size: Proportion of data to use for testing (0.0 to 1.0)
-            random_state: Random seed for reproducibility
-            
-        Returns:
-            Tuple of (X_train, X_test, y_train, y_test) arrays
-        """
-        import numpy as np
-        from sklearn.model_selection import KFold
-        
-        np.random.seed(random_state)
-        
-        # Get unique combinations
-        combinations = df['combination'].unique()
-        
-        train_indices = []
-        test_indices = []
-        
-        for combination in combinations:
-            # Get all indices for this combination
-            combination_mask = df['combination'] == combination
-            combination_indices = df[combination_mask].index.values
-            
-            # Shuffle the indices for this combination
-            np.random.shuffle(combination_indices)
-            
-            # Calculate split point for this combination
-            n_samples = len(combination_indices)
-            n_test = max(1, int(n_samples * test_size))  # Ensure at least 1 sample in test
-            n_train = n_samples - n_test
-            
-            # Ensure we have at least 1 sample in train set
-            if n_train < 1:
-                n_train = 1
-                n_test = n_samples - 1
-                
-                # Split indices
-            test_indices_combination = combination_indices[:n_test]
-            train_indices_combination = combination_indices[n_test:]
-            
-            train_indices.extend(train_indices_combination)
-            test_indices.extend(test_indices_combination)
-        
-        # Convert to numpy arrays
-        train_indices = np.array(train_indices)
-        test_indices = np.array(test_indices)
-            
-            # Convert to positional indices (0-based)
-        train_positions = np.searchsorted(df.index, train_indices)
-        test_positions = np.searchsorted(df.index, test_indices)
-            
-        return train_positions, test_positions
-    
-    async def train_models_for_stacked_data(
-        self,
-        split_clustered_data: Dict[str, pd.DataFrame],
-        x_variables: List[str],
-        y_variable: str,
-        standardization: str = 'none',
-        k_folds: int = 5,
-        models_to_run: Optional[List[str]] = None,
-        custom_configs: Optional[Dict[str, Any]] = None,
-        price_column: Optional[str] = None,
-        test_size: float = 0.2
-    ) -> Dict[str, Any]:
-        """
-        Train models on split clustered data using the same models as individual combinations.
-        
-        Args:
-            split_clustered_data: Dictionary of DataFrames with keys like 'pool_key_cluster_id'
-            x_variables: Original x variables from user
-            y_variable: Target variable
-            standardization: Type of standardization ('none', 'standard', 'minmax')
-            k_folds: Number of cross-validation folds
-            models_to_run: Optional list of specific models to run
-            custom_configs: Optional custom model configurations
-            price_column: Optional price column for elasticity calculation
-            
-        Returns:
-            Dictionary with training results for each split cluster
-        """
-        from .models import get_models
-        
-        results = {}
-        all_models = get_models()
-        
-        # Filter models if specified
-        if models_to_run:
-            models_dict = {name: model for name, model in all_models.items() if name in models_to_run}
-        else:
-            models_dict = all_models
-        
-        for split_key, df in split_clustered_data.items():
-            print(f"🔍 Processing split: {split_key} with {len(df)} records")
-            
-            # Determine feature set based on available columns
-            feature_columns = []
-            
-            
-            # 1. Add x_variables (prioritize scaled versions if standardization was applied)
-            for var in x_variables:
-                # Check if scaled version exists (standard_ or minmax_ prefix)
-                scaled_var = None
-                if standardization == 'standard':
-                    scaled_var = f"standard_{var}"
-                elif standardization == 'minmax':
-                    scaled_var = f"minmax_{var}"
 
-                
-                # Use scaled variable if it exists, otherwise use original
-                if scaled_var in df.columns:
-                    feature_columns.append(scaled_var)
-                elif var in df.columns:
-                    feature_columns.append(var)
-            
-            # 2. Add encoded variables (one-hot encoded identifiers with 'encoded_' prefix)
-            encoded_columns = [col for col in df.columns 
-                             if col.startswith('encoded_') 
-                             and col not in feature_columns 
-                             and not col.endswith('_x_')]  # Exclude interaction terms for now
-            
-            # 3. Add interaction terms (if they exist)
-            interaction_columns = [col for col in df.columns 
-                                 if col.endswith('_x_') and col not in feature_columns]
-            
-            all_feature_columns = feature_columns + encoded_columns + interaction_columns
-            
-            # Log all features being used for modeling
-            
-            if not all_feature_columns:
-                continue
-                
-            if y_variable not in df.columns:
-                continue
-            
-            try:
-                training_columns = all_feature_columns + [y_variable]
-                if 'combination' in df.columns:
-                    training_columns.append('combination')
-                training_df = df[training_columns].copy()
-                
-                model_results, variable_data = await self._train_models_with_dataframe(
-                    df=training_df,
-                    x_variables=all_feature_columns,
-                    y_variable=y_variable,
-                    price_column=price_column,
-                    standardization=standardization,
-                    k_folds=k_folds,
-                    models_to_run=models_to_run,
-                    custom_configs=custom_configs,
-                    test_size=test_size
-                )
-                
-                # Store results
-                print(f"✅ Split {split_key} completed with {len(model_results)} models")
-                for result in model_results:
-                    print(f"  - {result['model_name']}: MAPE={result['mape_test']:.4f}, R²={result['r2_test']:.4f}")
-                
-                results[split_key] = {
-                    'model_results': model_results,
-                    'variable_data': variable_data,
-                    'feature_columns': all_feature_columns,
-                    'feature_breakdown': {
-                        'original_x_variables': feature_columns,
-                        'encoded_variables': encoded_columns,
-                        'interaction_terms': interaction_columns
-                    },
-                    'data_shape': df.shape,
-                    'total_records': len(df)
-                }
-                
-                
-            except Exception as e:
-                results[split_key] = {
-                    'error': str(e),
-                    'feature_columns': all_feature_columns,
-                    'data_shape': df.shape
-                }
-        
-        return results
+    
 
+    
 
 class StackModelDataProcessor:
 
@@ -1486,6 +678,7 @@ class StackModelDataProcessor:
         except Exception as e:
             logger.error(f"Error fetching column classifier config: {e}")
             return {}
+
     
     def filter_combination_data(self, df: pd.DataFrame, identifiers: List[str], x_variables: List[str], y_variable: str) -> pd.DataFrame:
 
@@ -1632,7 +825,8 @@ class StackModelDataProcessor:
         y_variable: str,
         minio_client: Minio,
         bucket_name: str,
-        standardization: str = 'none'
+        n_clusters: Optional[int] = None,
+        clustering_columns: Optional[List[str]] = None
     ) -> Dict[str, Any]:
 
         try:
@@ -1662,12 +856,12 @@ class StackModelDataProcessor:
             if invalid_identifiers:
                 raise ValueError(f"Invalid pooling identifiers: {invalid_identifiers}. Available identifiers: {all_identifiers}")
             
-            # Log data preparation parameters
+            logger.info(f"Preparing stack model data for scope {scope_number} with {len(combinations)} combinations")
             
             # Create data pooler instance
-            data_pooler = DataPooler(minio_client, bucket_name)
+            data_pooler = MMMStackDataPooler(minio_client, bucket_name)
             
-            # Pool the data
+            # Step 1: Pool the data
             pooled_data = data_pooler.pool_data_by_identifiers(
                 scope_number=scope_number,
                 combinations=combinations,
@@ -1675,36 +869,103 @@ class StackModelDataProcessor:
                 x_variables=x_variables,
                 y_variable=y_variable,
                 all_identifiers=filtered_identifiers,
-                standardization=standardization
+                clustering_columns=clustering_columns
             )
             
             if not pooled_data:
                 raise ValueError("No pooled data created")
             
-            # Get summary
-            summary = data_pooler.get_pool_summary(pooled_data)
+            logger.info(f"Created {len(pooled_data)} pools")
             
-            # Prepare pool keys and their column names
-            pool_columns_info = {}
-            for pool_key, df in pooled_data.items():
-                pool_columns_info[pool_key] = {
+            # Step 2: Apply clustering to pooled data
+            # Use user-specified clustering columns or default to all variables
+            if clustering_columns is None:
+                numerical_columns = [var.lower() for var in x_variables + [y_variable]]
+            else:
+                numerical_columns = [var.lower() for var in clustering_columns]
+            
+            logger.info(f"Using columns for clustering: {numerical_columns}")
+            clustered_pools = data_pooler.apply_clustering_to_pools(pooled_data, numerical_columns, n_clusters)
+            
+            if not clustered_pools:
+                raise ValueError("Clustering failed - no clustered pools created")
+            
+            logger.info(f"Clustered pools: {clustered_pools}")
+            
+            split_clustered_data = data_pooler.split_clustered_data_by_clusters(clustered_pools)
+            
+            if not split_clustered_data:
+                raise ValueError("Split clustering failed - no split clusters created")
+            
+            
+            # Prepare detailed clustering information for each pool
+            pool_clustering_details = {}
+            for pool_key, df in clustered_pools.items():
+                # Get unique cluster IDs for this pool
+                unique_clusters = df['cluster_id'].unique().tolist()
+                unique_clusters = [int(cluster) for cluster in unique_clusters]  # Convert to int
+                
+                # Get clustered data (x_variables + y_variable) for each cluster
+                cluster_data = {}
+                for cluster_id in unique_clusters:
+                    # Use the split_clustered_data instead of re-splitting
+                    split_key = f"{pool_key}_{cluster_id}"
+                    if split_key in split_clustered_data:
+                        cluster_df = split_clustered_data[split_key]
+                        
+                        # Extract x_variables and y_variable data
+                        cluster_info = {
+                            'cluster_id': int(cluster_id),
+                            'rows': int(len(cluster_df)),
+                            'data': {}
+                        }
+                        
+                        # Add x_variables and y_variable data
+                        for col in numerical_columns:
+                            if col in cluster_df.columns:
+                                cluster_info['data'][col] = {
+                                    'mean': float(cluster_df[col].mean()),
+                                    'min': float(cluster_df[col].min()),
+                                    'max': float(cluster_df[col].max()),
+                                    'std': float(cluster_df[col].std())
+                                }
+                        
+                        cluster_data[f'cluster_{cluster_id}'] = cluster_info
+                
+                pool_clustering_details[pool_key] = {
+                    'total_clusters': len(unique_clusters),
+                    'cluster_ids': unique_clusters,
+                    'cluster_data': cluster_data
+                }
+            
+            # Prepare split clustered keys and their column names
+            split_clustered_columns_info = {}
+            for split_key, df in split_clustered_data.items():
+                split_clustered_columns_info[split_key] = {
                     'columns': df.columns.tolist(),
                     'total_columns': len(df.columns)
                 }
             
-            # Prepare response
+            # Prepare response with split clustered data
             result = {
                 'status': 'success',
                 'scope_number': scope_number,
                 'pool_by_identifiers': pool_by_identifiers,
                 'total_combinations': len(combinations),
                 'total_pools': len(pooled_data),
-                'pool_columns_info': pool_columns_info,
+                'total_split_clusters': len(split_clustered_data),
                 'x_variables': x_variables,
                 'y_variable': y_variable,
-                'pooled_data': pooled_data  # Include the actual pooled data for clustering (will be removed from final response)
+                'numerical_columns_used': numerical_columns,
+                'n_clusters': n_clusters,
+                'clustered_pool_keys': list(clustered_pools.keys()),
+                'split_clustered_keys': list(split_clustered_data.keys()),
+                'split_clustered_columns_info': split_clustered_columns_info,
+                'pool_clustering_details': pool_clustering_details,
+                'split_clustered_data': split_clustered_data  # Return the actual split clustered data
             }
             
+            logger.info(f"Successfully prepared stack model data: {len(split_clustered_data)} split clusters ready for modeling")
             return result
             
         except Exception as e:
@@ -1716,62 +977,967 @@ class StackModelDataProcessor:
                 'pool_by_identifiers': pool_by_identifiers
             }
     
-    def get_pooled_dataframe(self, pooled_data: Dict[str, pd.DataFrame], pool_key: str) -> Optional[pd.DataFrame]:
 
-        return pooled_data.get(pool_key)
+    def _apply_standardization(
+        self,
+        df: pd.DataFrame,
+        x_variables: List[str],
+        y_variable: str,
+        combo_config: Dict[str, Dict[str, Any]]
+    ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        """
+        Apply standardization to the DataFrame based on combo_config.
+        
+        Args:
+            df: Input DataFrame
+            x_variables: List of x variable names
+            y_variable: Target variable name
+            combo_config: Configuration for each variable
+            
+        Returns:
+            Tuple of (transformed_df, metadata)
+        """
+        try:
+            transformed_df = df.copy()
+            metadata = {}
+            
+            # Get standardization type from combo_config (default to 'none')
+            standardization_type = 'none'
+            if combo_config:
+                # Check if any variable has standardization specified
+                for var_name, var_config in combo_config.items():
+                    if 'standardization' in var_config:
+                        standardization_type = var_config['standardization']
+                        break
+                    elif 'type' in var_config and var_config['type'] in ['standard', 'minmax']:
+                        standardization_type = var_config['type']
+                        break
+            
+            logger.info(f"Applying standardization: {standardization_type}")
+            
+            if standardization_type == 'none':
+                # No standardization - return original data
+                metadata = {
+                    'standardization_type': 'none',
+                    'applied_to': [],
+                    'scalers': {}
+                }
+                return transformed_df, metadata
+            
+            # Apply standardization to x_variables and y_variable
+            variables_to_standardize = x_variables + [y_variable]
+            scalers = {}
+            
+            for var in variables_to_standardize:
+                if var in transformed_df.columns:
+                    if standardization_type == 'standard':
+                        # StandardScaler (mean=0, std=1)
+                        scaler = StandardScaler()
+                        transformed_df[f'standard_{var}'] = scaler.fit_transform(transformed_df[[var]])
+                        scalers[var] = scaler
+                        logger.info(f"Applied standard scaling to {var}")
+                        
+                    elif standardization_type == 'minmax':
+                        # MinMaxScaler (0-1 range)
+                        scaler = MinMaxScaler()
+                        transformed_df[f'minmax_{var}'] = scaler.fit_transform(transformed_df[[var]])
+                        scalers[var] = scaler
+                        logger.info(f"Applied minmax scaling to {var}")
+            
+            metadata = {
+                'standardization_type': standardization_type,
+                'applied_to': variables_to_standardize,
+                'scalers': scalers,
+                'original_columns': list(df.columns),
+                'transformed_columns': list(transformed_df.columns)
+            }
+            
+            logger.info(f"Standardization completed. Original columns: {len(df.columns)}, Transformed columns: {len(transformed_df.columns)}")
+            return transformed_df, metadata
+            
+        except Exception as e:
+            logger.error(f"Error applying standardization: {e}")
+            # Return original data with error metadata
+            return df, {'error': str(e), 'standardization_type': 'none'}
+
+    async def process_split_clustered_data(
+        self,
+        split_clustered_data: Dict[str, pd.DataFrame],
+        x_variables_lower: List[str],
+        y_variable_lower: str,
+        standardization: str = 'none',
+        k_folds: int = 5,
+        models_to_run: Optional[List[str]] = None,
+        custom_configs: Optional[Dict[str, Any]] = None,
+        price_column: Optional[str] = None,
+        test_size: float = 0.2,
+        apply_interaction_terms: bool = True,
+        numerical_columns_for_interaction: List[str] = None,
+        run_id: str = None,
+        negative_constraints: List[str] = None,
+        positive_constraints: List[str] = None
+    ) -> Dict[str, Any]:
+        """Process all split clustered data for stack MMM training."""
+        try:
+            # Debug: Log constraint parameters received
+            logger.info(f"🔍 DEBUG: process_split_clustered_data received constraints:")
+            logger.info(f"  - negative_constraints: {negative_constraints}")
+            logger.info(f"  - positive_constraints: {positive_constraints}")
+            
+            # Validate input parameters
+            if not split_clustered_data:
+                raise Exception("❌ No split clustered data provided")
+            
+            if not x_variables_lower:
+                raise Exception("❌ No x_variables provided")
+            
+            if not y_variable_lower:
+                raise Exception("❌ No y_variable provided")
+            
+            logger.info(f"Processing {len(split_clustered_data)} split clusters for stack modeling")
+            logger.info(f"X variables: {x_variables_lower}")
+            logger.info(f"Y variable: {y_variable_lower}")
+            
+            results = {}
+            training_progress = get_training_progress()
+            successful_clusters = 0
+            failed_clusters = 0
+            
+            for split_key, cluster_df in split_clustered_data.items():
+                logger.info(f"Processing split cluster: {split_key}")
+                
+                # Validate cluster data
+                if cluster_df is None or cluster_df.empty:
+                    error_msg = f"Empty or None cluster data for {split_key}"
+                    logger.error(f"❌ {error_msg}")
+                    results[split_key] = {
+                        'model_results': [],
+                        'total_records': 0,
+                        'error': error_msg
+                    }
+                    failed_clusters += 1
+                    continue
+                
+                # Check if required columns exist
+                missing_columns = []
+                for var in x_variables_lower + [y_variable_lower]:
+                    if var not in cluster_df.columns:
+                        missing_columns.append(var)
+                
+                if missing_columns:
+                    error_msg = f"Missing columns in {split_key}: {missing_columns}"
+                    logger.error(f"❌ {error_msg}")
+                    results[split_key] = {
+                        'model_results': [],
+                        'total_records': len(cluster_df),
+                        'error': error_msg
+                    }
+                    failed_clusters += 1
+                    continue
+                
+                # Create combo_config for standardization
+                combo_config = {}
+                for var in x_variables_lower + [y_variable_lower]:
+                    combo_config[var] = {'standardization': standardization}
+                
+                try:
+                    # Process this cluster
+                    cluster_results = await self._process_combination_for_stack(
+                        cluster_df=cluster_df,
+                        combo_config=combo_config,
+                        models_to_run=models_to_run or [],
+                        custom_configs=custom_configs or {},
+                        x_variables_lower=x_variables_lower,
+                        y_variable_lower=y_variable_lower,
+                        test_size=test_size,
+                        price_column=price_column,
+                        apply_interaction_terms=apply_interaction_terms,
+                        numerical_columns_for_interaction=numerical_columns_for_interaction or [],
+                        run_id=run_id,
+                        training_progress=training_progress,
+                        cluster_info=split_key,
+                        negative_constraints=negative_constraints,
+                        positive_constraints=positive_constraints
+                    )
+                    
+                    if not cluster_results:
+                        error_msg = f"No model results returned for {split_key}"
+                        logger.error(f"❌ {error_msg}")
+                        results[split_key] = {
+                            'model_results': [],
+                            'total_records': len(cluster_df),
+                            'error': error_msg
+                        }
+                        failed_clusters += 1
+                    else:
+                        results[split_key] = {
+                            'model_results': cluster_results,
+                            'total_records': len(cluster_df),
+                            'error': None
+                        }
+                        successful_clusters += 1
+                        logger.info(f"✅ Completed processing {split_key}: {len(cluster_results)} models trained")
+                
+                except Exception as e:
+                    error_msg = f"Error processing {split_key}: {str(e)}"
+                    logger.error(f"❌ {error_msg}")
+                    results[split_key] = {
+                        'model_results': [],
+                        'total_records': len(cluster_df),
+                        'error': error_msg
+                    }
+                    failed_clusters += 1
+            
+            # Summary logging
+            logger.info(f"📊 Processing Summary:")
+            logger.info(f"   ✅ Successful clusters: {successful_clusters}")
+            logger.info(f"   ❌ Failed clusters: {failed_clusters}")
+            logger.info(f"   📈 Total clusters: {len(split_clustered_data)}")
+            
+            if successful_clusters == 0:
+                raise Exception(f"❌ All {len(split_clustered_data)} clusters failed processing. Check logs for details.")
+            
+            # Debug logging for results
+            logger.info(f"🔍 DEBUG: Returning results with {len(results)} entries")
+            for split_key, result in results.items():
+                logger.info(f"   📊 {split_key}:")
+                logger.info(f"      - Keys: {list(result.keys())}")
+                logger.info(f"      - Has error: {'error' in result}")
+                logger.info(f"      - Model results count: {len(result.get('model_results', []))}")
+                logger.info(f"      - Total records: {result.get('total_records', 0)}")
+                if 'error' in result:
+                    logger.info(f"      - Error: {result['error']}")
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error processing split clustered data: {e}")
+            return {}
+
+    async def _process_combination_for_stack(
+        self,
+        cluster_df: pd.DataFrame,
+        combo_config: Dict[str, Dict[str, Any]],
+        models_to_run: List[str],
+        custom_configs: Optional[Dict[str, Any]],
+        x_variables_lower: List[str],
+        y_variable_lower: str,
+        test_size: float,
+        price_column: Optional[str],
+        apply_interaction_terms: bool,
+        numerical_columns_for_interaction: List[str],
+        run_id: str = None,
+        training_progress: Dict = None,
+        cluster_info: str = None,
+        negative_constraints: List[str] = None,
+        positive_constraints: List[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Process a single parameter combination for stack MMM training."""
+        try:
+            logger.info(f"Starting _process_combination_for_stack with {len(cluster_df)} records")
+            logger.info(f"Cluster columns: {list(cluster_df.columns)}")
+            logger.info(f"X variables: {x_variables_lower}")
+            logger.info(f"Y variable: {y_variable_lower}")
+            
+            # Step 1: Split by unique combinations and apply transformations
+            transformed_combinations = []
+            combination_metadata = {}
+            
+            # Get unique combinations in this cluster
+            if 'combination' in cluster_df.columns:
+                unique_combinations = cluster_df['combination'].unique()
+                logger.info(f"Found {len(unique_combinations)} unique combinations")
+            else:
+                # If no combination column, treat entire cluster as one combination
+                unique_combinations = ['default_combination']
+                cluster_df_copy = cluster_df.copy()
+                cluster_df_copy['combination'] = 'default_combination'
+                cluster_df = cluster_df_copy
+            
+            # Apply transformations to each unique combination
+            for combination in unique_combinations:
+                combo_data = cluster_df[cluster_df['combination'] == combination].copy()
+                
+                if len(combo_data) == 0:
+                    continue
+                
+                logger.info(f"Transforming combination '{combination}' with {len(combo_data)} records")
+                
+                # Apply standardization (not MMM transformations)
+                transformed_combo, metadata = self._apply_standardization(
+                    combo_data, x_variables_lower, y_variable_lower, combo_config
+                )
+                
+                transformed_combinations.append(transformed_combo)
+                combination_metadata[combination] = metadata
+            
+            if not transformed_combinations:
+                logger.warning("No valid transformed combinations")
+                return []
+            
+            # Step 2: Merge transformed combinations
+            merged_df = pd.concat(transformed_combinations, ignore_index=True)
+            logger.info(f"Merged {len(transformed_combinations)} combinations into {len(merged_df)} records")
+            logger.info(f"Merged dataframe columns: {list(merged_df.columns)}")
+            
+            # Step 3: Create encoded combination features (always needed for stack modeling)
+            if not apply_interaction_terms:
+                logger.info("Creating encoded combination features")
+                merged_df = self._create_encoded_combination_features(merged_df)
+            
+            # Step 4: Create interaction terms if requested
+            if apply_interaction_terms and numerical_columns_for_interaction:
+                logger.info("Creating interaction terms")
+                merged_df = self._create_interaction_terms_for_stack(
+                    merged_df, numerical_columns_for_interaction
+                )
+
+            # Debug: Log constraint parameters being passed to model training
+            logger.info(f"🔍 DEBUG: Passing constraints to _train_models_for_combination_stack:")
+            logger.info(f"  - negative_constraints: {negative_constraints}")
+            logger.info(f"  - positive_constraints: {positive_constraints}")
+            
+            logger.info(f"About to train models for combination with {len(merged_df)} records")
+            model_results = await self._train_models_for_combination_stack(
+                merged_df, combo_config, models_to_run, custom_configs,
+                x_variables_lower, y_variable_lower, test_size,
+                price_column, combination_metadata,
+                apply_interaction_terms, numerical_columns_for_interaction,
+                run_id, training_progress, cluster_info,
+                negative_constraints, positive_constraints
+            )
+            
+            logger.info(f"Model training completed: {len(model_results)} models trained")
+            
+            # Debug logging for model results
+            logger.info(f"🔍 DEBUG: Model results from _train_models_for_combination_stack")
+            logger.info(f"   - Type: {type(model_results)}")
+            logger.info(f"   - Length: {len(model_results) if model_results else 0}")
+            if model_results:
+                for i, model_result in enumerate(model_results):
+                    logger.info(f"   - Model {i+1}: {model_result.get('model_name', 'Unknown')} with keys {list(model_result.keys())}")
+            
+            return model_results
+            
+        except Exception as e:
+            logger.error(f"Error in _process_combination_for_stack: {e}")
+            return []
     
-    def get_identifier_combinations(self, combinations: List[str]) -> Dict[str, List[str]]:
-
-        available_identifiers = CombinationParser.get_available_identifiers(combinations)
-        
-        identifier_combinations = {}
-        for identifier in available_identifiers:
-            values = CombinationParser.get_identifier_values(combinations, identifier)
-            identifier_combinations[identifier] = values
-        
-        return identifier_combinations
 
 
-# Utility functions for external use
-def create_pool_key(identifiers: Dict[str, str], pool_by_identifiers: List[str]) -> str:
 
-    pool_key_parts = []
-    for identifier in pool_by_identifiers:
-        value = identifiers.get(identifier, 'Unknown')
-        pool_key_parts.append(f"{identifier}_{value}")
+    async def _train_models_for_combination_stack(
+            self,
+            df: pd.DataFrame,
+            combo_config: Dict[str, Dict[str, Any]],
+            models_to_run: List[str],
+            custom_configs: Optional[Dict[str, Any]],
+            x_variables_lower: List[str],
+            y_variable_lower: str,
+            test_size: float,
+            price_column: Optional[str],
+            transformation_metadata: Dict[str, Any],
+            apply_interaction_terms: bool = True,
+            numerical_columns_for_interaction: List[str] = None,
+            run_id: str = None,
+            training_progress: Dict = None,
+            cluster_info: str = None,
+            negative_constraints: List[str] = None,
+            positive_constraints: List[str] = None
+        ) -> List[Dict[str, Any]]:
+            """Train models for a specific parameter combination in stack MMM."""
+            try:
+                # Debug: Log constraint parameters received
+                logger.info(f"🔍 DEBUG: _train_models_for_combination_stack received constraints:")
+                logger.info(f"  - negative_constraints: {negative_constraints}")
+                logger.info(f"  - positive_constraints: {positive_constraints}")
+                
+                logger.info(f"Starting _train_models_for_combination_stack with {len(df)} records")
+                logger.info(f"Dataframe columns: {list(df.columns)}")
+                logger.info(f"X variables: {x_variables_lower}")
+                logger.info(f"Y variable: {y_variable_lower}")
+                
+                import numpy as np
+                from .models import get_models, safe_mape
+                
+
+                
+                # Check for missing values
+                missing_x = df[x_variables_lower].isnull().sum()
+                missing_y = df[y_variable_lower].isnull().sum()
     
-    return "_".join(pool_key_parts)
+                
+                # Check data types
+                x_dtypes = df[x_variables_lower].dtypes
+                y_dtype = df[y_variable_lower].dtype
+
+        
+                feature_columns = []
+                
+                # Add main x_variables first
+                for var in x_variables_lower:
+                    if var in df.columns:
+                        feature_columns.append(var)
+                
+                # Add encoded combination variables (encoded_combination_*)
+                for col in df.columns:
+                    if col.startswith('encoded_combination_') and col not in feature_columns:
+                        feature_columns.append(col)
+                
+                # Add interaction variables (ending with x_variable names) ONLY if interaction terms are enabled
+                if apply_interaction_terms:
+                    for var in x_variables_lower:
+                        for col in df.columns:
+                            if col.endswith(f'_x_{var}') and col not in feature_columns:
+                                feature_columns.append(col)
+                
+                # Sort to ensure consistent order
+                feature_columns.sort()
+                
+                # Log feature information for debugging
+                logger.info(f"   - Total features for modeling: {len(feature_columns)}")
+                logger.info(f"   - Main x_variables: {x_variables_lower}")
+                encoded_features = [col for col in feature_columns if col.startswith('encoded_combination_')]
+                interaction_features = [col for col in feature_columns if any(col.endswith(f'_x_{var}') for var in x_variables_lower)]
+                logger.info(f"   - Encoded combination features: {encoded_features}")
+                logger.info(f"   - Interaction features: {interaction_features}")
+                logger.info(f"   - All features: {feature_columns}")
+                
+                # Clean data - remove rows with missing values for ALL features
+                all_columns = feature_columns + [y_variable_lower]
+                # Preserve combination column if it exists
+                if 'combination' in df.columns:
+                    all_columns.append('combination')
+                df_clean = df[all_columns].dropna()
+                
+                if df_clean.empty:
+                    return []
+                
+                # Convert to numeric, coercing errors to NaN
+                for col in feature_columns:
+                    df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
+                df_clean[y_variable_lower] = pd.to_numeric(df_clean[y_variable_lower], errors='coerce')
+                
+                # Remove rows with NaN after conversion
+                df_clean = df_clean.dropna()
+                
+                if df_clean.empty:
+                    return []
+                
+                # Prepare data for modeling using ALL features
+                X = df_clean[feature_columns].values.astype(np.float64)
+                y = df_clean[y_variable_lower].values.astype(np.float64)
+                
+                # Store original data statistics for elasticity calculation (only for main x_variables)
+                X_original = df_clean[x_variables_lower]
+                y_original = df_clean[y_variable_lower]
+                
+
+                
+                # Final validation before train/test split
+                if len(X) < 10:  # Need minimum samples for meaningful training
+                    logger.error(f"❌ Insufficient data for stack MMM training: {len(X)} samples")
+                    return []
+                
+                # Train/test split - use combination-aware split if combination column exists
+                if 'combination' in df_clean.columns:
+                    logger.info("Using combination-aware train/test split")
+                    train_indices, test_indices = self._create_combination_aware_train_test_split(
+                        df_clean, test_size=test_size, random_state=42
+                    )
+                    X_train = X[train_indices]
+                    X_test = X[test_indices]
+                    y_train = y[train_indices]
+                    y_test = y[test_indices]
+                else:
+                    logger.info("Using standard train/test split (no combination column found)")
+                    X_train, X_test, y_train, y_test = train_test_split(
+                        X, y, test_size=test_size, random_state=42, shuffle=True
+                    )
+                
+                # Convert boolean columns to numeric (encoded combination variables)
+                logger.info("Converting boolean columns to numeric for validation")
+                # Note: feature_columns does not include 'combination' column, so it's automatically excluded
+                X_train_df = pd.DataFrame(X_train, columns=feature_columns)
+                X_test_df = pd.DataFrame(X_test, columns=feature_columns)
+                
+                # Convert boolean columns to numeric
+                for col in X_train_df.columns:
+                    if X_train_df[col].dtype == 'bool':
+                        X_train_df[col] = X_train_df[col].astype(int)
+                        X_test_df[col] = X_test_df[col].astype(int)
+                        logger.info(f"Converted boolean column '{col}' to numeric")
+                
+                # Convert back to numpy arrays with explicit float64 dtype
+                X_train = X_train_df.values.astype(np.float64)
+                X_test = X_test_df.values.astype(np.float64)
+                y_train = y_train.astype(np.float64)
+                y_test = y_test.astype(np.float64)
+                
+                # Validate split data
+                logger.info(f"X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
+                logger.info(f"X_train dtype: {X_train.dtype}, y_train dtype: {y_train.dtype}")
+                
+                # Add constraints to custom_configs for constrained models
+                if negative_constraints or positive_constraints:
+                    logger.info(f"🔍 DEBUG: Adding constraints to custom_configs:")
+                    logger.info(f"  - negative_constraints: {negative_constraints}")
+                    logger.info(f"  - positive_constraints: {positive_constraints}")
+                    
+                    # Convert constraints to the format expected by the models
+                    variable_constraints = []
+                    if negative_constraints:
+                        for var in negative_constraints:
+                            variable_constraints.append({
+                                'variable_name': var,
+                                'constraint_type': 'negative'
+                            })
+                    if positive_constraints:
+                        for var in positive_constraints:
+                            variable_constraints.append({
+                                'variable_name': var,
+                                'constraint_type': 'positive'
+                            })
+                    
+                    # Add constraints to custom_configs for constrained models
+                    for model_name, config in custom_configs.items():
+                        if 'Constrained' in model_name:
+                            config['variable_constraints'] = variable_constraints
+                            config['use_constraints'] = True
+                            logger.info(f"🔍 DEBUG: Added constraints to {model_name}: {variable_constraints}")
+                
+                # Get models
+                all_models = get_models()
+                logger.info(f"Available models: {list(all_models.keys())}")
+                
+                # Filter models if specified
+                if models_to_run:
+                    models_dict = {name: model for name, model in all_models.items() if name in models_to_run}
+                    logger.info(f"Filtered models to run: {list(models_dict.keys())}")
+                else:
+                    models_dict = all_models
+                    logger.info(f"Using all available models: {list(models_dict.keys())}")
+                
+                # Apply custom configurations (same approach as individual MMM training)
+                if custom_configs:
+                    for model_name, config in custom_configs.items():
+                        if model_name in models_dict:
+                            parameters = config.get('parameters', {})
+                            tuning_mode = config.get('tuning_mode', 'manual')
+                            
+                            # Handle automatic tuning with CV models (same as individual MMM)
+                            if model_name == "Ridge Regression" and tuning_mode == 'auto':
+                                # Use RidgeCV for automatic alpha tuning with reasonable alpha range
+                                from sklearn.linear_model import RidgeCV
+                                alphas = np.logspace(-2, 3, 50)  # 0.0001 to 10000 (reasonable range)
+                                logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values)")
+                                models_dict[model_name] = RidgeCV(alphas=alphas, cv=5)  # Default CV folds
+                                
+                            elif model_name == "Lasso Regression" and tuning_mode == 'auto':
+                                # Use LassoCV for automatic alpha tuning with reasonable alpha range
+                                from sklearn.linear_model import LassoCV
+                                alphas = np.logspace(-3, 2, 50)  # 0.0001 to 10 (reasonable range for Lasso)
+                                logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values)")
+                                models_dict[model_name] = LassoCV(alphas=alphas, cv=5, random_state=42)
+                                
+                            elif model_name == "ElasticNet Regression" and tuning_mode == 'auto':
+                                # Use ElasticNetCV for automatic alpha and l1_ratio tuning with reasonable ranges
+                                from sklearn.linear_model import ElasticNetCV
+                                alphas = np.logspace(-3, 2, 50)  # 0.0001 to 10 (reasonable range for ElasticNet)
+                                l1_ratios = np.linspace(0.1, 0.9, 9)  # Default l1_ratio range
+                                logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values), l1_ratio range: {l1_ratios[0]:.2f} to {l1_ratios[-1]:.2f} ({len(l1_ratios)} values)")
+                                models_dict[model_name] = ElasticNetCV(
+                                    alphas=alphas, l1_ratio=l1_ratios, cv=5, random_state=42
+                                )
+                            
+                            # Handle constrained models (extract constraints from parameters, not variable_constraints)
+                            elif model_name == "Constrained Ridge":
+                                # Check if we have interaction terms (stack modeling) or just base features (individual modeling)
+                                has_interaction_terms = any('_x_' in col for col in feature_columns)
+                                
+                                if has_interaction_terms:
+                                    # Stack modeling: use StackConstrainedRidge for interaction terms
+                                    from .models import StackConstrainedRidge
+                                    logger.info(f"🔍 Using StackConstrainedRidge for stack modeling with interaction terms")
+                                else:
+                                    # Individual modeling: use CustomConstrainedRidge for base features only
+                                    from .models import CustomConstrainedRidge
+                                    logger.info(f"🔍 Using CustomConstrainedRidge for individual modeling with base features only")
+                                
+                                # Extract constraints from parameters object - handle both old and new formats
+                                variable_constraints = parameters.get('variable_constraints', [])
+                                
+                                # Convert new format to old format for compatibility
+                                negative_constraints = []
+                                positive_constraints = []
+                                
+                                if variable_constraints:
+                                    for constraint in variable_constraints:
+                                        if constraint.get('constraint_type') == 'negative':
+                                            negative_constraints.append(constraint.get('variable_name'))
+                                        elif constraint.get('constraint_type') == 'positive':
+                                            positive_constraints.append(constraint.get('variable_name'))
+                                else:
+                                    # Fallback to old format if new format not available
+                                    negative_constraints = parameters.get('negative_constraints', [])
+                                    positive_constraints = parameters.get('positive_constraints', [])
+                                
+                                # Debug logging for constraints
+                                logger.info(f"🔍 Constrained Model - Parameters: {parameters}")
+                                logger.info(f"🔍 Constrained Model - Variable constraints: {variable_constraints}")
+                                logger.info(f"🔍 Constrained Model - Negative constraints: {negative_constraints}")
+                                logger.info(f"🔍 Constrained Model - Positive constraints: {positive_constraints}")
+                                
+                                if has_interaction_terms:
+                                    models_dict[model_name] = StackConstrainedRidge(
+                                        l2_penalty=parameters.get('l2_penalty', 0.1),
+                                        learning_rate=parameters.get('learning_rate', 0.001),
+                                        iterations=parameters.get('iterations', 10000),
+                                        adam=parameters.get('adam', False),
+                                        negative_constraints=negative_constraints,
+                                        positive_constraints=positive_constraints
+                                    )
+                                else:
+                                    models_dict[model_name] = CustomConstrainedRidge(
+                                        l2_penalty=parameters.get('l2_penalty', 0.1),
+                                        learning_rate=parameters.get('learning_rate', 0.001),
+                                        iterations=parameters.get('iterations', 10000),
+                                        adam=parameters.get('adam', False),
+                                        negative_constraints=negative_constraints,
+                                        positive_constraints=positive_constraints
+                                    )
+                            
+                            elif model_name == "Constrained Linear Regression":
+                                # Check if we have interaction terms (stack modeling) or just base features (individual modeling)
+                                has_interaction_terms = any('_x_' in col for col in feature_columns)
+                                
+                                if has_interaction_terms:
+                                    # Stack modeling: use StackConstrainedLinearRegression for interaction terms
+                                    from .models import StackConstrainedLinearRegression
+                                    logger.info(f"🔍 Using StackConstrainedLinearRegression for stack modeling with interaction terms")
+                                else:
+                                    # Individual modeling: use ConstrainedLinearRegression for base features only
+                                    from .models import ConstrainedLinearRegression
+                                    logger.info(f"🔍 Using ConstrainedLinearRegression for individual modeling with base features only")
+                                
+                                # Extract constraints from parameters object - handle both old and new formats
+                                variable_constraints = parameters.get('variable_constraints', [])
+                                
+                                # Convert new format to old format for compatibility
+                                negative_constraints = []
+                                positive_constraints = []
+                                
+                                if variable_constraints:
+                                    for constraint in variable_constraints:
+                                        if constraint.get('constraint_type') == 'negative':
+                                            negative_constraints.append(constraint.get('variable_name'))
+                                        elif constraint.get('constraint_type') == 'positive':
+                                            positive_constraints.append(constraint.get('variable_name'))
+                                else:
+                                    # Fallback to old format if new format not available
+                                    negative_constraints = parameters.get('negative_constraints', [])
+                                    positive_constraints = parameters.get('positive_constraints', [])
+
+                                
+                                if has_interaction_terms:
+                                    models_dict[model_name] = StackConstrainedLinearRegression(
+                                        learning_rate=parameters.get('learning_rate', 0.001),
+                                        iterations=parameters.get('iterations', 10000),
+                                        adam=parameters.get('adam', False),
+                                        negative_constraints=negative_constraints,
+                                        positive_constraints=positive_constraints
+                                    )
+                                else:
+                                    models_dict[model_name] = ConstrainedLinearRegression(
+                                        learning_rate=parameters.get('learning_rate', 0.001),
+                                        iterations=parameters.get('iterations', 10000),
+                                        adam=parameters.get('adam', False),
+                                        negative_constraints=negative_constraints,
+                                        positive_constraints=positive_constraints
+                                    )
+                            
+                            # Handle other models with manual parameter tuning
+                            elif tuning_mode == 'manual' and parameters:
+                                # Apply manual parameters to existing model instances
+                                try:
+                                    if hasattr(models_dict[model_name], 'set_params'):
+                                        models_dict[model_name].set_params(**parameters)
+                                        logger.info(f"🔧 {model_name} - Applied manual parameters: {parameters}")
+                                except Exception as e:
+                                    logger.warning(f"Failed to apply parameters to {model_name}: {e}")
+                                    # Keep original model if parameter application fails
+                
+                # Train models
+                model_results = []
+                logger.info(f"Starting to train {len(models_dict)} models")
+                
+                for model_idx, (model_name, model) in enumerate(models_dict.items()):
+                    logger.info(f"Training model: {model_name}")
+                    
+                    # Update progress for each model training
+                    if run_id:
+                        progress_dict = get_training_progress()
+                        if run_id in progress_dict:
+                            cluster_display = cluster_info if cluster_info else "Unknown"
+                            progress_dict[run_id]["current_step"] = f"Training {model_name} on cluster: {cluster_display}"
+                            progress_dict[run_id]["status"] = f"Stack Modeling: {model_name} ({model_idx + 1}/{len(models_dict)})"
+                            logger.info(f"📊 Progress: Training {model_name} on cluster: {cluster_display} ({model_idx + 1}/{len(models_dict)})")
+                        else:
+                            logger.warning(f"❌ Run ID {run_id} not found in progress tracking")
+                    
+                    try:
+                        # Train model
+                        if hasattr(model, 'fit'):
+                            if model_name in ["Custom Constrained Ridge", "Constrained Linear Regression", "Constrained Ridge"]:
+                                model.fit(X_train, y_train, feature_names=feature_columns)
+                            else:
+                                model.fit(X_train, y_train)
+                            logger.info(f"Successfully trained {model_name}")
+                        else:
+                            logger.error(f"Model {model_name} does not have fit method")
+                            continue
+                        
+                        # Make predictions
+                        y_train_pred = model.predict(X_train)
+                        y_test_pred = model.predict(X_test)
+                        
+                        # Validate predictions
+                        if np.isnan(y_train_pred).any() or np.isnan(y_test_pred).any():
+                            logger.error(f"❌ NaN values in predictions for {model_name}")
+                            continue
+                        
+                        if np.isinf(y_train_pred).any() or np.isinf(y_test_pred).any():
+                            logger.error(f"❌ Infinite values in predictions for {model_name}")
+                            continue
+                        
+                        # Calculate core metrics only
+                        mape_train = safe_mape(y_train, y_train_pred)
+                        mape_test = safe_mape(y_test, y_test_pred)
+                        r2_train = r2_score(y_train, y_train_pred)
+                        r2_test = r2_score(y_test, y_test_pred)
+                        
+                        # Calculate MSE
+                        mse_train = np.mean((y_train - y_train_pred) ** 2)
+                        mse_test = np.mean((y_test - y_test_pred) ** 2)
+                        
+                        # Calculate AIC and BIC
+                        n_samples = len(y_train)
+                        n_params = len(feature_columns) + 1  # Include interaction terms and encoded combination columns
+                        aic = n_samples * np.log(mse_test) + 2 * n_params
+                        bic = n_samples * np.log(mse_test) + n_params * np.log(n_samples)
+                        
+                        # Get basic coefficients for all features (x_variables + interaction terms + encoded combination columns)
+                        coefficients = {}
+                        intercept = model.intercept_ if hasattr(model, 'intercept_') else 0.0
+                        
+                        if hasattr(model, 'coef_'):
+                            for i, var in enumerate(feature_columns):
+                                coefficients[f"Beta_{var}"] = float(model.coef_[i])
+                        
+                        # Calculate combination-specific betas
+                        logger.info(f"Calculating combination betas for {model_name}")
+                        
+                        # Get unique combinations from the data
+                        unique_combinations = []
+                        if 'combination' in df.columns:
+                            unique_combinations = df['combination'].unique().tolist()
+                            logger.info(f"Found combinations: {unique_combinations}")
+                        else:
+                            logger.warning("No 'combination' column found in dataframe")
+                        
+                        combination_betas = {}
+                        for combination in unique_combinations:
+                            # Create a temporary model result with the required structure
+                            temp_model_result = {
+                                "model_name": model_name,
+                                "coefficients": coefficients,
+                                "intercept": float(intercept)
+                            }
+                            
+                        
+                        # Store enhanced model result
+                        model_result = {
+                            "model_name": model_name,
+                            "mape_train": float(mape_train),
+                            "mape_test": float(mape_test),
+                            "r2_train": float(r2_train),
+                            "r2_test": float(r2_test),
+                            "mse_train": float(mse_train),
+                            "mse_test": float(mse_test),
+                            "coefficients": coefficients,
+                            "intercept": float(intercept),
+                            "aic": float(aic),
+                            "bic": float(bic),
+                            "n_parameters": n_params,
+                            "train_size": len(y_train),
+                            "test_size": len(y_test),
+                            # Auto-tuning results (not implemented in stack models, set to None)
+                            "best_alpha": None,
+                            "best_cv_score": None,
+                            "best_l1_ratio": None
+                        }
+                        
+                        model_results.append(model_result)
+                        logger.info(f"Successfully added model result for {model_name}")
+                        
+                        # Update progress when model completes
+                        if run_id:
+                            progress_dict = get_training_progress()
+                            if run_id in progress_dict:
+                                cluster_display = cluster_info if cluster_info else "Unknown"
+                                progress_dict[run_id]["current_step"] = f"Completed {model_name} on cluster: {cluster_display}"
+                                progress_dict[run_id]["status"] = f"Stack Modeling: Completed {model_name} ({model_idx + 1}/{len(models_dict)})"
+                                logger.info(f"📊 Progress: Completed {model_name} on cluster: {cluster_display} ({model_idx + 1}/{len(models_dict)})")
+                
+                    except Exception as e:
+                        logger.error(f"Error training model {model_name}: {e}")
+                        import traceback
+                        logger.error(f"Traceback: {traceback.format_exc()}")
+                        continue
+                
+                return model_results
+                
+            except Exception as e:
+                logger.error(f"Error in _train_models_for_combination_stack: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                return []
+
+    def _create_combination_aware_train_test_split(
+        self, 
+        df: pd.DataFrame, 
+        test_size: float = 0.2, 
+        random_state: int = 42
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Create train/test split that ensures combinations are properly distributed.
+        This prevents data leakage by ensuring combinations don't appear in both train and test.
+        """
+        try:
+            if 'combination' not in df.columns:
+                # Fallback to standard split if no combination column
+                from sklearn.model_selection import train_test_split
+                indices = np.arange(len(df))
+                train_indices, test_indices = train_test_split(
+                    indices, test_size=test_size, random_state=random_state
+                )
+                return train_indices, test_indices
+            
+            # Get unique combinations
+            unique_combinations = df['combination'].unique()
+            logger.info(f"Creating combination-aware split for {len(unique_combinations)} combinations")
+            
+            # Split combinations into train/test
+            from sklearn.model_selection import train_test_split
+            train_combinations, test_combinations = train_test_split(
+                unique_combinations, 
+                test_size=test_size, 
+                random_state=random_state
+            )
+            
+            # Get indices for train and test combinations
+            train_mask = df['combination'].isin(train_combinations)
+            test_mask = df['combination'].isin(test_combinations)
+            
+            train_indices = df[train_mask].index.values
+            test_indices = df[test_mask].index.values
+            
+            logger.info(f"Train: {len(train_indices)} samples from {len(train_combinations)} combinations")
+            logger.info(f"Test: {len(test_indices)} samples from {len(test_combinations)} combinations")
+            
+            return train_indices, test_indices
+            
+        except Exception as e:
+            logger.error(f"Error in combination-aware train/test split: {e}")
+            # Fallback to standard split
+            from sklearn.model_selection import train_test_split
+            indices = np.arange(len(df))
+            train_indices, test_indices = train_test_split(
+                indices, test_size=test_size, random_state=random_state
+            )
+            return train_indices, test_indices
+    
+    def _create_interaction_terms_for_stack(
+        self, 
+        df: pd.DataFrame, 
+        numerical_columns_for_interaction: List[str]
+    ) -> pd.DataFrame:
+        """Create interaction terms for stack MMM data."""
+        try:
+            enhanced_df = df.copy()
+            
+            # Check if combination column exists and has more than 1 unique value
+            if 'combination' not in df.columns:
+                logger.warning("No 'combination' column found, skipping interaction terms")
+                return enhanced_df
+            
+            combination_unique_values = df['combination'].nunique()
+            
+            if combination_unique_values <= 1:
+                logger.info(f"Only {combination_unique_values} unique combination(s), skipping interaction terms")
+                return enhanced_df
+            
+            # One-hot encode the combination column
+            combination_dummies = pd.get_dummies(df['combination'], prefix="encoded_combination", drop_first=False)
+            
+            # Add one-hot encoded combination columns to the dataframe
+            for dummy_col in combination_dummies.columns:
+                enhanced_df[dummy_col] = combination_dummies[dummy_col]
+            
+            # Create interaction terms
+            interaction_columns_created = []
+            encoded_combination_columns = [col for col in enhanced_df.columns if col.startswith("encoded_combination_")]
+            
+            # Create interactions between encoded combinations and numerical columns
+            for encoded_combination_col in encoded_combination_columns:
+                for numerical_col in numerical_columns_for_interaction:
+                    if numerical_col in enhanced_df.columns:
+                        interaction_col_name = f"{encoded_combination_col}_x_{numerical_col}"
+                        enhanced_df[interaction_col_name] = enhanced_df[encoded_combination_col] * enhanced_df[numerical_col]
+                        interaction_columns_created.append(interaction_col_name)
+            
+            logger.info(f"Created {len(interaction_columns_created)} interaction terms")
+            return enhanced_df
+            
+        except Exception as e:
+            logger.error(f"Error creating interaction terms: {e}")
+            return df
+    
 
 
-def validate_pooling_request(
-    combinations: List[str],
-    pool_by_identifiers: List[str],
-    x_variables: List[str],
-    y_variable: str
-) -> Tuple[bool, str]:
-
-    try:
-        if not combinations:
-            return False, "No combinations provided"
-        
-        if not pool_by_identifiers:
-            return False, "No pooling identifiers provided"
-        
-        if not x_variables:
-            return False, "No x_variables provided"
-        
-        if not y_variable:
-            return False, "No y_variable provided"
-        
-        # Check if pooling identifiers are available (case-insensitive)
-        available_identifiers = CombinationParser.get_available_identifiers(combinations)
-        available_identifiers_lower = [id.lower() for id in available_identifiers]
-        invalid_identifiers = [id for id in pool_by_identifiers if id.lower() not in available_identifiers_lower]
-        
-        if invalid_identifiers:
-            return False, f"Invalid pooling identifiers: {invalid_identifiers}. Available: {available_identifiers}"
-        
-        return True, ""
-        
-    except Exception as e:
-        return False, f"Validation error: {str(e)}"
+    def _create_encoded_combination_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create encoded combination features for stack MMM data."""
+        try:
+            logger.info("Creating encoded combination features")
+            
+            # Check if combination column exists
+            if 'combination' not in df.columns:
+                logger.warning("No 'combination' column found, skipping encoded combination features")
+                return df
+            
+            # Create a copy to avoid modifying original
+            enhanced_df = df.copy()
+            
+            # Get unique combinations
+            unique_combinations = df['combination'].unique()
+            logger.info(f"Found {len(unique_combinations)} unique combinations: {unique_combinations}")
+            
+            # Check if we have enough combinations
+            combination_unique_values = len(unique_combinations)
+            if combination_unique_values <= 1:
+                logger.info(f"Only {combination_unique_values} unique combination(s), skipping encoded combination features")
+                return enhanced_df
+            
+            # One-hot encode the combination column
+            combination_dummies = pd.get_dummies(df['combination'], prefix="encoded_combination", drop_first=False)
+            
+            # Add one-hot encoded combination columns to the dataframe
+            for dummy_col in combination_dummies.columns:
+                enhanced_df[dummy_col] = combination_dummies[dummy_col]
+            
+            logger.info(f"Created {len(combination_dummies.columns)} encoded combination features: {list(combination_dummies.columns)}")
+            return enhanced_df
+            
+        except Exception as e:
+            logger.error(f"Error creating encoded combination features: {e}")
+            return df

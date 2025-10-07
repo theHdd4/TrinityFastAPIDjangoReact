@@ -777,11 +777,31 @@ async def filter_models_by_variable_and_metrics_with_filters(filter_req: ModelFi
         # Handle special case for "average" method which uses "avg" in column names
         method_suffix = "avg" if method_type.lower() == "average" else method_type.lower()
         
-        for col in df.columns:
-            if col.lower() == f"{filter_req.variable.lower()}_{method_suffix}":
-                method_column = col
-                logger.info(f"Found {method_type} column: '{col}'")
-                break
+        # For ROI, try multiple column name patterns
+        if method_type.lower() == "roi":
+            roi_patterns = [
+                f"{filter_req.variable.lower()}_{method_suffix}",
+                f"{filter_req.variable.upper()}_ROI",
+                f"ROI_{filter_req.variable}",
+                f"roi_{filter_req.variable}",
+                f"{filter_req.variable}_CPRP_VALUE",
+                f"self_{method_suffix}"
+            ]
+            
+            for pattern in roi_patterns:
+                for col in df.columns:
+                    if col.lower() == pattern.lower():
+                        method_column = col
+                        logger.info(f"Found {method_type} column: '{col}' using pattern: '{pattern}'")
+                        break
+                if method_column:
+                    break
+        else:
+            for col in df.columns:
+                if col.lower() == f"{filter_req.variable.lower()}_{method_suffix}":
+                    method_column = col
+                    logger.info(f"Found {method_type} column: '{col}'")
+                    break
         
         if not method_column:
             expected_column = f"{filter_req.variable}_{method_suffix}"
@@ -1029,6 +1049,8 @@ async def filter_models_by_variable_and_metrics_with_filters(filter_req: ModelFi
                 model_data["self_beta"] = float(row["selected_variable_value"])
             elif method_type == "average":
                 model_data["self_avg"] = float(row["selected_variable_value"])
+            elif method_type == "roi":
+                model_data["self_roi"] = float(row["selected_variable_value"])
             
             result.append(FilteredModel(**model_data))
         
@@ -1097,11 +1119,31 @@ async def filter_models_by_variable_and_metrics(filter_req: ModelFilterRequest):
         # Handle special case for "average" method which uses "avg" in column names
         method_suffix = "avg" if method_type.lower() == "average" else method_type.lower()
         
-        for col in df.columns:
-            if col.lower() == f"{filter_req.variable.lower()}_{method_suffix}":
-                method_column = col
-                logger.info(f"Found {method_type} column: '{col}'")
-                break
+        # For ROI, try multiple column name patterns
+        if method_type.lower() == "roi":
+            roi_patterns = [
+                f"{filter_req.variable.lower()}_{method_suffix}",
+                f"{filter_req.variable.upper()}_ROI",
+                f"ROI_{filter_req.variable}",
+                f"roi_{filter_req.variable}",
+                f"{filter_req.variable}_CPRP_VALUE",
+                f"self_{method_suffix}"
+            ]
+            
+            for pattern in roi_patterns:
+                for col in df.columns:
+                    if col.lower() == pattern.lower():
+                        method_column = col
+                        logger.info(f"Found {method_type} column: '{col}' using pattern: '{pattern}'")
+                        break
+                if method_column:
+                    break
+        else:
+            for col in df.columns:
+                if col.lower() == f"{filter_req.variable.lower()}_{method_suffix}":
+                    method_column = col
+                    logger.info(f"Found {method_type} column: '{col}'")
+                    break
         
         if not method_column:
             expected_column = f"{filter_req.variable}_{method_suffix}"
@@ -1306,6 +1348,8 @@ async def filter_models_by_variable_and_metrics(filter_req: ModelFilterRequest):
                 model_data["self_beta"] = float(row["selected_variable_value"])
             elif method_type == "average":
                 model_data["self_avg"] = float(row["selected_variable_value"])
+            elif method_type == "roi":
+                model_data["self_roi"] = float(row["selected_variable_value"])
             
             result.append(FilteredModel(**model_data))
         
@@ -2408,6 +2452,7 @@ async def calculate_ensemble_actual_vs_predicted(
             if df.empty:
                 raise HTTPException(status_code=404, detail=f"No data found for combination {combination_id}")
             
+            df.columns = df.columns.str.lower()
             # Get the target variable (Y variable)
             y_variable = None
             for col in df.columns:
@@ -2584,6 +2629,7 @@ async def calculate_ensemble_yoy(
             if df.empty:
                 raise HTTPException(status_code=404, detail=f"No data found for combination {combination_id}")
             
+            df.columns = df.columns.str.lower()
             # Get ensemble intercept and betas
             intercept = weighted_metrics.get("intercept", 0)
             
@@ -2906,6 +2952,8 @@ async def calculate_actual_vs_predicted(
                 except:
                     df = pd.read_feather(io.BytesIO(file_bytes))
             
+
+            df.columns = df.columns.str.lower()
             # Get coefficients and intercept
             intercept = model_coeffs.get("intercept", 0)
             coefficients = model_coeffs.get("coefficients", {})
@@ -2913,6 +2961,13 @@ async def calculate_actual_vs_predicted(
             y_variable = model_coeffs.get("y_variable", "")
             
             # Calculate predicted values
+            logger.info(f"Y variable: {y_variable}")
+            logger.info(f"X variables: {x_variables}")
+            logger.info(f"Coefficients: {coefficients}")
+            logger.info(f"Intercept: {intercept}")
+            logger.info(f"df: {df.columns}")
+            logger.info(f"df: {df.shape}")
+    
             actual_values = df[y_variable].tolist() if y_variable in df.columns else []
             predicted_values = []
             
@@ -2926,10 +2981,11 @@ async def calculate_actual_vs_predicted(
                         x_value = row[x_var]
                         beta_value = coefficients[beta_key]
                         contribution = beta_value * x_value
+                        logger.info(f"Contribution: {contribution}")
                         predicted_value += contribution
                 
                 predicted_values.append(predicted_value)
-            
+            logger.info(f"Predicted values: {predicted_values}")
             # Filter out extreme outliers that might be causing axis scaling issues
             if len(predicted_values) > 0:
                 import numpy as np
@@ -2948,12 +3004,14 @@ async def calculate_actual_vs_predicted(
                     if (predicted <= pred_99th and predicted >= pred_1st and 
                         actual <= actual_99th and actual >= actual_1st):
                         filtered_data.append((actual, predicted))
-                
+
+                logger.info(f"Filtered data: {filtered_data}")
                 if len(filtered_data) < len(actual_values):
                     logger.warning(f"⚠️ Filtered out {len(actual_values) - len(filtered_data)} extreme outliers")
                     actual_values = [item[0] for item in filtered_data]
                     predicted_values = [item[1] for item in filtered_data]
-            
+            logger.info(f"Actual values: {actual_values}")
+            logger.info(f"Predicted values: {predicted_values}")
             # Calculate performance metrics
             if len(actual_values) > 0 and len(predicted_values) > 0:
                 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -3070,6 +3128,7 @@ async def calculate_yoy(
                 except:
                     df = pd.read_feather(io.BytesIO(file_bytes))
             
+            df.columns = df.columns.str.lower()
             # Get coefficients and intercept
             intercept = model_coeffs.get("intercept", 0)
             coefficients = model_coeffs.get("coefficients", {})

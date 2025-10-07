@@ -94,6 +94,7 @@ class FilteredModel(BaseModel):
     # Add dynamic fields for different methods
     self_beta: Optional[float] = None
     self_avg: Optional[float] = None
+    self_roi: Optional[float] = None
 
 # ---------- Weighted ensemble (blend) ----------
 

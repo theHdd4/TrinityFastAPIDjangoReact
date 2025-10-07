@@ -212,20 +212,19 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
   });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {/* Part 1: Sales Value Conversion */}
       <div className="space-y-3">
-        <Label className="text-sm font-medium">ROI Specific Inputs</Label>
         <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
           {/* Header Text */}
-          <div className="mb-4">
+          <div className="mb-2">
             <p className="text-sm font-medium text-gray-700">
-              "<span className="text-orange-500 font-semibold">{yVariable || 'y_variable'}</span>" is converted to monetary metric by multiplying with:
+              <span className="text-orange-500 font-semibold">(1/3)</span> "<span className="text-orange-500 font-semibold">{yVariable || 'y_variable'}</span>" is converted to monetary metric by multiplying with:
             </p>
           </div>
 
           {/* Top Row: Dropdowns and Checkboxes */}
-          <div className="flex gap-4 items-center flex-wrap">
+          <div className="flex gap-2 items-center flex-wrap">
             {/* Price Column Dropdown or Manual Input */}
             {!roiConfig.manualPriceEntry ? (
               <div className="flex-shrink-0">
@@ -300,7 +299,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                   onCheckedChange={(checked) => handlePerCombinationManualPriceToggle(!!checked)}
                 />
                 <Label htmlFor="per-combination-manual-price" className="text-sm text-gray-600 cursor-pointer">
-                  Per combination input
+                  Give input for each combination
                 </Label>
               </div>
             )}
@@ -308,7 +307,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
 
           {/* Per-Combination Manual Inputs - Separate row when enabled */}
           {roiConfig.manualPriceEntry && roiConfig.perCombinationManualPrice && (
-            <div className="mt-4 space-y-3">
+            <div className="mt-2 space-y-3">
               {availableCombinations.map((combination, index) => (
                 <div key={index} className="flex items-center gap-3">
                   <div 
@@ -348,9 +347,9 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
          <div className="space-y-3 animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
            <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200 transform transition-all duration-300 hover:shadow-md">
              {/* Header Text */}
-             <div className="mb-3">
+             <div className="mb-2">
                <p className="text-sm font-medium text-gray-700">
-                 Determine variables to measure ROI for:
+                 <span className="text-orange-500 font-semibold">(2/3)</span> Determine variables to measure ROI for:
                </p>
              </div>
 
@@ -388,7 +387,7 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                              e.stopPropagation();
                              handleRemoveVariable(index);
                            }}
-                           className="h-6 w-6 flex items-center justify-center rounded border border-orange-300 bg-orange-50 hover:bg-orange-100 text-black transition-all duration-200 hover:scale-110 active:scale-95 flex-shrink-0 mt-1"
+                           className="h-6 w-6 flex items-center justify-center text-black transition-all duration-200 hover:scale-110 active:scale-95 flex-shrink-0 mt-1"
                            title="Remove variable"
                          >
                            <span className="text-sm font-bold leading-none">×</span>
@@ -403,10 +402,10 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
               <div className="flex justify-start items-center gap-2">
                 <button
                   onClick={handleAddVariable}
-                  className="h-8 px-3 flex items-center gap-1 rounded border border-orange-300 bg-orange-300 hover:bg-orange-400 text-white transition-all duration-200 hover:scale-105 active:scale-95 hover:shadow-md text-xs font-medium whitespace-nowrap"
+                  className="h-8 w-8 flex items-center justify-center rounded border border-orange-300 bg-orange-300 hover:bg-orange-400 text-white transition-all duration-200 hover:scale-105 active:scale-95 hover:shadow-md"
+                  title="Add Variable"
                 >
-                  <span className="text-sm leading-none font-bold transition-transform duration-200 group-hover:rotate-90">+</span>
-                  Add Variable
+                  <span className="text-sm leading-none font-bold">+</span>
                 </button>
                 
                 {/* Minus button to show/hide remove buttons */}
@@ -415,10 +414,10 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
                     e.stopPropagation();
                     setShowRemoveButtons(!showRemoveButtons);
                   }}
-                  className="h-8 w-8 flex items-center justify-center rounded border border-gray-300 bg-gray-50 hover:bg-gray-100 text-gray-600 transition-all duration-200 hover:scale-105 active:scale-95"
+                  className="h-8 w-8 flex items-center justify-center rounded border border-orange-300 bg-orange-300 hover:bg-orange-400 text-white transition-all duration-200 hover:scale-105 active:scale-95 hover:shadow-md"
                   title={showRemoveButtons ? "Hide remove buttons" : "Show remove buttons"}
                 >
-                  <span className="text-sm font-bold leading-none">−</span>
+                  <span className="text-sm leading-none font-bold">−</span>
                 </button>
               </div>
             </div>
@@ -431,9 +430,9 @@ const ROIConfiguration: React.FC<ROIConfigurationProps> = ({
          <div className="space-y-3 animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
           <div className="p-4 rounded-lg shadow-sm bg-white border border-gray-200">
             {/* Header Text and Per Combination Cost Toggle - Horizontal alignment */}
-            <div className="mb-4 flex items-center justify-between">
+            <div className="mb-2 flex items-center justify-between">
               <p className="text-sm font-medium text-gray-700">
-                For each selected variables enter cost per unit:
+                <span className="text-orange-500 font-semibold">(3/3)</span> For each selected variables enter cost per unit:
               </p>
               <div className="flex items-center space-x-2">
                 <Checkbox

@@ -211,6 +211,11 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                      ensemble.weighted_metrics[`Weighted_Avg_${variable}`] || 
                      ensemble.weighted_metrics[`Avg_${variable}`] ||
                      ensemble.weighted_metrics[variable];
+            } else if (data.selectedMethod === 'roi') {
+              value = ensemble.weighted_metrics[`${variable}_roi`] || 
+                     ensemble.weighted_metrics[`Weighted_ROI_${variable}`] || 
+                     ensemble.weighted_metrics[`ROI_${variable}`] ||
+                     ensemble.weighted_metrics[variable];
             }
             
             ensembleData[variable] = value;
@@ -751,8 +756,29 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
             // Get the correct column value based on selected method
             // Handle special case for "average" method which uses "avg" in field names
             const methodSuffix = data.selectedMethod === 'average' ? 'avg' : data.selectedMethod;
-            const columnName = `self_${methodSuffix}`;
-            value = item[columnName] || 0;
+            let columnName = `self_${methodSuffix}`;
+            
+            // For ROI, try multiple column name patterns
+            if (data.selectedMethod === 'roi') {
+              // Try different ROI column patterns
+              const roiPatterns = [
+                `self_roi`,
+                `${variable}_roi`,
+                `${variable.toUpperCase()}_ROI`,
+                `ROI_${variable}`,
+                `roi_${variable}`,
+                `${variable}_CPRP_VALUE`
+              ];
+              
+              for (const pattern of roiPatterns) {
+                if (item[pattern] !== undefined && item[pattern] !== null) {
+                  value = item[pattern];
+                  break;
+                }
+              }
+            } else {
+              value = item[columnName] || 0;
+            }
           
           return {
             name: item.model_name || 'Unknown Model',
@@ -1052,8 +1078,29 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           // Get the correct column value based on selected method
           // Handle special case for "average" method which uses "avg" in field names
           const methodSuffix = data.selectedMethod === 'average' ? 'avg' : data.selectedMethod;
-          const columnName = `self_${methodSuffix}`;
-          value = item[columnName] || 0;
+          let columnName = `self_${methodSuffix}`;
+          
+          // For ROI, try multiple column name patterns
+          if (data.selectedMethod === 'roi') {
+            // Try different ROI column patterns
+            const roiPatterns = [
+              `self_roi`,
+              `${variable}_roi`,
+              `${variable.toUpperCase()}_ROI`,
+              `ROI_${variable}`,
+              `roi_${variable}`,
+              `${variable}_CPRP_VALUE`
+            ];
+            
+            for (const pattern of roiPatterns) {
+              if (item[pattern] !== undefined && item[pattern] !== null) {
+                value = item[pattern];
+                break;
+              }
+            }
+          } else {
+            value = item[columnName] || 0;
+          }
           
           return {
             name: item.model_name || 'Unknown Model',
@@ -1159,8 +1206,29 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           // Get the correct column value based on selected method
           // Handle special case for "average" method which uses "avg" in field names
           const methodSuffix = data.selectedMethod === 'average' ? 'avg' : data.selectedMethod;
-          const columnName = `self_${methodSuffix}`;
-          value = item[columnName] || 0;
+          let columnName = `self_${methodSuffix}`;
+          
+          // For ROI, try multiple column name patterns
+          if (data.selectedMethod === 'roi') {
+            // Try different ROI column patterns
+            const roiPatterns = [
+              `self_roi`,
+              `${variable}_roi`,
+              `${variable.toUpperCase()}_ROI`,
+              `ROI_${variable}`,
+              `roi_${variable}`,
+              `${variable}_CPRP_VALUE`
+            ];
+            
+            for (const pattern of roiPatterns) {
+              if (item[pattern] !== undefined && item[pattern] !== null) {
+                value = item[pattern];
+                break;
+              }
+            }
+          } else {
+            value = item[columnName] || 0;
+          }
           
           return {
             name: item.model_name || 'Unknown Model',
@@ -2462,6 +2530,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     <SelectItem value="elasticity">Elasticity</SelectItem>
                     <SelectItem value="beta">Beta</SelectItem>
                     <SelectItem value="average">Average</SelectItem>
+                    <SelectItem value="roi">ROI</SelectItem>
                 </SelectContent>
               </Select>
             </div>

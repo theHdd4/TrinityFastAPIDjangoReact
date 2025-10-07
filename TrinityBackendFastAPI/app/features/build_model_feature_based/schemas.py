@@ -154,7 +154,6 @@ class StackModelResult(BaseModel):
     r2_train: float
     r2_test: float
     coefficients: Dict[str, float] = Field(..., description="Beta coefficients")
-    standardized_coefficients: Optional[Dict[str, float]] = Field(None, description="Standardized coefficients for reference")
     intercept: float = Field(..., description="Model intercept")
     aic: float = Field(..., description="Akaike Information Criterion")
     bic: float = Field(..., description="Bayesian Information Criterion")
@@ -164,13 +163,7 @@ class StackModelResult(BaseModel):
     best_alpha: Optional[float] = Field(None, description="Best alpha value found during auto-tuning")
     best_cv_score: Optional[float] = Field(None, description="Best cross-validation score during auto-tuning")
     best_l1_ratio: Optional[float] = Field(None, description="Best L1 ratio found during auto-tuning (for ElasticNet)")
-    
-    # Additional fields for consistency with individual modeling
-    mape_train_std: float = Field(0.0, description="Standard deviation of train MAPE")
-    mape_test_std: float = Field(0.0, description="Standard deviation of test MAPE")
-    r2_train_std: float = Field(0.0, description="Standard deviation of train R²")
-    r2_test_std: float = Field(0.0, description="Standard deviation of test R²")
-    fold_results: List[Dict[str, Any]] = Field(default_factory=list, description="Individual fold results")
+
     train_size: int = Field(0, description="Number of training samples")
     test_size: int = Field(0, description="Number of test samples")
     

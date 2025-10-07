@@ -28,8 +28,7 @@ from ..scope_selector.deps import get_minio_client
 # Import get_object_prefix for dynamic path construction
 from ..data_upload_validate.app.routes import get_object_prefix
 
-# Import MMM model results saver
-from .mongodb_saver import save_mmm_model_results
+# Import MMM model results saver (removed - using save_build_config instead)
 
 # Import MongoDB saver functions
 from .mongodb_saver import save_build_config, get_build_config_from_mongo, get_scope_config_from_mongo, get_combination_column_values
@@ -445,7 +444,14 @@ async def train_models_direct(request: dict):
         apply_interaction_terms = request.get('apply_interaction_terms', True)
         numerical_columns_for_interaction = request.get('numerical_columns_for_interaction', [])
         
-
+        # Extract constraint parameters
+        negative_constraints = request.get('negative_constraints', [])
+        positive_constraints = request.get('positive_constraints', [])
+        
+        # Debug: Log constraint parameters
+        logger.info(f"🔍 DEBUG: Received constraint parameters:")
+        logger.info(f"  - negative_constraints: {negative_constraints}")
+        logger.info(f"  - positive_constraints: {positive_constraints}")
         
         if not scope_number or not combinations or not x_variables or not y_variable:
             raise HTTPException(
@@ -801,15 +807,7 @@ async def train_models_direct(request: dict):
         
         # Add stack modeling results if requested (even if individual models failed)
         if stack_modeling:
-            try:
-                logger.info(f"🚀 Starting stack modeling for {len(combinations)} combinations")
-                logger.info(f"Stack modeling parameters:")
-                logger.info(f"  - pool_by_identifiers: {pool_by_identifiers}")
-                logger.info(f"  - apply_clustering: {apply_clustering}")
-                logger.info(f"  - numerical_columns_for_clustering: {numerical_columns_for_clustering}")
-                logger.info(f"  - apply_interaction_terms: {apply_interaction_terms}")
-                logger.info(f"  - numerical_columns_for_interaction: {numerical_columns_for_interaction}")
-                
+            try:     
                 # Import StackModelTrainer
                 from .stack_model_training import StackModelTrainer
                 stack_trainer = StackModelTrainer()
@@ -836,7 +834,9 @@ async def train_models_direct(request: dict):
                     models_to_run=stack_models_to_run,  # Use stack models
                     custom_configs=stack_custom_model_configs,  # Use stack configs
                     price_column=None,
-                    run_id=run_id
+                    run_id=run_id,
+                    negative_constraints=negative_constraints,
+                    positive_constraints=positive_constraints
                 )
                 
                 logger.info(f"📊 Stack modeling call completed. Status: {individual_metrics.get('status', 'unknown')}")
@@ -1236,7 +1236,7 @@ async def train_models_direct(request: dict):
                         
                         model_coefficients[combination_name] = combination_coefficients
             
-            # Prepare build configuration data
+            # Prepare comprehensive build configuration data
             build_config_data = {
                 "run_id": run_id,
                 "scope_number": scope_number,
@@ -1248,11 +1248,54 @@ async def train_models_direct(request: dict):
                 "models_to_run": models_to_run,
                 "total_combinations_processed": len(cleaned_combination_results),
                 "total_models_saved": total_saved,
-                # "variable_statistics": all_variable_stats,
                 "combination_file_keys": combination_file_keys,
                 "model_coefficients": model_coefficients,
                 "created_at": datetime.now().isoformat(),
-                "training_status": "completed"
+                "training_status": "completed",
+                
+                # ADD MISSING IMPORTANT FIELDS:
+                
+                # Individual modeling configuration
+                "individual_modeling": individual_modeling,
+                "individual_k_folds": individual_k_folds,
+                "individual_test_size": individual_test_size,
+                "individual_models_to_run": individual_models_to_run,
+                "individual_custom_model_configs": individual_custom_model_configs,
+                
+                # Stack modeling configuration
+                "stack_modeling": stack_modeling,
+                "stack_k_folds": stack_k_folds,
+                "stack_test_size": stack_test_size,
+                "stack_models_to_run": stack_models_to_run,
+                "stack_custom_model_configs": stack_custom_model_configs,
+                "pool_by_identifiers": pool_by_identifiers,
+                
+                # Clustering configuration
+                "apply_clustering": apply_clustering,
+                "numerical_columns_for_clustering": numerical_columns_for_clustering,
+                "n_clusters": n_clusters,
+                
+                # Interaction terms configuration
+                "apply_interaction_terms": apply_interaction_terms,
+                "numerical_columns_for_interaction": numerical_columns_for_interaction,
+                
+                # ROI configuration (if available in request)
+                "roi_config": request.get('roi_config', {}),
+                
+                # Constraints configuration (if available in request)
+                "constraints_config": request.get('constraints_config', {}),
+                
+                # Price column configuration
+                "price_column": request.get('price_column'),
+                
+                # Test size configuration
+                "test_size": request.get('test_size', 0.2),
+                
+                # Additional metadata
+                "client_name": client_name,
+                "app_name": app_name,
+                "project_name": project_name,
+                "training_type": "stack_modeling" if stack_modeling else "individual_modeling"
             }
             
             # Save to MongoDB
@@ -1970,26 +2013,74 @@ async def save_build_data(
         # Get the request body
         body = await request.json()
         
-        # Save build configuration data
-        result = await save_build_config(
-            client_name=client_name,
-            app_name=app_name,
-            project_name=project_name,
-            build_data=body,
-            user_id=user_id,
-            project_id=project_id
-        )
+        # Debug: Log the structure of the received data
+        logger.info(f"🔍 DEBUG: Received save request with keys: {list(body.keys())}")
+        if "cards" in body:
+            logger.info(f"🔍 DEBUG: Found {len(body['cards'])} cards")
+            for i, card in enumerate(body['cards']):
+                logger.info(f"🔍 DEBUG: Card {i} has {len(card.get('atoms', []))} atoms")
+                for j, atom in enumerate(card.get('atoms', [])):
+                    atom_id = atom.get('atomId', 'unknown')
+                    settings_keys = list(atom.get('settings', {}).keys())
+                    logger.info(f"🔍 DEBUG: Atom {j} ({atom_id}) has settings: {settings_keys}")
+                    
+                    # Check specifically for ROI and constraints
+                    settings = atom.get('settings', {})
+                    if 'roi_config' in settings:
+                        logger.info(f"🔍 DEBUG: Found roi_config in atom {j}: {settings['roi_config']}")
+                    if 'constraints_config' in settings:
+                        logger.info(f"🔍 DEBUG: Found constraints_config in atom {j}: {settings['constraints_config']}")
+                    if 'negative_constraints' in settings:
+                        logger.info(f"🔍 DEBUG: Found negative_constraints in atom {j}: {settings['negative_constraints']}")
+                    if 'positive_constraints' in settings:
+                        logger.info(f"🔍 DEBUG: Found positive_constraints in atom {j}: {settings['positive_constraints']}")
         
-        if result["status"] == "success":
-            return {
-                "success": True,
-                "message": f"Build data saved successfully",
-                "mongo_id": result["mongo_id"],
-                "operation": result["operation"],
-                "collection": result["collection"]
-            }
+        # Check if this is atom list configuration data (has cards structure)
+        if "cards" in body and isinstance(body["cards"], list):
+            # This is atom list configuration data - save to atom_list_configuration collection
+            from .mongodb_saver import save_atom_list_configuration
+            
+            result = await save_atom_list_configuration(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                atom_config_data=body,
+                user_id=user_id,
+                project_id=project_id
+            )
+            
+            if result["status"] == "success":
+                return {
+                    "success": True,
+                    "message": f"Atom list configuration saved successfully",
+                    "mongo_id": result["mongo_id"],
+                    "operation": result["operation"],
+                    "collection": result["collection"],
+                    "documents_inserted": result.get("documents_inserted", 0)
+                }
+            else:
+                raise HTTPException(status_code=500, detail=f"Failed to save atom list configuration: {result['error']}")
         else:
-            raise HTTPException(status_code=500, detail=f"Failed to save build data: {result['error']}")
+            # This is build configuration data - save to build-model_featurebased_configs collection
+            result = await save_build_config(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                build_data=body,
+                user_id=user_id,
+                project_id=project_id
+            )
+            
+            if result["status"] == "success":
+                return {
+                    "success": True,
+                    "message": f"Build data saved successfully",
+                    "mongo_id": result["mongo_id"],
+                    "operation": result["operation"],
+                    "collection": result["collection"]
+                }
+            else:
+                raise HTTPException(status_code=500, detail=f"Failed to save build data: {result['error']}")
             
     except Exception as e:
         logger.error(f"Error saving build data: {str(e)}")
@@ -2958,25 +3049,7 @@ async def train_mmm_models(request: dict):
                         logger.warning(f"Skipping error combination {combo_result.get('combination_id')} for MongoDB save")
                 
                 if valid_combination_results:
-                    saved_result = await save_mmm_model_results(
-                        scope_id=f"scope_{scope_number}",
-                        scope_name=f"Scope_{scope_number}",
-                        set_name=f"Scope_{scope_number}",
-                        combination_results=valid_combination_results,  # All combinations in one call
-                        x_variables=x_variables_lower,
-                        y_variable=y_variable_lower,
-                        price_column=roi_price_column,
-                        standardization="mmm_per_variable",  # Special marker for MMM
-                        test_size=individual_test_size,
-                        run_id=run_id,
-                        all_variable_stats=all_variable_stats,  # All variable stats
-                        combo_config=variable_configs_lower  # Pass combo_config for MMM
-                    )
-                    
-                    if saved_result.get("status") == "success":
-                        logger.info(f"✅ Saved {saved_result.get('total_combinations', 0)} combinations with {saved_result.get('total_models', 0)} models to MongoDB")
-                    else:
-                        logger.error(f"❌ Failed to save MMM results to MongoDB: {saved_result.get('error', 'Unknown error')}")
+                    logger.info(f"✅ Processed {len(valid_combination_results)} valid combinations for MMM training")
                 else:
                     logger.warning("No valid combinations to save to MongoDB")
                     
@@ -3125,12 +3198,7 @@ async def train_mmm_models(request: dict):
             for combo_result in combination_results:
                 # Get variable averages for this combination
                 combination_id = combo_result['combination_id']
-                
-                # Debug logging for variable averages
-                logger.info(f"🔍 Looking for combination_id: {combination_id}")
-                logger.info(f"🔍 all_variable_stats keys: {list(all_variable_stats.keys())}")
-                logger.info(f"🔍 all_variable_stats structure: {all_variable_stats}")
-                
+   
                 # Fix: all_variable_stats contains final_variable_statistics for each combination
                 # We need to extract variable_averages from the combination_results
                 variable_averages = {}
@@ -3299,6 +3367,145 @@ async def train_mmm_models(request: dict):
             logger.error(f"❌ Failed to prepare MMM results for MinIO saving: {e}")
             import traceback
             logger.error(f"   Traceback: {traceback.format_exc()}")
+        
+        # Save to MongoDB using the same structure as train-models-direct
+        try:
+            # Extract client_name, app_name, project_name from object_prefix
+            client_name = "Quant_Matrix_AI_Schema"  # Default
+            app_name = "marketing-mix"  # Default
+            project_name = "New Marketing Mix Modeling Project 1"  # Default
+            
+            try:
+                if object_prefix and object_prefix != "blank/blank project/":
+                    prefix_parts = object_prefix.rstrip('/').split('/')
+                    if len(prefix_parts) >= 3:
+                        client_name = prefix_parts[0]
+                        app_name = prefix_parts[1]
+                        project_name = prefix_parts[2] if len(prefix_parts) > 2 else "default_project"
+            except Exception as e:
+                logger.warning(f"Could not extract client/app/project from object_prefix: {e}")
+            
+            # Extract model coefficients from combination results
+            model_coefficients = {}
+            combination_file_keys = []
+            
+            for i, combo_result in enumerate(combination_results):
+                # Use combination_id (same as train-models-direct)
+                if 'combination_id' in combo_result:
+                    combination_name = combo_result['combination_id']
+                    
+                    # Add file key if available (remove mmm_stack_modeling prefix)
+                    if 'file_key' in combo_result:
+                        file_key = combo_result['file_key']
+                        # Remove mmm_stack_modeling prefix if present
+                        if file_key.startswith('mmm_stack_model_'):
+                            # For stack models, use a placeholder or skip file_key
+                            logger.info(f"📊 Skipping stack model file_key for {combination_name}")
+                            file_key = None
+                        
+                        if file_key:  # Only add if file_key is not None
+                            combination_file_keys.append({
+                                "combination": combination_name,
+                                "file_key": file_key
+                            })
+                    
+                    # Extract model coefficients for this combination
+                    if 'model_results' in combo_result:
+                        combination_coefficients = {}
+                        for model_result in combo_result['model_results']:
+                            model_name = model_result.get('model_name', 'unknown')
+                            coefficients = model_result.get('coefficients', {})
+                            intercept = model_result.get('intercept', 0)
+                            
+                            transformation_metadata = model_result.get('transformation_metadata', {})
+                            
+                            combination_coefficients[model_name] = {
+                                "intercept": intercept,
+                                "coefficients": coefficients,
+                                "x_variables": x_variables,
+                                "y_variable": y_variable,
+                                "transformation_metadata": transformation_metadata  # Per-model transformation metadata
+                            }
+                        
+                        model_coefficients[combination_name] = combination_coefficients
+            
+            # Prepare comprehensive build configuration data
+            build_config_data = {
+                "run_id": run_id,
+                "scope_number": scope_number,
+                "combinations": combinations,
+                "x_variables": x_variables,
+                "y_variable": y_variable,
+                "standardization": "mmm_per_variable",
+                "k_folds": individual_k_folds,
+                "models_to_run": individual_models_to_run,
+                "total_combinations_processed": len(combination_results),
+                "total_models_saved": len([r for r in combination_results if 'model_results' in r]),
+                "combination_file_keys": combination_file_keys,
+                "model_coefficients": model_coefficients,
+                "created_at": datetime.now().isoformat(),
+                "training_status": "completed",
+                
+                # Individual modeling configuration
+                "individual_modeling": individual_modeling,
+                "individual_k_folds": individual_k_folds,
+                "individual_test_size": individual_test_size,
+                "individual_models_to_run": individual_models_to_run,
+                "individual_custom_model_configs": individual_custom_model_configs,
+                
+                # Stack modeling configuration
+                "stack_modeling": stack_modeling,
+                "stack_k_folds": stack_k_folds,
+                "stack_test_size": stack_test_size,
+                "stack_models_to_run": stack_models_to_run,
+                "stack_custom_model_configs": stack_custom_model_configs,
+                "pool_by_identifiers": pool_by_identifiers,
+                
+                # Clustering configuration
+                "apply_clustering": apply_clustering,
+                "numerical_columns_for_clustering": numerical_columns_for_clustering,
+                "n_clusters": n_clusters,
+                
+                # Interaction terms configuration
+                "apply_interaction_terms": apply_interaction_terms,
+                "numerical_columns_for_interaction": numerical_columns_for_interaction,
+                
+                # ROI configuration (if available in request)
+                "roi_config": request.get('roi_config', {}),
+                
+                # Constraints configuration (if available in request)
+                "constraints_config": request.get('constraints_config', {}),
+                
+                # Price column configuration
+                "price_column": request.get('price_column'),
+                
+                # Test size configuration
+                "test_size": request.get('test_size', 0.2),
+                "mmm_training": True,
+                
+                # Additional metadata
+                "client_name": client_name,
+                "app_name": app_name,
+                "project_name": project_name,
+            }
+            
+            # Save to MongoDB
+            mongo_result = await save_build_config(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+                build_data=build_config_data,
+                user_id="",  # You can add user_id if available
+                project_id=None  # You can add project_id if available
+            )
+            
+            if mongo_result["status"] == "success":
+                logger.info(f"📦 MMM Build configuration saved to MongoDB: {mongo_result['mongo_id']}")
+            else:
+                logger.error(f"❌ Failed to save MMM build configuration to MongoDB: {mongo_result['error']}")
+        except Exception as e:
+            logger.error(f"❌ Error saving MMM build configuration to MongoDB: {str(e)}")
+            # Don't fail the entire request if MongoDB save fails
         
         return ModelTrainingResponse(
             scope_id=f"scope_{scope_number}",

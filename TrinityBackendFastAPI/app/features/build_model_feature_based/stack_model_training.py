@@ -46,7 +46,10 @@ class StackModelTrainer:
         custom_configs: Optional[Dict[str, Any]] = None,
         price_column: Optional[str] = None,
         test_size: float = 0.2,
-        run_id: str = None
+        run_id: str = None,
+        # Constraint parameters
+        negative_constraints: List[str] = None,
+        positive_constraints: List[str] = None
     ) -> Dict[str, Any]:
         """
         Complete stack model training workflow.
@@ -55,6 +58,7 @@ class StackModelTrainer:
             Dictionary with training results, saved model counts, and MinIO file path
         """
         try:
+            # Validate clustering columns if provided
 
             
             prepare_result = await self.processor.prepare_stack_model_data(
@@ -65,113 +69,111 @@ class StackModelTrainer:
                 y_variable=y_variable,
                 minio_client=minio_client,
                 bucket_name=bucket_name,
-                standardization=standardization
+                n_clusters=n_clusters,
+                clustering_columns=numerical_columns_for_clustering
             )
             
             if prepare_result.get('status') != 'success':
                 raise Exception(f"Failed to prepare stacked data: {prepare_result.get('error', 'Unknown error')}")
             
-            # Get the pooled data for further processing
-            pooled_data = prepare_result.get('pooled_data', {})
+            # Get the split clustered data from prepare_result
+            split_clustered_data = prepare_result.get('split_clustered_data', {})
             
-            # Step 2: Apply clustering if requested
-            split_clustered_data = {}
-            clustering_result = {}
-            
-            if apply_clustering and pooled_data:
-                
-                # Convert numerical columns to lowercase for consistent matching
-                numerical_columns_for_clustering = [col.lower() for col in numerical_columns_for_clustering]
-                
-                # Convert interaction terms parameters to lowercase for consistent matching
-                if apply_interaction_terms:
-                    numerical_columns_for_interaction = [col.lower() for col in numerical_columns_for_interaction]
-                
-                # Apply clustering to the pooled data
-                clustering_result = await self.processor.apply_clustering_to_stack_data(
-                    pooled_data=pooled_data,
-                    numerical_columns=numerical_columns_for_clustering,
-                    minio_client=minio_client,
-                    bucket_name=bucket_name,
-                    n_clusters=n_clusters,
-                    apply_interaction_terms=apply_interaction_terms,
-                    identifiers_for_interaction=None,  # Auto-detect identifiers
-                    numerical_columns_for_interaction=numerical_columns_for_interaction,
-                    standardization=standardization
-                )
-                
-                if clustering_result.get('status') == 'success':
-                    # Reconstruct split clustered data for model training
-                   
-                    
-                    from .stack_model_data import DataPooler
-                    data_pooler = DataPooler(minio_client, bucket_name)
-                    
-                    # Apply clustering to pooled data
-                    clustered_pools = data_pooler.apply_clustering_to_pools(
-                        pooled_data=pooled_data,
-                        numerical_columns=numerical_columns_for_clustering,
-                        n_clusters=n_clusters
-                    )
-                    
-                    # Split clustered data by individual clusters and save to MinIO
-                    split_clustered_data = data_pooler.split_clustered_data_by_clusters(
-                        clustered_pools, 
-                        minio_client=minio_client, 
-                        bucket_name=bucket_name
-                    )
-                    
-                    # Apply interaction terms if requested
-                    if apply_interaction_terms and numerical_columns_for_interaction:
-                        # Get column classifier identifiers for interaction terms
-                        column_config = await self.processor.get_column_classifier_config()
-                        all_identifiers = column_config.get('identifiers', [])
-                        
-                        split_clustered_data = data_pooler.create_interaction_terms(
-                            pooled_data=split_clustered_data,
-                            identifiers=None,  # Will auto-detect identifiers with >1 unique value
-                            numerical_columns_for_interaction=numerical_columns_for_interaction,
-                            column_classifier_identifiers=all_identifiers,
-                            standardization=standardization
-                        )
-                else:
-                    raise Exception(f"Clustering failed: {clustering_result.get('error', 'Unknown error')}")
-            else:
-                split_clustered_data = pooled_data
-            
-
+            # Clustering is already handled in prepare_stack_model_data
+            # No need for additional clustering logic here
+        
             
             # Convert parameters to lowercase for consistent matching
             x_variables_lower = [col.lower() for col in x_variables]
             y_variable_lower = y_variable.lower()
             
-            # Create DataPooler instance for model training
-            from .stack_model_data import DataPooler
-            data_pooler = DataPooler(minio_client, bucket_name)
+            # Debug: Log constraint parameters being passed to processor
+            logger.info(f"🔍 DEBUG: Passing constraints to processor:")
+            logger.info(f"  - negative_constraints: {negative_constraints}")
+            logger.info(f"  - positive_constraints: {positive_constraints}")
             
-            training_results = await data_pooler.train_models_for_stacked_data(
+            # Use the processor to train models on stacked data
+            training_results = await self.processor.process_split_clustered_data(
                 split_clustered_data=split_clustered_data,
-                x_variables=x_variables_lower,
-                y_variable=y_variable_lower,
-                standardization=standardization,
+                x_variables_lower=x_variables_lower,
+                y_variable_lower=y_variable_lower,
+                standardization=standardization,  
                 k_folds=k_folds,
                 models_to_run=models_to_run,
                 custom_configs=custom_configs,
                 price_column=price_column.lower() if price_column else None,
-                test_size=test_size
+                test_size=test_size,    
+                apply_interaction_terms=apply_interaction_terms,
+                numerical_columns_for_interaction=numerical_columns_for_interaction,
+                run_id=run_id,
+                negative_constraints=negative_constraints,
+                positive_constraints=positive_constraints
             )
             
-
+            # Validate training results
+            if not training_results:
+                raise Exception("❌ No training results returned from process_split_clustered_data")
             
+            if not isinstance(training_results, dict):
+                raise Exception(f"❌ Invalid training results format. Expected dict, got {type(training_results)}")
             
+            # Check if we have any valid results
+            # A result is valid if it has no error (error is None or missing) AND has model_results
+            logger.info(f"🔍 DEBUG: Validating results...")
+            for split_key, result in training_results.items():
+                has_error = bool(result.get('error'))
+                has_model_results = bool(result.get('model_results'))
+                logger.info(f"   📊 {split_key}: has_error={has_error}, has_model_results={has_model_results}, error_value='{result.get('error')}'")
+            
+            valid_results = [k for k, v in training_results.items() if not v.get('error') and v.get('model_results')]
+            logger.info(f"🔍 DEBUG: Found {len(valid_results)} valid results: {valid_results}")
+            if not valid_results:
+                error_details = []
+                for split_key, result in training_results.items():
+                    if result.get('error'):
+                        error_details.append(f"{split_key}: {result['error']}")
+                    elif not result.get('model_results'):
+                        error_details.append(f"{split_key}: No model results")
+                    else:
+                        error_details.append(f"{split_key}: Unknown issue")
+                
+                raise Exception(f"❌ No valid model results found. Errors: {error_details}")
+            
+            logger.info(f"✅ Training completed successfully for {len(valid_results)} split clusters")
+            logger.info(f"   Valid clusters: {valid_results}")
+             
             # Convert training results to match individual model format
             from .schemas import StackModelResults, StackModelResult
             split_cluster_results = []
             for split_key, result in training_results.items():
-                if 'error' not in result:
+                if not result.get('error'):  # No error (error is None or missing)
                     # Convert model results to simplified format (beta coefficients only)
                     simplified_model_results = []
                     for model_result in result.get('model_results', []):
+                        # Debug: Log the model result structure
+                        logger.info(f"🔍 DEBUG: Model result keys: {list(model_result.keys())}")
+                        logger.info(f"🔍 DEBUG: Model result: {model_result}")
+                        
+                        # Check for missing required fields
+                        missing_fields = []
+                        required_fields = ['coefficients', 'intercept', 'aic', 'bic', 'n_parameters']
+                        for field in required_fields:
+                            if field not in model_result:
+                                missing_fields.append(field)
+                        
+                        if missing_fields:
+                            logger.error(f"❌ Missing required fields in model result: {missing_fields}")
+                            logger.error(f"❌ Model result: {model_result}")
+                            # Provide default values for missing fields
+                            for field in missing_fields:
+                                if field == 'coefficients':
+                                    model_result[field] = {}
+                                elif field in ['intercept', 'aic', 'bic']:
+                                    model_result[field] = 0.0
+                                elif field == 'n_parameters':
+                                    model_result[field] = 0
+                                logger.warning(f"⚠️ Added default value for {field}: {model_result[field]}")
+                        
                         simplified_model = StackModelResult(
                             model_name=model_result.get('model_name', 'Unknown'),
                             mape_train=model_result.get('mape_train', 0),
@@ -179,7 +181,6 @@ class StackModelTrainer:
                             r2_train=model_result.get('r2_train', 0),
                             r2_test=model_result.get('r2_test', 0),
                             coefficients=model_result.get('coefficients', {}),
-                            standardized_coefficients=model_result.get('standardized_coefficients', None),
                             intercept=model_result.get('intercept', 0),
                             aic=model_result.get('aic', 0),
                             bic=model_result.get('bic', 0),
@@ -189,11 +190,7 @@ class StackModelTrainer:
                             best_cv_score=model_result.get('best_cv_score', None),
                             best_l1_ratio=model_result.get('best_l1_ratio', None),
                             # Additional fields for consistency
-                            mape_train_std=model_result.get('mape_train_std', 0.0),
-                            mape_test_std=model_result.get('mape_test_std', 0.0),
-                            r2_train_std=model_result.get('r2_train_std', 0.0),
-                            r2_test_std=model_result.get('r2_test_std', 0.0),
-                            fold_results=model_result.get('fold_results', []),
+   
                             train_size=model_result.get('train_size', 0),
                             test_size=model_result.get('test_size', 0)
                         )
@@ -226,8 +223,7 @@ class StackModelTrainer:
                     "total_models_saved": 0,  # Models are not saved to MinIO in this endpoint
                     "clustering_applied": apply_clustering,
                     "interaction_terms_applied": apply_interaction_terms and apply_clustering,
-                    "minio_results_file": None,  # No MinIO file saved in this endpoint
-                    "clustering_result": clustering_result if apply_clustering else None
+                    "clustering_result": None  # Clustering is handled in prepare_stack_model_data
                 }
             )
             
@@ -254,8 +250,12 @@ class StackModelTrainer:
             )
     
     
-    def calculate_combination_betas(self, model_results: List[Dict[str, Any]], combinations: List[str], x_variables: List[str], numerical_columns_for_interaction: List[str], split_cluster_id: str = None, standardization: str = 'none') -> Dict[str, Dict[str, float]]:
-
+     
+    def calculate_combination_betas(self, model_results: List[Dict[str, Any]], combinations: List[str], x_variables: List[str], numerical_columns_for_interaction: List[str], split_cluster_id: str = None, standardization: str = 'none', apply_interaction_terms: bool = True) -> Dict[str, Dict[str, float]]:
+        """
+        Calculate final beta coefficients for each combination by combining common betas and interaction term betas.
+        This method follows the same logic as stack_model_training.py.
+        """
         combination_betas = {}
         
         for model_result in model_results:
@@ -263,67 +263,137 @@ class StackModelTrainer:
             coefficients = model_result['coefficients']
             intercept = model_result['intercept']
             
+            logger.info(f"Calculating combination betas for model: {model_name}")
+            logger.info(f"Available coefficients: {list(coefficients.keys())}")
+            logger.info(f"Requested combinations: {combinations}")
+            
             # Extract combinations that are actually present in this model's coefficients
             available_combinations = []
             for key in coefficients.keys():
-                if key.startswith('encoded_combination_') and not key.endswith('_x_'):
-                    # Extract combination name from encoded_combination_{combination}
-                    combination_name = key.replace('encoded_combination_', '')
+                # Try different patterns for encoded combinations
+                if key.startswith('Beta_encoded_combination_') and not key.endswith('_x_price') and not key.endswith('_x_d1'):
+                    combination_name = key.replace('Beta_encoded_combination_', '')
+                    # Remove any interaction suffixes
+                    if '_x_' in combination_name:
+                        combination_name = combination_name.split('_x_')[0]
+                    logger.info(f"Found encoded combination: '{combination_name}' from key '{key}'")
                     if combination_name in combinations:
                         available_combinations.append(combination_name)
+                        logger.info(f"Added combination '{combination_name}' to available_combinations")
+                elif key.startswith('encoded_combination_') and not key.endswith('_x_price') and not key.endswith('_x_d1'):
+                    combination_name = key.replace('encoded_combination_', '')
+                    # Remove any interaction suffixes
+                    if '_x_' in combination_name:
+                        combination_name = combination_name.split('_x_')[0]
+                    logger.info(f"Found encoded combination (no Beta prefix): '{combination_name}' from key '{key}'")
+                    if combination_name in combinations:
+                        available_combinations.append(combination_name)
+                        logger.info(f"Added combination '{combination_name}' to available_combinations")
+            
+            logger.info(f"Available combinations for calculation: {available_combinations}")
+            
+            # Debug: Log all coefficient keys to understand the structure
+            logger.info(f"🔍 DEBUG: All coefficient keys in model {model_name}:")
+            for key in sorted(coefficients.keys()):
+                logger.info(f"   {key}: {coefficients[key]}")
+            
+            # If no combinations found, try to extract from all coefficient keys
+            if not available_combinations:
+                logger.warning("No combinations found using standard method, trying alternative extraction")
+                for key in coefficients.keys():
+                    if key.startswith('Beta_encoded_combination_') and not key.endswith('_x_price') and not key.endswith('_x_d1'):
+                        combination_name = key.replace('Beta_encoded_combination_', '')
+                        # Remove any interaction suffixes
+                        if '_x_' in combination_name:
+                            combination_name = combination_name.split('_x_')[0]
+                        if combination_name in combinations and combination_name not in available_combinations:
+                            available_combinations.append(combination_name)
+                            logger.info(f"Found combination via alternative method: '{combination_name}'")
+            
+            logger.info(f"Final available combinations: {available_combinations}")
             
             # Calculate final betas only for combinations that are available in this model
             for combination in available_combinations:
+                logger.info(f"Calculating final betas for combination: {combination}")
                 combination_key = f"{model_name}_{combination}"
                 final_betas = {}
-                # Calculate final intercept
-                combination_intercept_key = f"encoded_combination_{combination}"
+                # Calculate final intercept - try different key patterns
+                combination_intercept_key = f"Beta_encoded_combination_{combination}"
                 combination_intercept_beta = coefficients.get(combination_intercept_key, 0.0)
+                if combination_intercept_beta == 0.0:
+                    # Try without Beta prefix
+                    combination_intercept_key = f"encoded_combination_{combination}"
+                    combination_intercept_beta = coefficients.get(combination_intercept_key, 0.0)
                 final_betas['intercept'] = intercept + combination_intercept_beta
+                logger.info(f"Combination intercept key: {combination_intercept_key}")
+                logger.info(f"Combination intercept: {combination_intercept_beta}, Final intercept: {final_betas['intercept']}")
                 
                 # Calculate final betas for x_variables (main model variables)
                 for x_var in x_variables:
-                    # Determine the actual variable name used in the model
-                    if standardization == 'standard':
-                        model_var_name = f"standard_{x_var}"
-                    elif standardization == 'minmax':
-                        model_var_name = f"minmax_{x_var}"
-                    else:
-                        model_var_name = x_var
+                    # Use original variable name (mmm_stack_training.py uses original names throughout)
+                    model_var_name = x_var
                     
-                    # Common beta for this x_variable (use model variable name)
-                    common_beta = coefficients.get(model_var_name, 0.0)
+                    # Common beta for this x_variable (use original variable name)
+                    beta_key = f"Beta_{model_var_name}"
+                    common_beta = coefficients.get(beta_key, 0.0)
+                    logger.info(f"Common beta for {x_var} (Beta_{model_var_name}): {common_beta}")
+                    logger.info(f"🔍 DEBUG: Looking for coefficient key '{beta_key}', found: {beta_key in coefficients}")
+                    if beta_key not in coefficients:
+                        logger.warning(f"❌ Coefficient key '{beta_key}' not found in coefficients!")
+                        logger.info(f"Available keys containing '{model_var_name}': {[k for k in coefficients.keys() if model_var_name in k]}")
 
-                    interaction_key = f"encoded_combination_{combination}_x_{x_var}"
-                    individual_beta = coefficients.get(interaction_key, 0.0)
-                    final_betas[x_var] = common_beta + individual_beta
+                    # Individual beta for this combination and x_variable (only if interaction terms are enabled)
+                    if apply_interaction_terms:
+                        interaction_key = f"encoded_combination_{combination}_x_{x_var}"
+                        # Try different key patterns
+                        individual_beta = coefficients.get(f"Beta_{interaction_key}", 0.0)
+                        if individual_beta == 0.0:
+                            # Try without Beta prefix
+                            individual_beta = coefficients.get(interaction_key, 0.0)
+                        logger.info(f"Individual beta for {x_var} (interaction_key: {interaction_key}): {individual_beta}")
+                    else:
+                        individual_beta = 0.0
+                        logger.info(f"Individual beta for {x_var} (interaction terms disabled): {individual_beta}")
+                    
+                    final_beta = common_beta + individual_beta
+                    final_betas[x_var] = final_beta
+                    logger.info(f"Final beta for {x_var}: {final_beta}")
                     
                 
-                # Calculate final betas for numerical_columns_for_interaction (interaction variables)
-                for interaction_var in numerical_columns_for_interaction:
-                    # Only add if it's not already in x_variables to avoid duplication
-                    if interaction_var not in x_variables:
-                        # Determine the actual variable name used in the model
-                        if standardization == 'standard':
-                            model_var_name = f"standard_{interaction_var}"
-                        elif standardization == 'minmax':
-                            model_var_name = f"minmax_{interaction_var}"
-                        else:
+                # Calculate final betas for numerical_columns_for_interaction (interaction variables) ONLY if interaction terms are enabled
+                if apply_interaction_terms:
+                    for interaction_var in numerical_columns_for_interaction:
+                        # Only add if it's not already in x_variables to avoid duplication
+                        if interaction_var not in x_variables:
+                            # Use original variable name (mmm_stack_training.py uses original names throughout)
                             model_var_name = interaction_var
-                        
-                        # Common beta for this interaction variable (use model variable name)
-                        common_beta = coefficients.get(model_var_name, 0.0)
-                        
-                        # Individual beta for this combination and interaction variable
-                        interaction_key = f"encoded_combination_{combination}_x_{model_var_name}"
-                        individual_beta = coefficients.get(interaction_key, 0.0)
-                        
-                        # Final beta = common + individual
-                        final_betas[interaction_var] = common_beta + individual_beta
+                            
+                            # Common beta for this interaction variable (use original variable name)
+                            common_beta = coefficients.get(model_var_name, 0.0)
+                            
+                            # Individual beta for this combination and interaction variable
+                            interaction_key = f"encoded_combination_{combination}_x_{interaction_var}"
+                            individual_beta = coefficients.get(interaction_key, 0.0)
+                            
+                            # Final beta = common + individual
+                            final_betas[interaction_var] = common_beta + individual_beta
                 
                 combination_betas[combination_key] = final_betas
+                logger.info(f"Stored final betas for {combination_key}: {final_betas}")
         
-        return combination_betas
+        logger.info(f"Final combination_betas result: {combination_betas}")
+        
+        # Restructure the result to use combination names as keys instead of model_combination keys
+        restructured_betas = {}
+        for key, betas in combination_betas.items():
+            # Extract combination name from model_combination key
+            if '_' in key:
+                combination_name = '_'.join(key.split('_')[1:])  # Remove model name prefix
+                restructured_betas[combination_name] = betas
+                logger.info(f"Restructured key '{key}' -> '{combination_name}': {betas}")
+        
+        logger.info(f"Restructured combination_betas: {restructured_betas}")
+        return restructured_betas
     
     async def calculate_individual_combination_metrics(
         self,
@@ -347,7 +417,10 @@ class StackModelTrainer:
         models_to_run: Optional[List[str]] = None,
         custom_configs: Optional[Dict[str, Any]] = None,
         price_column: Optional[str] = None,
-        run_id: str = None
+        run_id: str = None,
+        # Constraint parameters
+        negative_constraints: List[str] = None,
+        positive_constraints: List[str] = None
     ) -> Dict[str, Any]:
         """
         Calculate MAPE, AIC, and BIC for individual combinations using betas from stack modeling.
@@ -359,6 +432,11 @@ class StackModelTrainer:
         4. Calculate predictions and metrics (MAPE, AIC, BIC)
         5. Use stack modeling MAPE as train MAPE, individual combination MAPE as test MAPE
         """
+        # Debug: Log constraint parameters
+        logger.info(f"🔍 DEBUG: Constraint parameters received:")
+        logger.info(f"  - negative_constraints: {negative_constraints}")
+        logger.info(f"  - positive_constraints: {positive_constraints}")
+        
         try:
             # Step 1: Train stack models to get betas
             try:
@@ -380,7 +458,9 @@ class StackModelTrainer:
                 models_to_run=models_to_run,
                 custom_configs=custom_configs,
                 price_column=price_column,
-                run_id=run_id
+                run_id=run_id,
+                negative_constraints=negative_constraints,
+                positive_constraints=positive_constraints
                 )
             except Exception as e:
                 raise
@@ -408,8 +488,10 @@ class StackModelTrainer:
                     )
                     
                     for combination_key, betas in model_betas.items():
-                        model_name = combination_key.split('_', 1)[0]  
-                        combination = combination_key.split('_', 1)[1] if '_' in combination_key else combination_key
+                        # Since we restructured the keys, combination_key is now just the combination name
+                        # But we still need the model_name from the original model_result_dict
+                        model_name = model_result_dict['model_name']
+                        combination = combination_key  # This is already the combination name after restructuring
                         
                         # Remove intercept from coefficients
                         coefficients = {k: v for k, v in betas.items() if k != 'intercept'}
@@ -478,11 +560,11 @@ class StackModelTrainer:
         """
         Calculate metrics for individual combinations using stack modeling betas.
         """
-        from .stack_model_data import DataPooler
+        from .stack_model_data import MMMStackDataPooler
         from sklearn.metrics import mean_absolute_percentage_error
         import numpy as np
         
-        data_pooler = DataPooler(minio_client, bucket_name)
+        data_pooler = MMMStackDataPooler(minio_client, bucket_name)
         individual_metrics = {}
         
         # Create a mapping of combination -> model_name -> betas (with split cluster info)
@@ -516,7 +598,7 @@ class StackModelTrainer:
                      'aic': model_result.aic,
                      'bic': model_result.bic,
                      'coefficients': model_result.coefficients,
-                     'standardized_coefficients': model_result.standardized_coefficients,
+    
                      # Auto-tuning results
                      'best_alpha': model_result.best_alpha,
                      'best_cv_score': model_result.best_cv_score,
@@ -542,11 +624,20 @@ class StackModelTrainer:
                 if missing_columns:
                     continue
                 
-                # Use original X variables for predictions with destandardized coefficients
-                # The original variables should always be available in the DataFrame
-                X = df[x_variables].values
+                # Apply the same transformation that was used during training
+                # This ensures we use transformed data with transformed coefficients
+                X_original = df[x_variables].values
+                y_original = df[y_variable].values
                 
-                y_actual = df[y_variable].values
+                # Apply standardization if it was used during training
+                # CRITICAL: We need to use the SAME transformation that was used during training
+                if standardization != 'none':
+                    # Use transformed data with transformed betas (no destandardization needed)
+                    X = self._standardize_X_only(X_original, standardization)
+                    y_actual = y_original  # Keep y in original scale for meaningful metrics
+                else:
+                    X = X_original
+                    y_actual = y_original
                 
                 combination_metrics = {}
                 
@@ -566,9 +657,16 @@ class StackModelTrainer:
                         variable_mins[x_var] = df[x_var].min()
                         variable_maxs[x_var] = df[x_var].max()
                     
-                    # Destandardize betas if standardization was applied
+                    
+                    # Debug: Log beta values
+                    logger.info(f"🔍 DEBUG: Beta values for {combination} - {model_name}")
+                    logger.info(f"   Original betas: {betas}")
+                    
+                    # Calculate destandardized betas for predictions and elasticity calculations
+                    # CRITICAL: Use destandardized betas with original data for proper scale matching
+                    destandardized_betas = betas.copy()  # Start with original betas
                     if standardization != 'none':
-                        betas = self._destandardize_betas(
+                        destandardized_betas = self._destandardize_betas(
                             betas=betas,
                             x_variables=x_variables,
                             standardization=standardization,
@@ -577,35 +675,56 @@ class StackModelTrainer:
                             variable_mins=variable_mins,
                             variable_maxs=variable_maxs
                         )
+                        logger.info(f"   Destandardized betas: {destandardized_betas}")
+                    else:
+                        logger.info(f"   No standardization, using original betas")
                     
-                    # Make predictions using the destandardized betas
-                    y_pred = self._predict_with_betas(X, betas, x_variables)
+                    # CRITICAL FIX: Use original data with destandardized betas for proper scale matching
+                    # This ensures y_pred is in the same scale as y_actual
+                    y_pred = self._predict_with_betas(X_original, destandardized_betas, x_variables)
+                    
+                    # Debug: Log data ranges to identify issues
+                    logger.info(f"🔍 DEBUG: Data ranges for {combination} - {model_name}")
+                    logger.info(f"   y_actual range: {y_actual.min():.2f} to {y_actual.max():.2f}")
+                    logger.info(f"   y_pred range: {y_pred.min():.2f} to {y_pred.max():.2f}")
+                    logger.info(f"   y_actual mean: {y_actual.mean():.2f}, std: {y_actual.std():.2f}")
+                    logger.info(f"   y_pred mean: {y_pred.mean():.2f}, std: {y_pred.std():.2f}")
                     
                     # Calculate individual combination metrics using same safe_mape as individual models
                     from .models import safe_mape
                     individual_mape = safe_mape(y_actual, y_pred)
                     individual_r2 = self._calculate_r2(y_actual, y_pred)
                     
+                    logger.info(f"   Calculated MAPE: {individual_mape:.4f}, R²: {individual_r2:.4f}")
+                    
                     # Calculate AIC and BIC for individual combination
+                    # Use original scale data for meaningful AIC/BIC values
                     n = len(y_actual)
                     k = len(x_variables) + 1  # +1 for intercept
+                    
+                    # For AIC/BIC, use original scale data (y is already in original scale)
+                    # No back-transformation needed since y_actual is in original scale
                     mse = np.mean((y_actual - y_pred) ** 2)
                     log_likelihood = -n/2 * np.log(2 * np.pi * mse) - n/2
                     individual_aic = 2 * k - 2 * log_likelihood
                     individual_bic = k * np.log(n) - 2 * log_likelihood
                     
+                    logger.info(f"   AIC: {individual_aic:.2f}, BIC: {individual_bic:.2f}, MSE: {mse:.2f}")
+                    
                     # Calculate elasticity and contribution for individual combination
                     elasticities = {}
                     contributions = {}
                     
-                    # Get y_mean and y_std from the individual combination data
-                    y_mean = df[y_variable].mean()
-                    y_std = df[y_variable].std()
+                    # Get y_mean and y_std from the original individual combination data
+                    # Use original data for elasticity calculations (not transformed data)
+                    y_mean = df[y_variable].mean()  # Original scale
+                    y_std = df[y_variable].std()    # Original scale
                     
                     # Calculate elasticity and contribution for each x_variable
+                    # Use destandardized betas and original data for meaningful elasticities
                     for x_var in x_variables:
-                        beta_val = betas['coefficients'].get(x_var, 0.0)
-                        x_mean = variable_means.get(x_var, 0)
+                        beta_val = destandardized_betas['coefficients'].get(x_var, 0.0)  # Use destandardized beta
+                        x_mean = variable_means.get(x_var, 0)  # Original scale
                         
                         # Calculate elasticity: (β × X_mean) / Y_mean
                         if y_mean != 0 and x_mean != 0:
@@ -794,3 +913,31 @@ class StackModelTrainer:
             logger.error(f"Error in destandardization: {e}")
             # Return original betas if destandardization fails
             return betas
+    
+
+    
+    def _standardize_X_only(self, X, standardization):
+        """Standardize only X features, not y variable."""
+        try:
+            import numpy as np
+            from sklearn.preprocessing import StandardScaler, MinMaxScaler
+            
+            if standardization == 'standard':
+                scaler_X = StandardScaler()
+                X_scaled = scaler_X.fit_transform(X)
+                return X_scaled
+                
+            elif standardization == 'minmax':
+                scaler_X = MinMaxScaler()
+                X_scaled = scaler_X.fit_transform(X)
+                return X_scaled
+                
+            else:
+                # No standardization
+                return X
+                
+        except Exception as e:
+            logger.error(f"Error standardizing X only: {e}")
+            # Return original X if standardization fails
+            return X
+    

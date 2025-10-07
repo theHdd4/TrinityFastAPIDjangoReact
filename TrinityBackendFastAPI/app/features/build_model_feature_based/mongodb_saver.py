@@ -245,3 +245,142 @@ async def get_combination_column_values(minio_client, bucket_name: str, file_key
     except Exception as e:
         logger.error(f"Error getting column values from {file_key}: {e}")
         return {identifier: "Unknown" for identifier in identifiers}
+
+async def save_atom_list_configuration(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    atom_config_data: dict,
+    *,
+    user_id: str = "",
+    project_id: int | None = None,
+):
+    """Save atom configuration to MongoDB atom_list_configuration collection"""
+    try:
+        from motor.motor_asyncio import AsyncIOMotorClient
+        from datetime import datetime
+        import hashlib
+        import json
+        
+        # Connect to MongoDB
+        client = AsyncIOMotorClient(MONGO_URI)
+        db = client[MONGO_DB]
+        
+        # Get environment IDs (similar to Django backend)
+        client_id = client_name
+        app_id = app_name  
+        project_id = project_name
+        
+        # Get the collection
+        coll = db["atom_list_configuration"]
+        
+        # Delete existing configurations for this project/mode
+        await coll.delete_many({
+            "client_id": client_id,
+            "app_id": app_id,
+            "project_id": project_id,
+            "mode": atom_config_data.get("mode", "build")
+        })
+        
+        # Prepare documents for insertion
+        timestamp = datetime.utcnow()
+        docs = []
+        
+        # Extract cards from atom_config_data
+        cards = atom_config_data.get("cards", [])
+        
+        for canvas_pos, card in enumerate(cards):
+            open_card = "no" if card.get("collapsed") else "yes"
+            exhibition_preview = "yes" if card.get("isExhibited") else "no"
+            scroll_pos = card.get("scroll_position", 0)
+            
+            for atom_pos, atom in enumerate(card.get("atoms", [])):
+                atom_id = atom.get("atomId") or atom.get("title") or "unknown"
+                atom_title = atom.get("title") or atom_id
+                atom_settings = atom.get("settings", {})
+                
+                # Debug: Log what settings are being processed
+                logger.info(f"🔍 DEBUG: Processing atom {atom_id} with settings keys: {list(atom_settings.keys())}")
+                
+                # Check for ROI and constraints specifically
+                if 'roi_config' in atom_settings:
+                    logger.info(f"🔍 DEBUG: Found roi_config in {atom_id}: {atom_settings['roi_config']}")
+                if 'constraints_config' in atom_settings:
+                    logger.info(f"🔍 DEBUG: Found constraints_config in {atom_id}: {atom_settings['constraints_config']}")
+                if 'negative_constraints' in atom_settings:
+                    logger.info(f"🔍 DEBUG: Found negative_constraints in {atom_id}: {atom_settings['negative_constraints']}")
+                if 'positive_constraints' in atom_settings:
+                    logger.info(f"🔍 DEBUG: Found positive_constraints in {atom_id}: {atom_settings['positive_constraints']}")
+                
+                # Clean up dataframe-operations data (similar to Django backend)
+                if atom.get("atomId") == "dataframe-operations":
+                    atom_settings = {
+                        k: v for k, v in atom_settings.items() if k not in {"tableData", "data"}
+                    }
+                
+                # Generate version hash
+                version_hash = hashlib.sha256(
+                    json.dumps(atom_settings, sort_keys=True).encode()
+                ).hexdigest()
+                
+                # Create document
+                doc = {
+                    "client_id": client_id,
+                    "app_id": app_id,
+                    "project_id": project_id,
+                    "mode": atom_config_data.get("mode", "build"),
+                    "atom_name": atom_id,
+                    "atom_title": atom_title,
+                    "canvas_position": canvas_pos,
+                    "atom_positions": atom_pos,
+                    "atom_configs": atom_settings,
+                    "open_cards": open_card,
+                    "scroll_position": scroll_pos,
+                    "exhibition_previews": exhibition_preview,
+                    "notes": atom_settings.get("notes", ""),
+                    "last_edited": timestamp,
+                    "version_hash": version_hash,
+                    "mode_meta": {
+                        "card_id": card.get("id"),
+                        "atom_id": atom.get("id"),
+                    },
+                    "isDeleted": False,
+                }
+                
+                # Debug: Log what's being saved for this atom
+                logger.info(f"🔍 DEBUG: Saving atom {atom_id} with atom_configs keys: {list(atom_settings.keys())}")
+                if 'roi_config' in atom_settings:
+                    logger.info(f"🔍 DEBUG: Saving roi_config: {atom_settings['roi_config']}")
+                if 'constraints_config' in atom_settings:
+                    logger.info(f"🔍 DEBUG: Saving constraints_config: {atom_settings['constraints_config']}")
+                if 'negative_constraints' in atom_settings:
+                    logger.info(f"🔍 DEBUG: Saving negative_constraints: {atom_settings['negative_constraints']}")
+                if 'positive_constraints' in atom_settings:
+                    logger.info(f"🔍 DEBUG: Saving positive_constraints: {atom_settings['positive_constraints']}")
+                
+                docs.append(doc)
+        
+        # Insert documents
+        if docs:
+            result = await coll.insert_many(docs)
+            logger.info(f"📦 Stored {len(docs)} atom configurations in atom_list_configuration")
+            
+            return {
+                "status": "success", 
+                "mongo_id": f"{client_id}/{app_id}/{project_id}",
+                "operation": "inserted",
+                "collection": "atom_list_configuration",
+                "documents_inserted": len(docs)
+            }
+        else:
+            return {
+                "status": "success", 
+                "mongo_id": f"{client_id}/{app_id}/{project_id}",
+                "operation": "no_data",
+                "collection": "atom_list_configuration",
+                "documents_inserted": 0
+            }
+        
+    except Exception as e:
+        logger.error(f"❌ MongoDB save error for atom_list_configuration: {e}")
+        return {"status": "error", "error": str(e)}

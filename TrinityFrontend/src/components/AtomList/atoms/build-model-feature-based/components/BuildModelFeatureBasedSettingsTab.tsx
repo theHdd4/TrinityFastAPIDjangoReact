@@ -259,6 +259,7 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
                 id="individual-modeling"
                 checked={data?.individualModeling ?? true}
                 onCheckedChange={(checked) => onDataChange({ individualModeling: !!checked })}
+                onClick={(e) => e.stopPropagation()}
               />
               <h4 className="font-medium text-foreground flex items-center gap-2">
                 Individual Modeling
@@ -515,7 +516,10 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
               <Checkbox
                 id="stack-modeling"
                 checked={data?.stackModeling || false}
-                onCheckedChange={(checked) => onDataChange({ stackModeling: checked as boolean })}
+                onCheckedChange={(checked) => {
+                  onDataChange({ stackModeling: checked as boolean });
+                }}
+                onClick={(e) => e.stopPropagation()}
               />
               <h4 className="font-medium text-foreground flex items-center gap-2">
                 Stack Modeling
