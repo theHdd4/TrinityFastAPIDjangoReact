@@ -33,6 +33,9 @@ from ..data_upload_validate.app.routes import get_object_prefix
 # Import MongoDB saver functions
 from .mongodb_saver import save_build_config, get_build_config_from_mongo, get_scope_config_from_mongo, get_combination_column_values
 
+# Import ensemble calculation
+from .ensemble_calculation import ensemble_calculator
+
 # Import stack model training
 from .stack_model_training import StackModelTrainer
 from .mmm_stack_training import MMMStackModelDataProcessor
@@ -2560,6 +2563,55 @@ async def train_models_for_stacked_data(request: dict):
 #         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+def _get_ensemble_models_by_type(filtered_combination_results):
+    """Helper function to get ensemble models grouped by type."""
+    models_by_type = {}
+    for combo_result in filtered_combination_results:
+        for model in combo_result.get('model_results', []):
+            model_name = model.get('model_name', 'unknown')
+            if model_name not in models_by_type:
+                models_by_type[model_name] = []
+            models_by_type[model_name].append({
+                'combination_id': combo_result.get('combination_id', ''),
+                'mape_test': model.get('mape_test', 0),
+                'r2_test': model.get('r2_test', 0),
+                'ensemble_applied': combo_result.get('ensemble_applied', False)
+            })
+    return models_by_type
+
+async def _save_results_to_minio(summary_data, file_key, minio_client, bucket_name):
+    """Helper function to save results to MinIO."""
+    try:
+        import pandas as pd
+        import pyarrow as pa
+        import pyarrow.feather as feather
+        from io import BytesIO
+        
+        summary_df = pd.DataFrame(summary_data)
+        logger.info(f"📊 DataFrame shape: {summary_df.shape}")
+        logger.info(f"📊 DataFrame columns: {list(summary_df.columns)}")
+        
+        arrow_buffer = BytesIO()
+        table = pa.Table.from_pandas(summary_df)
+        feather.write_feather(table, arrow_buffer)
+        arrow_buffer.seek(0)
+        
+        # Save to MinIO
+        minio_client.put_object(
+            bucket_name,
+            file_key,
+            arrow_buffer,
+            length=arrow_buffer.getbuffer().nbytes,
+            content_type='application/vnd.apache.arrow.file'
+        )
+        logger.info(f"✅ Successfully saved results to MinIO: {file_key}")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to save results to MinIO: {e}")
+        logger.error(f"   Bucket: {bucket_name}")
+        logger.error(f"   File key: {file_key}")
+        logger.error(f"   Buffer size: {arrow_buffer.getbuffer().nbytes}")
+
 @router.post("/mmm-train-models", response_model=ModelTrainingResponse, tags=["MMM Training"])
 async def train_mmm_models(request: dict):
 
@@ -2941,9 +2993,7 @@ async def train_mmm_models(request: dict):
                                 
                                 # Update progress - combination completed (for stack-only mode)
                                 training_progress[run_id]["completed_combinations"] += 1
-                                
-                                logger.info(f"Added {len(stack_model_results_formatted)} MMM stack models as new combination {combination} (no existing entry found)")
-                    
+                                                    
                     # Store stack modeling results in all_variable_stats
                     for combination, model_results_dict in stack_combination_results.items():
                         # Create variable stats entry for this combination
@@ -2969,7 +3019,6 @@ async def train_mmm_models(request: dict):
                         
                         # Store in all_variable_stats
                         all_variable_stats[combination] = combination_variable_stats
-                        logger.info(f"📊 Stored variable stats for stack combination {combination}: {len(combination_variable_stats['combination_results'])} results")
                     
                     training_progress[run_id]["current_step"] = "Stack modeling completed"
                 else:
@@ -3037,7 +3086,7 @@ async def train_mmm_models(request: dict):
         # Save all results to MongoDB (both individual and stack MMM models) in a single document
         if combination_results:
             try:
-                logger.info(f"💾 Saving {len(combination_results)} combination results to MongoDB in a single document")
+
                 
                 # Filter out error combinations
                 valid_combination_results = []
@@ -3050,6 +3099,76 @@ async def train_mmm_models(request: dict):
                 
                 if valid_combination_results:
                     logger.info(f"✅ Processed {len(valid_combination_results)} valid combinations for MMM training")
+                    
+                    # Store original individual parameter results before ensemble calculation
+                    original_combination_results = []
+                    for combo_result in combination_results:
+                        # Create a deep copy of the original results
+                        import copy
+                        original_combo_result = copy.deepcopy(combo_result)
+                        original_combination_results.append(original_combo_result)
+                    
+                    # Calculate ensemble results for each combination
+                    logger.info("🔄 Starting ensemble calculation for MMM model results")
+                    ensemble_results = ensemble_calculator.calculate_ensemble_results(valid_combination_results)
+                    
+                    # Create ensemble summary
+                    ensemble_summary = ensemble_calculator.create_ensemble_summary(ensemble_results)
+                    logger.info(f"📊 Ensemble calculation completed: {ensemble_summary}")
+                    
+                    # Update combination_results with ensemble results
+                    # Replace individual model results with ensemble results for each combination
+                    for i, combo_result in enumerate(combination_results):
+                        combination_name = combo_result.get('combination_id', f'combination_{i}')
+                        if combination_name in ensemble_results:
+                            # Replace model_results with ensemble results
+                            ensemble_data = ensemble_results[combination_name]
+                            ensemble_model_results = []
+                            
+                            # Convert ensemble results back to model_results format
+                            for model_type, ensemble_metrics in ensemble_data.items():
+                                # Ensure all numeric values are proper Python types
+                                def safe_convert(value, default=0):
+                                    import numpy as np
+                                    if isinstance(value, np.integer):
+                                        return int(value)
+                                    elif isinstance(value, np.floating):
+                                        return float(value)
+                                    elif value is None:
+                                        return default
+                                    else:
+                                        return value
+                                
+                                ensemble_model_result = {
+                                    "model_name": model_type,
+                                    "combination_index": 0,  # Single ensemble result
+                                    "parameter_combination": ensemble_metrics.get('weighted_transformation_parameters', {}),
+                                    "actual_parameters_used": ensemble_metrics.get('weighted_transformation_parameters', {}),
+                                    "mape_train": safe_convert(ensemble_metrics.get('mape_train', 0)),
+                                    "mape_test": safe_convert(ensemble_metrics.get('mape_test', 0)),
+                                    "r2_train": safe_convert(ensemble_metrics.get('r2_train', 0)),
+                                    "r2_test": safe_convert(ensemble_metrics.get('r2_test', 0)),
+                                    "coefficients": ensemble_metrics.get('coefficients', {}),
+                                    "standardized_coefficients": ensemble_metrics.get('coefficients', {}),
+                                    "intercept": safe_convert(ensemble_metrics.get('intercept', 0)),
+                                    "aic": safe_convert(ensemble_metrics.get('aic', 0)),
+                                    "bic": safe_convert(ensemble_metrics.get('bic', 0)),
+                                    "n_parameters": safe_convert(ensemble_metrics.get('n_parameters', 0)),
+                                    "price_elasticity": safe_convert(ensemble_metrics.get('price_elasticity', 0)),
+                                    "elasticities": ensemble_metrics.get('elasticities', {}),
+                                    "contributions": ensemble_metrics.get('contributions', {}),
+                                    "roi_results": ensemble_metrics.get('roi_results', {}),
+                                    "transformation_metadata": ensemble_metrics.get('transformation_metadata', {}),
+                                    "variable_configs": ensemble_metrics.get('weighted_transformation_parameters', {}),
+                                    "ensemble_metadata": ensemble_metrics.get('ensemble_metadata', {})
+                                }
+                                ensemble_model_results.append(ensemble_model_result)
+                            
+                            # Update the combination result with ensemble results
+                            combo_result['model_results'] = ensemble_model_results
+                            combo_result['ensemble_applied'] = True
+                            logger.info(f"✅ Applied ensemble calculation to {combination_name}: {len(ensemble_model_results)} model types")
+                        
                 else:
                     logger.warning("No valid combinations to save to MongoDB")
                     
@@ -3057,106 +3176,75 @@ async def train_mmm_models(request: dict):
                 logger.error(f"❌ Failed to save MMM results to MongoDB: {e}")
                 # Don't fail the entire request if MongoDB save fails
         
-        # Initialize filtered results
+        # Use ensemble results directly (no need for additional filtering)
+        # The combination_results already contain ensemble results after ensemble calculation
         filtered_combination_results = []
-        
-        # Find best models by model type and create filtered results
         
         for combo_result in combination_results:
             combo_id = combo_result["combination_id"]
             
-            # Group models by model name to find best for each model type
-            models_by_type = {}
-            for model_result in combo_result["model_results"]:
-                model_name = model_result["model_name"]
-                if model_name not in models_by_type:
-                    models_by_type[model_name] = []
-                models_by_type[model_name].append(model_result)
+            # Check if ensemble calculation was applied
+            if combo_result.get('ensemble_applied', False):
+                logger.info(f"✅ Using ensemble results for {combo_id}")
+                # The model_results already contain ensemble results
+                filtered_combo_result = {
+                    "combination_id": combo_id,
+                    "file_key": combo_result.get("file_key", ""),
+                    "total_records": combo_result.get("total_records", 0),
+                    "model_results": combo_result["model_results"],  # Already contains ensemble results
+                    "ensemble_applied": True
+                }
+            else:
+                logger.warning(f"⚠️ No ensemble results found for {combo_id}, using original results")
+                # Fallback to original results if ensemble wasn't applied
+                filtered_combo_result = {
+                    "combination_id": combo_id,
+                    "file_key": combo_result.get("file_key", ""),
+                    "total_records": combo_result.get("total_records", 0),
+                    "model_results": combo_result["model_results"],
+                    "ensemble_applied": False
+                }
             
-            # Find best MAPE and R² for each model type
-            best_models = []
-            for model_name, model_list in models_by_type.items():
-                # Find best MAPE for this model type
-                best_mape_model = min(model_list, key=lambda x: x["mape_test"])
-                best_mape_model = best_mape_model.copy()
-                # Remove extra fields that don't match ModelResult schema
-                best_mape_model.pop("best_metric", None)
-                best_mape_model.pop("model_type", None)
-                best_mape_model["best_metric"] = "mape"  # Mark as best MAPE
-                best_models.append(best_mape_model)
-                
-                # Find best R² for this model type
-                best_r2_model = max(model_list, key=lambda x: x["r2_test"])
-                best_r2_model = best_r2_model.copy()
-                # Remove extra fields that don't match ModelResult schema
-                best_r2_model.pop("best_metric", None)
-                best_r2_model.pop("model_type", None)
-                best_r2_model["best_metric"] = "r2"  # Mark as best R²
-                best_models.append(best_r2_model)
-            
-            # Remove duplicates (same model might be best for both MAPE and R²)
-            seen_models = set()
-            unique_best_models = []
-            for model in best_models:
-                # Create a unique identifier for the model
-                model_id = f"{model['model_name']}_{model.get('best_alpha', '')}_{model.get('best_l1_ratio', '')}"
-                if model_id not in seen_models:
-                    seen_models.add(model_id)
-                    unique_best_models.append(model)
-                else:
-                    # If duplicate, keep the one with more metrics marked as best
-                    existing_model = next(m for m in unique_best_models if f"{m['model_name']}_{m.get('best_alpha', '')}_{m.get('best_l1_ratio', '')}" == model_id)
-                    if model.get('best_metric') == 'r2' and existing_model.get('best_metric') == 'mape':
-                        # Replace with R² version (more comprehensive)
-                        unique_best_models.remove(existing_model)
-                        unique_best_models.append(model)
-            
-            # Add filtered combination result
-            filtered_combination_results.append({
-                "combination_id": combo_id,
-                "file_key": combo_result.get("file_key", f"mmm_{combo_id}"),
-                "total_records": combo_result.get("total_records", 0),
-                "model_results": unique_best_models
-            })
+            filtered_combination_results.append(filtered_combo_result)
         
-        # Prepare summary after filtered results are created
-        total_best_models = sum(len(combo.get('model_results', [])) for combo in filtered_combination_results)
+        # Prepare summary after ensemble results are created
+        total_ensemble_models = sum(len(combo.get('model_results', [])) for combo in filtered_combination_results)
+        ensemble_applied_count = sum(1 for combo in filtered_combination_results if combo.get('ensemble_applied', False))
+        
         summary = {
             "run_id": run_id,
             "total_combinations_processed": len(combination_results),
-            "total_models_returned": total_best_models,  # Only best models in response
-            "note": "Response contains best MAPE and R² models for each model type per combination (deduplicated).",
+            "total_models_returned": total_ensemble_models,  # Ensemble models in response
+            "ensemble_applied_to_combinations": ensemble_applied_count,
+            "note": "Response contains ensemble results for each model type per combination (weighted by MAPE performance).",
             "variable_transformations_applied": len(variable_configs),
             "business_constraints_applied": len(individual_custom_model_configs) + len(stack_custom_model_configs),
             "transformation_types_used": list(set(config.get("type", "none") for config in variable_configs.values())),
-            "best_models_by_type": {},
+            "ensemble_models_by_type": _get_ensemble_models_by_type(filtered_combination_results),
             "stack_modeling_enabled": stack_modeling,
             "stack_models_count": sum(1 for combo in filtered_combination_results for model in combo.get('model_results', []) if 'Stack_' in model.get('model_name', '')) if stack_modeling else 0
         }
         
-        # Populate best model summaries by model type
+        # Populate ensemble model summaries by model type
         for combo_result in filtered_combination_results:
             combo_id = combo_result["combination_id"]
-            if combo_id not in summary["best_models_by_type"]:
-                summary["best_models_by_type"][combo_id] = {}
+            if combo_id not in summary["ensemble_models_by_type"]:
+                summary["ensemble_models_by_type"][combo_id] = {}
             
             for model_result in combo_result["model_results"]:
                 model_name = model_result["model_name"]
-                if model_name not in summary["best_models_by_type"][combo_id]:
-                    summary["best_models_by_type"][combo_id][model_name] = {}
+                if model_name not in summary["ensemble_models_by_type"][combo_id]:
+                    summary["ensemble_models_by_type"][combo_id][model_name] = {}
                 
-                if model_result.get("best_metric") == "mape":
-                    summary["best_models_by_type"][combo_id][model_name]["best_mape"] = {
+                # Store ensemble results for each model type
+                summary["ensemble_models_by_type"][combo_id][model_name] = {
                         "mape_test": model_result["mape_test"],
-                        "r2_test": model_result["r2_test"]
-                    }
-                elif model_result.get("best_metric") == "r2":
-                    summary["best_models_by_type"][combo_id][model_name]["best_r2"] = {
-                        "mape_test": model_result["mape_test"],
-                        "r2_test": model_result["r2_test"]
+                    "r2_test": model_result["r2_test"],
+                    "ensemble_applied": combo_result.get("ensemble_applied", False),
+                    "ensemble_metadata": model_result.get("ensemble_metadata", {})
                 }
         
-        # Save MMM results to MinIO (same format and column sequence as train-models-direct)
+        # Save MMM results to MinIO (both ensemble and individual parameter results)
         try:
             # Get the standard prefix using get_object_prefix
             prefix = await get_object_prefix()
@@ -3164,11 +3252,13 @@ async def train_mmm_models(request: dict):
             # Create timestamp for file naming
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            # Generate filename for MMM model results
-            model_results_filename = f"mmm_results_scope_{scope_number}_{timestamp}.arrow"
+            # Generate filenames for both ensemble and individual results
+            ensemble_results_filename = f"mmm_ensemble_results_scope_{scope_number}_{timestamp}.arrow"
+            individual_results_filename = f"mmm_individual_results_scope_{scope_number}_{timestamp}.arrow"
             
-            # Construct the full path with the standard structure
-            model_results_file_key = f"{prefix}model-results/{model_results_filename}"
+            # Construct the full paths with the standard structure
+            ensemble_results_file_key = f"{prefix}model-results/{ensemble_results_filename}"
+            individual_results_file_key = f"{prefix}model-results/{individual_results_filename}"
             
             # Get identifiers from scope configuration
             identifiers = []
@@ -3193,12 +3283,13 @@ async def train_mmm_models(request: dict):
             except Exception as e:
                 identifiers = []
             
-            # Prepare data for MinIO storage (same column sequence as train-models-direct)
-            summary_data = []
+            # Prepare data for MinIO storage - both ensemble and individual results
+            # 1. Prepare ensemble results data
+            ensemble_summary_data = []
             for combo_result in combination_results:
                 # Get variable averages for this combination
                 combination_id = combo_result['combination_id']
-   
+                
                 # Fix: all_variable_stats contains final_variable_statistics for each combination
                 # We need to extract variable_averages from the combination_results
                 variable_averages = {}
@@ -3262,7 +3353,8 @@ async def train_mmm_models(request: dict):
                         'n_parameters': model_result.get('n_parameters', 0),
                         'price_elasticity': model_result.get('price_elasticity', None),
                         'run_id': run_id,
-                        'timestamp': timestamp
+                        'timestamp': timestamp,
+                        'result_type': 'ensemble'  # Mark as ensemble result
                     }
                     
                     # Add identifier column values (same as train-models-direct)
@@ -3280,11 +3372,9 @@ async def train_mmm_models(request: dict):
                     
                     # Add Y variable average
                     y_avg_key = f"{y_variable}_avg"
-                    # Use lowercase variable name for Y variable average lookup to match how averages are generated
                     summary_row[y_avg_key] = variable_averages.get(y_variable.lower(), 0)
                     
-                    # Add beta coefficients for each X-variable
-                    coefficients = model_result.get('coefficients', {})
+                    coefficients = model_result.get('standardized_coefficients', {})
                     for x_var in x_variables:
                         beta_key = f"{x_var}_beta"
                         # Use lowercase variable name for coefficient lookup to match how coefficients are generated
@@ -3326,42 +3416,129 @@ async def train_mmm_models(request: dict):
                         summary_row['parameter_combination'] = ""
                         logger.warning(f"⚠️ No variable_configs found in model_result")
                     
-                    summary_data.append(summary_row)
+                    ensemble_summary_data.append(summary_row)
             
-            logger.info(f"📊 Total summary_data rows prepared: {len(summary_data)}")
-            if summary_data:
-                logger.info(f"📊 Preparing to save {len(summary_data)} MMM model results to MinIO")
-                # Convert to DataFrame and save as Arrow file
-                import pandas as pd
-                import pyarrow as pa
-                import pyarrow.feather as feather
-                from io import BytesIO
-                
-                summary_df = pd.DataFrame(summary_data)
-                logger.info(f"📊 DataFrame shape: {summary_df.shape}")
-                logger.info(f"📊 DataFrame columns: {list(summary_df.columns)}")
-                
-                arrow_buffer = BytesIO()
-                table = pa.Table.from_pandas(summary_df)
-                feather.write_feather(table, arrow_buffer)
-                arrow_buffer.seek(0)
-                
-                # Save to MinIO
-                try:
-                    minio_client.put_object(
-                        bucket_name,
-                        model_results_file_key,
-                        arrow_buffer,
-                        length=arrow_buffer.getbuffer().nbytes,
-                        content_type='application/vnd.apache.arrow.file'
-                    )
-                    logger.info(f"✅ Successfully saved MMM results to MinIO: {model_results_file_key}")
+            # 2. Prepare individual parameter results data (from original_combination_results)
+            individual_summary_data = []
+            if 'original_combination_results' in locals():
+                for combo_result in original_combination_results:
+                    # Get variable averages for this combination
+                    combination_id = combo_result['combination_id']
+       
+                    # Get variable averages from all_variable_stats
+                    variable_averages = {}
+                    if 'combination_results' in all_variable_stats.get(combination_id, {}):
+                        combination_results_list = all_variable_stats[combination_id]['combination_results']
+                        if combination_results_list and len(combination_results_list) > 0:
+                            variable_averages = combination_results_list[0].get('variable_averages', {})
                     
-                except Exception as e:
-                    logger.error(f"❌ Failed to save MMM results to MinIO: {e}")
-                    logger.error(f"   Bucket: {bucket_name}")
-                    logger.error(f"   File key: {model_results_file_key}")
-                    logger.error(f"   Buffer size: {arrow_buffer.getbuffer().nbytes}")
+                    # Fallback: if no variable_averages found, try to get from any available combination
+                    if not variable_averages:
+                        for combo_key, combo_data in all_variable_stats.items():
+                            if 'combination_results' in combo_data:
+                                combination_results_list = combo_data['combination_results']
+                                if combination_results_list and len(combination_results_list) > 0:
+                                    variable_averages = combination_results_list[0].get('variable_averages', {})
+                                    if variable_averages:
+                                        logger.info(f"🔍 Using fallback variable_averages from {combo_key} for individual results")
+                                        break
+                    
+                    # Get column values for this combination from source file
+                    column_values = {}
+                    if identifiers and combo_result.get('file_key'):
+                        try:
+                            column_values = await get_combination_column_values(
+                                minio_client, 
+                                bucket_name,
+                                combo_result['file_key'], 
+                                identifiers
+                            )
+                        except Exception as e:
+                            logger.warning(f"⚠️ Could not get column values for {combination_id}: {e}")
+                            column_values = {identifier: "Unknown" for identifier in identifiers}
+                    else:
+                        column_values = {identifier: "Unknown" for identifier in identifiers}
+                    
+                    # Process each model result in this combination
+                    for model_result in combo_result.get('model_results', []):
+                        # Create summary row for individual parameter result
+                        summary_row = {
+                            'run_id': run_id,
+                            'scope_number': scope_number,
+                            'combination_id': combination_id,
+                            'model_name': model_result.get('model_name', 'Unknown'),
+                            'combination_index': model_result.get('combination_index', 0),
+                            'mape_train': model_result.get('mape_train', 0),
+                            'mape_test': model_result.get('mape_test', 0),
+                            'r2_train': model_result.get('r2_train', 0),
+                            'r2_test': model_result.get('r2_test', 0),
+                            'intercept': model_result.get('intercept', 0),
+                            'unstandardized_intercept': model_result.get('unstandardized_intercept', 0),
+                            'aic': model_result.get('aic', 0),
+                            'bic': model_result.get('bic', 0),
+                            'n_parameters': model_result.get('n_parameters', 0),
+                            'price_elasticity': model_result.get('price_elasticity', 0),
+                            'total_records': combo_result.get('total_records', 0),
+                            'file_key': combo_result.get('file_key', ''),
+                            'result_type': 'individual_parameter'  # Mark as individual result
+                        }
+                        
+                        # Add identifier columns
+                        for identifier in identifiers:
+                            summary_row[identifier] = column_values.get(identifier, "Unknown")
+                        
+                        # Add variable average columns
+                        for var_name, var_value in variable_averages.items():
+                            # variable_averages contains simple float values (means), not dictionaries
+                            summary_row[f"{var_name}_mean"] = var_value if isinstance(var_value, (int, float)) else 0
+                            # For individual results, we don't have std/min/max from variable_average
+                        
+                        # Add coefficient values for each X-variable (using standardized coefficients)
+                        coefficients = model_result.get('standardized_coefficients', {})
+                        for x_var in x_variables:
+                            beta_key = f"{x_var}_beta"
+                            summary_row[beta_key] = coefficients.get(f"Beta_{x_var.lower()}", 0)
+                        
+                        # Add elasticity values for each X-variable
+                        elasticities = model_result.get('elasticities', {})
+                        for x_var in x_variables:
+                            elasticity_key = f"{x_var}_elasticity"
+                            summary_row[elasticity_key] = elasticities.get(x_var.lower(), 0)
+                        
+                        # Add contribution values for each X-variable
+                        contributions = model_result.get('contributions', {})
+                        for x_var in x_variables:
+                            contribution_key = f"{x_var}_contribution"
+                            summary_row[contribution_key] = contributions.get(x_var.lower(), 0)
+                        
+                        # Add ROI results as individual columns
+                        roi_results = model_result.get('roi_results', {})
+                        for feature_name, roi_data in roi_results.items():
+                            summary_row[f"{feature_name}_roi"] = roi_data.get('roi', 0)
+                            summary_row[f"{feature_name}_cprp_value"] = roi_data.get('cprp_value', 0)
+                        
+                        # Add parameter_combination column
+                        import json
+                        combo_config = model_result.get('variable_configs', {})
+                        if combo_config:
+                            summary_row['parameter_combination'] = json.dumps(combo_config, default=str)
+                        else:
+                            summary_row['parameter_combination'] = ""
+                        
+                        individual_summary_data.append(summary_row)
+            
+            logger.info(f"📊 Total ensemble summary_data rows prepared: {len(ensemble_summary_data)}")
+            logger.info(f"📊 Total individual summary_data rows prepared: {len(individual_summary_data)}")
+            
+            # Save ensemble results to MinIO
+            if ensemble_summary_data:
+                logger.info(f"📊 Preparing to save {len(ensemble_summary_data)} MMM ensemble results to MinIO")
+                await _save_results_to_minio(ensemble_summary_data, ensemble_results_file_key, minio_client, bucket_name)
+            
+            # Save individual parameter results to MinIO
+            if individual_summary_data:
+                logger.info(f"📊 Preparing to save {len(individual_summary_data)} MMM individual parameter results to MinIO")
+                await _save_results_to_minio(individual_summary_data, individual_results_file_key, minio_client, bucket_name)
                     
         except Exception as e:
             logger.error(f"❌ Failed to prepare MMM results for MinIO saving: {e}")
@@ -3389,12 +3566,28 @@ async def train_mmm_models(request: dict):
             model_coefficients = {}
             combination_file_keys = []
             
+            # Add ensemble results file key
+            if 'ensemble_results_file_key' in locals():
+                combination_file_keys.append({
+                    "combination": "ensemble_results",
+                    "file_key": ensemble_results_file_key,
+                    "result_type": "ensemble"
+                })
+            
+            # Add individual parameter results file key
+            if 'individual_results_file_key' in locals():
+                combination_file_keys.append({
+                    "combination": "individual_parameter_results", 
+                    "file_key": individual_results_file_key,
+                    "result_type": "individual_parameters"
+                })
+            
             for i, combo_result in enumerate(combination_results):
                 # Use combination_id (same as train-models-direct)
                 if 'combination_id' in combo_result:
                     combination_name = combo_result['combination_id']
                     
-                    # Add file key if available (remove mmm_stack_modeling prefix)
+                    # Add original file key if available (remove mmm_stack_modeling prefix)
                     if 'file_key' in combo_result:
                         file_key = combo_result['file_key']
                         # Remove mmm_stack_modeling prefix if present
@@ -3406,7 +3599,8 @@ async def train_mmm_models(request: dict):
                         if file_key:  # Only add if file_key is not None
                             combination_file_keys.append({
                                 "combination": combination_name,
-                                "file_key": file_key
+                                "file_key": file_key,
+                                "result_type": "source_data"
                             })
                     
                     # Extract model coefficients for this combination

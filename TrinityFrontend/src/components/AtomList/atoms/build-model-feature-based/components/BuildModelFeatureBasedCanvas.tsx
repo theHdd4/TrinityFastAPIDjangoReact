@@ -66,7 +66,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     }
   };
   const [roiConfig, setRoiConfig] = useState<ROIConfig>({
-    enabled: true,  // Always enabled
+    enabled: false,  // Will be set based on enableROICalculation state
     features: {},
     priceColumn: '',
     perCombinationCPRP: false,
@@ -320,7 +320,16 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map((col) => col.toLowerCase()),
         price_column: finalData.priceColumn?.toLowerCase(),
         // ROI configuration
-        roi_config: roiConfig
+        roi_config: {
+          ...roiConfig,
+          enabled: enableROICalculation
+        },
+        // Constraints configuration
+        constraints_config: {
+          enabled: finalData.enableConstraintSetup || false,
+          negative_constraints: finalData.negativeConstraints || [],
+          positive_constraints: finalData.positiveConstraints || []
+        }
       };
     } else {
       // General models payload (existing logic)
@@ -349,7 +358,16 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         apply_interaction_terms: finalData.applyInteractionTerms ?? true,
         numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map(col => col.toLowerCase()),
         // ROI configuration
-        roi_config: roiConfig
+        roi_config: {
+          ...roiConfig,
+          enabled: enableROICalculation
+        },
+        // Constraints configuration
+        constraints_config: {
+          enabled: finalData.enableConstraintSetup || false,
+          negative_constraints: finalData.negativeConstraints || [],
+          positive_constraints: finalData.positiveConstraints || []
+        }
       };
     }
 

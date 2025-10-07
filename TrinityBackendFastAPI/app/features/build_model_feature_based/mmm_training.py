@@ -95,12 +95,12 @@ class MMMTransformationEngine:
             if config.get("type") == "media":
                 # Auto-generate default parameter ranges based on data frequency
                 if data_frequency == "weekly":
-                    adstock_decay = config.get("adstock_decay", [0.70, 0.75, 0.80])  # Weekly decay values
+                    adstock_decay = config.get("adstock_decay", [0.70])  # Weekly decay values
                 else:  # monthly
-                    adstock_decay = config.get("adstock_decay", [0.4, 0.50, 0.60])  # Monthly decay values
+                    adstock_decay = config.get("adstock_decay", [0.4])  # Monthly decay values
                 
-                logistic_growth = config.get("logistic_growth", [1.5,2.5,3.5])  # Default range
-                logistic_midpoint = config.get("logistic_midpoint", [-0.5,0.0,0.5])  # Default range
+                logistic_growth = config.get("logistic_growth", [1.5,2.5])  # Default range
+                logistic_midpoint = config.get("logistic_midpoint", [0.0])  # Default range
                 logistic_carryover = config.get("logistic_carryover", [0.0])  # Single value since it's not used
                 
                 # Ensure parameters are lists
@@ -372,7 +372,7 @@ class MMMTransformationEngine:
         transformed = scaler.fit_transform(x_reshaped).flatten()
         return transformed, scaler
     
-    def apply_variable_transformations(self, df: pd.DataFrame, variable_configs: Dict[str, Dict[str, Any]]) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    def apply_variable_transformations(self, df: pd.DataFrame, variable_configs: Dict[str, Dict[str, Any]]) -> Tuple[pd.DataFrame, Dict[str, Any], Dict[str, Dict[str, Any]]]:
         """
         Apply per-variable transformations based on configuration
         
@@ -395,10 +395,12 @@ class MMMTransformationEngine:
                 }
         
         Returns:
-            Tuple of (transformed_dataframe, transformation_metadata)
+            Tuple of (transformed_dataframe, transformation_metadata, updated_variable_configs_with_actual_params)
         """
         transformed_df = df.copy()
         transformation_metadata = {}
+        # Create a copy of variable_configs to store actual parameters used
+        updated_variable_configs = variable_configs.copy()
         
         for var_name, config in variable_configs.items():
             if var_name not in df.columns:
@@ -495,6 +497,19 @@ class MMMTransformationEngine:
                     "std": float(current_data.std())
                 })
                 
+                # Update variable_configs with actual parameters used for this transformation
+                updated_variable_configs[var_name] = {
+                    "type": "media",
+                    "adstock_decay": adstock_decay,
+                    "logistic_growth": logistic_growth,
+                    "logistic_midpoint": logistic_midpoint,
+                    "logistic_carryover": logistic_carryover,
+                    "standardization_mean": float(standard_scaler.mean_[0]),
+                    "standardization_scale": float(standard_scaler.scale_[0]),
+                    "minmax_min": float(minmax_scaler.data_min_[0]),
+                    "minmax_scale": float(minmax_scaler.scale_[0])
+                }
+                
             elif var_type == "standard":
                 # Only StandardScaler
                 current_data, standard_scaler = self.apply_standardization(current_data)
@@ -505,6 +520,13 @@ class MMMTransformationEngine:
                     "mean": float(current_data.mean()),
                     "std": float(current_data.std())
                 })
+                
+                # Update variable_configs with actual parameters used for this transformation
+                updated_variable_configs[var_name] = {
+                    "type": "standard",
+                    "standardization_mean": float(standard_scaler.mean_[0]),
+                    "standardization_scale": float(standard_scaler.scale_[0])
+                }
                 
             elif var_type == "minmax":
                 # Only MinMaxScaler
@@ -517,6 +539,13 @@ class MMMTransformationEngine:
                     "std": float(current_data.std())
                 })
                 
+                # Update variable_configs with actual parameters used for this transformation
+                updated_variable_configs[var_name] = {
+                    "type": "minmax",
+                    "minmax_min": float(minmax_scaler.data_min_[0]),
+                    "minmax_scale": float(minmax_scaler.scale_[0])
+                }
+                
             else:  # "none"
                 # No transformation
                 var_metadata["transformation_steps"].append({
@@ -524,6 +553,11 @@ class MMMTransformationEngine:
                     "mean": float(current_data.mean()),
                     "std": float(current_data.std())
                 })
+                
+                # Update variable_configs with actual parameters used for this transformation
+                updated_variable_configs[var_name] = {
+                    "type": "none"
+                }
             
             # Update final statistics
             var_metadata["final_mean"] = float(current_data.mean())
@@ -535,7 +569,7 @@ class MMMTransformationEngine:
             transformed_df[var_name] = current_data
             transformation_metadata[var_name] = var_metadata
         
-        return transformed_df, transformation_metadata
+        return transformed_df, transformation_metadata, updated_variable_configs
 
 
 class MMMModelTrainer:
@@ -756,14 +790,13 @@ class MMMModelTrainer:
                 if feature_config.get('type') != 'CPRP':
                     continue  # Skip non-CPRP features
                     
-                # Get CPRP value for this combination
+
                 if per_combination_cprp and matched_combination_name:
                     # Use matched combination name to get CPRP values
                     combination_values = combination_cprp_values[matched_combination_name]
                     cprp_value = combination_values.get(feature_name, 0)
                     logger.info(f"Using per-combination CPRP for '{feature_name}' in '{matched_combination_name}': {cprp_value}")
                 else:
-                    # Use global CPRP value (either perCombinationCPRP is false or no match found)
                     cprp_value = feature_config.get('value', 0)
                     if per_combination_cprp:
                         logger.info(f"Using global CPRP for '{feature_name}' (no combination match): {cprp_value}")
@@ -789,14 +822,12 @@ class MMMModelTrainer:
             else:
                 logger.warning(f"   Feature {feature_lower} not found in transformed_df columns: {list(transformed_df.columns)}")
                 beta_transformed_sum = 0
-            
-            # Calculate sigma_j(cprp * xij) - sum of cprp * original values
+
             if feature_lower in X_original.columns:
                 original_values = X_original[feature_lower].values
                 cprp_original_sum = np.sum(cprp_value * original_values)
                 logger.info(f"   {feature_name}: cprp_original_sum = {cprp_original_sum} (cprp={cprp_value} * sum of {len(original_values)} values)")
             else:
-                logger.warning(f"   Feature {feature_lower} not found in X_original columns: {list(X_original.columns)}")
                 cprp_original_sum = 0
             
             # Calculate ROI using the formula
@@ -805,8 +836,6 @@ class MMMModelTrainer:
                 logger.info(f"   {feature_name}: ROI = ({beta_transformed_sum} / {cprp_original_sum}) * {avg_price_column} = {roi}")
             else:
                 roi = 0
-                logger.warning(f"   ⚠️ CPRP original sum is 0 for feature {feature_name}, ROI set to 0")
-                logger.warning(f"   Reason: cprp_value={cprp_value}, original_values sum={np.sum(original_values) if feature_lower in X_original.columns else 'N/A'}")
             
             roi_results[feature_name] = {
                 'cprp_value': float(cprp_value),
@@ -861,7 +890,6 @@ class MMMModelTrainer:
             elif file_key.endswith('.csv'):
                 df = pd.read_csv(BytesIO(file_data))
                 df.columns = df.columns.str.lower()
-                logger.info(f"Successfully read CSV file: {file_key}, shape: {df.shape}")
             else:
                 raise Exception(f"Unsupported file format: {file_key}")
                 
@@ -879,9 +907,7 @@ class MMMModelTrainer:
         if missing_vars:
             raise Exception(f"Variables not found in {file_key}: {missing_vars}")
         
-        # Generate parameter combinations
-        logger.info("Generating parameter combinations...")
-        logger.info(f"Input variable_configs: {variable_configs}")
+
         parameter_combinations = self.transformation_engine.generate_parameter_combinations(
             variable_configs, df=df
         )
@@ -896,11 +922,10 @@ class MMMModelTrainer:
         all_variable_stats = []
         
         for combo_idx, combo_config in enumerate(parameter_combinations):
-            logger.info(f"Training combination {combo_idx + 1}/{len(parameter_combinations)}")
-            logger.info(f"Combo config: {combo_config}")
+  
             
             # Apply per-variable transformations for this combination
-            transformed_df, transformation_metadata = self.transformation_engine.apply_variable_transformations(
+            transformed_df, transformation_metadata, updated_combo_config = self.transformation_engine.apply_variable_transformations(
                 df, combo_config
             )
         
@@ -937,20 +962,17 @@ class MMMModelTrainer:
                         if model_name == "Ridge Regression" and tuning_mode == 'auto':
                             # Use RidgeCV for automatic alpha tuning with reasonable alpha range
                             alphas = np.logspace(-2, 3, 50)  # 0.0001 to 10000 (reasonable range)
-                            logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values)")
                             models_dict[model_name] = RidgeCV(alphas=alphas, cv=k_folds)
                             
                         elif model_name == "Lasso Regression" and tuning_mode == 'auto':
                             # Use LassoCV for automatic alpha tuning with reasonable alpha range
                             alphas = np.logspace(-3, 2, 50)  # 0.0001 to 10 (reasonable range for Lasso)
-                            logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values)")
                             models_dict[model_name] = LassoCV(alphas=alphas, cv=k_folds, random_state=42)
                             
                         elif model_name == "ElasticNet Regression" and tuning_mode == 'auto':
                             # Use ElasticNetCV for automatic alpha and l1_ratio tuning with reasonable ranges
                             alphas = np.logspace(-3, 2, 50)  # 0.0001 to 10 (reasonable range for ElasticNet)
                             l1_ratios = np.linspace(0.1, 0.9, 9)  # Default l1_ratio range
-                            logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values), l1_ratio range: {l1_ratios[0]:.2f} to {l1_ratios[-1]:.2f} ({len(l1_ratios)} values)")
                             models_dict[model_name] = ElasticNetCV(
                                 alphas=alphas, l1_ratio=l1_ratios, cv=k_folds, random_state=42
                             )
@@ -973,9 +995,6 @@ class MMMModelTrainer:
                                 # Fallback to old format if new format not available
                                 negative_constraints = parameters.get('negative_constraints', [])
                                 positive_constraints = parameters.get('positive_constraints', [])
-                            
-                            logger.info(f"🔍 MMM Custom Constrained Ridge - Negative constraints: {negative_constraints}")
-                            logger.info(f"🔍 MMM Custom Constrained Ridge - Positive constraints: {positive_constraints}")
                             
                             # Check if we should use auto-tuning for l2_penalty
                             if tuning_mode == 'auto':
@@ -1088,13 +1107,10 @@ class MMMModelTrainer:
                     intercept_adjustment = 0.0
                     
                     if hasattr(model, 'coef_'):
-                        # For MMM, coefficients represent relationships with transformed variables
-                        # We'll store both transformed and attempt to back-transform
-                        logger.info(f"Model {model_name} coefficients: {model.coef_}")
-                        logger.info(f"X variables for coefficients: {x_variables_lower}")
+    
                         for i, var in enumerate(x_variables_lower):
                             coefficients[f"Beta_{var}"] = float(model.coef_[i])
-                            logger.info(f"Stored coefficient Beta_{var} = {float(model.coef_[i])}")
+    
                             
                             # Attempt back-transformation based on transformation type
                             var_config = combo_config.get(var, {})
@@ -1148,7 +1164,6 @@ class MMMModelTrainer:
                         # For standard transformation: intercept = intercept - sum(beta_i * x_mean_i)
                         unstandardized_intercept = intercept - intercept_adjustment
                     elif has_minmax_vars:
-                        # For minmax transformation: intercept = intercept - sum(beta_i * x_min_i)
                         unstandardized_intercept = intercept - intercept_adjustment
                     # For "none" or "media" transformations, intercept remains as-is
                     
@@ -1247,19 +1262,12 @@ class MMMModelTrainer:
                         else:
                             actual_params[var_name] = config
                     
-                    logger.info(f"Extracted actual_params for {model_name}: {actual_params}")
                     
                     # Calculate ROI for selected features if ROI config is provided
                     roi_results = {}
-                    if roi_config and combination_name:
-                        # Use the combination name passed from routes
-                        logger.info(f"Calculating ROI for combination: {combination_name}")
-                        logger.info(f"Price column passed to ROI calculation: '{price_column}'")
-                        logger.info(f"Full original dataframe columns: {list(df.columns)}")
-                        logger.info(f"Full original dataframe shape: {df.shape}")
-                        
+                    if roi_config and combination_name:   
                         # Apply transformations to FULL dataset first for consistent standardization
-                        transformed_df_full, transformation_metadata = self.transformation_engine.apply_variable_transformations(
+                        transformed_df_full, transformation_metadata, updated_combo_config = self.transformation_engine.apply_variable_transformations(
                             df, combo_config
                         )
  
@@ -1267,7 +1275,6 @@ class MMMModelTrainer:
                         
                         df_last_12_months = self._filter_last_12_months(df)
 
-                        logger.info(f"Transformed dataframe last 12 months: {transformed_df_last_12_months[['region'] + x_variables_lower].head(12)}")
                         
                         roi_results = self.calculate_roi_for_features(
                             roi_config=roi_config,
@@ -1289,11 +1296,6 @@ class MMMModelTrainer:
                             logger.info("=" * 80)
                             for feature_name, roi_data in roi_results.items():
                                 logger.info(f"📊 {feature_name}:")
-                                logger.info(f"   CPRP Value: {roi_data['cprp_value']:.6f}")
-                                logger.info(f"   Beta Coefficient: {roi_data['beta_coefficient']:.6f}")
-                                logger.info(f"   Beta Transformed Sum: {roi_data['beta_transformed_sum']:.6f}")
-                                logger.info(f"   CPRP Original Sum: {roi_data['cprp_original_sum']:.6f}")
-                                logger.info(f"   Avg Price Column: {roi_data['avg_price_column']:.6f}")
                                 logger.info(f"   🎯 FINAL ROI: {roi_data['roi']:.6f}")
                                 logger.info("-" * 40)
                             logger.info("=" * 80)
@@ -1307,7 +1309,7 @@ class MMMModelTrainer:
                     model_result = {
                         "model_name": model_name,
                         "combination_index": combo_idx,
-                        "parameter_combination": combo_config,
+                        "parameter_combination": updated_combo_config,
                         "actual_parameters_used": actual_params,
                         "mape_train": float(mape_train),
                         "mape_test": float(mape_test),
@@ -1325,7 +1327,7 @@ class MMMModelTrainer:
                         "contributions": contributions,
                         "roi_results": roi_results,  # Add ROI results
                         "transformation_metadata": transformation_metadata,
-                        "variable_configs": combo_config
+                        "variable_configs": updated_combo_config
                     }
                     
                     # Debug: Log final coefficients being returned
@@ -1345,7 +1347,7 @@ class MMMModelTrainer:
             # Store variable statistics for this combination
             variable_statistics = {
                 "combination_index": combo_idx,
-                "parameter_combination": combo_config,
+                "parameter_combination": updated_combo_config,
                 "variable_averages": {**{var: float(X_original[var].mean()) for var in x_variables_lower}, 
                                     y_variable_lower: float(y_original.mean())},
                 "transformation_metadata": transformation_metadata,

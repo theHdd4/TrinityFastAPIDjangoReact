@@ -294,3 +294,10 @@ class ScopeListResponse(BaseModel):
     total_scopes: int
     scopes: List[ScopeSummary]
     pagination: Dict[str, int]
+
+class SCurveRequest(BaseModel):
+    client_name: str
+    app_name: str
+    project_name: str
+    combination_name: str
+    model_name: str

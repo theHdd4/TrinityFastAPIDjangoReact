@@ -26,6 +26,7 @@ from .database import (
     get_transformation_metadata,
     get_model_by_transform_and_id  
 )
+from .s_curve import get_s_curve_endpoint
 
 # Import get_object_prefix for dynamic path construction
 from ..data_upload_validate.app.routes import get_object_prefix
@@ -47,7 +48,8 @@ from .schemas import (
     ActualVsPredicted,
     GenericModelSelectionRequest,
     SavedModelResponse,
-    SavedCombinationsStatusResponse
+    SavedCombinationsStatusResponse,
+    SCurveRequest
 )
 
 from .database import MINIO_BUCKET, MONGO_URI, MONGO_DB, SELECT_CONFIGS_COLLECTION_NAME
@@ -120,7 +122,7 @@ async def get_unique_combination_ids(
     Get unique combination_id values from a model results file.
     Returns a list of unique combination_id values for dropdown selection.
     """
-    logger.info(f"🔧 COMBINATION-IDS ENDPOINT CALLED with file_key: {file_key}")
+   
     
     if not minio_client:
         logger.error("❌ MinIO client is not available")
@@ -136,35 +138,29 @@ async def get_unique_combination_ids(
         else:
             full_file_key = f"{object_prefix}{file_key}"
         
-        logger.info(f"Original file_key: {file_key}")
-        logger.info(f"Dynamic object_prefix: {object_prefix}")
-        logger.info(f"Final full_file_key: {full_file_key}")
         response = minio_client.get_object(MINIO_BUCKET, full_file_key)
         content = response.read()
         
         # Read file based on extension (same pattern as merge/concat)
         if file_key.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(content))
-            logger.info(f"Successfully read CSV file. Columns: {list(df.columns)}")
         elif file_key.endswith(".xlsx"):
             df = pd.read_excel(io.BytesIO(content))
-            logger.info(f"Successfully read Excel file. Columns: {list(df.columns)}")
         elif file_key.endswith(".arrow"):
             import pyarrow as pa
             import pyarrow.ipc as ipc
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
-            logger.info(f"Successfully read Arrow file. Columns: {list(df.columns)}")
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_key}")
 
         # Check if combination_id column exists - more robust detection
         combination_id_columns = []
-        logger.info(f"Checking for combination_id columns in: {list(df.columns)}")
+
         
         for col in df.columns:
             col_lower = col.lower()
-            logger.info(f"Checking column: '{col}' (lowercase: '{col_lower}')")
+ 
             
             # Check for various combination_id patterns
             if (col_lower == 'combination_id' or 
@@ -175,11 +171,11 @@ async def get_unique_combination_ids(
                 'combo_id' in col_lower or 
                 'combination' in col_lower):
                 combination_id_columns.append(col)
-                logger.info(f"Found matching column: '{col}'")
+   
 
         if not combination_id_columns:
             # Log available columns for debugging
-            logger.info(f"Available columns in file: {list(df.columns)}")
+
             raise HTTPException(
                 status_code=404, 
                 detail=f"No combination_id column found. Available columns: {', '.join(df.columns[:10])}"
@@ -754,24 +750,19 @@ async def filter_models_by_variable_and_metrics_with_filters(filter_req: ModelFi
         # Read file based on extension (same pattern as combination-ids endpoint)
         if filter_req.file_key.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(content))
-            logger.info(f"Successfully read CSV file. Columns: {list(df.columns)}")
         elif filter_req.file_key.endswith(".xlsx"):
             df = pd.read_excel(io.BytesIO(content))
-            logger.info(f"Successfully read Excel file. Columns: {list(df.columns)}")
         elif filter_req.file_key.endswith(".arrow"):
             import pyarrow as pa
             import pyarrow.ipc as ipc
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
-            logger.info(f"Successfully read Arrow file. Columns: {list(df.columns)}")
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {filter_req.file_key}")
 
         # Find the method column for the selected variable
         method_column = None
         method_type = filter_req.method or "elasticity"
-        logger.info(f"Looking for {method_type} column for variable: {filter_req.variable}")
-        logger.info(f"Available columns: {list(df.columns)}")
         
         # Look for method column with pattern: {variable}_{method}
         # Handle special case for "average" method which uses "avg" in column names
@@ -792,7 +783,6 @@ async def filter_models_by_variable_and_metrics_with_filters(filter_req: ModelFi
                 for col in df.columns:
                     if col.lower() == pattern.lower():
                         method_column = col
-                        logger.info(f"Found {method_type} column: '{col}' using pattern: '{pattern}'")
                         break
                 if method_column:
                     break
@@ -800,7 +790,6 @@ async def filter_models_by_variable_and_metrics_with_filters(filter_req: ModelFi
             for col in df.columns:
                 if col.lower() == f"{filter_req.variable.lower()}_{method_suffix}":
                     method_column = col
-                    logger.info(f"Found {method_type} column: '{col}'")
                     break
         
         if not method_column:
@@ -826,7 +815,6 @@ async def filter_models_by_variable_and_metrics_with_filters(filter_req: ModelFi
             )
 
         # Log the detected model column for debugging
-        logger.info(f"Using model column: {model_column}")
 
         # Prepare a DataFrame with model column and the method column
         columns_to_select = [model_column, method_column]
@@ -844,7 +832,6 @@ async def filter_models_by_variable_and_metrics_with_filters(filter_req: ModelFi
                     'combo_id' in col_lower or 
                     'combination' in col_lower):
                     combination_id_column = col
-                    logger.info(f"Found combination_id column: '{col}'")
                     break
             
             if combination_id_column:
@@ -866,9 +853,7 @@ async def filter_models_by_variable_and_metrics_with_filters(filter_req: ModelFi
         
         # Filter by combination_id if specified
         if filter_req.combination_id and combination_id_column:
-            logger.info(f"Filtering by combination_id: {filter_req.combination_id}")
             filtered = filtered[filtered[combination_id_column] == filter_req.combination_id]
-            logger.info(f"After combination filtering: {len(filtered)} rows")
         
         # Rename columns for consistent processing
         filtered = filtered.rename(columns={
@@ -1063,7 +1048,6 @@ async def filter_models_by_variable_and_metrics_with_filters(filter_req: ModelFi
                 detail=f"No models found matching the criteria. Total models: {total_models}, After filtering: {filtered_by_metrics}"
             )
         
-        logger.info(f"Found {len(result)} models matching the criteria")
         return result
         
     except HTTPException:
@@ -1096,24 +1080,19 @@ async def filter_models_by_variable_and_metrics(filter_req: ModelFilterRequest):
         # Read file based on extension (same pattern as combination-ids endpoint)
         if filter_req.file_key.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(content))
-            logger.info(f"Successfully read CSV file. Columns: {list(df.columns)}")
         elif filter_req.file_key.endswith(".xlsx"):
             df = pd.read_excel(io.BytesIO(content))
-            logger.info(f"Successfully read Excel file. Columns: {list(df.columns)}")
         elif filter_req.file_key.endswith(".arrow"):
             import pyarrow as pa
             import pyarrow.ipc as ipc
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
-            logger.info(f"Successfully read Arrow file. Columns: {list(df.columns)}")
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported file type: {filter_req.file_key}")
 
         # Find the method column for the selected variable
         method_column = None
         method_type = filter_req.method or "elasticity"
-        logger.info(f"Looking for {method_type} column for variable: {filter_req.variable}")
-        logger.info(f"Available columns: {list(df.columns)}")
         
         # Look for method column with pattern: {variable}_{method}
         # Handle special case for "average" method which uses "avg" in column names
@@ -1134,7 +1113,6 @@ async def filter_models_by_variable_and_metrics(filter_req: ModelFilterRequest):
                 for col in df.columns:
                     if col.lower() == pattern.lower():
                         method_column = col
-                        logger.info(f"Found {method_type} column: '{col}' using pattern: '{pattern}'")
                         break
                 if method_column:
                     break
@@ -1142,7 +1120,6 @@ async def filter_models_by_variable_and_metrics(filter_req: ModelFilterRequest):
             for col in df.columns:
                 if col.lower() == f"{filter_req.variable.lower()}_{method_suffix}":
                     method_column = col
-                    logger.info(f"Found {method_type} column: '{col}'")
                     break
         
         if not method_column:
@@ -1168,7 +1145,6 @@ async def filter_models_by_variable_and_metrics(filter_req: ModelFilterRequest):
             )
 
         # Log the detected model column for debugging
-        logger.info(f"Using model column: {model_column}")
 
         # Prepare a DataFrame with model column and the method column
         columns_to_select = [model_column, method_column]
@@ -1186,13 +1162,10 @@ async def filter_models_by_variable_and_metrics(filter_req: ModelFilterRequest):
                     'combo_id' in col_lower or 
                     'combination' in col_lower):
                     combination_id_column = col
-                    logger.info(f"Found combination_id column: '{col}'")
                     break
             
             if combination_id_column:
                 columns_to_select.append(combination_id_column)
-            else:
-                logger.warning(f"Combination ID filtering requested but no combination_id column found")
         
         # Add metric columns if they exist
         metric_columns = ['MAPE', 'Test_R2', 'SelfElasticity', 'R2', 'r2', 'Test_r2', 'mape_train', 'mape_test', 'r2_train', 'r2_test', 'aic', 'bic', 'AIC', 'BIC']
@@ -1208,9 +1181,7 @@ async def filter_models_by_variable_and_metrics(filter_req: ModelFilterRequest):
         
         # Filter by combination_id if specified
         if filter_req.combination_id and combination_id_column:
-            logger.info(f"Filtering by combination_id: {filter_req.combination_id}")
-            filtered = filtered[filtered[combination_id_column] == filter_req.combination_id]
-            logger.info(f"After combination filtering: {len(filtered)} rows")
+                        filtered = filtered[filtered[combination_id_column] == filter_req.combination_id]
         
         # Rename columns for consistent processing
         filtered = filtered.rename(columns={
@@ -1362,7 +1333,6 @@ async def filter_models_by_variable_and_metrics(filter_req: ModelFilterRequest):
                 detail=f"No models found matching the criteria. Total models: {total_models}, After filtering: {filtered_by_metrics}"
             )
         
-        logger.info(f"Found {len(result)} models matching the criteria")
         return result
         
     except HTTPException:
@@ -1372,7 +1342,6 @@ async def filter_models_by_variable_and_metrics(filter_req: ModelFilterRequest):
         # Log the full error for debugging
         import traceback
         error_detail = f"Error processing file: {str(e)}\nTraceback: {traceback.format_exc()}"
-        logger.error(error_detail)
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 @router.post("/models/select-save-generic", response_model=SavedModelResponse, tags=["Models"])
@@ -1533,10 +1502,8 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                     if hasattr(ensemble_data, 'weighted'):
                         weighted_metrics = ensemble_data.weighted
                     else:
-                        logger.warning(f"⚠️ WARNING: No 'weighted' attribute in ensemble data")
                         weighted_metrics = {}
                 else:
-                    logger.warning(f"⚠️ WARNING: No ensemble results found")
                     weighted_metrics = {}
                 
                 # Handle x_variables properly - convert numpy array to string
@@ -1574,7 +1541,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 cleaned_dict = model_dict
                     
             except Exception as e:
-                logger.error(f"❌ Error fetching ensemble metrics: {str(e)}")
                 # Fallback to default values if ensemble fetch fails
                 x_vars = df['x_variables'].iloc[0] if len(df) > 0 else '[]'
                 if isinstance(x_vars, (list, np.ndarray)):
@@ -1670,7 +1636,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
             client_name = selection_req.client_name
             app_name = selection_req.app_name
             project_name = selection_req.project_name
-            logger.info(f"✅ Using client: {client_name}, app: {app_name}, project: {project_name} from request")
             
             # Get combination_id for creating unique _id
             combination_id = cleaned_dict.get("combination_id") or cleaned_dict.get("Combination_ID") or cleaned_dict.get("combination") or "unknown"
@@ -1681,7 +1646,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
             # Get the select_configs collection dynamically
             select_configs_coll = get_select_configs_collection()
             if select_configs_coll is None:
-                logger.error("❌ Failed to get select_configs collection - cannot save metadata")
                 raise Exception("Select configs collection not available")
             
             # Look up createandtransform_operations from scope selector collection based on document_id
@@ -1696,13 +1660,10 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 
                 if scopeselector_doc and "createandtransform_operations" in scopeselector_doc:
                     createandtransform_operations = scopeselector_doc["createandtransform_operations"]
-                    logger.info(f"🔍 Found createandtransform operations from scope selector for document_id: {document_id}")
                 else:
-                    logger.info(f"🔍 No createandtransform operations found in scope selector for document_id: {document_id}")
                     createandtransform_operations = None
                         
             except Exception as e:
-                logger.warning(f"⚠️ Could not fetch createandtransform operations: {str(e)}")
                 createandtransform_operations = None
             
             # Prepare document for select_configs collection with client/app/project structure
@@ -1779,7 +1740,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                         "complete_model_data": cleaned_dict,
                         "updated_at": datetime.now()
                     })
-                    logger.info(f"✅ Updated existing combination {combination_id} in document")
                 else:
                     # Add new combination to the array
                     new_combination = {
@@ -1811,7 +1771,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                         "updated_at": datetime.now()
                     }
                     merged_document["combinations"].append(new_combination)
-                    logger.info(f"✅ Added new combination {combination_id} to document")
                 
                 # Update the existing document
                 result_select = await select_configs_coll.replace_one(
@@ -1855,12 +1814,6 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
                 operation = "inserted"
             
             # Determine operation type
-            logger.info(f"✅ Document saved with custom _id: {document_id}")
-            logger.info(f"✅ Operation: {operation}")
-            if operation == "inserted":
-                logger.info(f"✅ Inserted ID: {result_select.inserted_id}")
-            else:
-                logger.info(f"✅ Modified count: {result_select.modified_count}")
             
             # Create index for efficient queries (including client/app/project)
             await select_configs_coll.create_index([("client_name", 1), ("app_name", 1), ("project_name", 1)])
@@ -1869,11 +1822,7 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
             await select_configs_coll.create_index([("combinations.model_name", 1)])
             await select_configs_coll.create_index([("created_at", -1)])
             
-            logger.info(f"✅ Successfully saved to select_configs collection for combination_id: {combination_id}")
-            logger.info(f"✅ Document saved with custom _id: {document_id}")
-            logger.info(f"✅ Operation: {operation}")
-            logger.info(f"✅ Saved under client: {client_name}, app: {app_name}, project: {project_name}")
-            logger.info(f"✅ Collection used: {MONGO_DB}.{SELECT_CONFIGS_COLLECTION_NAME}")
+ 
             
         except Exception as e:
             logger.error(f"❌ Error: Failed to save to select_configs collection: {e}")
@@ -2119,8 +2068,7 @@ async def select_and_save_model_generic(selection_req: GenericModelSelectionRequ
             
             # Note: Redis cache update removed due to import issues
             # The file is successfully updated in MinIO
-            
-            logger.info(f"Successfully updated source file with 'selected_models' column: {selection_req.file_key}")
+
             
         except Exception as e:
             logger.error(f"Error updating source file with 'selected_models' column: {str(e)}")
@@ -2453,6 +2401,22 @@ async def calculate_ensemble_actual_vs_predicted(
                 raise HTTPException(status_code=404, detail=f"No data found for combination {combination_id}")
             
             df.columns = df.columns.str.lower()
+            
+            # Find date column
+            date_column = None
+            for col in df.columns:
+                if col.lower() in ['date', 'time', 'timestamp', 'period', 'month', 'year']:
+                    date_column = col
+                    break
+            
+            # Get dates if available
+            dates = []
+            if date_column and date_column in df.columns:
+                dates = df[date_column].tolist()
+            else:
+                # If no date column, create sequential dates
+                dates = [f"Period {i+1}" for i in range(len(df))]
+            
             # Get the target variable (Y variable)
             y_variable = None
             for col in df.columns:
@@ -2514,6 +2478,7 @@ async def calculate_ensemble_actual_vs_predicted(
                 "combination_name": combination_id,
                 "model_name": "Ensemble",
                 "file_key": source_file_key,
+                "dates": dates,
                 "actual_values": actual_values,
                 "predicted_values": predicted_values,
                 "performance_metrics": {
@@ -2539,7 +2504,6 @@ async def calculate_ensemble_actual_vs_predicted(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error calculating ensemble actual vs predicted: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error calculating ensemble actual vs predicted: {str(e)}")
 
 @router.get("/models/yoy-calculation-ensemble", tags=["Ensemble YoY Calculation"])
@@ -2882,7 +2846,6 @@ async def get_ensemble_contribution(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting ensemble contribution: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error getting ensemble contribution: {str(e)}")
 
 @router.post("/actual-vs-predicted", tags=["Actual vs Predicted"])
@@ -2960,13 +2923,21 @@ async def calculate_actual_vs_predicted(
             x_variables = model_coeffs.get("x_variables", [])
             y_variable = model_coeffs.get("y_variable", "")
             
-            # Calculate predicted values
-            logger.info(f"Y variable: {y_variable}")
-            logger.info(f"X variables: {x_variables}")
-            logger.info(f"Coefficients: {coefficients}")
-            logger.info(f"Intercept: {intercept}")
-            logger.info(f"df: {df.columns}")
-            logger.info(f"df: {df.shape}")
+            # Find date column
+            date_column = None
+            for col in df.columns:
+                if col.lower() in ['date', 'time', 'timestamp', 'period', 'month', 'year']:
+                    date_column = col
+                    break
+            
+            # Get dates if available
+            dates = []
+            if date_column and date_column in df.columns:
+                dates = df[date_column].tolist()
+            else:
+                # If no date column, create sequential dates
+                dates = [f"Period {i+1}" for i in range(len(df))]
+
     
             actual_values = df[y_variable].tolist() if y_variable in df.columns else []
             predicted_values = []
@@ -2981,11 +2952,10 @@ async def calculate_actual_vs_predicted(
                         x_value = row[x_var]
                         beta_value = coefficients[beta_key]
                         contribution = beta_value * x_value
-                        logger.info(f"Contribution: {contribution}")
                         predicted_value += contribution
                 
                 predicted_values.append(predicted_value)
-            logger.info(f"Predicted values: {predicted_values}")
+
             # Filter out extreme outliers that might be causing axis scaling issues
             if len(predicted_values) > 0:
                 import numpy as np
@@ -3005,13 +2975,12 @@ async def calculate_actual_vs_predicted(
                         actual <= actual_99th and actual >= actual_1st):
                         filtered_data.append((actual, predicted))
 
-                logger.info(f"Filtered data: {filtered_data}")
+         
                 if len(filtered_data) < len(actual_values):
                     logger.warning(f"⚠️ Filtered out {len(actual_values) - len(filtered_data)} extreme outliers")
                     actual_values = [item[0] for item in filtered_data]
                     predicted_values = [item[1] for item in filtered_data]
-            logger.info(f"Actual values: {actual_values}")
-            logger.info(f"Predicted values: {predicted_values}")
+
             # Calculate performance metrics
             if len(actual_values) > 0 and len(predicted_values) > 0:
                 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -3033,6 +3002,7 @@ async def calculate_actual_vs_predicted(
                 "combination_name": combination_name,
                 "model_name": model_name,
                 "file_key": file_key,
+                "dates": dates,
                 "actual_values": actual_values,
                 "predicted_values": predicted_values,
                 "performance_metrics": {
@@ -3058,7 +3028,6 @@ async def calculate_actual_vs_predicted(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error calculating actual vs predicted: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error calculating actual vs predicted: {str(e)}")
 
 @router.post("/yoy-calculation", tags=["YoY Calculation"])
@@ -3343,7 +3312,8 @@ async def weighted_ensemble(req: WeightedEnsembleRequest):
 
     if df.empty:
         raise HTTPException(status_code=400, detail="File has no rows.")
-
+     
+    df.columns  = df.columns.str.lower()
     # ---- sanity on grouping keys
     for g in req.grouping_keys:
         if g not in df.columns:
@@ -3465,6 +3435,19 @@ async def weighted_ensemble(req: WeightedEnsembleRequest):
             "r2_train": pick_alias("R2 Train", "r2_train", "Weighted_R2_Train"),
             "b0": pick_alias("Weighted_B0", "B0 (Original)", "Intercept", "Beta_Intercept", "intercept"),
         }
+        
+        # Add ROI-related aliases for MMM results
+        # Look for ROI columns in the format {feature_name}_roi (case-insensitive)
+        roi_columns = [col for col in numeric_candidates if col.lower().endswith('_roi')]
+        for roi_col in roi_columns:
+            feature_name = roi_col.replace('_ROI', '').replace('_roi', '')
+            aliases[f"{feature_name}_roi"] = pick_alias(roi_col)
+        
+        # Look for CPRP columns in the format {feature_name}_cprp_value (case-insensitive)
+        cprp_columns = [col for col in numeric_candidates if col.lower().endswith('_cprp_value')]
+        for cprp_col in cprp_columns:
+            feature_name = cprp_col.replace('_CPRP_VALUE', '').replace('_cprp_value', '')
+            aliases[f"{feature_name}_cprp"] = pick_alias(cprp_col)
 
         # model composition by weight
         comp = combo_df[[model_col]].copy()
@@ -3631,3 +3614,36 @@ async def get_saved_combinations_status(
     except Exception as e:
         logger.error(f"Error getting saved combinations status: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error getting saved combinations status: {str(e)}")
+
+@router.post("/models/s-curve", tags=["S-Curve"])
+async def get_s_curve(request: SCurveRequest):
+    """
+    Generate S-curve data for media variables with ROI calculations.
+    
+    This endpoint:
+    1. Gets the last 12 months of source data for the specified combination
+    2. Identifies media variables that have ROI calculations
+    3. Generates scaled media series around the base series (original 12 months data)
+    4. Applies the same transformations that were used in the model
+    5. Returns S-curve data for visualization
+    
+    Args:
+        client_name: Client name
+        app_name: App name  
+        project_name: Project name
+        combination_name: Combination name
+        model_name: Model name
+    
+    Returns:
+        Dictionary containing S-curve data for each media variable
+    """
+    return await get_s_curve_endpoint(
+        client_name=request.client_name,
+        app_name=request.app_name,
+        project_name=request.project_name,
+        combination_name=request.combination_name,
+        model_name=request.model_name,
+        db=db,
+        minio_client=minio_client,
+        MINIO_BUCKET=MINIO_BUCKET
+    )
