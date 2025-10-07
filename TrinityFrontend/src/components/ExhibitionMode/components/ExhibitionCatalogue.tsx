@@ -2,22 +2,7 @@ import React from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ChevronRight, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-export interface DroppedAtom {
-  id: string;
-  atomId: string;
-  title: string;
-  category: string;
-  color: string;
-}
-
-export interface LayoutCard {
-  id: string;
-  atoms: DroppedAtom[];
-  isExhibited: boolean;
-  moleculeId?: string;
-  moleculeTitle?: string;
-}
+import type { DroppedAtom, LayoutCard } from '../store/exhibitionStore';
 
 interface ExhibitionCatalogueProps {
   cards: LayoutCard[];

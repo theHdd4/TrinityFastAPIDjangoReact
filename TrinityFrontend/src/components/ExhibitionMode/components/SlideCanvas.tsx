@@ -24,7 +24,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import type { DroppedAtom, LayoutCard } from './ExhibitionCatalogue';
+import type { DroppedAtom, LayoutCard } from '../store/exhibitionStore';
 
 interface SlideCanvasProps {
   card: LayoutCard;

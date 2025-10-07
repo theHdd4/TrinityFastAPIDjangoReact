@@ -2,7 +2,7 @@ import React from 'react';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { LayoutCard } from './ExhibitionCatalogue';
+import type { LayoutCard } from '../store/exhibitionStore';
 
 interface GridViewProps {
   cards: LayoutCard[];

@@ -6,3 +6,4 @@ export * from './SlideCanvas';
 export * from './SlideNavigation';
 export * from './SlideNotes';
 export * from './SlideThumbnails';
+export type { DroppedAtom, LayoutCard } from '../store/exhibitionStore';
