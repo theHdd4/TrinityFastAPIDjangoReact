@@ -14,6 +14,7 @@ export type LayoutCard = LaboratoryLayoutCard;
 interface ExhibitionStore {
   cards: LayoutCard[];
   exhibitedCards: LayoutCard[];
+  hasHydrated: boolean;
   loadSavedConfiguration: () => void;
   toggleCardExhibition: (cardId: string) => void;
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => void;
@@ -165,37 +166,56 @@ const selectPersistedCards = (): LayoutCard[] | null => {
   return null;
 };
 
+let lastSignature = safeStringify({ cards: [] as LayoutCard[], exhibitedCards: [] as LayoutCard[] });
+
 const updateStateIfChanged = (
   set: (state: Partial<ExhibitionStore>) => void,
   get: () => ExhibitionStore,
   cards: LayoutCard[],
+  extraState: Partial<ExhibitionStore> = {},
 ) => {
   const exhibitedCards = cards.filter(card => card.isExhibited);
   const nextState = { cards, exhibitedCards };
-
-  const currentState = get();
-  const currentSignature = safeStringify({
-    cards: currentState.cards,
-    exhibitedCards: currentState.exhibitedCards,
-  });
   const nextSignature = safeStringify(nextState);
 
-  if (currentSignature !== nextSignature) {
-    set(nextState);
+  if (nextSignature === lastSignature) {
+    if (Object.keys(extraState).length > 0) {
+      const current = get();
+      const shouldUpdate = Object.entries(extraState).some(
+        ([key, value]) => (current as Record<string, unknown>)[key] !== value,
+      );
+      if (shouldUpdate) {
+        set(extraState);
+      }
+    }
+    return false;
   }
+
+  lastSignature = nextSignature;
+  set({ ...nextState, ...extraState });
+  return true;
 };
 
 export const useExhibitionStore = create<ExhibitionStore>((set, get) => ({
   cards: [],
   exhibitedCards: [],
+  hasHydrated: false,
 
   loadSavedConfiguration: () => {
-    const cards = selectPersistedCards();
-    if (!cards || cards.length === 0) {
+    const state = get();
+    if (state.hasHydrated && state.cards.length > 0) {
       return;
     }
 
-    updateStateIfChanged(set, get, cards);
+    const cards = selectPersistedCards();
+    if (!cards || cards.length === 0) {
+      if (!state.hasHydrated) {
+        set({ hasHydrated: true });
+      }
+      return;
+    }
+
+    updateStateIfChanged(set, get, cards, { hasHydrated: true });
   },
 
   toggleCardExhibition: (cardId: string) => {
@@ -225,10 +245,11 @@ export const useExhibitionStore = create<ExhibitionStore>((set, get) => ({
 
   setCards: (cards: LayoutCard[] | unknown) => {
     const normalizedCards = normalizeCards(cards) ?? [];
-    updateStateIfChanged(set, get, normalizedCards);
+    updateStateIfChanged(set, get, normalizedCards, { hasHydrated: true });
   },
 
   reset: () => {
-    set({ cards: [], exhibitedCards: [] });
+    lastSignature = safeStringify({ cards: [] as LayoutCard[], exhibitedCards: [] as LayoutCard[] });
+    set({ cards: [], exhibitedCards: [], hasHydrated: false });
   },
 }));

@@ -82,11 +82,11 @@ const ExhibitionMode = () => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!hasRequestedInitialLoad.current && cards.length === 0) {
+    if (!hasRequestedInitialLoad.current) {
       hasRequestedInitialLoad.current = true;
       loadSavedConfiguration();
     }
-  }, [cards.length, loadSavedConfiguration]);
+  }, [loadSavedConfiguration]);
 
   useEffect(() => {
     if (currentSlide >= exhibitedCards.length && exhibitedCards.length > 0) {
