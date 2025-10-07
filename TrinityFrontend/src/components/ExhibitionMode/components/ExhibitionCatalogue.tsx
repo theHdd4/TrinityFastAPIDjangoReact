@@ -2,28 +2,14 @@ import React from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ChevronRight, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-interface DroppedAtom {
-  id: string;
-  atomId: string;
-  title: string;
-  category: string;
-  color: string;
-}
-
-interface LayoutCard {
-  id: string;
-  atoms: DroppedAtom[];
-  isExhibited: boolean;
-  moleculeId?: string;
-  moleculeTitle?: string;
-}
+import { DroppedAtom, LayoutCard } from '../store/exhibitionStore';
 
 interface ExhibitionCatalogueProps {
   cards: LayoutCard[];
   currentSlide: number;
   onSlideSelect: (index: number) => void;
   onDragStart?: (atom: DroppedAtom, cardId: string) => void;
+  onDragEnd?: () => void;
   enableDragging?: boolean;
 }
 
@@ -32,6 +18,7 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
   currentSlide,
   onSlideSelect,
   onDragStart,
+  onDragEnd,
   enableDragging = true,
 }) => {
   const getSlideTitle = (card: LayoutCard, index: number) => {
@@ -86,7 +73,19 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
                     <div
                       key={atom.id}
                       draggable={enableDragging && Boolean(onDragStart)}
-                      onDragStart={() => enableDragging && onDragStart?.(atom, card.id)}
+                      onDragStart={event => {
+                        if (!enableDragging || !onDragStart) {
+                          return;
+                        }
+                        try {
+                          event.dataTransfer.effectAllowed = 'move';
+                          event.dataTransfer.setData('application/json', JSON.stringify({ atomId: atom.id }));
+                        } catch {
+                          /* ignore browsers without dataTransfer */
+                        }
+                        onDragStart(atom, card.id);
+                      }}
+                      onDragEnd={() => enableDragging && onDragEnd?.()}
                       className={cn(
                         'flex items-center gap-2 px-2 py-1.5 rounded bg-muted/50 hover:bg-muted group transition-colors',
                         enableDragging && onDragStart ? 'cursor-move' : 'cursor-not-allowed opacity-70'

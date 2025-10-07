@@ -1,7 +1,20 @@
 
 import { create } from 'zustand';
 
-interface DroppedAtom {
+export type CardColor = 'default' | 'blue' | 'purple' | 'green' | 'orange';
+export type CardWidth = 'M' | 'L';
+export type ContentAlignment = 'top' | 'center' | 'bottom';
+export type CardLayout = 'blank' | 'horizontal-split' | 'vertical-split' | 'content-right' | 'full';
+
+export interface PresentationSettings {
+  cardColor: CardColor;
+  cardWidth: CardWidth;
+  contentAlignment: ContentAlignment;
+  fullBleed: boolean;
+  cardLayout: CardLayout;
+}
+
+export interface DroppedAtom {
   id: string;
   atomId: string;
   title: string;
@@ -9,12 +22,13 @@ interface DroppedAtom {
   color: string;
 }
 
-interface LayoutCard {
+export interface LayoutCard {
   id: string;
   atoms: DroppedAtom[];
   isExhibited: boolean;
   moleculeId?: string;
   moleculeTitle?: string;
+  presentationSettings?: PresentationSettings;
 }
 
 interface ExhibitionStore {
@@ -23,11 +37,27 @@ interface ExhibitionStore {
   loadSavedConfiguration: () => void;
   toggleCardExhibition: (cardId: string) => void;
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => void;
-  setCards: (cards: LayoutCard[]) => void;
+  setCards: (cards: LayoutCard[] | unknown) => void;
   reset: () => void;
 }
 
 const FALLBACK_COLOR = 'bg-gray-400';
+
+export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
+  cardColor: 'default',
+  cardWidth: 'L',
+  contentAlignment: 'top',
+  fullBleed: false,
+  cardLayout: 'content-right',
+};
+
+const withPresentationDefaults = (card: LayoutCard): LayoutCard => ({
+  ...card,
+  presentationSettings: {
+    ...DEFAULT_PRESENTATION_SETTINGS,
+    ...card.presentationSettings,
+  },
+});
 
 const normalizeAtom = (atom: any): DroppedAtom | null => {
   if (!atom) {
@@ -65,13 +95,21 @@ const normalizeCard = (card: any): LayoutCard | null => {
     ? (card.atoms.map(normalizeAtom).filter(Boolean) as DroppedAtom[])
     : [];
 
-  return {
+  const normalized: LayoutCard = {
     id: String(identifier),
     atoms,
     isExhibited: Boolean(card.isExhibited),
     moleculeId: card.moleculeId ? String(card.moleculeId) : undefined,
     moleculeTitle: typeof card.moleculeTitle === 'string' ? card.moleculeTitle : undefined,
+    presentationSettings: card.presentationSettings && typeof card.presentationSettings === 'object'
+      ? {
+          ...DEFAULT_PRESENTATION_SETTINGS,
+          ...card.presentationSettings,
+        }
+      : undefined,
   };
+
+  return withPresentationDefaults(normalized);
 };
 
 const extractCards = (raw: unknown): LayoutCard[] => {
@@ -120,53 +158,75 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   loadSavedConfiguration: () => {
     const loadedCards = loadCardsFromStorage();
     const exhibitedCards = loadedCards.filter(card => card.isExhibited);
-    set({ cards: loadedCards, exhibitedCards });
+    set({ cards: loadedCards.map(withPresentationDefaults), exhibitedCards: exhibitedCards.map(withPresentationDefaults) });
   },
-  
+
   toggleCardExhibition: (cardId: string) => {
     set((state) => {
       const updatedCards = state.cards.map(card =>
         card.id === cardId
-          ? { ...card, isExhibited: !card.isExhibited }
+          ? withPresentationDefaults({ ...card, isExhibited: !card.isExhibited })
           : card
       );
 
       const exhibitedCards = updatedCards.filter(card => card.isExhibited);
-      const newState = {
+      return {
         cards: updatedCards,
-        exhibitedCards
+        exhibitedCards,
       };
-      return newState;
     });
   },
-  
+
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => {
     set((state) => {
-      let updatedCards = state.cards.map(card =>
-        card.id === cardId ? { ...card, ...updatedCard } : card
-      );
+      let updatedCards = state.cards.map(card => {
+        if (card.id !== cardId) {
+          return card;
+        }
+
+        const nextCard: LayoutCard = {
+          ...card,
+          ...updatedCard,
+        };
+
+        if (updatedCard.atoms) {
+          nextCard.atoms = updatedCard.atoms;
+        }
+
+        if (updatedCard.presentationSettings) {
+          nextCard.presentationSettings = {
+            ...DEFAULT_PRESENTATION_SETTINGS,
+            ...card.presentationSettings,
+            ...updatedCard.presentationSettings,
+          };
+        }
+
+        return withPresentationDefaults(nextCard);
+      });
 
       if (!updatedCards.find(card => card.id === cardId)) {
-        updatedCards = [
-          ...updatedCards,
-          { id: cardId, atoms: [], isExhibited: false, ...updatedCard }
-        ];
+        const fallbackCard: LayoutCard = withPresentationDefaults({
+          id: cardId,
+          atoms: [],
+          isExhibited: false,
+          ...updatedCard,
+        });
+        updatedCards = [...updatedCards, fallbackCard];
       }
 
       const exhibitedCards = updatedCards.filter(card => card.isExhibited);
-      const newState = {
+      return {
         cards: updatedCards,
-        exhibitedCards
+        exhibitedCards,
       };
-      return newState;
     });
   },
 
   setCards: (cards: LayoutCard[] | unknown) => {
     const safeCards = extractCards(cards);
-    const exhibitedCards = safeCards.filter(card => card.isExhibited);
-    const newState = { cards: safeCards, exhibitedCards };
-    set(newState);
+    const cardsWithDefaults = safeCards.map(withPresentationDefaults);
+    const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
+    set({ cards: cardsWithDefaults, exhibitedCards });
   },
   reset: () => {
     set({ cards: [], exhibitedCards: [] });

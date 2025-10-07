@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Presentation } from 'lucide-react';
 import Header from '@/components/Header';
-import { useExhibitionStore } from './store/exhibitionStore';
+import { useExhibitionStore, DroppedAtom, PresentationSettings } from './store/exhibitionStore';
 import { ExhibitionCatalogue } from './components/ExhibitionCatalogue';
 import { SlideCanvas } from './components/SlideCanvas';
 import { OperationsPalette } from './components/OperationsPalette';
@@ -13,14 +13,6 @@ import { ExportDialog } from './components/ExportDialog';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-
-interface DroppedAtom {
-  id: string;
-  atomId: string;
-  title: string;
-  category: string;
-  color: string;
-}
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
 
@@ -156,35 +148,95 @@ const ExhibitionMode = () => {
     setDraggedAtom({ atom, cardId });
   };
 
-  const handleDrop = (atom: DroppedAtom, sourceCardId: string) => {
-    const targetCard = exhibitedCards[currentSlide];
-    if (!targetCard) {
-      setDraggedAtom(null);
-      return;
-    }
-
-    if (sourceCardId === targetCard.id) {
-      setDraggedAtom(null);
-      return;
-    }
-
-    const sourceCard = cards.find(card => card.id === sourceCardId);
-    const destinationCard = cards.find(card => card.id === targetCard.id);
-
-    if (!sourceCard || !destinationCard) {
-      setDraggedAtom(null);
-      return;
-    }
-
-    const sourceAtoms = sourceCard.atoms.filter(a => a.id !== atom.id);
-    const destinationAtoms = destinationCard.atoms.some(a => a.id === atom.id)
-      ? destinationCard.atoms
-      : [...destinationCard.atoms, atom];
-
-    updateCard(sourceCard.id, { atoms: sourceAtoms });
-    updateCard(destinationCard.id, { atoms: destinationAtoms });
+  const handleDragEnd = () => {
     setDraggedAtom(null);
   };
+
+  useEffect(() => {
+    setDraggedAtom(null);
+  }, [currentSlide]);
+
+  const handleDrop = useCallback(
+    (atom: DroppedAtom, sourceCardId: string) => {
+      const targetCard = exhibitedCards[currentSlide];
+      if (!targetCard) {
+        setDraggedAtom(null);
+        return;
+      }
+
+      if (sourceCardId === targetCard.id) {
+        setDraggedAtom(null);
+        return;
+      }
+
+      const sourceCard = cards.find(card => card.id === sourceCardId);
+      const destinationCard = cards.find(card => card.id === targetCard.id);
+
+      if (!sourceCard || !destinationCard) {
+        setDraggedAtom(null);
+        return;
+      }
+
+      const destinationAlreadyHasAtom = destinationCard.atoms.some(a => a.id === atom.id);
+      if (destinationAlreadyHasAtom) {
+        toast({
+          title: 'Component already on slide',
+          description: `${atom.title} is already part of this slide.`,
+        });
+        setDraggedAtom(null);
+        return;
+      }
+
+      const sourceAtoms = sourceCard.atoms.filter(a => a.id !== atom.id);
+      const destinationAtoms = [...destinationCard.atoms, atom];
+
+      updateCard(sourceCard.id, { atoms: sourceAtoms });
+      updateCard(destinationCard.id, { atoms: destinationAtoms });
+      toast({
+        title: 'Component added',
+        description: `${atom.title} moved to slide ${currentSlide + 1}.`,
+      });
+      setDraggedAtom(null);
+    },
+    [cards, currentSlide, exhibitedCards, toast, updateCard]
+  );
+
+  const handlePresentationChange = useCallback(
+    (settings: PresentationSettings) => {
+      const targetCard = exhibitedCards[currentSlide];
+      if (!targetCard) {
+        return;
+      }
+      updateCard(targetCard.id, { presentationSettings: settings });
+    },
+    [currentSlide, exhibitedCards, updateCard]
+  );
+
+  const handleRemoveAtom = useCallback(
+    (atomId: string) => {
+      const targetCard = exhibitedCards[currentSlide];
+      if (!targetCard) {
+        return;
+      }
+
+      const latestCard = cards.find(card => card.id === targetCard.id);
+      if (!latestCard) {
+        return;
+      }
+
+      if (!latestCard.atoms.some(atom => atom.id === atomId)) {
+        return;
+      }
+
+      const nextAtoms = latestCard.atoms.filter(atom => atom.id !== atomId);
+      updateCard(latestCard.id, { atoms: nextAtoms });
+      toast({
+        title: 'Component removed',
+        description: 'The component has been removed from this slide.',
+      });
+    },
+    [cards, currentSlide, exhibitedCards, toast, updateCard]
+  );
 
   const handleNotesChange = (slideIndex: number, value: string) => {
     setNotes(prev => {
@@ -247,6 +299,7 @@ const ExhibitionMode = () => {
             currentSlide={currentSlide}
             onSlideSelect={setCurrentSlide}
             onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
             enableDragging={canEdit}
           />
         )}
@@ -258,6 +311,8 @@ const ExhibitionMode = () => {
           onDrop={handleDrop}
           draggedAtom={draggedAtom}
           canEdit={canEdit}
+          onPresentationChange={handlePresentationChange}
+          onRemoveAtom={handleRemoveAtom}
         />
 
         {!isFullscreen && (

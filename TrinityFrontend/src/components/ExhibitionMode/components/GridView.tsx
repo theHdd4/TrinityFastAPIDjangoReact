@@ -2,21 +2,7 @@ import React from 'react';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-
-interface DroppedAtom {
-  id: string;
-  atomId: string;
-  title: string;
-  category: string;
-  color: string;
-}
-
-interface LayoutCard {
-  id: string;
-  atoms: DroppedAtom[];
-  isExhibited?: boolean;
-  moleculeTitle?: string;
-}
+import { LayoutCard } from '../store/exhibitionStore';
 
 interface GridViewProps {
   cards: LayoutCard[];

@@ -3,21 +3,7 @@ import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
-
-interface DroppedAtom {
-  id: string;
-  atomId: string;
-  title: string;
-  category: string;
-  color: string;
-}
-
-interface LayoutCard {
-  id: string;
-  atoms: DroppedAtom[];
-  isExhibited?: boolean;
-  moleculeTitle?: string;
-}
+import { LayoutCard } from '../store/exhibitionStore';
 
 interface SlideThumbnailsProps {
   cards: LayoutCard[];
