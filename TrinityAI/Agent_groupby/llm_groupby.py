@@ -252,96 +252,17 @@ class SmartGroupByAgent:
         return "\n".join(buf)
 
     def _enforce_allowed_keys(self, result: dict, session_id: str) -> dict:
+        """
+        MINIMAL validation - just add session_id and filter keys, let handlers deal with validation
+        """
+        if not result:
+            return {"success": False, "message": "No valid JSON found", "session_id": session_id}
+        
+        # Just add session_id and filter to allowed keys
         result["session_id"] = session_id
         filtered = {k: v for k, v in result.items() if k in ALLOWED_KEYS}
         
-        # If success and groupby_json exists, ensure it has all required fields
-        if filtered.get("success") and "groupby_json" in filtered:
-            groupby_config = filtered["groupby_json"]
-            
-            # Auto-generate missing required fields for backend compatibility
-            if "validator_atom_id" not in groupby_config:
-                # Generate a real validator_atom_id from session
-                groupby_config["validator_atom_id"] = f"groupby_{session_id[:8]}"
-            
-            if "file_key" not in groupby_config:
-                # Use object_names as file_key if available
-                if "object_names" in groupby_config:
-                    groupby_config["file_key"] = groupby_config["object_names"]
-                else:
-                    groupby_config["file_key"] = "unknown_file"
-            
-            # Ensure bucket_name is set
-            if "bucket_name" not in groupby_config:
-                groupby_config["bucket_name"] = "trinity"
-                
-            # Ensure all required fields are present and valid
-            required_fields = ["bucket_name", "object_names", "identifiers", "aggregations", "validator_atom_id", "file_key"]
-            missing_fields = [field for field in required_fields if field not in groupby_config or not groupby_config[field]]
-            
-            if missing_fields:
-                logger.warning(f"Missing or empty required fields: {missing_fields}")
-                # Try to fill missing fields with sensible defaults
-                if "identifiers" not in groupby_config or not groupby_config["identifiers"]:
-                    groupby_config["identifiers"] = []
-                if "aggregations" not in groupby_config or not groupby_config["aggregations"]:
-                    groupby_config["aggregations"] = {}
-                    
-            # 🔧 CRITICAL FIX: Convert all column names to lowercase for backend compatibility
-            if "identifiers" in groupby_config and groupby_config["identifiers"]:
-                groupby_config["identifiers"] = [col.lower() for col in groupby_config["identifiers"]]
-                
-            if "aggregations" in groupby_config and groupby_config["aggregations"]:
-                # Convert aggregation column names to lowercase
-                new_aggregations = {}
-                for col_name, agg_config in groupby_config["aggregations"].items():
-                    new_aggregations[col_name.lower()] = agg_config
-                groupby_config["aggregations"] = new_aggregations
-                
-        elif filtered.get("success") and "groupby_json" not in filtered:
-            filtered["groupby_json"] = {}
-            
-        # Only remove groupby_json if success is explicitly false AND we don't have other useful fields
-        if not filtered.get("success") and not filtered.get("suggestions") and not filtered.get("smart_response"):
-            filtered.pop("groupby_json", None)
-            
-        # Set default suggestions and message
-        if not filtered.get("suggestions"):
-            filtered["suggestions"] = [] if filtered.get("success") else ["Please provide more details."]
-        if not filtered.get("message"):
-            filtered["message"] = ""
-        
-        # Ensure smart_response is present for UI display
-        if not filtered.get("smart_response"):
-            if filtered.get("success") and filtered.get("groupby_json"):
-                # Generate smart response for successful groupby operations
-                groupby_config = filtered["groupby_json"]
-                identifiers = groupby_config.get("identifiers", [])
-                aggregations = groupby_config.get("aggregations", {})
-                file_name = groupby_config.get("object_names", "your data")
-                
-                if identifiers and aggregations:
-                    agg_summary = []
-                    for field, agg_config in aggregations.items():
-                        if isinstance(agg_config, dict):
-                            agg_type = agg_config.get("agg", "sum")
-                            rename_to = agg_config.get("rename_to", field)
-                            agg_summary.append(f"{field} ({agg_type})")
-                        else:
-                            agg_summary.append(f"{field} ({agg_config})")
-                    
-                    filtered["smart_response"] = f"I've configured the groupby operation for you. The data will be grouped by {', '.join(identifiers)} and aggregated using {', '.join(agg_summary)}. You can now proceed with the operation or make adjustments as needed."
-                else:
-                    filtered["smart_response"] = "I've configured the groupby operation for you. You can now proceed with the operation or make adjustments as needed."
-            elif filtered.get("success"):
-                filtered["smart_response"] = "GroupBy configuration completed successfully. You can now proceed with the operation."
-            else:
-                # Generate smart response for failed operations
-                if filtered.get("suggestions"):
-                    filtered["smart_response"] = "I can help you create groupby operations from your data. Please provide more details about what you'd like to group and aggregate, or ask me to suggest appropriate groupings for your data."
-                else:
-                    filtered["smart_response"] = "I'm here to help you create groupby operations and analyze your data. Please describe what you'd like to group and aggregate."
-        
+        logger.info(f"✅ Minimal validation passed, returning {len(filtered)} keys")
         return filtered
 
     def process_request(self, user_prompt: str, session_id: Optional[str] = None, client_name: str = "", app_name: str = "", project_name: str = ""):
@@ -374,13 +295,83 @@ class SmartGroupByAgent:
 
         prompt = build_prompt_group_by(user_prompt, session_id, self.files_with_columns, sup_det, OPERATION_FORMAT, hist_str)
         
+        # 🔧 LOG LLM REQUEST AND RESPONSE
+        logger.info(f"🤖 GROUPBY LLM REQUEST:")
+        logger.info(f"📝 User Prompt: {user_prompt}")
+        logger.info(f"🔧 Session ID: {session_id}")
+        logger.info(f"📁 Available Files: {list(self.files_with_columns.keys())}")
+        logger.info(f"📋 Prompt Length: {len(prompt)} characters")
 
         raw = call_llm_group_by(self.api_url, self.model_name, self.bearer_token, prompt)
+        
+        # 🔧 LOG LLM RESPONSE
+        logger.info(f"🤖 GROUPBY LLM RESPONSE:")
+        logger.info(f"📄 Raw Response Length: {len(raw) if raw else 0} characters")
+        if raw:
+            logger.info(f"📄 FULL RAW LLM RESPONSE:")
+            logger.info("=" * 80)
+            logger.info(raw)
+            logger.info("=" * 80)
+        else:
+            logger.warning("❌ No response from LLM")
         
         if not raw:
             return {"success": False, "message": "No response from LLM", "session_id": session_id, "suggestions": ["Try again."]}
 
         parsed = extract_json_group_by(raw) or {}
+        
+        # 🔧 LOG PARSED JSON
+        logger.info(f"🔍 GROUPBY PARSED JSON:")
+        logger.info(f"✅ Success: {parsed.get('success', False)}")
+        logger.info(f"📊 Has groupby_json: {bool(parsed.get('groupby_json'))}")
+        logger.info(f"💬 Has smart_response: {bool(parsed.get('smart_response'))}")
+        logger.info(f"📋 Has suggestions: {bool(parsed.get('suggestions'))}")
+        if parsed.get('smart_response'):
+            logger.info(f"💬 Smart Response: {parsed['smart_response'][:200]}...")
+        logger.info(f"🔍 FULL PARSED JSON:")
+        logger.info("=" * 80)
+        logger.info(json.dumps(parsed, indent=2))
+        logger.info("=" * 80)
+        
+        # LENIENT HANDLING: If JSON extraction fails, create a helpful fallback response
+        if not parsed:
+            logger.warning("JSON extraction failed, creating fallback response")
+            # Build file list for suggestions
+            file_list = []
+            for name, data in self.files_with_columns.items():
+                col_count = len(data.get('columns', []))
+                file_list.append(f"{name} ({col_count} columns)")
+            
+            # Build detailed file info for smart_response
+            file_details = []
+            for name, data in self.files_with_columns.items():
+                columns = data.get('columns', [])
+                col_count = len(columns)
+                sample_cols = ', '.join(columns[:8])
+                if col_count > 8:
+                    sample_cols += '...'
+                file_details.append(f"**{name}** ({col_count} columns) - {sample_cols}")
+            
+            parsed = {
+                "success": False,
+                "suggestions": [
+                    "Here's what I found about your files:",
+                    f"Available files for groupby: {', '.join(file_list)}",
+                    "To complete groupby, specify: file + group columns + aggregation functions",
+                    "Or say 'yes' to use my suggestions"
+                ],
+                "message": "Here's what I can help you with",
+                "smart_response": f"I'd be happy to help you with GroupBy operations! Here are your available files and their columns:\n" + 
+                               "\n".join(file_details) +
+                               "\n\nI can help you group and aggregate this data by specifying which columns to group by and which aggregation functions to use.",
+                "available_files": self.files_with_columns,
+                "next_steps": [
+                    "Tell me which file you want to group",
+                    "Specify the columns to group by",
+                    "Choose the aggregation functions (sum, mean, count, etc.)",
+                    "Ask me to suggest the best grouping strategy"
+                ]
+            }
         
         result = self._enforce_allowed_keys(parsed, session_id)
         

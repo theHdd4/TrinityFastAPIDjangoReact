@@ -75,21 +75,11 @@ def groupby_files(request: GroupByRequest):
         logger.info(f"Success: {result.get('success', False)}")
         logger.info(f"Processing Time: {processing_time}s")
 
-        # 🔧 SMART RESPONSE FALLBACK: Ensure smart_response is always present
+        # 🔧 MINIMAL SMART RESPONSE FALLBACK: Only create if missing
         if "smart_response" not in result or not result["smart_response"]:
-            if result.get("success") and result.get("groupby_json"):
-                # GroupBy configuration success - create smart response
-                cfg = result["groupby_json"]
-                identifiers = cfg.get("identifiers", [])
-                aggregations = cfg.get("aggregations", {})
-                
-                result["smart_response"] = f"I've configured the groupby operation for you. The data will be grouped by {identifiers} and aggregated using {list(aggregations.keys()) if aggregations else 'the specified functions'}. You can now proceed with the operation or make adjustments as needed."
-            else:
-                # Suggestions or error - create smart response
-                if result.get("suggestions"):
-                    result["smart_response"] = "I can help you perform groupby operations on your data! Based on your available files, I can suggest the best grouping strategies and aggregation functions. What would you like to group and aggregate?"
-                else:
-                    result["smart_response"] = "I'm here to help you perform groupby operations on your data. Please describe what you'd like to group and aggregate or ask me for suggestions."
+            logger.warning("⚠️ No smart_response found in LLM result, creating minimal fallback")
+            result["smart_response"] = "I'm here to help you perform groupby operations on your data. Please describe what you'd like to group and aggregate or ask me for suggestions."
+            logger.info(f"✅ Created minimal fallback smart_response")
 
         if result.get("success") and result.get("groupby_json"):
             cfg = result["groupby_json"]
@@ -113,6 +103,7 @@ def groupby_files(request: GroupByRequest):
         error_result = {
             "success": False,
             "error": str(e),
+            "smart_response": "I encountered an error while processing your groupby request. Please try again or check your input.",
             "processing_time": round(time.time() - start_time, 2)
         }
         return error_result

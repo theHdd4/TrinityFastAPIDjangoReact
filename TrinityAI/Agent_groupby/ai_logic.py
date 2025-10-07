@@ -127,70 +127,117 @@ def call_llm_group_by(api_url: str, model_name: str, bearer_token: str, prompt: 
 
 
 def extract_json_group_by(response: str) -> Optional[Union[Dict, list]]:
-    """Extract JSON object from raw LLM response."""
+    """
+    SIMPLIFIED JSON extraction - only check for required keys:
+    1. Clean response (remove <think> tags)
+    2. Find JSON using brace counting (respecting strings)
+    3. Parse JSON
+    4. Validate: success=true needs smart_response+groupby_json, success=false needs smart_response
+    """
+    logger.info(f"🔍 Extracting JSON (response length: {len(response)})")
+    
     if not response:
+        logger.error("❌ Empty response")
         return None
+
+    # Step 1: Clean response - remove thinking tags and code blocks
+    cleaned = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
+    cleaned = re.sub(r"<reasoning>.*?</reasoning>", "", cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r"```json\s*", "", cleaned)
+    cleaned = re.sub(r"```\s*", "", cleaned)
+    cleaned = cleaned.strip()
     
-    # First try to find JSON in code blocks
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", response, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except json.JSONDecodeError:
-            pass
+    logger.info(f"📋 Cleaned response length: {len(cleaned)}")
     
-    # Find all JSON objects in the response
-    json_objects = []
-    start = 0
-    while True:
-        start_brace = response.find('{', start)
-        if start_brace == -1:
-            break
-        
-        # Find the matching closing brace
-        brace_count = 0
-        end_brace = start_brace
-        for i in range(start_brace, len(response)):
-            if response[i] == '{':
-                brace_count += 1
-            elif response[i] == '}':
-                brace_count -= 1
-                if brace_count == 0:
-                    end_brace = i
-                    break
-        
-        if brace_count == 0:  # Found matching closing brace
-            json_str = response[start_brace:end_brace + 1]
+    # Step 2: Try multiple extraction methods (like dataframe operations)
+    
+    # Method 1: Try regex patterns first
+    json_patterns = [
+        r'```json\s*(\{.*?\})\s*```',
+        r'```\s*(\{.*?\})\s*```',
+    ]
+    
+    for pattern in json_patterns:
+        matches = re.findall(pattern, cleaned, re.DOTALL | re.IGNORECASE)
+        for match in matches:
             try:
-                parsed = json.loads(json_str)
-                if isinstance(parsed, dict):
-                    json_objects.append((len(json_str), parsed))  # Store with length for sorting
-            except json.JSONDecodeError:
-                pass
+                result = json.loads(match)
+                logger.info("✅ Successfully extracted JSON using pattern matching")
+                return result
+            except json.JSONDecodeError as e:
+                logger.debug(f"JSON decode error with pattern {pattern}: {e}")
+                continue
+
+    # Method 2: Try brace counting
+    try:
+        start_idx = cleaned.find("{")
+        if start_idx == -1:
+            logger.error("❌ No opening brace found")
+            return None
         
-        start = start_brace + 1
-    
-    # Sort by length (longest first) and return the first valid one
-    json_objects.sort(key=lambda x: x[0], reverse=True)
-    
-    # Look for objects with the expected structure
-    for _, parsed in json_objects:
-        # Check if this looks like a complete AI response
-        if ('success' in parsed and 
-            ('groupby_json' in parsed or 'suggestions' in parsed or 'smart_response' in parsed)):
-            return parsed
-    
-    # If no complete response found, return the largest valid JSON object
-    if json_objects:
-        return json_objects[0][1]
-    
-    # Fallback: try to find any JSON object
-    start, end = response.find("{"), response.rfind("}")
-    if start != -1 and end != -1:
-        try:
-            return json.loads(response[start:end+1])
-        except json.JSONDecodeError:
-            pass
-    
+        # Count braces (respecting strings to avoid counting braces inside strings)
+        brace_count = 0
+        in_string = False
+        escape_next = False
+        end_idx = start_idx
+        
+        for i in range(start_idx, len(cleaned)):
+            char = cleaned[i]
+            
+            # Handle escape sequences (\", \\, etc.)
+            if escape_next:
+                escape_next = False
+                continue
+            if char == '\\':
+                escape_next = True
+                continue
+            
+            # Track if we're inside a string (to ignore braces in strings)
+            if char == '"':
+                in_string = not in_string
+                continue
+            
+            # Only count braces outside of strings
+            if not in_string:
+                if char == "{":
+                    brace_count += 1
+                elif char == "}":
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_idx = i + 1
+                        break
+        
+        if brace_count != 0:
+            logger.error(f"❌ Unbalanced braces (remaining count: {brace_count})")
+            return None
+        
+        # Extract and parse JSON
+        json_str = cleaned[start_idx:end_idx]
+        logger.info(f"📦 Extracted JSON string (length: {len(json_str)})")
+        
+        result = json.loads(json_str)
+        logger.info("✅ Successfully extracted JSON using brace counting")
+        return result
+        
+    except json.JSONDecodeError as e:
+        logger.debug(f"Brace counting JSON decode failed: {e}")
+    except Exception as e:
+        logger.debug(f"Brace counting failed: {e}")
+
+    # Method 3: Try simple bracket matching (fallback)
+    try:
+        start = cleaned.find('{')
+        end = cleaned.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            json_str = cleaned[start:end+1]
+            result = json.loads(json_str)
+            logger.info("✅ Successfully extracted JSON using bracket matching")
+            return result
+    except json.JSONDecodeError as e:
+        logger.debug(f"Bracket matching JSON decode failed: {e}")
+
+    # If all methods fail, return None and let fallback handle it
+    logger.warning("❌ All JSON extraction methods failed")
+    logger.warning(f"Response preview for debugging: {cleaned[:500]}")
     return None
 

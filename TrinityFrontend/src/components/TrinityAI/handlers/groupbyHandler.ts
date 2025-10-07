@@ -17,6 +17,25 @@ export const groupbyHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { atomId, updateAtomSettings, setMessages, sessionId } = context;
     
+    // 🔧 FIX: Show smart_response in handleSuccess for success cases
+    // handleFailure will handle failure cases
+    const smartResponseText = processSmartResponse(data);
+    console.log('💬 Smart response text available:', smartResponseText ? 'Yes' : 'No');
+    console.log('🔍 Has groupby_json:', !!data.groupby_json);
+    
+    // Show smart_response for success cases (when groupby_json exists)
+    if (smartResponseText) {
+      const smartMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        content: smartResponseText,
+        sender: 'ai',
+        timestamp: new Date(),
+      };
+      console.log('📤 Sending smart response message to chat...');
+      setMessages(prev => [...prev, smartMsg]);
+      console.log('✅ Displayed smart_response to user:', smartResponseText);
+    }
+    
     if (!data.groupby_json) {
       return { success: false, error: 'No groupby configuration found in AI response' };
     }
@@ -425,25 +444,63 @@ export const groupbyHandler: AtomHandler = {
   },
 
   handleFailure: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
-    const { setMessages, updateAtomSettings, atomId } = context;
+    const { setMessages, atomId, updateAtomSettings } = context;
     
-    // Process smart response with enhanced logic
-    const aiText = processSmartResponse(data);
+    // 🔧 FIX: This function now handles BOTH success and failure cases
+    // Always show the smart_response message once, regardless of success/failure
+    let aiText = '';
+    if (data.smart_response) {
+      aiText = data.smart_response;
+    } else if (data.suggestions && Array.isArray(data.suggestions)) {
+      aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
+      
+      if (data.file_analysis) {
+        aiText += `\n\n📊 File Analysis:\n`;
+        if (data.file_analysis.total_files) {
+          aiText += `• Total files available: ${data.file_analysis.total_files}\n`;
+        }
+        if (data.file_analysis.groupby_tips && data.file_analysis.groupby_tips.length > 0) {
+          aiText += `• Tips: ${data.file_analysis.groupby_tips.join(', ')}\n`;
+        }
+      }
+      
+      if (data.next_steps && data.next_steps.length > 0) {
+        aiText += `\n\n🎯 Next Steps:\n${data.next_steps.map((step: string, idx: number) => `${idx + 1}. ${step}`).join('\n')}`;
+      }
+    } else {
+      aiText = data.smart_response || data.message || 'AI response received';
+    }
     
-    // Create and add AI message
-    const aiMsg = createMessage(aiText);
-    setMessages(prev => [...prev, aiMsg]);
+    // Only add the message if we have content
+    if (aiText) {
+      const aiMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        content: aiText,
+        sender: 'ai',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, aiMsg]);
+      console.log('📤 Added AI message to chat:', aiText.substring(0, 100) + '...');
+    }
     
-    // Store suggestions for potential use
-    if (data.suggestions || data.next_steps || data.file_analysis) {
+    // 🔧 CRITICAL FIX: Load available files into atom settings for dropdown population
+    // This ensures files appear in the groupby interface even for failure cases
+    if (data.available_files && typeof data.available_files === 'object') {
+      console.log('📁 Loading available files into atom settings for groupby interface');
+      console.log('📋 Available files:', Object.keys(data.available_files));
+      
+      // Update atom settings with available files
       updateAtomSettings(atomId, {
-        aiSuggestions: data.suggestions || [],
-        aiNextSteps: data.next_steps || [],
+        availableFiles: data.available_files,
+        fileSuggestions: data.suggestions || [],
+        nextSteps: data.next_steps || [],
         recommendedAggregations: data.recommended_aggregations || [],
         recommendedIdentifiers: data.recommended_identifiers || [],
         fileAnalysis: data.file_analysis || null,
-        lastInteractionTime: Date.now()
+        lastUpdateTime: Date.now()
       });
+      
+      console.log('✅ Files loaded into groupby interface');
     }
     
     return { success: true };
