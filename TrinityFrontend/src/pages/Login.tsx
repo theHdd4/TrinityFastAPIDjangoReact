@@ -9,7 +9,7 @@ import { Eye, EyeOff, User, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
 import LoginAnimation from '@/components/LoginAnimation';
-import AnimatedBackground from '@/components/AnimatedBackground';
+import BackgroundVideo from '@/components/BackgroundVideo';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 
 const Login = () => {
@@ -149,7 +149,7 @@ const Login = () => {
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
       <LoginAnimation active={showAnimation} onComplete={handleAnimationComplete} />
-      <AnimatedBackground hidden={showAnimation} />
+      <BackgroundVideo hidden={showAnimation} />
       <div
         className={`relative z-10 w-full max-w-md space-y-6 transition-opacity duration-500 ${
           showAnimation ? 'pointer-events-none opacity-0' : 'opacity-100'

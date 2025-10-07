@@ -142,67 +142,6 @@
   will-change: opacity, transform;
 }
 
-@keyframes matrix-gradient-shift {
-  0% {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-
-  50% {
-    transform: translate3d(-6%, -4%, 0) scale(1.08);
-  }
-
-  100% {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-.animate-matrix-gradient {
-  animation: matrix-gradient-shift 24s ease-in-out infinite;
-}
-
-@keyframes matrix-grid-pan {
-  0% {
-    transform: translate3d(0, 0, 0);
-  }
-
-  100% {
-    transform: translate3d(-60px, -120px, 0);
-  }
-}
-
-.animate-matrix-grid {
-  animation: matrix-grid-pan 30s linear infinite;
-}
-
-@keyframes matrix-rain-shift {
-  0% {
-    background-position: 0 0;
-  }
-
-  100% {
-    background-position: 0 180px;
-  }
-}
-
-.animate-matrix-rain {
-  animation: matrix-rain-shift 1.8s linear infinite;
-}
-
-@keyframes matrix-noise-flicker {
-  0%,
-  100% {
-    opacity: 0.25;
-  }
-
-  50% {
-    opacity: 0.35;
-  }
-}
-
-.animate-matrix-noise {
-  animation: matrix-noise-flicker 4s ease-in-out infinite;
-}
-
 body.lab-transition-prep [data-lab-header],
 body.lab-transition-prep [data-lab-toolbar],
 body.lab-transition-prep [data-lab-sidebar],
