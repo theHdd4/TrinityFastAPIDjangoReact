@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Presentation,
   StickyNote,
@@ -49,6 +49,7 @@ const ExhibitionMode = () => {
   const [notes, setNotes] = useState<Record<number, string>>({});
   const [draggedAtom, setDraggedAtom] = useState<{ atom: DroppedAtom; fromCardId: string } | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const hasRequestedInitialLoad = useRef(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -81,7 +82,8 @@ const ExhibitionMode = () => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (cards.length === 0) {
+    if (!hasRequestedInitialLoad.current && cards.length === 0) {
+      hasRequestedInitialLoad.current = true;
       loadSavedConfiguration();
     }
   }, [cards.length, loadSavedConfiguration]);

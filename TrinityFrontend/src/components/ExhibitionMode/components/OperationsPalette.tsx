@@ -2,8 +2,8 @@ import React from 'react';
 import {
   Sparkles,
   Type,
-  Image,
-  Table,
+  Image as ImageIcon,
+  Columns3,
   BarChart3,
   Layers,
   FileText,
@@ -22,8 +22,8 @@ interface OperationsPaletteProps {
 const operations = [
   { icon: Sparkles, label: 'AI Assistant', color: 'text-purple-500' },
   { icon: Type, label: 'Text', color: 'text-blue-500' },
-  { icon: Image, label: 'Images', color: 'text-green-500' },
-  { icon: Table, label: 'Tables', color: 'text-orange-500' },
+  { icon: ImageIcon, label: 'Images', color: 'text-green-500' },
+  { icon: Columns3, label: 'Tables', color: 'text-orange-500' },
   { icon: BarChart3, label: 'Charts', color: 'text-pink-500' },
   { icon: Layers, label: 'Layouts', color: 'text-cyan-500' },
 ];
