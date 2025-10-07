@@ -528,10 +528,14 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   // Chart display options state
   const [showDataLabels, setShowDataLabels] = useState<boolean>(false);
   const [showAxisLabels, setShowAxisLabels] = useState<boolean>(true);
-  
+
   // State for managing expanded views
   const [showStatsSummary, setShowStatsSummary] = useState<boolean>(false);
   const [expandedMetrics, setExpandedMetrics] = useState<Set<string>>(new Set());
+  const exhibitionSkuSet = React.useMemo(
+    () => new Set((settings.exhibitionSkus || []).map((sku: string) => String(sku))),
+    [settings.exhibitionSkus]
+  );
 
   const numericColumnSet = React.useMemo(() => {
     const set = new Set<string>();
@@ -866,6 +870,16 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     setExpandedMetrics(new Set());
   };
 
+  const handleSkuExhibitionToggle = (skuId: string, enabled: boolean) => {
+    const next = new Set(exhibitionSkuSet);
+    if (enabled) {
+      next.add(String(skuId));
+    } else {
+      next.delete(String(skuId));
+    }
+    onUpdateSettings({ exhibitionSkus: Array.from(next) });
+  };
+
   const handleColumnFilter = (column: string, values: string[]) => {
     setColumnFilters(prev => ({
       ...prev,
@@ -929,7 +943,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const dimensionCols = Object.values(dimensionMap)
     .filter(Array.isArray)
     .flat();
-  const colSpan = dimensionCols.length + 2; // SR NO. + View Stat
+  const colSpan = dimensionCols.length + 3; // SR NO. + View Stat + Exhibition
 
   // SKU Table filtering and sorting logic
   const displayedSkuRows = React.useMemo(() => {
@@ -1749,7 +1763,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                       </ContextMenuContent>
                     </ContextMenu>
                   )),
-                  "View Stat"
+                  "View Stat",
+                  "Exhibition"
                 ]}
                 bodyClassName="max-h-[600px] overflow-y-auto"
                 borderColor="border-green-500"
@@ -1757,8 +1772,10 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                   title: "SKU Table"
                 }}
               >
-                {displayedSkuRows.map((row) => (
-                  <React.Fragment key={row.id}>
+                {displayedSkuRows.map((row, rowIndex) => {
+                  const skuRowId = row?.id ?? row?.SKU ?? row?.sku ?? rowIndex;
+                  return (
+                  <React.Fragment key={String(skuRowId)}>
                     <tr className="table-row">
                       <td className="table-cell">{row.id}</td>
                       {dimensionCols.map((d) => (
@@ -1770,6 +1787,15 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                         <Button size="sm" onClick={() => viewStats(row)}>
                           View Stat
                         </Button>
+                      </td>
+                      <td className="table-cell">
+                        <Switch
+                          checked={exhibitionSkuSet.has(String(skuRowId))}
+                          onCheckedChange={(checked) =>
+                            handleSkuExhibitionToggle(String(skuRowId), checked)
+                          }
+                          aria-label="Toggle exhibition for SKU"
+                        />
                       </td>
                     </tr>
                     {activeRow === row.id && showStatsSummary && (
@@ -1903,7 +1929,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                               </Card>
                                             </td>
                                           </tr>
-                                        )}
+                )})
                                       </React.Fragment>
                                     ))}
                                   </tbody>

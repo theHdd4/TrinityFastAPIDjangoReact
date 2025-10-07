@@ -48,6 +48,16 @@ const LaboratoryMode = () => {
   const skipInitialLabCleanupRef = useRef(true);
   const reduceMotionRef = useRef(initialReduceMotion);
   const [isPreparingAnimation, setIsPreparingAnimation] = useState(!initialReduceMotion);
+  const activeCard = selectedCardId ? cards.find(card => card.id === selectedCardId) : undefined;
+
+  useEffect(() => {
+    if (!selectedCardId) {
+      setCardExhibited(false);
+      return;
+    }
+
+    setCardExhibited(activeCard?.exhibitionControlEnabled ?? false);
+  }, [selectedCardId, activeCard?.exhibitionControlEnabled]);
 
   useIsomorphicInsertionEffect(() => {
     const reduceMotion = prefersReducedMotion();

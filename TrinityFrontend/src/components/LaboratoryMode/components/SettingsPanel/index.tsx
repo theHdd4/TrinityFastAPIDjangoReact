@@ -4,6 +4,7 @@ import { ChevronRight, Sliders } from 'lucide-react';
 
 import {
   useLaboratoryStore,
+  LayoutCard,
   TextBoxSettings,
   DEFAULT_TEXTBOX_SETTINGS,
   DataUploadSettings,
@@ -44,6 +45,8 @@ import ExploreProperties from '@/components/AtomList/atoms/explore/components/pr
 import SelectModelsFeatureProperties from '@/components/AtomList/atoms/select-models-feature/components/properties/SelectModelsFeatureProperties';
 import EvaluateModelsFeatureProperties from '@/components/AtomList/atoms/evaluate-models-feature/components/properties/EvaluateModelsFeatureProperties';
 import AtomSettingsTabs from './AtomSettingsTabs';
+import CardSettings from './CardSettings';
+import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -66,6 +69,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
   const updateSettings = useLaboratoryStore((state) => state.updateAtomSettings);
+  const selectedCard = useLaboratoryStore(state =>
+    selectedCardId ? state.getCard(selectedCardId) : undefined
+  );
+  const updateCardMeta = useLaboratoryStore(state => state.updateCard);
+  const updateExhibitionCard = useExhibitionStore(state => state.updateCard);
 
   const settings:
     | TextBoxSettings
@@ -108,6 +116,23 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
 
 
+  const handleExhibitionControlToggle = (enabled: boolean) => {
+    if (!selectedCardId) {
+      return;
+    }
+
+    const updates: Partial<LayoutCard> = {
+      exhibitionControlEnabled: enabled,
+    };
+
+    if (!enabled) {
+      updates.isExhibited = false;
+    }
+
+    updateCardMeta(selectedCardId, updates);
+    updateExhibitionCard(selectedCardId, updates);
+  };
+
   return (
     <div
       className={`bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full ${
@@ -131,6 +156,11 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
           {!selectedAtomId && !selectedCardId ? (
             <div className="p-4 text-gray-600 text-sm">Please select a Card/Atom</div>
+          ) : selectedCardId && !selectedAtomId ? (
+            <CardSettings
+              exhibitionEnabled={selectedCard?.exhibitionControlEnabled ?? false}
+              onToggleExhibitionControl={handleExhibitionControlToggle}
+            />
           ) : selectedAtomId && atom?.atomId === 'data-upload-validate' ? (
             <DataUploadValidateProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'feature-overview' ? (

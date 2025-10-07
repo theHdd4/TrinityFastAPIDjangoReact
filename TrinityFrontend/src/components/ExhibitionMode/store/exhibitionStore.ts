@@ -1,5 +1,7 @@
 
 import { create } from 'zustand';
+import { fetchExhibitionConfiguration, ExhibitionFeatureOverviewPayload } from '@/lib/exhibition';
+import { getActiveProjectContext } from '@/utils/projectEnv';
 
 export type CardColor = 'default' | 'blue' | 'purple' | 'green' | 'orange';
 export type CardWidth = 'M' | 'L';
@@ -20,6 +22,7 @@ export interface DroppedAtom {
   title: string;
   category: string;
   color: string;
+  metadata?: Record<string, any>;
 }
 
 export interface LayoutCard {
@@ -29,12 +32,13 @@ export interface LayoutCard {
   moleculeId?: string;
   moleculeTitle?: string;
   presentationSettings?: PresentationSettings;
+  exhibitionControlEnabled?: boolean;
 }
 
 interface ExhibitionStore {
   cards: LayoutCard[];
   exhibitedCards: LayoutCard[];
-  loadSavedConfiguration: () => void;
+  loadSavedConfiguration: () => Promise<void>;
   toggleCardExhibition: (cardId: string) => void;
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => void;
   setCards: (cards: LayoutCard[] | unknown) => void;
@@ -53,6 +57,7 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
 
 const withPresentationDefaults = (card: LayoutCard): LayoutCard => ({
   ...card,
+  exhibitionControlEnabled: card.exhibitionControlEnabled ?? false,
   presentationSettings: {
     ...DEFAULT_PRESENTATION_SETTINGS,
     ...card.presentationSettings,
@@ -78,6 +83,7 @@ const normalizeAtom = (atom: any): DroppedAtom | null => {
         ? atom.category
         : 'General',
     color: typeof atom.color === 'string' && atom.color.trim().length > 0 ? atom.color : FALLBACK_COLOR,
+    metadata: typeof atom.metadata === 'object' && atom.metadata !== null ? atom.metadata : undefined,
   };
 };
 
@@ -107,6 +113,9 @@ const normalizeCard = (card: any): LayoutCard | null => {
           ...card.presentationSettings,
         }
       : undefined,
+    exhibitionControlEnabled: 'exhibitionControlEnabled' in card
+      ? Boolean(card.exhibitionControlEnabled)
+      : false,
   };
 
   return withPresentationDefaults(normalized);
@@ -151,21 +160,91 @@ const loadCardsFromStorage = (): LayoutCard[] => {
   return parseStoredCards(window.localStorage.getItem('laboratory-layout-cards'));
 };
 
+const SKU_ATOM_ID = 'feature-overview-sku';
+
+const applyFeatureOverviewSelections = (
+  cards: LayoutCard[],
+  selections?: ExhibitionFeatureOverviewPayload[]
+): LayoutCard[] => {
+  if (!Array.isArray(selections) || selections.length === 0) {
+    return cards;
+  }
+
+  const lookup = new Map<string, ExhibitionFeatureOverviewPayload>();
+  selections.forEach(entry => {
+    if (entry.cardId) {
+      lookup.set(entry.cardId, entry);
+    }
+  });
+
+  if (lookup.size === 0) {
+    return cards;
+  }
+
+  return cards.map(card => {
+    const config = lookup.get(card.id);
+    if (!config) {
+      return card;
+    }
+
+    const baseAtoms = card.atoms.filter(atom => atom.atomId !== SKU_ATOM_ID);
+    const skuAtoms = Array.isArray(config.skus)
+      ? config.skus.map((sku, index) => ({
+          id: `${config.atomId}-sku-${sku.id ?? index}`,
+          atomId: SKU_ATOM_ID,
+          title: sku.title || `SKU ${sku.id ?? index + 1}`,
+          category: 'Feature Overview',
+          color: 'bg-amber-500',
+          metadata: sku.details,
+        }))
+      : [];
+
+    return withPresentationDefaults({
+      ...card,
+      atoms: [...baseAtoms, ...skuAtoms],
+    });
+  });
+};
+
 export const useExhibitionStore = create<ExhibitionStore>(set => ({
   cards: [],
   exhibitedCards: [],
 
-  loadSavedConfiguration: () => {
-    const loadedCards = loadCardsFromStorage();
-    const exhibitedCards = loadedCards.filter(card => card.isExhibited);
-    set({ cards: loadedCards.map(withPresentationDefaults), exhibitedCards: exhibitedCards.map(withPresentationDefaults) });
+  loadSavedConfiguration: async () => {
+    let loadedCards: LayoutCard[] = [];
+    const context = getActiveProjectContext();
+
+    if (context) {
+      try {
+        const remote = await fetchExhibitionConfiguration(context);
+        if (remote && Array.isArray(remote.cards)) {
+          loadedCards = extractCards(remote.cards);
+          loadedCards = applyFeatureOverviewSelections(
+            loadedCards,
+            Array.isArray(remote.feature_overview) ? remote.feature_overview : undefined
+          );
+        }
+      } catch (error) {
+        console.warn('Failed to fetch exhibition configuration', error);
+      }
+    }
+
+    if (loadedCards.length === 0) {
+      loadedCards = loadCardsFromStorage();
+    }
+
+    const cardsWithDefaults = loadedCards.map(withPresentationDefaults);
+    const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
+    set({ cards: cardsWithDefaults, exhibitedCards });
   },
 
   toggleCardExhibition: (cardId: string) => {
     set((state) => {
       const updatedCards = state.cards.map(card =>
         card.id === cardId
-          ? withPresentationDefaults({ ...card, isExhibited: !card.isExhibited })
+          ? !card.exhibitionControlEnabled
+            ? card
+            : withPresentationDefaults({ ...card, isExhibited: !card.isExhibited })
           : card
       );
 
@@ -188,6 +267,10 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
           ...card,
           ...updatedCard,
         };
+
+        if (updatedCard.exhibitionControlEnabled === false) {
+          nextCard.isExhibited = false;
+        }
 
         if (updatedCard.atoms) {
           nextCard.atoms = updatedCard.atoms;

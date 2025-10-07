@@ -72,7 +72,7 @@ import { deriveWorkflowMolecules, WorkflowMolecule } from './helpers';
 
 interface CanvasAreaProps {
   onAtomSelect?: (atomId: string) => void;
-  onCardSelect?: (cardId: string, exhibited: boolean) => void;
+  onCardSelect?: (cardId: string, exhibitionControlEnabled: boolean) => void;
   selectedCardId?: string;
   onToggleSettingsPanel?: () => void;
   onToggleHelpPanel?: () => void;
@@ -113,6 +113,7 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
     isExhibited: !!card.isExhibited,
     moleculeId: card.moleculeId,
     moleculeTitle: card.moleculeTitle,
+    exhibitionControlEnabled: !!card.exhibitionControlEnabled,
   }));
 };
 
@@ -843,6 +844,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             isExhibited: false,
             moleculeId: atom.moleculeId,
             moleculeTitle: atom.moleculeTitle,
+            exhibitionControlEnabled: false,
           } as LayoutCard;
         });
 
@@ -1062,7 +1064,8 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     atoms: [],
     isExhibited: false,
     moleculeId,
-    moleculeTitle: info?.title
+    moleculeTitle: info?.title,
+    exhibitionControlEnabled: false,
   };
   if (position === undefined || position >= layoutCards.length) {
     setLayoutCards([...(Array.isArray(layoutCards) ? layoutCards : []), newCard]);
@@ -1128,6 +1131,7 @@ const addNewCardWithAtom = (
     isExhibited: false,
     moleculeId,
     moleculeTitle: cardInfo?.title,
+    exhibitionControlEnabled: false,
   };
   const arr = Array.isArray(layoutCards) ? layoutCards : [];
   const insertIndex =
@@ -1318,11 +1322,11 @@ const handleAddDragLeave = (e: React.DragEvent) => {
   const handleCardSettingsClick = (
     e: React.MouseEvent,
     cardId: string,
-    exhibited: boolean
+    exhibitionEnabled: boolean
   ) => {
     e.stopPropagation();
     if (onCardSelect) {
-      onCardSelect(cardId, exhibited);
+      onCardSelect(cardId, exhibitionEnabled);
     }
     onToggleSettingsPanel?.();
   };
@@ -1330,11 +1334,11 @@ const handleAddDragLeave = (e: React.DragEvent) => {
   const handleCardClick = (
     e: React.MouseEvent,
     cardId: string,
-    exhibited: boolean
+    exhibitionEnabled: boolean
   ) => {
     e.stopPropagation();
     if (onCardSelect) {
-      onCardSelect(cardId, exhibited);
+      onCardSelect(cardId, exhibitionEnabled);
     }
   };
 
@@ -1422,6 +1426,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                           : card.atoms.length > 0
                             ? card.atoms[0].title
                             : 'Card';
+                        const exhibitionEnabled = card.exhibitionControlEnabled ?? false;
                         return (
                         <Card
                           key={card.id}
@@ -1449,13 +1454,17 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                               />
                             </div>
                             <div className="flex items-center space-x-2">
-                              <span className="text-xs text-gray-500">Exhibit the Card</span>
-                              <Switch
-                                checked={card.isExhibited || false}
-                                onCheckedChange={checked => handleExhibitionToggle(card.id, checked)}
-                                onClick={e => e.stopPropagation()}
-                                className="data-[state=checked]:bg-[#458EE2]"
-                              />
+                              {exhibitionEnabled && (
+                                <>
+                                  <span className="text-xs text-gray-500">Exhibit the Card</span>
+                                  <Switch
+                                    checked={card.isExhibited || false}
+                                    onCheckedChange={checked => handleExhibitionToggle(card.id, checked)}
+                                    onClick={e => e.stopPropagation()}
+                                    className="data-[state=checked]:bg-[#458EE2]"
+                                  />
+                                </>
+                              )}
                               <button
                                 onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
                                 className="p-1 hover:bg-gray-100 rounded"
@@ -1596,6 +1605,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
             : card.atoms.length > 0
               ? card.atoms[0].title
               : 'Card';
+          const exhibitionEnabled = card.exhibitionControlEnabled ?? false;
           return (
           <React.Fragment key={card.id}>
           <Card
@@ -1605,7 +1615,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                 ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
                 : 'border-gray-200 shadow-sm hover:shadow-md'
             }`}
-            onClick={(e) => handleCardClick(e, card.id, card.isExhibited)}
+            onClick={(e) => handleCardClick(e, card.id, exhibitionEnabled)}
             onDragOver={(e) => handleDragOver(e, card.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, card.id)}
@@ -1625,7 +1635,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                 />
                 {card.atoms.length > 0 && (
                   <button
-                    onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
+                    onClick={e => handleCardSettingsClick(e, card.id, exhibitionEnabled)}
                     className="p-1 hover:bg-gray-100 rounded"
                     title="Card Settings"
                   >
@@ -1644,13 +1654,17 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                 </button>
               </div>
               <div className="flex items-center space-x-2">
-                <span className="text-xs text-gray-500">Exhibit the Card</span>
-                <Switch
-                  checked={card.isExhibited || false}
-                  onCheckedChange={(checked) => handleExhibitionToggle(card.id, checked)}
-                  onClick={e => e.stopPropagation()}
-                  className="data-[state=checked]:bg-[#458EE2]"
-                />
+                {exhibitionEnabled && (
+                  <>
+                    <span className="text-xs text-gray-500">Exhibit the Card</span>
+                    <Switch
+                      checked={card.isExhibited || false}
+                      onCheckedChange={(checked) => handleExhibitionToggle(card.id, checked)}
+                      onClick={e => e.stopPropagation()}
+                      className="data-[state=checked]:bg-[#458EE2]"
+                    />
+                  </>
+                )}
                 <button
                   onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
                   className="p-1 hover:bg-gray-100 rounded"
@@ -1871,35 +1885,45 @@ const handleAddDragLeave = (e: React.DragEvent) => {
             <div className="relative z-10 flex h-full w-full flex-col bg-gray-50 shadow-2xl">
               {/* Fullscreen Header */}
               <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
-                <div className="flex items-center space-x-2">
-                <Eye className={`w-4 h-4 ${layoutCards.find(c => c.id === expandedCard)?.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
-                <span className="text-lg font-semibold text-gray-900">
-                  {(() => {
-                    const card = layoutCards.find(c => c.id === expandedCard);
-                    if (!card) return 'Card';
-                    return card.moleculeTitle
+                {(() => {
+                  const card = layoutCards.find(c => c.id === expandedCard);
+                  const exhibitionEnabled = card?.exhibitionControlEnabled ?? false;
+                  const title = card
+                    ? card.moleculeTitle
                       ? (card.atoms.length > 0 ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
                       : card.atoms.length > 0
                         ? card.atoms[0].title
-                        : 'Card';
-                  })()}
-                </span>
-                </div>
-                <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-500">Exhibit the Card</span>
-                <Switch
-                  checked={layoutCards.find(c => c.id === expandedCard)?.isExhibited || false}
-                  onCheckedChange={(checked) => handleExhibitionToggle(expandedCard, checked)}
-                  className="data-[state=checked]:bg-[#458EE2]"
-                />
-                <button
-                  onClick={() => setExpandedCard(null)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  title="Close Fullscreen"
-                >
-                  <X className="w-5 h-5 text-gray-500" />
-                </button>
-                </div>
+                        : 'Card'
+                    : 'Card';
+
+                  return (
+                    <>
+                      <div className="flex items-center space-x-2">
+                        <Eye className={`w-4 h-4 ${card?.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
+                        <span className="text-lg font-semibold text-gray-900">{title}</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        {exhibitionEnabled && (
+                          <>
+                            <span className="text-sm text-gray-500">Exhibit the Card</span>
+                            <Switch
+                              checked={card?.isExhibited || false}
+                              onCheckedChange={(checked) => handleExhibitionToggle(expandedCard, checked)}
+                              className="data-[state=checked]:bg-[#458EE2]"
+                            />
+                          </>
+                        )}
+                        <button
+                          onClick={() => setExpandedCard(null)}
+                          className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                          title="Close Fullscreen"
+                        >
+                          <X className="w-5 h-5 text-gray-500" />
+                        </button>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
 
               {/* Fullscreen Content */}

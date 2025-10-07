@@ -64,7 +64,7 @@ const ExhibitionMode = () => {
 
   useEffect(() => {
     if (cards.length === 0) {
-      loadSavedConfiguration();
+      void loadSavedConfiguration();
     }
   }, [cards.length, loadSavedConfiguration]);
 

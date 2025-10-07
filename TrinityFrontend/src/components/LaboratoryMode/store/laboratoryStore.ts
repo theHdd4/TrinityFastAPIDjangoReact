@@ -117,6 +117,11 @@ export interface FeatureOverviewSettings {
   isLoading?: boolean;
   loadingMessage?: string;
   loadingStatus?: string;
+  exhibitionSkus?: string[];
+  exhibitionComponents?: {
+    skuStatistics: boolean;
+    trendAnalysis: boolean;
+  };
 }
 
 export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
@@ -141,6 +146,11 @@ export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   isLoading: false,
   loadingMessage: '',
   loadingStatus: '',
+  exhibitionSkus: [],
+  exhibitionComponents: {
+    skuStatistics: false,
+    trendAnalysis: false,
+  },
 };
 
 export interface ConcatSettings {
@@ -1354,6 +1364,7 @@ export interface LayoutCard {
   isExhibited: boolean;
   moleculeId?: string;
   moleculeTitle?: string;
+  exhibitionControlEnabled?: boolean;
 }
 
 interface LaboratoryStore {
@@ -1363,6 +1374,8 @@ interface LaboratoryStore {
   setAuxPanelActive: (panel: 'settings' | 'frames' | null) => void;
   updateAtomSettings: (atomId: string, settings: any) => void;
   getAtom: (atomId: string) => DroppedAtom | undefined;
+  getCard: (cardId: string) => LayoutCard | undefined;
+  updateCard: (cardId: string, updates: Partial<LayoutCard>) => void;
   reset: () => void;
 }
 
@@ -1370,7 +1383,12 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   cards: [],
   auxPanelActive: null,
   setCards: (cards: LayoutCard[]) => {
-    set({ cards });
+    set({
+      cards: cards.map(card => ({
+        ...card,
+        exhibitionControlEnabled: card.exhibitionControlEnabled ?? false,
+      })),
+    });
   },
   
   setAuxPanelActive: (panel: 'settings' | 'frames' | null) => {
@@ -1405,6 +1423,26 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   getAtom: (atomId: string) => {
     const state = get();
     return state.cards.flatMap(card => card.atoms).find(atom => atom.id === atomId);
+  },
+
+  getCard: (cardId: string) => {
+    const state = get();
+    return state.cards.find(card => card.id === cardId);
+  },
+
+  updateCard: (cardId: string, updates: Partial<LayoutCard>) => {
+    set(state => ({
+      cards: state.cards.map(card =>
+        card.id === cardId
+          ? {
+              ...card,
+              ...updates,
+              exhibitionControlEnabled:
+                updates.exhibitionControlEnabled ?? card.exhibitionControlEnabled ?? false,
+            }
+          : card,
+      ),
+    }));
   },
 
   reset: () => {
