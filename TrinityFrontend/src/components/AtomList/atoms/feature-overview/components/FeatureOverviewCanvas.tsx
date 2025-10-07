@@ -1774,174 +1774,180 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
               >
                 {displayedSkuRows.map((row, rowIndex) => {
                   const skuRowId = row?.id ?? row?.SKU ?? row?.sku ?? rowIndex;
+
                   return (
-                  <React.Fragment key={String(skuRowId)}>
-                    <tr className="table-row">
-                      <td className="table-cell">{row.id}</td>
-                      {dimensionCols.map((d) => (
-                        <td key={d} className="table-cell">
-                          {row[d.toLowerCase()]}
-                        </td>
-                      ))}
-                      <td className="table-cell">
-                        <Button size="sm" onClick={() => viewStats(row)}>
-                          View Stat
-                        </Button>
-                      </td>
-                      <td className="table-cell">
-                        <Switch
-                          checked={exhibitionSkuSet.has(String(skuRowId))}
-                          onCheckedChange={(checked) =>
-                            handleSkuExhibitionToggle(String(skuRowId), checked)
-                          }
-                          aria-label="Toggle exhibition for SKU"
-                        />
-                      </td>
-                    </tr>
-                    {activeRow === row.id && showStatsSummary && (
+                    <React.Fragment key={String(skuRowId)}>
                       <tr className="table-row">
-                        <td className="table-cell" colSpan={colSpan}>
-                          <Card className="border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] hover:-translate-y-1 transition-all duration-300 relative flex flex-col group hover:shadow-2xl">
-                            <div className="bg-white border-b border-black px-4 py-2 flex items-center justify-between relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
-                              <h5 className="font-bold text-gray-900 text-sm flex items-center">
-                                <BarChart3 className="w-4 h-4 mr-2 text-gray-900" />
-                                Statistical Summary
-                              </h5>
-                              <button
-                                onClick={handleCloseStatsSummary}
-                                className="text-gray-500 hover:text-gray-700 transition-colors"
-                                aria-label="Close statistical summary"
-                              >
-                                <X className="w-5 h-5" />
-                              </button>
-                            </div>
-                            <div className="p-4 overflow-auto flex-1">
-                              <div className="overflow-x-auto">
-                                <table className="min-w-full text-sm whitespace-nowrap">
-                                  <thead>
-                                    <tr className="border-b border-gray-200">
-                                      <th className="p-3 text-left whitespace-nowrap sticky left-0 bg-white z-10 font-semibold">
-                                        Metric
-                                      </th>
-                                      <th className="p-3 text-right whitespace-nowrap font-semibold">Avg</th>
-                                      <th className="p-3 text-right whitespace-nowrap font-semibold">Min</th>
-                                      <th className="p-3 text-right whitespace-nowrap font-semibold">Max</th>
-                                      <th className="p-3 text-right whitespace-nowrap font-semibold">Action</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {(Array.isArray(settings.yAxes) ? settings.yAxes : []).map((m) => (
-                                      <React.Fragment key={m}>
-                                        <tr className="border-b last:border-0 hover:bg-gray-50">
-                                          <td className="p-3 whitespace-nowrap sticky left-0 bg-white z-10 font-medium">{m}</td>
-                                          <td className="p-3 text-right whitespace-nowrap">
-                                            {statDataMap[m]?.summary.avg?.toFixed(2) ?? "-"}
-                                          </td>
-                                          <td className="p-3 text-right whitespace-nowrap">
-                                            {statDataMap[m]?.summary.min?.toFixed(2) ?? "-"}
-                                          </td>
-                                          <td className="p-3 text-right whitespace-nowrap">
-                                            {statDataMap[m]?.summary.max?.toFixed(2) ?? "-"}
-                                          </td>
-                                          <td className="p-3 text-right whitespace-nowrap">
-                                            <button
-                                              className="text-blue-600 hover:text-blue-800 font-medium underline transition-colors"
-                                              onClick={() => handleMetricView(m)}
-                                            >
-                                              View
-                                            </button>
-                                          </td>
-                                        </tr>
-                                        {expandedMetrics.has(m) && (
-                                          <tr className="border-b last:border-0">
-                                            <td className="p-0" colSpan={5}>
-                                              <Card className="border border-gray-200 shadow-lg bg-white/95 backdrop-blur-sm overflow-hidden transform transition-all duration-300 relative flex flex-col group hover:shadow-xl m-4">
-                                                <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-between relative flex-shrink-0">
-                                                  <h6 className="font-bold text-gray-900 text-md flex items-center">
-                                                    <TrendingUp className="w-4 h-4 mr-2 text-gray-900" />
-                                                    {m} - Trend Analysis
-                                                  </h6>
-                                                  <div className="flex items-center gap-2">
-                                                    <Dialog>
-                                                      <DialogTrigger asChild>
-                                                        <button type="button" aria-label="Full screen" className="text-gray-500 hover:text-gray-700 transition-colors">
-                                                          <Maximize2 className="w-4 h-4" />
-                                                        </button>
-                                                      </DialogTrigger>
-                                                      <DialogContent className="max-w-7xl w-[95vw] h-[90vh]">
-                                                        <div className="w-full h-full flex flex-col">
-                                                          <div className="flex-1 min-h-0">
-                                                            <RechartsChartRenderer
-                                                              type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
-                                                              data={statDataMap[m]?.timeseries || []}
-                                                              xField="date"
-                                                              yField="value"
-                                                              width={undefined}
-                                                              height={undefined}
-                                                              title=""
-                                                              xAxisLabel={settings.xAxis || "Date"}
-                                                              yAxisLabel={m || "Value"}
-                                                              showDataLabels={showDataLabels}
-                                                              showAxisLabels={showAxisLabels}
-                                                              theme={chartTheme}
-                                                              onChartTypeChange={handleChartTypeChange}
-                                                              onThemeChange={handleChartThemeChange}
-                                                              onDataLabelsToggle={handleDataLabelsToggle}
-                                                              onAxisLabelsToggle={handleAxisLabelsToggle}
-                                                            />
-                                                          </div>
-                                                        </div>
-                                                      </DialogContent>
-                                                    </Dialog>
-                                                    <button
-                                                      onClick={() => handleCloseMetric(m)}
-                                                      className="text-gray-500 hover:text-gray-700 transition-colors"
-                                                      aria-label="Close graph"
-                                                    >
-                                                      <X className="w-4 h-4" />
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                                <div className="p-4 flex-1 flex items-center justify-center min-h-0">
-                                                  <div className="w-full h-[400px] flex items-center justify-center">
-                                                    <div className="w-full h-full">
-                                                      <RechartsChartRenderer
-                                                        type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
-                                                        data={statDataMap[m]?.timeseries || []}
-                                                        xField="date"
-                                                        yField="value"
-                                                        width={undefined}
-                                                        height={undefined}
-                                                        title=""
-                                                        xAxisLabel={settings.xAxis || "Date"}
-                                                        yAxisLabel={m || "Value"}
-                                                        showDataLabels={showDataLabels}
-                                                        showAxisLabels={showAxisLabels}
-                                                        theme={chartTheme}
-                                                        onChartTypeChange={handleChartTypeChange}
-                                                        onThemeChange={handleChartThemeChange}
-                                                        onDataLabelsToggle={handleDataLabelsToggle}
-                                                        onAxisLabelsToggle={handleAxisLabelsToggle}
-                                                      />
-                                                    </div>
-                                                  </div>
-                                                </div>
-                                              </Card>
-                                            </td>
-                                          </tr>
-                                        )}
-                                      </React.Fragment>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          </Card>
+                        <td className="table-cell">{row.id}</td>
+                        {dimensionCols.map((d) => (
+                          <td key={d} className="table-cell">
+                            {row[d.toLowerCase()]}
+                          </td>
+                        ))}
+                        <td className="table-cell">
+                          <Button size="sm" onClick={() => viewStats(row)}>
+                            View Stat
+                          </Button>
+                        </td>
+                        <td className="table-cell">
+                          <Switch
+                            checked={exhibitionSkuSet.has(String(skuRowId))}
+                            onCheckedChange={(checked) =>
+                              handleSkuExhibitionToggle(String(skuRowId), checked)
+                            }
+                            aria-label="Toggle exhibition for SKU"
+                          />
                         </td>
                       </tr>
-                    )}
-                  </React.Fragment>
-                ))}
+                      {activeRow === row.id && showStatsSummary && (
+                        <tr className="table-row">
+                          <td className="table-cell" colSpan={colSpan}>
+                            <Card className="border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] hover:-translate-y-1 transition-all duration-300 relative flex flex-col group hover:shadow-2xl">
+                              <div className="bg-white border-b border-black px-4 py-2 flex items-center justify-between relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
+                                <h5 className="font-bold text-gray-900 text-sm flex items-center">
+                                  <BarChart3 className="w-4 h-4 mr-2 text-gray-900" />
+                                  Statistical Summary
+                                </h5>
+                                <button
+                                  onClick={handleCloseStatsSummary}
+                                  className="text-gray-500 hover:text-gray-700 transition-colors"
+                                  aria-label="Close statistical summary"
+                                >
+                                  <X className="w-5 h-5" />
+                                </button>
+                              </div>
+                              <div className="p-4 overflow-auto flex-1">
+                                <div className="overflow-x-auto">
+                                  <table className="min-w-full text-sm whitespace-nowrap">
+                                    <thead>
+                                      <tr className="border-b border-gray-200">
+                                        <th className="p-3 text-left whitespace-nowrap sticky left-0 bg-white z-10 font-semibold">
+                                          Metric
+                                        </th>
+                                        <th className="p-3 text-right whitespace-nowrap font-semibold">Avg</th>
+                                        <th className="p-3 text-right whitespace-nowrap font-semibold">Min</th>
+                                        <th className="p-3 text-right whitespace-nowrap font-semibold">Max</th>
+                                        <th className="p-3 text-right whitespace-nowrap font-semibold">Action</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {(Array.isArray(settings.yAxes) ? settings.yAxes : []).map((m) => (
+                                        <React.Fragment key={m}>
+                                          <tr className="border-b last:border-0 hover:bg-gray-50">
+                                            <td className="p-3 whitespace-nowrap sticky left-0 bg-white z-10 font-medium">{m}</td>
+                                            <td className="p-3 text-right whitespace-nowrap">
+                                              {statDataMap[m]?.summary.avg?.toFixed(2) ?? "-"}
+                                            </td>
+                                            <td className="p-3 text-right whitespace-nowrap">
+                                              {statDataMap[m]?.summary.min?.toFixed(2) ?? "-"}
+                                            </td>
+                                            <td className="p-3 text-right whitespace-nowrap">
+                                              {statDataMap[m]?.summary.max?.toFixed(2) ?? "-"}
+                                            </td>
+                                            <td className="p-3 text-right whitespace-nowrap">
+                                              <button
+                                                className="text-blue-600 hover:text-blue-800 font-medium underline transition-colors"
+                                                onClick={() => handleMetricView(m)}
+                                              >
+                                                View
+                                              </button>
+                                            </td>
+                                          </tr>
+                                          {expandedMetrics.has(m) && (
+                                            <tr className="border-b last:border-0">
+                                              <td className="p-0" colSpan={5}>
+                                                <Card className="border border-gray-200 shadow-lg bg-white/95 backdrop-blur-sm overflow-hidden transform transition-all duration-300 relative flex flex-col group hover:shadow-xl m-4">
+                                                  <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-between relative flex-shrink-0">
+                                                    <h6 className="font-bold text-gray-900 text-md flex items-center">
+                                                      <TrendingUp className="w-4 h-4 mr-2 text-gray-900" />
+                                                      {m} - Trend Analysis
+                                                    </h6>
+                                                    <div className="flex items-center gap-2">
+                                                      <Dialog>
+                                                        <DialogTrigger asChild>
+                                                          <button
+                                                            type="button"
+                                                            aria-label="Full screen"
+                                                            className="text-gray-500 hover:text-gray-700 transition-colors"
+                                                          >
+                                                            <Maximize2 className="w-4 h-4" />
+                                                          </button>
+                                                        </DialogTrigger>
+                                                        <DialogContent className="max-w-7xl w-[95vw] h-[90vh]">
+                                                          <div className="w-full h-full flex flex-col">
+                                                            <div className="flex-1 min-h-0">
+                                                              <RechartsChartRenderer
+                                                                type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
+                                                                data={statDataMap[m]?.timeseries || []}
+                                                                xField="date"
+                                                                yField="value"
+                                                                width={undefined}
+                                                                height={undefined}
+                                                                title=""
+                                                                xAxisLabel={settings.xAxis || "Date"}
+                                                                yAxisLabel={m || "Value"}
+                                                                showDataLabels={showDataLabels}
+                                                                showAxisLabels={showAxisLabels}
+                                                                theme={chartTheme}
+                                                                onChartTypeChange={handleChartTypeChange}
+                                                                onThemeChange={handleChartThemeChange}
+                                                                onDataLabelsToggle={handleDataLabelsToggle}
+                                                                onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                              />
+                                                            </div>
+                                                          </div>
+                                                        </DialogContent>
+                                                      </Dialog>
+                                                      <button
+                                                        onClick={() => handleCloseMetric(m)}
+                                                        className="text-gray-500 hover:text-gray-700 transition-colors"
+                                                        aria-label="Close graph"
+                                                      >
+                                                        <X className="w-4 h-4" />
+                                                      </button>
+                                                    </div>
+                                                  </div>
+                                                  <div className="p-4 flex-1 flex items-center justify-center min-h-0">
+                                                    <div className="w-full h-[400px] flex items-center justify-center">
+                                                      <div className="w-full h-full">
+                                                        <RechartsChartRenderer
+                                                          type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
+                                                          data={statDataMap[m]?.timeseries || []}
+                                                          xField="date"
+                                                          yField="value"
+                                                          width={undefined}
+                                                          height={undefined}
+                                                          title=""
+                                                          xAxisLabel={settings.xAxis || "Date"}
+                                                          yAxisLabel={m || "Value"}
+                                                          showDataLabels={showDataLabels}
+                                                          showAxisLabels={showAxisLabels}
+                                                          theme={chartTheme}
+                                                          onChartTypeChange={handleChartTypeChange}
+                                                          onThemeChange={handleChartThemeChange}
+                                                          onDataLabelsToggle={handleDataLabelsToggle}
+                                                          onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                        />
+                                                      </div>
+                                                    </div>
+                                                  </div>
+                                                </Card>
+                                              </td>
+                                            </tr>
+                                          )}
+                                        </React.Fragment>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </Card>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </Table>
             </div>
           )}
