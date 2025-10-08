@@ -246,39 +246,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
   }, [settings.cardLayout]);
 
-  const accentSection =
-    accentLayout.showAccent
-      ? (
-          <div className={cn('relative', accentLayout.accentWrapperClass)}>
-            <div
-              className={cn(
-                'relative flex h-full w-full items-center justify-center overflow-hidden',
-                heroBackgroundClasses,
-                accentLayout.accentInnerClass
-              )}
-              style={heroBackgroundStyle}
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-black/25 via-transparent to-black/25 backdrop-blur-sm" />
-              <div className="relative z-10 flex w-full flex-col items-start gap-2 p-6 text-background">
-                <span className="inline-flex items-center rounded-full bg-background/90 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-foreground">
-                  Slide {slideNumber}
-                </span>
-                {!settings.accentImage && (
-                  <p className="max-w-xs text-xs text-background/80">
-                    Use card formatting controls to tailor this accent panel with colors or imagery.
-                  </p>
-                )}
-              </div>
-              {card.atoms.length > 0 && (
-                <div className="absolute bottom-4 right-4 rounded-full bg-background/90 px-3 py-1 text-xs font-medium text-foreground">
-                  {card.atoms.length} {card.atoms.length === 1 ? 'Component' : 'Components'}
-                </div>
-              )}
-            </div>
-          </div>
-        )
-      : null;
-
   const handleAtomRemove = (atomId: string) => {
     if (!canEdit) {
       return;
@@ -367,6 +334,39 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const heroBackgroundStyle = settings.accentImage
     ? { backgroundImage: `url(${settings.accentImage})` }
     : undefined;
+
+  const accentSection =
+    accentLayout.showAccent
+      ? (
+          <div className={cn('relative', accentLayout.accentWrapperClass)}>
+            <div
+              className={cn(
+                'relative flex h-full w-full items-center justify-center overflow-hidden',
+                heroBackgroundClasses,
+                accentLayout.accentInnerClass
+              )}
+              style={heroBackgroundStyle}
+            >
+              <div className="absolute inset-0 bg-gradient-to-br from-black/25 via-transparent to-black/25 backdrop-blur-sm" />
+              <div className="relative z-10 flex w-full flex-col items-start gap-2 p-6 text-background">
+                <span className="inline-flex items-center rounded-full bg-background/90 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-foreground">
+                  Slide {slideNumber}
+                </span>
+                {!settings.accentImage && (
+                  <p className="max-w-xs text-xs text-background/80">
+                    Use card formatting controls to tailor this accent panel with colors or imagery.
+                  </p>
+                )}
+              </div>
+              {card.atoms.length > 0 && (
+                <div className="absolute bottom-4 right-4 rounded-full bg-background/90 px-3 py-1 text-xs font-medium text-foreground">
+                  {card.atoms.length} {card.atoms.length === 1 ? 'Component' : 'Components'}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      : null;
 
   const alignmentClasses = {
     top: 'justify-start',
