@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Presentation } from 'lucide-react';
+import { FileText, Grid3x3, Presentation } from 'lucide-react';
 import Header from '@/components/Header';
 import { useExhibitionStore, DroppedAtom, PresentationSettings } from './store/exhibitionStore';
 import { ExhibitionCatalogue } from './components/ExhibitionCatalogue';
@@ -33,6 +33,7 @@ const ExhibitionMode = () => {
   const [showGridView, setShowGridView] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'horizontal' | 'vertical'>('horizontal');
+  const [isCatalogueOpen, setIsCatalogueOpen] = useState(true);
   const [notes, setNotes] = useState<Record<number, string>>(() => {
     if (typeof window === 'undefined') {
       return {};
@@ -356,14 +357,47 @@ const ExhibitionMode = () => {
 
       <div className="flex-1 flex overflow-hidden">
         {!isFullscreen && (
-          <ExhibitionCatalogue
-            cards={exhibitedCards}
-            currentSlide={currentSlide}
-            onSlideSelect={setCurrentSlide}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-            enableDragging={canEdit}
-          />
+          isCatalogueOpen ? (
+            <ExhibitionCatalogue
+              cards={exhibitedCards}
+              currentSlide={currentSlide}
+              onSlideSelect={setCurrentSlide}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              enableDragging={canEdit}
+              onCollapse={() => setIsCatalogueOpen(false)}
+            />
+          ) : (
+            <div className="bg-background border-r border-border transition-all duration-300 flex flex-col h-full w-12">
+              <div className="p-3 border-b border-border flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => setIsCatalogueOpen(true)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+                  title="Open exhibition catalogue"
+                  aria-label="Open exhibition catalogue"
+                  data-exhibition-catalogue-toggle="true"
+                >
+                  <FileText className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="p-3 border-b border-border flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowGridView(false);
+                    setShowThumbnails(true);
+                  }}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+                  title="Open slides view"
+                  aria-label="Open slides view"
+                  data-exhibition-slides-toggle="true"
+                >
+                  <Grid3x3 className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )
         )}
 
         <div className="flex-1 flex flex-col overflow-hidden">
