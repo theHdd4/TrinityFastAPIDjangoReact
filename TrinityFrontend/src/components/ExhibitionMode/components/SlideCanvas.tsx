@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   User,
   Calendar,
@@ -30,8 +30,6 @@ import TextBoxDisplay from '@/components/AtomList/atoms/text-box/TextBoxDisplay'
 import {
   CardLayout,
   CardColor,
-  CardWidth,
-  ContentAlignment,
   LayoutCard,
   DroppedAtom,
   PresentationSettings,
@@ -76,6 +74,18 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     ...DEFAULT_PRESENTATION_SETTINGS,
     ...card.presentationSettings,
   }));
+  const accentImageInputRef = useRef<HTMLInputElement | null>(null);
+
+  const layoutDefaultColors: Record<CardLayout, CardColor> = useMemo(
+    () => ({
+      blank: 'purple',
+      'horizontal-split': 'blue',
+      'vertical-split': 'green',
+      'content-right': 'default',
+      full: 'orange',
+    }),
+    [],
+  );
 
   const cardWidthClass = settings.cardWidth === 'M' ? 'max-w-4xl' : 'max-w-6xl';
 
@@ -97,9 +107,29 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       if (!canEdit) {
         return prev;
       }
-      const next = { ...prev, ...partial };
-      onPresentationChange?.(next, card.id);
-      return next;
+
+      const merged = { ...prev, ...partial } as PresentationSettings;
+
+      if ('cardLayout' in partial && !('cardColor' in partial)) {
+        const targetLayout = partial.cardLayout ?? prev.cardLayout;
+        const mappedColor = layoutDefaultColors[targetLayout];
+        if (!merged.accentImage && mappedColor && merged.cardColor !== mappedColor) {
+          merged.cardColor = mappedColor;
+        }
+      }
+
+      if ('accentImage' in partial && !partial.accentImage) {
+        const fallbackColor = layoutDefaultColors[merged.cardLayout] ?? 'default';
+        merged.cardColor = fallbackColor;
+        merged.accentImage = null;
+      }
+
+      if ('accentImageName' in partial && !partial.accentImageName) {
+        merged.accentImageName = null;
+      }
+
+      onPresentationChange?.(merged, card.id);
+      return merged;
     });
   };
 
@@ -192,6 +222,30 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     onDrop(draggedAtom.atom, draggedAtom.cardId, card.id, draggedAtom.origin);
   };
 
+  const handleAccentImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) {
+      return;
+    }
+
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== 'string' || reader.result.length === 0) {
+        return;
+      }
+
+      updateSettings({ accentImage: reader.result, accentImageName: file.name });
+    };
+
+    reader.readAsDataURL(file);
+  };
+
   const getSlideTitle = () => {
     if (card.moleculeTitle) {
       return card.atoms.length > 0 ? `${card.moleculeTitle}` : card.moleculeTitle;
@@ -215,6 +269,14 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     green: 'from-emerald-500 via-green-500 to-lime-400',
     orange: 'from-orange-500 via-amber-500 to-yellow-400',
   };
+
+  const heroBackgroundClasses = settings.accentImage
+    ? 'bg-center bg-cover bg-no-repeat'
+    : `bg-gradient-to-br ${cardColorClasses[settings.cardColor]}`;
+
+  const heroBackgroundStyle = settings.accentImage
+    ? { backgroundImage: `url(${settings.accentImage})` }
+    : undefined;
 
   const alignmentClasses = {
     top: 'justify-start',
@@ -384,10 +446,59 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                     <ImageIcon className="w-4 h-4 text-muted-foreground" />
                     <span className="text-sm">Accent image</span>
                   </div>
-                  <Button size="sm" variant="ghost" className="h-7 text-xs text-primary">
-                    Edit
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {settings.accentImage && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs text-destructive"
+                        onClick={() => updateSettings({ accentImage: null, accentImageName: null })}
+                        disabled={!canEdit}
+                        type="button"
+                      >
+                        Remove
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs text-primary"
+                      onClick={() => accentImageInputRef.current?.click()}
+                      disabled={!canEdit}
+                      type="button"
+                    >
+                      {settings.accentImage ? 'Change' : 'Upload'}
+                    </Button>
+                  </div>
                 </div>
+
+                {settings.accentImage && (
+                  <div className="space-y-2">
+                    <div className="relative h-24 rounded-lg border border-border overflow-hidden">
+                      <img
+                        src={settings.accentImage}
+                        alt="Accent"
+                        className="h-full w-full object-cover"
+                      />
+                      {settings.accentImageName && (
+                        <div className="absolute bottom-0 left-0 right-0 bg-background/90 text-[11px] px-2 py-1 truncate">
+                          {settings.accentImageName}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Accent images replace the card color for this slide layout.
+                    </p>
+                  </div>
+                )}
+
+                <input
+                  ref={accentImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleAccentImageChange}
+                  className="hidden"
+                />
 
                 <Separator />
 
@@ -402,7 +513,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                         size="sm"
                         variant="outline"
                         className="h-7 text-xs capitalize"
-                        disabled={!canEdit}
+                        disabled={!canEdit || Boolean(settings.accentImage)}
                       >
                         {settings.cardColor}
                       </Button>
@@ -535,10 +646,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
 
           <div
             className={cn(
-              'relative h-64 overflow-hidden bg-gradient-to-br',
-              cardColorClasses[settings.cardColor],
+              'relative h-64 overflow-hidden',
+              heroBackgroundClasses,
               settings.fullBleed ? 'rounded-none' : 'rounded-t-2xl'
             )}
+            style={heroBackgroundStyle}
           >
             <div className="absolute inset-0 bg-gradient-to-br from-black/20 via-transparent to-black/20 backdrop-blur-sm" />
             {card.atoms.length > 0 && (

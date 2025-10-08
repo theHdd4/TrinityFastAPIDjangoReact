@@ -14,6 +14,8 @@ export interface PresentationSettings {
   contentAlignment: ContentAlignment;
   fullBleed: boolean;
   cardLayout: CardLayout;
+  accentImage?: string | null;
+  accentImageName?: string | null;
 }
 
 export interface DroppedAtom {
@@ -83,6 +85,8 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   contentAlignment: 'top',
   fullBleed: false,
   cardLayout: 'content-right',
+  accentImage: null,
+  accentImageName: null,
 };
 
 const withPresentationDefaults = (card: LayoutCard): LayoutCard => {
