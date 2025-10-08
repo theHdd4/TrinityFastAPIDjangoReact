@@ -95,6 +95,20 @@ export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
   fileSizeMap: {},
 });
 
+export interface FeatureOverviewExhibitionSelectionDimension {
+  name: string;
+  value: string;
+}
+
+export interface FeatureOverviewExhibitionSelection {
+  key: string;
+  metric: string;
+  combination: Record<string, string>;
+  dimensions: FeatureOverviewExhibitionSelectionDimension[];
+  rowId?: string | number;
+  label?: string;
+}
+
 export interface FeatureOverviewSettings {
   selectedColumns: string[];
   hierarchicalView: boolean;
@@ -117,6 +131,7 @@ export interface FeatureOverviewSettings {
   isLoading?: boolean;
   loadingMessage?: string;
   loadingStatus?: string;
+  exhibitionSelections?: FeatureOverviewExhibitionSelection[];
 }
 
 export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
@@ -141,6 +156,7 @@ export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
   isLoading: false,
   loadingMessage: '',
   loadingStatus: '',
+  exhibitionSelections: [],
 };
 
 export interface ConcatSettings {
