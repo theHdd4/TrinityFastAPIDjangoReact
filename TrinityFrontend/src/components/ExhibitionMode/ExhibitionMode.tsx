@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { FileText, Grid3x3, Presentation } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Download, FileText, Grid3x3, Presentation, Save, Share2, Undo2 } from 'lucide-react';
 import Header from '@/components/Header';
-import { useExhibitionStore, DroppedAtom, PresentationSettings } from './store/exhibitionStore';
+import { useExhibitionStore } from './store/exhibitionStore';
+import type { DroppedAtom, PresentationSettings, LayoutCard } from './store/exhibitionStore';
 import { ExhibitionCatalogue } from './components/ExhibitionCatalogue';
 import { SlideCanvas } from './components/SlideCanvas';
 import { OperationsPalette } from './components/OperationsPalette';
@@ -13,11 +15,14 @@ import { ExportDialog } from './components/ExportDialog';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
+import { saveExhibitionConfiguration } from '@/lib/exhibition';
+import { getActiveProjectContext } from '@/utils/projectEnv';
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
 
 const ExhibitionMode = () => {
-  const { exhibitedCards, cards, loadSavedConfiguration, updateCard, addBlankSlide } = useExhibitionStore();
+  const { exhibitedCards, cards, loadSavedConfiguration, updateCard, addBlankSlide, setCards } =
+    useExhibitionStore();
   const { toast } = useToast();
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('exhibition:edit');
@@ -34,6 +39,8 @@ const ExhibitionMode = () => {
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'horizontal' | 'vertical'>('horizontal');
   const [isCatalogueOpen, setIsCatalogueOpen] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [undoAvailable, setUndoAvailable] = useState(false);
   const [notes, setNotes] = useState<Record<number, string>>(() => {
     if (typeof window === 'undefined') {
       return {};
@@ -49,6 +56,9 @@ const ExhibitionMode = () => {
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const verticalSlideRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const undoStackRef = useRef<LayoutCard[][]>([]);
+  const isRestoringSnapshotRef = useRef(false);
+  const lastSerializedCardsRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -73,6 +83,30 @@ const ExhibitionMode = () => {
       void loadSavedConfiguration();
     }
   }, [cards.length, loadSavedConfiguration]);
+
+  useEffect(() => {
+    const serialized = JSON.stringify(cards);
+
+    if (isRestoringSnapshotRef.current) {
+      isRestoringSnapshotRef.current = false;
+      lastSerializedCardsRef.current = serialized;
+      return;
+    }
+
+    if (lastSerializedCardsRef.current && lastSerializedCardsRef.current !== serialized) {
+      const previous = JSON.parse(lastSerializedCardsRef.current) as LayoutCard[];
+      undoStackRef.current.push(previous);
+
+      const MAX_UNDO_HISTORY = 20;
+      if (undoStackRef.current.length > MAX_UNDO_HISTORY) {
+        undoStackRef.current.shift();
+      }
+
+      setUndoAvailable(undoStackRef.current.length > 0);
+    }
+
+    lastSerializedCardsRef.current = serialized;
+  }, [cards]);
 
   useEffect(() => {
     if (currentSlide >= exhibitedCards.length) {
@@ -148,6 +182,128 @@ const ExhibitionMode = () => {
   const toggleFullscreen = () => {
     setIsFullscreen(prev => !prev);
   };
+
+  const handleUndo = useCallback(() => {
+    if (!canEdit) {
+      toast({
+        title: 'Insufficient permissions',
+        description: 'You need edit access to undo exhibition changes.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const previous = undoStackRef.current.pop();
+    if (!previous) {
+      toast({
+        title: 'Nothing to undo',
+        description: 'There are no more exhibition changes to revert.',
+      });
+      setUndoAvailable(false);
+      return;
+    }
+
+    isRestoringSnapshotRef.current = true;
+    setCards(previous);
+    setUndoAvailable(undoStackRef.current.length > 0);
+    toast({ title: 'Undo', description: 'Reverted the last change to your exhibition.' });
+  }, [canEdit, setCards, toast]);
+
+  const persistCardsLocally = useCallback((payloadCards: LayoutCard[]) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem('laboratory-layout-cards', JSON.stringify(payloadCards));
+    } catch (error) {
+      console.warn('Failed to cache exhibition layout locally', error);
+    }
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!canEdit) {
+      toast({
+        title: 'Insufficient permissions',
+        description: 'You need edit access to save exhibition updates.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (isSaving) {
+      return;
+    }
+
+    const context = getActiveProjectContext();
+    if (!context) {
+      toast({
+        title: 'Project details missing',
+        description: 'Select a project before saving your exhibition.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      const cardsToPersist = JSON.parse(JSON.stringify(cards)) as LayoutCard[];
+      await saveExhibitionConfiguration({
+        client_name: context.client_name,
+        app_name: context.app_name,
+        project_name: context.project_name,
+        cards: cardsToPersist,
+      });
+      persistCardsLocally(cardsToPersist);
+      toast({ title: 'Exhibition saved', description: 'Your exhibition updates have been saved.' });
+    } catch (error) {
+      console.error('Failed to save exhibition configuration', error);
+      toast({
+        title: 'Save failed',
+        description:
+          error instanceof Error ? error.message : 'Unable to save your exhibition configuration right now.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [canEdit, cards, isSaving, persistCardsLocally, toast]);
+
+  const handleShare = useCallback(async () => {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+      return;
+    }
+
+    const shareUrl = window.location.href;
+    const nav = navigator as Navigator & {
+      share?: (data: { title?: string; url?: string; text?: string }) => Promise<void>;
+      clipboard?: Clipboard;
+    };
+
+    try {
+      if (typeof nav.share === 'function') {
+        await nav.share({ title: 'Exhibition Mode', url: shareUrl });
+        toast({ title: 'Share', description: 'Opened the share dialog for your exhibition.' });
+        return;
+      }
+
+      if (nav.clipboard && typeof nav.clipboard.writeText === 'function') {
+        await nav.clipboard.writeText(shareUrl);
+        toast({ title: 'Link copied', description: 'Copied the exhibition link to your clipboard.' });
+        return;
+      }
+
+      throw new Error('Sharing not supported');
+    } catch (error) {
+      console.warn('Share action unavailable', error);
+      toast({
+        title: 'Share unavailable',
+        description: 'Your browser does not support sharing from this page.',
+        variant: 'destructive',
+      });
+    }
+  }, [toast]);
 
   const handleDragStart = (atom: DroppedAtom, cardId: string, origin: 'catalogue' | 'slide' = 'catalogue') => {
     if (!canEdit) return;
@@ -313,15 +469,69 @@ const ExhibitionMode = () => {
     }
   }, [currentSlide, exhibitedCards, viewMode]);
 
+  const hasSlides = exhibitedCards.length > 0;
+  const disableDownload = exhibitedCards.length === 0;
+
+  const renderHeaderSection = () => (
+    <div className="bg-white/80 backdrop-blur-sm border-b border-border/60 px-6 py-6 flex-shrink-0 shadow-sm">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h2 className="text-3xl font-light text-foreground mb-1">Exhibition Mode</h2>
+          <p className="text-muted-foreground font-light">
+            Transform laboratory insights into presentation-ready stories.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2" data-exhibition-toolbar="true">
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-border text-foreground/80 font-medium"
+            onClick={handleUndo}
+            disabled={!canEdit || !undoAvailable}
+          >
+            <Undo2 className="w-4 h-4 mr-2" />
+            Undo
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-border text-foreground/80 font-medium"
+            onClick={handleSave}
+            disabled={!canEdit || isSaving}
+          >
+            <Save className="w-4 h-4 mr-2" />
+            {isSaving ? 'Saving…' : 'Save'}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-border text-foreground/80 font-medium"
+            onClick={handleShare}
+            disabled={!hasSlides}
+          >
+            <Share2 className="w-4 h-4 mr-2" />
+            Share
+          </Button>
+          <Button
+            size="sm"
+            className="bg-primary text-primary-foreground font-medium hover:bg-primary/90"
+            onClick={() => setIsExportOpen(true)}
+            disabled={disableDownload}
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Download
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+
   if (exhibitedCards.length === 0) {
     return (
       <div className="h-screen bg-background flex flex-col">
         <Header />
-
-        <div className="bg-muted/30 border-b border-border px-6 py-6">
-          <h2 className="text-3xl font-semibold text-foreground mb-2">Exhibition Mode</h2>
-          <p className="text-muted-foreground">Present your laboratory results with PowerPoint-like features</p>
-        </div>
+        {renderHeaderSection()}
 
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center max-w-md">
@@ -354,6 +564,7 @@ const ExhibitionMode = () => {
       )}
     >
       {!isFullscreen && <Header />}
+      {!isFullscreen && renderHeaderSection()}
 
       <div className="flex-1 flex overflow-hidden">
         {!isFullscreen && (
