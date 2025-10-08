@@ -52,6 +52,17 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
     updateSettings(atomId, { exhibitionComponents: components });
   };
 
+  const handleSelectionRemove = (key: string) => {
+    if (!key) {
+      return;
+    }
+    const next = { ...(settings.exhibitionMetrics || {}) };
+    if (key in next) {
+      delete next[key];
+      updateSettings(atomId, { exhibitionMetrics: next });
+    }
+  };
+
   const handleExhibit = async () => {
     if (isSubmitting) {
       return;
@@ -68,27 +79,69 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
       return;
     }
 
-    const selectedSkus = Array.isArray(settings.exhibitionSkus) ? settings.exhibitionSkus.map(String) : [];
-    if (selectedSkus.length === 0) {
-      toast({ title: 'No SKUs selected', description: 'Pick at least one SKU from the table before exhibiting.' });
+    const metricSelections = settings.exhibitionMetrics
+      ? Object.values(settings.exhibitionMetrics)
+      : [];
+
+    if (metricSelections.length === 0) {
+      toast({ title: 'No metrics selected', description: 'Toggle the Exhibit switch for at least one metric before exhibiting.' });
       return;
     }
 
     const components = settings.exhibitionComponents ?? { skuStatistics: false, trendAnalysis: false };
-    const tableRows = Array.isArray(settings.skuTable) ? settings.skuTable : [];
 
-    const skuPayload = selectedSkus.map((skuId, index) => {
-      const match = tableRows.find(row => String(row?.id ?? row?.SKU ?? row?.sku) === skuId) || tableRows.find(row => String(row?.id) === skuId);
-      const titleCandidate =
-        (match && (match.SKU_NAME || match.sku_name || match.SKU || match.sku || match.name || match.product_name)) ||
-        skuId;
+    const grouped = new Map<string, {
+      id: string;
+      title: string;
+      details?: Record<string, any>;
+      statistical_summaries: any[];
+    }>();
 
-      return {
+    metricSelections.forEach(selection => {
+      if (!selection || !selection.skuId || !selection.metric) {
+        return;
+      }
+
+      const skuId = String(selection.skuId);
+      const existing = grouped.get(skuId) ?? {
         id: skuId,
-        title: String(titleCandidate),
-        details: match,
+        title: selection.skuTitle || skuId,
+        details: typeof selection.skuDetails === 'object' && selection.skuDetails !== null
+          ? selection.skuDetails as Record<string, any>
+          : undefined,
+        statistical_summaries: [],
       };
+
+      const chartSettings = selection.chartSettings ?? {
+        chartType: 'line_chart',
+        chartTheme: 'default',
+        showDataLabels: false,
+        showAxisLabels: true,
+        xAxisLabel: settings.xAxis || 'Date',
+        yAxisLabel: selection.metric,
+      };
+
+      existing.statistical_summaries.push({
+        metric: selection.metric,
+        metric_label: selection.metricLabel || selection.metric,
+        summary: selection.summary ?? {},
+        timeseries: Array.isArray(selection.timeseries) ? selection.timeseries : [],
+        chart_settings: {
+          chart_type: chartSettings.chartType,
+          chart_theme: chartSettings.chartTheme,
+          show_data_labels: Boolean(chartSettings.showDataLabels),
+          show_axis_labels: Boolean(chartSettings.showAxisLabels),
+          x_axis_label: chartSettings.xAxisLabel ?? settings.xAxis ?? 'Date',
+          y_axis_label: chartSettings.yAxisLabel ?? selection.metric,
+        },
+        combination: selection.combination ?? {},
+        component_type: selection.componentType ?? 'statistical_summary',
+      });
+
+      grouped.set(skuId, existing);
     });
+
+    const skuPayload = Array.from(grouped.values());
 
     const sanitizedCards = sanitizeCards(cards);
 
@@ -118,10 +171,10 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
     };
 
     setIsSubmitting(true);
-    try {
-      await saveExhibitionConfiguration(payload);
-      await useExhibitionStore.getState().loadSavedConfiguration();
-      toast({ title: 'Exhibition updated', description: 'Selected SKUs have been prepared for exhibition.' });
+      try {
+        await saveExhibitionConfiguration(payload);
+        await useExhibitionStore.getState().loadSavedConfiguration();
+        toast({ title: 'Exhibition updated', description: 'Selected metrics have been prepared for exhibition.' });
     } catch (error: any) {
       toast({ title: 'Failed to exhibit', description: error?.message || 'Unable to update exhibition configuration.', variant: 'destructive' });
     } finally {
@@ -181,6 +234,7 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
             onComponentsChange={handleComponentSelectionChange}
             onExhibit={handleExhibit}
             isSubmitting={isSubmitting}
+            onSelectionRemove={handleSelectionRemove}
           />
         </TabsContent>
       </Tabs>

@@ -93,6 +93,7 @@ async def _sync_catalogue(
             "sku_id": entry.get("sku_id"),
             "sku_title": entry.get("sku_title"),
             "sku_details": entry.get("sku_details"),
+            "metadata": entry.get("metadata"),
             "updated_at": timestamp,
         }
 

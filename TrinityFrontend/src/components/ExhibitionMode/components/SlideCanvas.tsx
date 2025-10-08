@@ -26,6 +26,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import TextBoxDisplay from '@/components/AtomList/atoms/text-box/TextBoxDisplay';
+import StatisticalSummaryAtom from './StatisticalSummaryAtom';
 import {
   CardLayout,
   CardColor,
@@ -203,6 +204,24 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       } with our comprehensive analysis and insights. Stay organized and focused on key findings and activities.`;
     }
     return 'Add components from the catalogue to build your presentation slide.';
+  };
+
+  const renderAtomContent = (atom: DroppedAtom) => {
+    const componentType = atom.metadata?.componentType || (atom.metadata as any)?.component_type;
+
+    if (componentType === 'statistical_summary') {
+      return <StatisticalSummaryAtom metadata={atom.metadata as any} />;
+    }
+
+    if (atom.atomId === 'text-box') {
+      return (
+        <div className="p-3 bg-muted/40 rounded-lg border border-border">
+          <TextBoxDisplay textId={atom.id} />
+        </div>
+      );
+    }
+
+    return <p>Component visualization and analysis results</p>;
   };
 
   const cardColorClasses = {
@@ -592,13 +611,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                           {atom.category}
                         </div>
                         <div className="text-sm text-muted-foreground space-y-3">
-                          {atom.atomId === 'text-box' ? (
-                            <div className="p-3 bg-muted/40 rounded-lg border border-border">
-                              <TextBoxDisplay textId={atom.id} />
-                            </div>
-                          ) : (
-                            <p>Component visualization and analysis results</p>
-                          )}
+                          {renderAtomContent(atom)}
                         </div>
 
                         {canEdit && (

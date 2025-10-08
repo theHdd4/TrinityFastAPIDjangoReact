@@ -207,12 +207,14 @@ const COMPONENT_COLORS: Record<string, string> = {
   overview: 'bg-emerald-500',
   skuStatistics: 'bg-amber-500',
   trendAnalysis: 'bg-blue-500',
+  statistical_summary: 'bg-purple-500',
 };
 
 const DEFAULT_COMPONENT_LABELS: Record<string, string> = {
   overview: 'Overview Insight',
   skuStatistics: 'SKU Statistics',
   trendAnalysis: 'Trend Analysis',
+  statistical_summary: 'Statistical Summary',
 };
 
 const applyFeatureOverviewSelections = (
@@ -258,41 +260,76 @@ const applyFeatureOverviewSelections = (
           const components = Array.isArray(sku?.catalogue_components)
             ? sku.catalogue_components.filter(component => component && component.title)
             : [];
+          const summaries = Array.isArray((sku as any)?.statistical_summaries)
+            ? (sku as any).statistical_summaries.filter((summary: any) => summary)
+            : [];
 
           const componentEntries = components.length > 0
             ? components
-            : (enabledComponents.length > 0
-                ? enabledComponents.map((componentType, componentIndex) => ({
+            : summaries.length > 0
+              ? summaries.map((summary: any, componentIndex: number) => {
+                  const componentType = summary?.component_type ?? 'statistical_summary';
+                  const metricLabel = summary?.metric_label ?? summary?.metric ?? componentType;
+                  const catalogueId = summary?.catalogue_id
+                    ?? `${config.atomId ?? 'atom'}-${componentType}-${skuId}-${componentIndex}`;
+                  const title = summary?.catalogue_title
+                    ?? `${baseTitle} • ${metricLabel}`;
+                  const metadata = summary?.metadata ?? {
+                    metric: summary?.metric,
+                    metricLabel,
+                    summary: summary?.summary ?? {},
+                    timeseries: Array.isArray(summary?.timeseries) ? summary.timeseries : [],
+                    chartSettings: summary?.chart_settings ?? {},
+                    combination: summary?.combination ?? {},
+                    componentType,
+                    skuId,
+                    skuTitle: baseTitle,
+                    skuDetails: sku?.details,
+                  };
+
+                  return {
                     type: componentType,
-                    title: `${baseTitle} • ${DEFAULT_COMPONENT_LABELS[componentType] ?? componentType}`,
-                    catalogue_id: `${config.atomId ?? 'atom'}-${componentType}-${skuId}-${componentIndex}`,
-                    label: DEFAULT_COMPONENT_LABELS[componentType] ?? componentType,
-                  }))
-                : [{
-                    type: 'overview',
-                    title: `${baseTitle} • ${DEFAULT_COMPONENT_LABELS.overview}`,
-                    catalogue_id: `${config.atomId ?? 'atom'}-overview-${skuId}`,
-                    label: DEFAULT_COMPONENT_LABELS.overview,
-                  }]);
+                    title,
+                    catalogue_id: catalogueId,
+                    label: metricLabel,
+                    metadata,
+                  };
+                })
+              : (enabledComponents.length > 0
+                  ? enabledComponents.map((componentType, componentIndex) => ({
+                      type: componentType,
+                      title: `${baseTitle} • ${DEFAULT_COMPONENT_LABELS[componentType] ?? componentType}`,
+                      catalogue_id: `${config.atomId ?? 'atom'}-${componentType}-${skuId}-${componentIndex}`,
+                      label: DEFAULT_COMPONENT_LABELS[componentType] ?? componentType,
+                    }))
+                  : [{
+                      type: 'overview',
+                      title: `${baseTitle} • ${DEFAULT_COMPONENT_LABELS.overview}`,
+                      catalogue_id: `${config.atomId ?? 'atom'}-overview-${skuId}`,
+                      label: DEFAULT_COMPONENT_LABELS.overview,
+                    }]);
 
           return componentEntries.map((component, componentIndex) => {
             const componentType = component.type ?? 'overview';
             const catalogueId = component.catalogue_id
               ?? `${config.atomId ?? 'atom'}-${componentType}-${skuId}-${componentIndex}`;
+            const metadata = component.metadata && typeof component.metadata === 'object'
+              ? component.metadata
+              : {
+                  ...((sku.details && typeof sku.details === 'object') ? sku.details : {}),
+                  componentType,
+                  componentLabel: component.label ?? DEFAULT_COMPONENT_LABELS[componentType] ?? componentType,
+                  skuId,
+                  skuTitle: baseTitle,
+                };
 
             return {
               id: catalogueId,
               atomId: SKU_ATOM_ID,
               title: component.title ?? `${baseTitle} • ${componentType}`,
-              category: 'Feature Overview',
+              category: component.label ?? DEFAULT_COMPONENT_LABELS[componentType] ?? 'Feature Overview',
               color: COMPONENT_COLORS[componentType] ?? COMPONENT_COLORS.skuStatistics,
-              metadata: {
-                ...((sku.details && typeof sku.details === 'object') ? sku.details : {}),
-                componentType,
-                componentLabel: component.label ?? DEFAULT_COMPONENT_LABELS[componentType] ?? componentType,
-                skuId,
-                skuTitle: baseTitle,
-              },
+              metadata,
             } as DroppedAtom;
           });
         })

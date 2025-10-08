@@ -510,6 +510,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const [activeMetric, setActiveMetric] = useState<string>(
     settings.activeMetric || settings.yAxes?.[0] || "",
   );
+  const [activeSkuDetails, setActiveSkuDetails] = useState<any | null>(null);
+  const [activeCombination, setActiveCombination] = useState<Record<string, any>>({});
   const [error, setError] = useState<string | null>(null);
   const [dimensionError, setDimensionError] = useState<string | null>(null);
   
@@ -532,10 +534,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   // State for managing expanded views
   const [showStatsSummary, setShowStatsSummary] = useState<boolean>(false);
   const [expandedMetrics, setExpandedMetrics] = useState<Set<string>>(new Set());
-  const exhibitionSkuSet = React.useMemo(
-    () => new Set((settings.exhibitionSkus || []).map((sku: string) => String(sku))),
-    [settings.exhibitionSkus]
-  );
+  const exhibitionMetricMap = React.useMemo(() => settings.exhibitionMetrics || {}, [settings.exhibitionMetrics]);
 
   const numericColumnSet = React.useMemo(() => {
     const set = new Set<string>();
@@ -742,7 +741,13 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
 
   useEffect(() => {
     setActiveRow(settings.activeRow ?? null);
-  }, [settings.activeRow]);
+    if (settings.activeRow && Array.isArray(settings.skuTable)) {
+      const row = settings.skuTable.find((r: any) => String(r?.id) === String(settings.activeRow));
+      if (row) {
+        setActiveSkuDetails(row);
+      }
+    }
+  }, [settings.activeRow, settings.skuTable]);
 
   useEffect(() => {
     if (settings.activeMetric) {
@@ -868,16 +873,76 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const handleCloseStatsSummary = () => {
     setShowStatsSummary(false);
     setExpandedMetrics(new Set());
+    setActiveSkuDetails(null);
+    setActiveCombination({});
   };
 
-  const handleSkuExhibitionToggle = (skuId: string, enabled: boolean) => {
-    const next = new Set(exhibitionSkuSet);
-    if (enabled) {
-      next.add(String(skuId));
-    } else {
-      next.delete(String(skuId));
+  const handleMetricExhibitionToggle = (metric: string, enabled: boolean) => {
+    if (!metric) {
+      return;
     }
-    onUpdateSettings({ exhibitionSkus: Array.from(next) });
+
+    const activeSkuId = activeRow != null ? String(activeRow) : null;
+    if (!activeSkuId) {
+      toast({ title: 'Select an SKU', description: 'Open a statistical summary before exhibiting metrics.' });
+      return;
+    }
+
+    const metricData = statDataMap[metric];
+    if (enabled && !metricData) {
+      toast({ title: 'Metric data unavailable', description: 'View the metric to load its statistics before exhibiting.' });
+      return;
+    }
+
+    const key = `${activeSkuId}::${metric}`;
+    const currentSelections = { ...(settings.exhibitionMetrics || {}) };
+
+    if (!enabled) {
+      if (key in currentSelections) {
+        delete currentSelections[key];
+        onUpdateSettings({ exhibitionMetrics: currentSelections });
+      }
+      return;
+    }
+
+    const chartSettings = {
+      chartType,
+      chartTheme,
+      showDataLabels,
+      showAxisLabels,
+      xAxisLabel: settings.xAxis || 'Date',
+      yAxisLabel: metric,
+    };
+
+    const lookupRows = Array.isArray(settings.skuTable) ? settings.skuTable : skuRows;
+    const skuMatch =
+      activeSkuDetails ||
+      lookupRows.find((row: any) => String(row?.id ?? row?.SKU ?? row?.sku) === activeSkuId) ||
+      null;
+
+    const titleCandidate = skuMatch
+      ? skuMatch.SKU_NAME || skuMatch.sku_name || skuMatch.SKU || skuMatch.sku || skuMatch.name || skuMatch.product_name
+      : undefined;
+    const skuTitle = typeof titleCandidate === 'string' && titleCandidate.trim().length > 0
+      ? titleCandidate.trim()
+      : activeSkuId;
+
+    currentSelections[key] = {
+      key,
+      skuId: activeSkuId,
+      skuTitle,
+      metric,
+      metricLabel: (metricData as any)?.label || metric,
+      summary: metricData?.summary || {},
+      timeseries: Array.isArray(metricData?.timeseries) ? metricData.timeseries : [],
+      chartSettings,
+      combination: activeCombination,
+      skuDetails: skuMatch,
+      componentType: 'statistical_summary',
+      createdAt: new Date().toISOString(),
+    };
+
+    onUpdateSettings({ exhibitionMetrics: currentSelections });
   };
 
   const handleColumnFilter = (column: string, values: string[]) => {
@@ -1362,6 +1427,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       setStatDataMap(result);
       setActiveMetric(settings.yAxes[0]);
       setActiveRow(row.id);
+      setActiveSkuDetails(row);
+      setActiveCombination(combo);
       setShowStatsSummary(true);
       setExpandedMetrics(new Set());
       onUpdateSettings({
@@ -1763,8 +1830,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                       </ContextMenuContent>
                     </ContextMenu>
                   )),
-                  "View Stat",
-                  "Exhibition"
+                  "View Stat"
                 ]}
                 bodyClassName="max-h-[600px] overflow-y-auto"
                 borderColor="border-green-500"
@@ -1788,15 +1854,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                           <Button size="sm" onClick={() => viewStats(row)}>
                             View Stat
                           </Button>
-                        </td>
-                        <td className="table-cell">
-                          <Switch
-                            checked={exhibitionSkuSet.has(String(skuRowId))}
-                            onCheckedChange={(checked) =>
-                              handleSkuExhibitionToggle(String(skuRowId), checked)
-                            }
-                            aria-label="Toggle exhibition for SKU"
-                          />
                         </td>
                       </tr>
                       {activeRow === row.id && showStatsSummary && (
@@ -1827,35 +1884,46 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                         <th className="p-3 text-right whitespace-nowrap font-semibold">Avg</th>
                                         <th className="p-3 text-right whitespace-nowrap font-semibold">Min</th>
                                         <th className="p-3 text-right whitespace-nowrap font-semibold">Max</th>
+                                        <th className="p-3 text-center whitespace-nowrap font-semibold">Exhibit</th>
                                         <th className="p-3 text-right whitespace-nowrap font-semibold">Action</th>
                                       </tr>
                                     </thead>
                                     <tbody>
-                                      {(Array.isArray(settings.yAxes) ? settings.yAxes : []).map((m) => (
-                                        <React.Fragment key={m}>
-                                          <tr className="border-b last:border-0 hover:bg-gray-50">
-                                            <td className="p-3 whitespace-nowrap sticky left-0 bg-white z-10 font-medium">{m}</td>
-                                            <td className="p-3 text-right whitespace-nowrap">
-                                              {statDataMap[m]?.summary.avg?.toFixed(2) ?? "-"}
-                                            </td>
-                                            <td className="p-3 text-right whitespace-nowrap">
-                                              {statDataMap[m]?.summary.min?.toFixed(2) ?? "-"}
-                                            </td>
-                                            <td className="p-3 text-right whitespace-nowrap">
-                                              {statDataMap[m]?.summary.max?.toFixed(2) ?? "-"}
-                                            </td>
-                                            <td className="p-3 text-right whitespace-nowrap">
-                                              <button
-                                                className="text-blue-600 hover:text-blue-800 font-medium underline transition-colors"
-                                                onClick={() => handleMetricView(m)}
-                                              >
+                                      {(Array.isArray(settings.yAxes) ? settings.yAxes : []).map((m) => {
+                                        const selectionKey = `${String(activeRow ?? '')}::${m}`;
+                                        const isSelected = Boolean(exhibitionMetricMap[selectionKey]);
+                                        return (
+                                          <React.Fragment key={m}>
+                                            <tr className="border-b last:border-0 hover:bg-gray-50">
+                                              <td className="p-3 whitespace-nowrap sticky left-0 bg-white z-10 font-medium">{m}</td>
+                                              <td className="p-3 text-right whitespace-nowrap">
+                                                {statDataMap[m]?.summary.avg?.toFixed(2) ?? "-"}
+                                              </td>
+                                              <td className="p-3 text-right whitespace-nowrap">
+                                                {statDataMap[m]?.summary.min?.toFixed(2) ?? "-"}
+                                              </td>
+                                              <td className="p-3 text-right whitespace-nowrap">
+                                                {statDataMap[m]?.summary.max?.toFixed(2) ?? "-"}
+                                              </td>
+                                              <td className="p-3 text-center whitespace-nowrap">
+                                                <Switch
+                                                  checked={isSelected}
+                                                  onCheckedChange={(checked) => handleMetricExhibitionToggle(m, Boolean(checked))}
+                                                  aria-label={`Toggle exhibition for ${m}`}
+                                                />
+                                              </td>
+                                              <td className="p-3 text-right whitespace-nowrap">
+                                                <button
+                                                  className="text-blue-600 hover:text-blue-800 font-medium underline transition-colors"
+                                                  onClick={() => handleMetricView(m)}
+                                                >
                                                 View
                                               </button>
                                             </td>
                                           </tr>
                                           {expandedMetrics.has(m) && (
                                             <tr className="border-b last:border-0">
-                                              <td className="p-0" colSpan={5}>
+                                              <td className="p-0" colSpan={6}>
                                                 <Card className="border border-gray-200 shadow-lg bg-white/95 backdrop-blur-sm overflow-hidden transform transition-all duration-300 relative flex flex-col group hover:shadow-xl m-4">
                                                   <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-between relative flex-shrink-0">
                                                     <h6 className="font-bold text-gray-900 text-md flex items-center">
@@ -1936,7 +2004,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                             </tr>
                                           )}
                                         </React.Fragment>
-                                      ))}
+                                        );
+                                      })}
                                     </tbody>
                                   </table>
                                 </div>

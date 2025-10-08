@@ -5,6 +5,29 @@ export interface ExhibitionCatalogueComponentPayload {
   title: string;
   label?: string;
   catalogue_id?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface ExhibitionChartSettingsPayload {
+  chart_type: string;
+  chart_theme: string;
+  show_data_labels: boolean;
+  show_axis_labels: boolean;
+  x_axis_label?: string;
+  y_axis_label?: string;
+}
+
+export interface ExhibitionStatisticalSummaryPayload {
+  metric: string;
+  metric_label?: string;
+  summary: Record<string, any>;
+  timeseries: Array<Record<string, any>>;
+  chart_settings: ExhibitionChartSettingsPayload;
+  combination?: Record<string, any>;
+  component_type?: string;
+  catalogue_id?: string;
+  catalogue_title?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface ExhibitionSkuPayload {
@@ -12,12 +35,13 @@ export interface ExhibitionSkuPayload {
   title: string;
   details?: Record<string, any>;
   catalogue_components?: ExhibitionCatalogueComponentPayload[];
+  statistical_summaries?: ExhibitionStatisticalSummaryPayload[];
 }
 
 export interface ExhibitionFeatureOverviewPayload {
   atomId: string;
   cardId: string;
-  components: {
+  components?: {
     skuStatistics: boolean;
     trendAnalysis: boolean;
   };

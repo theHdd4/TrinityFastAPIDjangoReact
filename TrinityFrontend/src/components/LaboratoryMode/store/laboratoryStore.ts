@@ -122,6 +122,29 @@ export interface FeatureOverviewSettings {
     skuStatistics: boolean;
     trendAnalysis: boolean;
   };
+  exhibitionMetrics?: Record<string, FeatureOverviewExhibitionMetricSelection>;
+}
+
+export interface FeatureOverviewExhibitionMetricSelection {
+  key: string;
+  skuId: string;
+  skuTitle: string;
+  metric: string;
+  metricLabel: string;
+  summary: Record<string, any>;
+  timeseries: Array<{ date: string; value: number }>;
+  chartSettings: {
+    chartType: string;
+    chartTheme: string;
+    showDataLabels: boolean;
+    showAxisLabels: boolean;
+    xAxisLabel?: string;
+    yAxisLabel?: string;
+  };
+  combination?: Record<string, any>;
+  skuDetails?: Record<string, any> | null;
+  componentType?: string;
+  createdAt?: string;
 }
 
 export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
@@ -151,6 +174,7 @@ export const DEFAULT_FEATURE_OVERVIEW_SETTINGS: FeatureOverviewSettings = {
     skuStatistics: false,
     trendAnalysis: false,
   },
+  exhibitionMetrics: {},
 };
 
 export interface ConcatSettings {
