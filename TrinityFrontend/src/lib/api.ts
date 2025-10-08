@@ -95,6 +95,10 @@ export const VALIDATE_API =
   normalizeUrl(import.meta.env.VITE_VALIDATE_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/data-upload-validate`;
 
+export const EXHIBITION_API =
+  normalizeUrl(import.meta.env.VITE_EXHIBITION_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/exhibition`;
+
 export const CONCAT_API =
   normalizeUrl(import.meta.env.VITE_CONCAT_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/concat`;
