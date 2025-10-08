@@ -150,22 +150,25 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           wrapper: '',
           contentClass: '',
           overviewOuterClass: 'hidden',
-          gridClass: 'hidden',
+          overviewContainerClass: '',
+          gridClass: 'grid-cols-1',
         };
       case 'horizontal-split':
         return {
           showOverview: true,
-          wrapper: 'lg:flex-row lg:items-stretch lg:divide-x lg:divide-border/60',
-          contentClass: 'lg:w-1/2 lg:pr-8',
-          overviewOuterClass: 'lg:w-1/2 lg:pl-8',
+          wrapper: 'gap-6 lg:gap-0 lg:flex-row lg:items-stretch',
+          contentClass: 'lg:w-1/3 lg:pr-8',
+          overviewOuterClass: 'lg:flex-1 lg:pl-8',
+          overviewContainerClass: 'h-full',
           gridClass: 'grid-cols-1 md:grid-cols-2',
         };
       case 'vertical-split':
         return {
           showOverview: true,
           wrapper: 'gap-6',
-          contentClass: '',
-          overviewOuterClass: '',
+          contentClass: 'lg:max-w-xl',
+          overviewOuterClass: 'lg:flex-1',
+          overviewContainerClass: 'h-full',
           gridClass: 'grid-cols-1',
         };
       case 'full':
@@ -174,20 +177,107 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           wrapper: 'gap-6',
           contentClass: '',
           overviewOuterClass: '',
+          overviewContainerClass: '',
           gridClass: 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3',
         };
+      case 'content-right':
       default:
         return {
           showOverview: true,
-          wrapper: 'lg:flex-row lg:items-stretch lg:divide-x lg:divide-border/60',
-          contentClass: 'lg:w-2/5 lg:pr-8',
-          overviewOuterClass: 'lg:w-3/5 lg:pl-8',
+          wrapper: 'gap-6 lg:gap-0 lg:flex-row lg:items-stretch',
+          contentClass: 'lg:w-[30%] lg:pr-8',
+          overviewOuterClass: 'lg:flex-1 lg:pl-8',
+          overviewContainerClass: 'h-full',
           gridClass: 'grid-cols-1 md:grid-cols-2',
         };
     }
   }, [settings.cardLayout]);
 
   const showOverview = layoutConfig.showOverview && card.atoms.length > 0;
+
+  const accentLayout = useMemo(() => {
+    switch (settings.cardLayout) {
+      case 'blank':
+        return {
+          showAccent: false,
+          placement: 'before' as const,
+          container: 'flex-col',
+          accentWrapperClass: '',
+          accentInnerClass: '',
+          contentWrapperClass: 'flex-1 flex flex-col w-full',
+        };
+      case 'horizontal-split':
+        return {
+          showAccent: true,
+          placement: 'before' as const,
+          container: 'flex-col',
+          accentWrapperClass: 'order-1 w-full flex-shrink-0 min-h-[150px] sm:min-h-[180px] lg:min-h-[200px]',
+          accentInnerClass: 'h-full w-full',
+          contentWrapperClass: 'order-2 flex-1 flex flex-col',
+        };
+      case 'vertical-split':
+        return {
+          showAccent: true,
+          placement: 'before' as const,
+          container: 'flex-col lg:flex-row',
+          accentWrapperClass: 'order-1 w-full flex-shrink-0 min-h-[150px] lg:w-56 xl:w-64',
+          accentInnerClass: 'h-full w-full',
+          contentWrapperClass: 'order-2 flex-1 flex flex-col',
+        };
+      case 'content-right':
+        return {
+          showAccent: true,
+          placement: 'before' as const,
+          container: 'flex-col lg:flex-row',
+          accentWrapperClass: 'order-1 w-full flex-shrink-0 min-h-[150px] lg:w-64 xl:w-72',
+          accentInnerClass: 'h-full w-full',
+          contentWrapperClass: 'order-2 flex-1 flex flex-col',
+        };
+      case 'full':
+      default:
+        return {
+          showAccent: true,
+          placement: 'before' as const,
+          container: 'flex-col',
+          accentWrapperClass: 'order-1 w-full min-h-[220px]',
+          accentInnerClass: 'h-full w-full',
+          contentWrapperClass: 'order-2 flex-1 flex flex-col',
+        };
+    }
+  }, [settings.cardLayout]);
+
+  const accentSection =
+    accentLayout.showAccent
+      ? (
+          <div className={cn('relative', accentLayout.accentWrapperClass)}>
+            <div
+              className={cn(
+                'relative flex h-full w-full items-center justify-center overflow-hidden',
+                heroBackgroundClasses,
+                accentLayout.accentInnerClass
+              )}
+              style={heroBackgroundStyle}
+            >
+              <div className="absolute inset-0 bg-gradient-to-br from-black/25 via-transparent to-black/25 backdrop-blur-sm" />
+              <div className="relative z-10 flex w-full flex-col items-start gap-2 p-6 text-background">
+                <span className="inline-flex items-center rounded-full bg-background/90 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-foreground">
+                  Slide {slideNumber}
+                </span>
+                {!settings.accentImage && (
+                  <p className="max-w-xs text-xs text-background/80">
+                    Use card formatting controls to tailor this accent panel with colors or imagery.
+                  </p>
+                )}
+              </div>
+              {card.atoms.length > 0 && (
+                <div className="absolute bottom-4 right-4 rounded-full bg-background/90 px-3 py-1 text-xs font-medium text-foreground">
+                  {card.atoms.length} {card.atoms.length === 1 ? 'Component' : 'Components'}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      : null;
 
   const handleAtomRemove = (atomId: string) => {
     if (!canEdit) {
@@ -317,8 +407,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
 
         <div
           className={cn(
-            'bg-card shadow-2xl transition-all duration-300 relative',
+            'relative flex overflow-hidden bg-card shadow-2xl transition-all duration-300',
             settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border',
+            accentLayout.container,
             isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
             !canEdit && 'opacity-90'
           )}
@@ -396,8 +487,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                       disabled={!canEdit}
                     >
                       <div className="flex flex-col gap-0.5 w-6 h-6">
-                        <div className="h-2 border-2 border-current rounded-sm" />
-                        <div className="h-3 border-2 border-current rounded-sm bg-current/20" />
+                        <div className="h-2 border-2 border-current rounded-sm bg-current/20" />
+                        <div className="h-3 border-2 border-current rounded-sm" />
                       </div>
                     </Button>
                     <Button
@@ -409,8 +500,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                       disabled={!canEdit}
                     >
                       <div className="flex gap-0.5 w-6 h-6">
-                        <div className="w-2 border-2 border-current rounded-sm" />
-                        <div className="w-3 border-2 border-current rounded-sm bg-current/20" />
+                        <div className="w-2 border-2 border-current rounded-sm bg-current/20" />
+                        <div className="w-3 border-2 border-current rounded-sm" />
                       </div>
                     </Button>
                     <Button
@@ -422,8 +513,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                       disabled={!canEdit}
                     >
                       <div className="flex gap-0.5 w-6 h-6">
-                        <div className="w-2 border-2 border-current rounded-sm" />
-                        <div className="flex-1 border-2 border-current rounded-sm bg-current/20" />
+                        <div className="w-2 border-2 border-current rounded-sm bg-current/20" />
+                        <div className="flex-1 border-2 border-current rounded-sm" />
                       </div>
                     </Button>
                     <Button
@@ -644,105 +735,100 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             </div>
           )}
 
-          <div
-            className={cn(
-              'relative h-64 overflow-hidden',
-              heroBackgroundClasses,
-              settings.fullBleed ? 'rounded-none' : 'rounded-t-2xl'
-            )}
-            style={heroBackgroundStyle}
-          >
-            <div className="absolute inset-0 bg-gradient-to-br from-black/20 via-transparent to-black/20 backdrop-blur-sm" />
-            {card.atoms.length > 0 && (
-              <div className="absolute top-4 left-4 bg-background/90 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-medium">
-                {card.atoms.length} {card.atoms.length === 1 ? 'Component' : 'Components'}
-              </div>
-            )}
-          </div>
+          {accentLayout.showAccent && accentLayout.placement === 'before' ? accentSection : null}
 
-          <div className={cn('flex flex-col', layoutConfig.wrapper)}>
-            <div
-              className={cn(
-                'p-8 flex flex-col',
-                alignmentClasses[settings.contentAlignment],
-                'min-h-[300px]',
-                layoutConfig.contentClass
-              )}
-            >
-              <h1 className="text-4xl font-bold text-foreground mb-4">{getSlideTitle()}</h1>
+          <div className={cn('flex flex-1 flex-col', accentLayout.contentWrapperClass)}>
+            <div className={cn('flex flex-col', layoutConfig.wrapper)}>
+              <div
+                className={cn(
+                  'p-8 flex flex-col',
+                  alignmentClasses[settings.contentAlignment],
+                  'min-h-[300px]',
+                  layoutConfig.contentClass
+                )}
+              >
+                <h1 className="text-4xl font-bold text-foreground mb-4">{getSlideTitle()}</h1>
 
-              <p className="text-muted-foreground mb-6 leading-relaxed max-w-3xl">
-                {getSlideDescription()}
-              </p>
+                <p className="text-muted-foreground mb-6 leading-relaxed max-w-3xl">
+                  {getSlideDescription()}
+                </p>
 
-              <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
-                    <User className="w-4 h-4 text-primary-foreground" />
+                <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
+                      <User className="w-4 h-4 text-primary-foreground" />
+                    </div>
+                    <span className="font-medium">Exhibition Presenter</span>
                   </div>
-                  <span className="font-medium">Exhibition Presenter</span>
+                  <div className="flex items-center gap-1">
+                    <Calendar className="w-4 h-4" />
+                    <span>Last edited recently</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1">
-                  <Calendar className="w-4 h-4" />
-                  <span>Last edited recently</span>
-                </div>
+
+                {card.atoms.length === 0 && canEdit && (
+                  <div className="mt-6 rounded-xl border-2 border-dashed border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
+                    Drag atoms from the catalogue to start building this slide.
+                  </div>
+                )}
               </div>
 
-              {card.atoms.length === 0 && canEdit && (
-                <div className="mt-6 rounded-xl border-2 border-dashed border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
-                  Drag atoms from the catalogue to start building this slide.
+              {showOverview && (
+                <div className={cn('px-8 pb-8 flex flex-col', layoutConfig.overviewOuterClass)}>
+                  <div
+                    className={cn(
+                      'bg-muted/30 rounded-xl border border-border p-6 flex-1',
+                      layoutConfig.overviewContainerClass
+                    )}
+                  >
+                    <h2 className="text-2xl font-bold text-foreground mb-6">Components Overview</h2>
+
+                    <div className={cn('grid gap-4', layoutConfig.gridClass)}>
+                      {card.atoms.map(atom => (
+                        <div
+                          key={atom.id}
+                          className="relative group p-6 border-2 border-border bg-card rounded-xl hover:shadow-lg hover:border-primary/50 transition-all duration-300"
+                        >
+                          <div className="flex items-center gap-3 mb-3">
+                            <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
+                            <h3 className="font-semibold text-foreground text-lg group-hover:text-primary transition-colors">
+                              {atom.title}
+                            </h3>
+                          </div>
+                          <div className="inline-block px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full mb-3">
+                            {atom.category}
+                          </div>
+                          <div className="text-sm text-muted-foreground space-y-3">
+                            {atom.atomId === 'text-box' ? (
+                              <div className="p-3 bg-muted/40 rounded-lg border border-border">
+                                <TextBoxDisplay textId={atom.id} />
+                              </div>
+                            ) : (
+                              <p>Component visualization and analysis results</p>
+                            )}
+                          </div>
+
+                          {canEdit && (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="absolute top-3 right-3 h-8 w-8 text-muted-foreground hover:text-destructive"
+                              onClick={() => handleAtomRemove(atom.id)}
+                              type="button"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
-
-            {showOverview && (
-              <div className={cn('px-8 pb-8', layoutConfig.overviewOuterClass)}>
-                <div className="bg-muted/30 rounded-xl border border-border p-6 h-full">
-                  <h2 className="text-2xl font-bold text-foreground mb-6">Components Overview</h2>
-
-                  <div className={cn('grid gap-4', layoutConfig.gridClass)}>
-                    {card.atoms.map(atom => (
-                      <div
-                        key={atom.id}
-                        className="relative group p-6 border-2 border-border bg-card rounded-xl hover:shadow-lg hover:border-primary/50 transition-all duration-300"
-                      >
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
-                          <h3 className="font-semibold text-foreground text-lg group-hover:text-primary transition-colors">
-                            {atom.title}
-                          </h3>
-                        </div>
-                        <div className="inline-block px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full mb-3">
-                          {atom.category}
-                        </div>
-                        <div className="text-sm text-muted-foreground space-y-3">
-                          {atom.atomId === 'text-box' ? (
-                            <div className="p-3 bg-muted/40 rounded-lg border border-border">
-                              <TextBoxDisplay textId={atom.id} />
-                            </div>
-                          ) : (
-                            <p>Component visualization and analysis results</p>
-                          )}
-                        </div>
-
-                        {canEdit && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="absolute top-3 right-3 h-8 w-8 text-muted-foreground hover:text-destructive"
-                            onClick={() => handleAtomRemove(atom.id)}
-                            type="button"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
+
+          {accentLayout.showAccent && accentLayout.placement === 'after' ? accentSection : null}
         </div>
 
         {viewMode === 'horizontal' && (

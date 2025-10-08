@@ -666,20 +666,20 @@ const ExhibitionMode = () => {
           )}
         </div>
 
-        {!isFullscreen && (
-          <OperationsPalette
-            onFullscreen={toggleFullscreen}
-            onExport={() => setIsExportOpen(true)}
-            onGridView={() => setShowGridView(true)}
-          />
-        )}
-
         {showNotes && (
           <SlideNotes
             currentSlide={currentSlide}
             notes={notes}
             onNotesChange={handleNotesChange}
             onClose={() => setShowNotes(false)}
+          />
+        )}
+
+        {!isFullscreen && (
+          <OperationsPalette
+            onFullscreen={toggleFullscreen}
+            onExport={() => setIsExportOpen(true)}
+            onGridView={() => setShowGridView(true)}
           />
         )}
       </div>
