@@ -1,4 +1,5 @@
 import React from 'react';
+import type { LucideIcon } from 'lucide-react';
 import {
   Sparkles,
   Type,
@@ -22,18 +23,24 @@ interface OperationsPaletteProps {
   onGridView?: () => void;
 }
 
-const operations = [
-  { icon: Sparkles, label: 'AI Assistant', color: 'text-purple-500' },
-  { icon: Type, label: 'Text', color: 'text-blue-500' },
-  { icon: Image, label: 'Images', color: 'text-green-500' },
-  { icon: Table, label: 'Tables', color: 'text-orange-500' },
-  { icon: BarChart3, label: 'Charts', color: 'text-pink-500' },
+interface PaletteItem {
+  icon: LucideIcon;
+  label: string;
+  colorClass?: string;
+}
+
+const operations: PaletteItem[] = [
+  { icon: Sparkles, label: 'AI Assistant', colorClass: 'text-purple-500' },
+  { icon: Type, label: 'Text' },
+  { icon: Image, label: 'Images' },
+  { icon: Table, label: 'Tables' },
+  { icon: BarChart3, label: 'Charts' },
 ];
 
-const tools = [
-  { icon: FileText, label: 'Templates', color: 'text-indigo-500' },
-  { icon: Palette, label: 'Themes', color: 'text-rose-500' },
-  { icon: Settings, label: 'Settings', color: 'text-gray-500' },
+const tools: PaletteItem[] = [
+  { icon: FileText, label: 'Templates' },
+  { icon: Palette, label: 'Themes' },
+  { icon: Settings, label: 'Settings' },
 ];
 
 export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
@@ -44,7 +51,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
   return (
     <div className="w-12 h-full bg-background border-l border-border flex flex-col items-center py-4 gap-4">
       <div className="flex flex-col items-center gap-3 w-full">
-        <span className="block w-full text-center text-[0.55rem] font-semibold text-muted-foreground uppercase tracking-[0.08em] leading-none pb-1 border-b-2 border-yellow-400">
+        <span className="inline-flex items-center justify-center px-1 mx-auto text-[0.55rem] font-semibold text-muted-foreground uppercase tracking-[0.08em] leading-none pb-1 border-b-2 border-yellow-400">
           Tools
         </span>
         <div className="flex flex-col items-center gap-2">
@@ -60,7 +67,9 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
               title={op.label}
               type="button"
             >
-              <op.icon className={cn('h-4 w-4', op.color)} />
+              <op.icon
+                className={cn('h-4 w-4', op.colorClass ?? 'text-black dark:text-white')}
+              />
               <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
                 {op.label}
               </span>
@@ -72,7 +81,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
       <Separator className="w-6" />
 
       <div className="flex flex-col items-center gap-3 w-full">
-        <span className="block w-full text-center text-[0.55rem] font-semibold text-muted-foreground uppercase tracking-[0.08em] leading-none pb-1 border-b-2 border-yellow-400">
+        <span className="inline-flex items-center justify-center px-1 mx-auto text-[0.55rem] font-semibold text-muted-foreground uppercase tracking-[0.08em] leading-none pb-1 border-b-2 border-yellow-400">
           More
         </span>
         <div className="flex flex-col items-center gap-2">
@@ -88,7 +97,9 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
               title={tool.label}
               type="button"
             >
-              <tool.icon className={cn('h-4 w-4', tool.color)} />
+              <tool.icon
+                className={cn('h-4 w-4', tool.colorClass ?? 'text-black dark:text-white')}
+              />
               <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
                 {tool.label}
               </span>
@@ -108,7 +119,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
           title="Grid view"
           type="button"
         >
-          <Layers className="h-4 w-4 text-cyan-500" />
+          <Layers className="h-4 w-4 text-black dark:text-white" />
           <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
             Grid View
           </span>
@@ -121,7 +132,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
           title="Export presentation"
           type="button"
         >
-          <Download className="h-4 w-4 text-emerald-500" />
+          <Download className="h-4 w-4 text-black dark:text-white" />
           <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
             Export
           </span>

@@ -568,25 +568,18 @@ const ExhibitionMode = () => {
 
       <div className="flex-1 flex overflow-hidden">
         {!isFullscreen && (
-          isCatalogueOpen ? (
-            <ExhibitionCatalogue
-              cards={exhibitedCards}
-              currentSlide={currentSlide}
-              onSlideSelect={setCurrentSlide}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-              enableDragging={canEdit}
-              onCollapse={() => setIsCatalogueOpen(false)}
-            />
-          ) : (
-            <div className="bg-background border-r border-border transition-all duration-300 flex flex-col h-full w-12">
+          <div className="flex h-full flex-shrink-0">
+            <div className="bg-background border-r border-border transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
               <div className="p-3 border-b border-border flex items-center justify-center">
                 <button
                   type="button"
-                  onClick={() => setIsCatalogueOpen(true)}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
-                  title="Open exhibition catalogue"
-                  aria-label="Open exhibition catalogue"
+                  onClick={() => setIsCatalogueOpen(prev => !prev)}
+                  className={cn(
+                    'inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted',
+                    isCatalogueOpen ? 'text-foreground' : 'text-muted-foreground'
+                  )}
+                  title={`${isCatalogueOpen ? 'Collapse' : 'Open'} exhibition catalogue`}
+                  aria-label={`${isCatalogueOpen ? 'Collapse' : 'Open'} exhibition catalogue`}
                   data-exhibition-catalogue-toggle="true"
                 >
                   <FileText className="h-4 w-4" />
@@ -599,7 +592,10 @@ const ExhibitionMode = () => {
                     setShowGridView(false);
                     setShowThumbnails(true);
                   }}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+                  className={cn(
+                    'inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted',
+                    showThumbnails ? 'text-foreground' : 'text-muted-foreground'
+                  )}
                   title="Open slides view"
                   aria-label="Open slides view"
                   data-exhibition-slides-toggle="true"
@@ -608,19 +604,31 @@ const ExhibitionMode = () => {
                 </button>
               </div>
             </div>
-          )
-        )}
 
-        {showThumbnails && (
-          <SlideThumbnails
-            cards={exhibitedCards}
-            currentSlide={currentSlide}
-            onSlideSelect={index => {
-              setCurrentSlide(index);
-              setShowThumbnails(false);
-            }}
-            onClose={() => setShowThumbnails(false)}
-          />
+            {isCatalogueOpen && (
+              <ExhibitionCatalogue
+                cards={exhibitedCards}
+                currentSlide={currentSlide}
+                onSlideSelect={setCurrentSlide}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                enableDragging={canEdit}
+                onCollapse={() => setIsCatalogueOpen(false)}
+              />
+            )}
+
+            {showThumbnails && (
+              <SlideThumbnails
+                cards={exhibitedCards}
+                currentSlide={currentSlide}
+                onSlideSelect={index => {
+                  setCurrentSlide(index);
+                  setShowThumbnails(false);
+                }}
+                onClose={() => setShowThumbnails(false)}
+              />
+            )}
+          </div>
         )}
 
         <div className="flex-1 flex flex-col overflow-hidden">
