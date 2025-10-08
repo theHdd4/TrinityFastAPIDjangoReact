@@ -515,7 +515,7 @@ const ExhibitionMode = () => {
           </Button>
           <Button
             size="sm"
-            className="bg-primary text-primary-foreground font-medium hover:bg-primary/90"
+            className="bg-blue-600 text-white font-medium hover:bg-blue-500 focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
             onClick={() => setIsExportOpen(true)}
             disabled={disableDownload}
           >
@@ -566,7 +566,7 @@ const ExhibitionMode = () => {
       {!isFullscreen && <Header />}
       {!isFullscreen && renderHeaderSection()}
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         {!isFullscreen && (
           isCatalogueOpen ? (
             <ExhibitionCatalogue
@@ -661,6 +661,18 @@ const ExhibitionMode = () => {
             onGridView={() => setShowGridView(true)}
           />
         )}
+
+        {showThumbnails && (
+          <SlideThumbnails
+            cards={exhibitedCards}
+            currentSlide={currentSlide}
+            onSlideSelect={index => {
+              setCurrentSlide(index);
+              setShowThumbnails(false);
+            }}
+            onClose={() => setShowThumbnails(false)}
+          />
+        )}
       </div>
 
       {exhibitedCards.length > 0 && (
@@ -677,18 +689,6 @@ const ExhibitionMode = () => {
           onToggleViewMode={handleToggleViewMode}
           viewMode={viewMode}
           canEdit={canEdit}
-        />
-      )}
-
-      {showThumbnails && (
-        <SlideThumbnails
-          cards={exhibitedCards}
-          currentSlide={currentSlide}
-          onSlideSelect={index => {
-            setCurrentSlide(index);
-            setShowThumbnails(false);
-          }}
-          onClose={() => setShowThumbnails(false)}
         />
       )}
 
