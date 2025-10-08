@@ -43,8 +43,8 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
 }) => {
   return (
     <div className="w-12 h-full bg-background border-l border-border flex flex-col items-center py-4 gap-4">
-      <div className="flex flex-col items-center gap-3">
-        <span className="block whitespace-nowrap text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.3em] -rotate-45 origin-center leading-none">
+      <div className="flex flex-col items-center gap-3 w-full">
+        <span className="block w-full text-center text-[0.55rem] font-semibold text-muted-foreground uppercase tracking-[0.08em] leading-none pb-1 border-b-2 border-yellow-400">
           Tools
         </span>
         <div className="flex flex-col items-center gap-2">
@@ -71,8 +71,8 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
 
       <Separator className="w-6" />
 
-      <div className="flex flex-col items-center gap-3">
-        <span className="block whitespace-nowrap text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.3em] -rotate-45 origin-center leading-none">
+      <div className="flex flex-col items-center gap-3 w-full">
+        <span className="block w-full text-center text-[0.55rem] font-semibold text-muted-foreground uppercase tracking-[0.08em] leading-none pb-1 border-b-2 border-yellow-400">
           More
         </span>
         <div className="flex flex-col items-center gap-2">
