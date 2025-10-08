@@ -28,7 +28,6 @@ const operations = [
   { icon: Image, label: 'Images', color: 'text-green-500' },
   { icon: Table, label: 'Tables', color: 'text-orange-500' },
   { icon: BarChart3, label: 'Charts', color: 'text-pink-500' },
-  { icon: Layers, label: 'Layouts', color: 'text-cyan-500' },
 ];
 
 const tools = [
@@ -45,7 +44,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
   return (
     <div className="w-12 h-full bg-background border-l border-border flex flex-col items-center py-4 gap-4">
       <div className="flex flex-col items-center gap-3">
-        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.3em] [writing-mode:vertical-rl] [text-orientation:mixed] rotate-180">
+        <span className="block whitespace-nowrap text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.3em] -rotate-45 origin-center leading-none">
           Tools
         </span>
         <div className="flex flex-col items-center gap-2">
@@ -73,7 +72,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
       <Separator className="w-6" />
 
       <div className="flex flex-col items-center gap-3">
-        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.3em] [writing-mode:vertical-rl] [text-orientation:mixed] rotate-180">
+        <span className="block whitespace-nowrap text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.3em] -rotate-45 origin-center leading-none">
           More
         </span>
         <div className="flex flex-col items-center gap-2">
