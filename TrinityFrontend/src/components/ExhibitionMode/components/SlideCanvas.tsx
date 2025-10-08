@@ -75,6 +75,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     ...card.presentationSettings,
   }));
   const accentImageInputRef = useRef<HTMLInputElement | null>(null);
+  const formatPanelRef = useRef<HTMLDivElement | null>(null);
+  const formatToggleRef = useRef<HTMLButtonElement | null>(null);
 
   const layoutDefaultColors: Record<CardLayout, CardColor> = useMemo(
     () => ({
@@ -102,6 +104,38 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       setShowFormatPanel(false);
     }
   }, [canEdit]);
+
+  useEffect(() => {
+    if (!showFormatPanel) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+
+      if (!target) {
+        return;
+      }
+
+      if (formatPanelRef.current?.contains(target)) {
+        return;
+      }
+
+      if (formatToggleRef.current?.contains(target)) {
+        return;
+      }
+
+      setShowFormatPanel(false);
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [showFormatPanel]);
 
   const updateSettings = (partial: Partial<PresentationSettings>) => {
     setSettings(prev => {
@@ -456,6 +490,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                 onClick={() => setShowFormatPanel(!showFormatPanel)}
                 disabled={!canEdit}
                 type="button"
+                ref={formatToggleRef}
               >
                 <Settings className="h-4 w-4" />
               </Button>
@@ -567,7 +602,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           </div>
 
           {showFormatPanel && (
-            <div className="absolute right-0 top-12 z-30 w-80 rounded-xl border-2 border-border bg-background p-4 shadow-2xl sm:right-3">
+            <div
+              ref={formatPanelRef}
+              className="absolute right-0 top-12 z-30 w-80 rounded-xl border-2 border-border bg-background p-4 shadow-2xl sm:right-3"
+            >
               <h3 className="mb-4 text-sm font-semibold">Card Formatting</h3>
 
               <div className="space-y-4">

@@ -573,7 +573,10 @@ const ExhibitionMode = () => {
               <div className="p-3 border-b border-border flex items-center justify-center">
                 <button
                   type="button"
-                  onClick={() => setIsCatalogueOpen(prev => !prev)}
+                  onClick={() => {
+                    setShowThumbnails(false);
+                    setIsCatalogueOpen(prev => !prev);
+                  }}
                   className={cn(
                     'inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted',
                     isCatalogueOpen ? 'text-foreground' : 'text-muted-foreground'
@@ -590,6 +593,7 @@ const ExhibitionMode = () => {
                   type="button"
                   onClick={() => {
                     setShowGridView(false);
+                    setIsCatalogueOpen(false);
                     setShowThumbnails(true);
                   }}
                   className={cn(
