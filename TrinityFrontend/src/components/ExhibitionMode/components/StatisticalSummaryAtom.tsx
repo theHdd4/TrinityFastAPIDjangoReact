@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card } from '@/components/ui/card';
 import { TrendingUp, BarChart3 } from 'lucide-react';
-import RechartsChartRenderer from '@/components/Charts/RechartsChartRenderer';
+import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 
 type TimeseriesPoint = { date: string | number; value: number };
 
