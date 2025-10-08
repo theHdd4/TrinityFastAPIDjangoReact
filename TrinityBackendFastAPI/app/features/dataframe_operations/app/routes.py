@@ -922,7 +922,7 @@ async def round_column(df_id: str = Body(...), name: str = Body(...), decimal_pl
 
 @router.post("/transform_column_case")
 async def transform_column_case(df_id: str = Body(...), column: str = Body(...), case_type: str = Body(...)):
-    """Transform the case of text values in a column (lower, upper, camel)."""
+    """Transform the case of text values in a column with various case styles."""
     df = _get_df(df_id)
     
     if column not in df.columns:
@@ -938,15 +938,64 @@ async def transform_column_case(df_id: str = Body(...), column: str = Body(...),
         elif case_type == "upper":
             # Convert to uppercase
             df = df.with_columns(pl.col(column).str.to_uppercase())
-        elif case_type == "camel":
-            # Convert to camelCase (first letter lowercase, rest as-is)
-            # This is a simplified camelCase - for proper camelCase we'd need more complex logic
+        elif case_type == "pascal":
+            # Pascal Case: FirstLetterOfEachWord
             df = df.with_columns(
-                pl.col(column).str.slice(0, 1).str.to_lowercase() + 
-                pl.col(column).str.slice(1)
+                pl.col(column).map_elements(
+                    lambda x: ''.join(word.capitalize() for word in re.split(r'[\s_\-]+', x)) if isinstance(x, str) and x.strip() else x,
+                    return_dtype=pl.Utf8
+                )
+            )
+        elif case_type == "lower_camel":
+            # Lower Camel Case: firstLetterOfEachWord
+            df = df.with_columns(
+                pl.col(column).map_elements(
+                    lambda x: ''.join(word.capitalize() if i > 0 else word.lower() for i, word in enumerate(re.split(r'[\s_\-]+', x))) if isinstance(x, str) and x.strip() else x,
+                    return_dtype=pl.Utf8
+                )
+            )
+        elif case_type == "snake":
+            # Snake Case: snake_case
+            df = df.with_columns(
+                pl.col(column).map_elements(
+                    lambda x: re.sub(r'(?<!^)(?=[A-Z])', '_', re.sub(r'[\s\-]+', '_', x)).lower() if isinstance(x, str) and x.strip() else x,
+                    return_dtype=pl.Utf8
+                )
+            )
+        elif case_type == "screaming_snake":
+            # Screaming Snake Case: SCREAMING_SNAKE_CASE
+            df = df.with_columns(
+                pl.col(column).map_elements(
+                    lambda x: re.sub(r'(?<!^)(?=[A-Z])', '_', re.sub(r'[\s\-]+', '_', x)).upper() if isinstance(x, str) and x.strip() else x,
+                    return_dtype=pl.Utf8
+                )
+            )
+        elif case_type == "kebab":
+            # Kebab Case: kebab-case
+            df = df.with_columns(
+                pl.col(column).map_elements(
+                    lambda x: re.sub(r'(?<!^)(?=[A-Z])', '-', re.sub(r'[\s_]+', '-', x)).lower() if isinstance(x, str) and x.strip() else x,
+                    return_dtype=pl.Utf8
+                )
+            )
+        elif case_type == "train":
+            # Train Case: Train-Case
+            df = df.with_columns(
+                pl.col(column).map_elements(
+                    lambda x: '-'.join(word.capitalize() for word in re.split(r'[\s_\-]+', x)) if isinstance(x, str) and x.strip() else x,
+                    return_dtype=pl.Utf8
+                )
+            )
+        elif case_type == "flat":
+            # Flat Case: flatcase
+            df = df.with_columns(
+                pl.col(column).map_elements(
+                    lambda x: re.sub(r'[\s_\-]+', '', x).lower() if isinstance(x, str) and x.strip() else x,
+                    return_dtype=pl.Utf8
+                )
             )
         else:
-            raise HTTPException(status_code=400, detail=f"Invalid case_type '{case_type}'. Must be 'lower', 'upper', or 'camel'")
+            raise HTTPException(status_code=400, detail=f"Invalid case_type '{case_type}'. Supported types: lower, upper, pascal, lower_camel, snake, screaming_snake, kebab, train, flat")
             
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1102,3 +1151,95 @@ async def ai_execute(df_id: str = Body(...), operations: List[Dict[str, Any]] = 
             ).drop("row_nr")
     SESSIONS[df_id] = df
     return _df_payload(SESSIONS[df_id], df_id)
+
+@router.post("/find_and_replace")
+async def find_and_replace(
+    df_id: str = Body(...), 
+    find_text: str = Body(...), 
+    replace_text: str = Body(...),
+    replace_all: bool = Body(False),
+    case_sensitive: bool = Body(False)
+):
+    df = _get_df(df_id)
+    try:
+        # Get all string columns
+        string_columns = [col for col in df.columns if df[col].dtype == pl.Utf8]
+        
+        if not string_columns:
+            raise HTTPException(status_code=400, detail="No string columns found to search")
+        
+        # Apply find and replace to all string columns
+        expressions = []
+        for col in string_columns:
+            if case_sensitive:
+                # Case sensitive replacement
+                if replace_all:
+                    expr = pl.col(col).str.replace_all(find_text, replace_text, literal=True)
+                else:
+                    expr = pl.col(col).str.replace(find_text, replace_text, literal=True)
+            else:
+                # Case insensitive replacement - convert to lowercase for comparison
+                if replace_all:
+                    # For case insensitive replace all, we need to handle this differently
+                    expr = pl.col(col).map_elements(
+                        lambda x: x.replace(find_text.lower(), replace_text) if isinstance(x, str) and find_text.lower() in x.lower() else x,
+                        return_dtype=pl.Utf8
+                    )
+                else:
+                    expr = pl.col(col).map_elements(
+                        lambda x: x.replace(find_text.lower(), replace_text, 1) if isinstance(x, str) and find_text.lower() in x.lower() else x,
+                        return_dtype=pl.Utf8
+                    )
+            expressions.append(expr.alias(col))
+        
+        # Apply the expressions
+        df = df.with_columns(expressions)
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    SESSIONS[df_id] = df
+    result = _df_payload(df, df_id)
+    return result
+
+@router.post("/count_matches")
+async def count_matches(
+    df_id: str = Body(...), 
+    find_text: str = Body(...), 
+    case_sensitive: bool = Body(False)
+):
+    """Count occurrences of text in the dataframe."""
+    df = _get_df(df_id)
+    try:
+        # Get all string columns
+        string_columns = [col for col in df.columns if df[col].dtype == pl.Utf8]
+        
+        if not string_columns:
+            return {"total_matches": 0, "matches_by_column": {}}
+        
+        total_matches = 0
+        matches_by_column = {}
+        
+        for col in string_columns:
+            if case_sensitive:
+                # Case sensitive search
+                matches = df.select(
+                    pl.col(col).str.count_matches(find_text, literal=True).sum()
+                ).item()
+            else:
+                # Case insensitive search
+                matches = df.select(
+                    pl.col(col).str.count_matches(find_text.lower(), literal=True).sum()
+                ).item()
+            
+            matches_by_column[col] = matches
+            total_matches += matches
+        
+        return {
+            "total_matches": total_matches,
+            "matches_by_column": matches_by_column,
+            "string_columns": string_columns
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

@@ -18,7 +18,7 @@ import {
 import {
   Upload, Download, Search, Filter, ArrowUpDown, Pin, Palette, Trash2, Plus, 
   GripVertical, RotateCcw, FileText, Check, AlertCircle, Info, Edit2,
-  ChevronDown, ChevronUp, X, PlusCircle, MinusCircle, Save
+  ChevronDown, ChevronUp, X, PlusCircle, MinusCircle, Save, Replace
 } from 'lucide-react';
 import { DataFrameData, DataFrameSettings } from '../DataFrameOperationsAtom';
 import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
@@ -42,6 +42,8 @@ import {
   loadDataframeByKey,
   describeColumn as apiDescribeColumn,
   transformColumnCase as apiTransformColumnCase,
+  findAndReplace as apiFindAndReplace,
+  countMatches as apiCountMatches,
 } from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
 import '@/templates/tables/table.css';
@@ -898,6 +900,18 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
   const [historyPanelMinimized, setHistoryPanelMinimized] = useState(false);
   const [historyPanelPosition, setHistoryPanelPosition] = useState({ x: 0, y: 0 });
+  
+  // Find and Replace state
+  const [findReplaceModalOpen, setFindReplaceModalOpen] = useState(false);
+  const [findText, setFindText] = useState('');
+  const [replaceText, setReplaceText] = useState('');
+  const [replaceAll, setReplaceAll] = useState(false);
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [findReplaceLoading, setFindReplaceLoading] = useState(false);
+  const [matchCount, setMatchCount] = useState(0);
+  const [matchCountLoading, setMatchCountLoading] = useState(false);
+  const [matchesByColumn, setMatchesByColumn] = useState<Record<string, number>>({});
+  const [highlightedText, setHighlightedText] = useState('');
   const [historyOperations, setHistoryOperations] = useState<Array<{
     id: string;
     type: string;
@@ -2632,7 +2646,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     }
   };
 
-  const handleTransformColumnCase = async (columns: string[], caseType: 'lower' | 'upper' | 'camel') => {
+  const handleTransformColumnCase = async (columns: string[], caseType: 'lower' | 'upper' | 'camel' | 'pascal' | 'lower_camel' | 'snake' | 'screaming_snake' | 'kebab' | 'train' | 'flat') => {
     if (!data || !settings.fileId || columns.length === 0) return;
     
     const fileId = settings.fileId;
@@ -2686,6 +2700,94 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       addToHistory('Transform Column Case', `Failed to transform ${columns.length} columns`, 'error');
     } finally {
       setConvertLoading(false);
+    }
+  };
+
+  const highlightText = (text: string, searchText: string, caseSensitive: boolean = false) => {
+    if (!searchText || !text) return text;
+    
+    const flags = caseSensitive ? 'g' : 'gi';
+    const regex = new RegExp(searchText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+    
+    return text.replace(regex, (match) => {
+      return `<mark style="background-color: #FFE066; padding: 1px 2px; border-radius: 2px;">${match}</mark>`;
+    });
+  };
+
+  const handleCountMatches = async (searchText: string, caseSensitive: boolean) => {
+    if (!data || !settings.fileId || !searchText.trim()) {
+      setMatchCount(0);
+      setMatchesByColumn({});
+      setHighlightedText('');
+      return;
+    }
+    
+    const fileId = settings.fileId;
+    
+    setMatchCountLoading(true);
+    try {
+      const resp = await apiCountMatches(fileId, searchText, caseSensitive);
+      setMatchCount(resp.total_matches);
+      setMatchesByColumn(resp.matches_by_column);
+      setHighlightedText(searchText);
+    } catch (err) {
+      console.error('[DataFrameOperations] Count matches error:', err);
+      setMatchCount(0);
+      setMatchesByColumn({});
+      setHighlightedText('');
+    } finally {
+      setMatchCountLoading(false);
+    }
+  };
+
+  const handleFindAndReplace = async () => {
+    if (!data || !settings.fileId || !findText.trim()) {
+      return;
+    }
+    
+    const fileId = settings.fileId;
+    
+    setFindReplaceLoading(true);
+    try {
+      console.log('[DataFrameOperations] Find and replace:', { findText, replaceText, replaceAll, caseSensitive });
+      
+      const resp = await apiFindAndReplace(fileId, findText, replaceText, replaceAll, caseSensitive);
+      
+      // Preserve deleted columns by filtering out columns that were previously deleted
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const currentDeletedColumns = data.deletedColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+      
+      onDataChange({
+        headers: filtered.headers,
+        rows: filtered.rows,
+        fileName: data.fileName,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+        hiddenColumns: currentHiddenColumns,
+        deletedColumns: currentDeletedColumns,
+      });
+      
+      const actionText = replaceAll ? 'Replaced all' : 'Replaced';
+      addToHistory('Find and Replace', `${actionText} "${findText}" with "${replaceText}"`);
+      
+      toast({
+        title: "Find and Replace Complete",
+        description: `${actionText} occurrences of "${findText}"`,
+      });
+      
+      // Close modal after successful operation
+      setFindReplaceModalOpen(false);
+      setFindText('');
+      setReplaceText('');
+    } catch (err) {
+      console.error('[DataFrameOperations] Find and replace error:', err);
+      handleApiError('Find and replace failed', err);
+      addToHistory('Find and Replace', `Failed to replace "${findText}"`, 'error');
+    } finally {
+      setFindReplaceLoading(false);
     }
   };
 
@@ -3110,6 +3212,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       }
       
       if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'f') {
+          e.preventDefault();
+          setFindReplaceModalOpen(true);
+          return;
+        }
         if (e.key === 'a' && data?.headers) {
           e.preventDefault();
           setMultiSelectedColumns(new Set(data.headers));
@@ -3251,6 +3358,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     )}
                   </div>
                 </div>
+                <button
+                  onClick={() => setFindReplaceModalOpen(true)}
+                  className="p-2 mx-1 hover:bg-blue-50 rounded-md transition-colors"
+                  title="Find and Replace (Ctrl+F)"
+                >
+                  <Search className="w-6 h-6 text-blue-600" />
+                </button>
                 <button
                   onClick={() => setHistoryPanelOpen(true)}
                   className="p-2 mx-1 hover:bg-purple-50 rounded-md transition-colors"
@@ -3629,7 +3743,21 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                               }}
                               title={`Double-click to edit cell\nValue: ${safeToString(row[column])}`}
                             >
-                              {safeToString(row[column]) !== '' ? highlightMatch(safeToString(row[column]), settings.searchTerm || '') : null}
+                              {(() => {
+                                const cellValue = safeToString(row[column]);
+                                if (cellValue === '') return null;
+                                
+                                // Use find and replace highlighting if active
+                                if (highlightedText && findReplaceModalOpen) {
+                                  const highlightedValue = highlightText(cellValue, highlightedText, caseSensitive);
+                                  if (highlightedValue !== cellValue) {
+                                    return <span dangerouslySetInnerHTML={{ __html: highlightedValue }} />;
+                                  }
+                                }
+                                
+                                // Fall back to existing search highlighting
+                                return highlightMatch(cellValue, settings.searchTerm || '');
+                              })()}
                             </div>
                           )}
                         </TableCell>
@@ -3909,18 +4037,36 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               Letter Case <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
             </button>
             {caseSubmenuOpen && (
-              <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md min-w-[140px] max-h-[300px] overflow-y-auto z-50" style={{ scrollbarWidth: 'thin' }}>
+              <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md min-w-[180px] max-h-[400px] overflow-y-auto z-50" style={{ scrollbarWidth: 'thin' }}>
                 {multiSelectedColumns.size > 1 ? (
                   <>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'lower'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Lowercase (All)</button>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'upper'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Uppercase (All)</button>
-                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'camel'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Camel Case (All)</button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'pascal'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Pascal Case (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'lower_camel'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Lower Camel Case (All)</button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'snake'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Snake Case (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'screaming_snake'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>SCREAMING_SNAKE_CASE (All)</button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'kebab'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Kebab Case (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'train'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Train Case (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'flat'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Flat Case (All)</button>
                   </>
                 ) : (
                   <>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'lower'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Lowercase</button>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'upper'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Uppercase</button>
-                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'camel'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Camel Case</button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'pascal'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Pascal Case</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'lower_camel'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Lower Camel Case</button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'snake'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Snake Case</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'screaming_snake'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>SCREAMING_SNAKE_CASE</button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'kebab'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Kebab Case</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'train'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Train Case</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'flat'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Flat Case</button>
                   </>
                 )}
               </div>
@@ -4364,6 +4510,174 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               >
                 Delete {rowDeleteConfirmModal.rowsToDelete.length} Row{rowDeleteConfirmModal.rowsToDelete.length > 1 ? 's' : ''}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Find and Replace Modal */}
+      {findReplaceModalOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setFindReplaceModalOpen(false)}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div className="flex items-center space-x-2">
+                <Search className="w-5 h-5 text-blue-600" />
+                <h3 className="text-lg font-semibold text-gray-900">Find and Replace</h3>
+              </div>
+              <button
+                onClick={() => setFindReplaceModalOpen(false)}
+                className="p-1 hover:bg-gray-100 rounded-md transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            
+            <div className="p-4 space-y-4">
+              {/* Find Text Input */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Find
+                </label>
+                <Input
+                  value={findText}
+                  onChange={(e) => {
+                    const newValue = e.target.value;
+                    setFindText(newValue);
+                    // Debounce the match counting
+                    setTimeout(() => {
+                      if (newValue === findText) {
+                        handleCountMatches(newValue, caseSensitive);
+                      }
+                    }, 300);
+                  }}
+                  placeholder="Enter text to find..."
+                  className="w-full"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && findText.trim()) {
+                      handleFindAndReplace();
+                    }
+                  }}
+                />
+                {/* Match Count Display */}
+                {findText.trim() && (
+                  <div className="mt-2 text-sm">
+                    {matchCountLoading ? (
+                      <div className="flex items-center text-gray-500">
+                        <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mr-2"></div>
+                        Searching...
+                      </div>
+                    ) : (
+                      <div className="text-gray-600">
+                        <span className="font-medium text-blue-600">{matchCount}</span> match{matchCount !== 1 ? 'es' : ''} found
+                        {matchCount > 0 && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            {Object.entries(matchesByColumn)
+                              .filter(([_, count]) => count > 0)
+                              .slice(0, 3)
+                              .map(([col, count]) => `${col}: ${count}`)
+                              .join(', ')}
+                            {Object.keys(matchesByColumn).filter(col => matchesByColumn[col] > 0).length > 3 && '...'}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              
+              {/* Replace Text Input */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Replace with
+                </label>
+                <Input
+                  value={replaceText}
+                  onChange={(e) => setReplaceText(e.target.value)}
+                  placeholder="Enter replacement text..."
+                  className="w-full"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && findText.trim()) {
+                      handleFindAndReplace();
+                    }
+                  }}
+                />
+              </div>
+              
+              {/* Options */}
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="caseSensitive"
+                    checked={caseSensitive}
+                    onChange={(e) => {
+                      const newValue = e.target.checked;
+                      setCaseSensitive(newValue);
+                      if (findText.trim()) {
+                        handleCountMatches(findText, newValue);
+                      }
+                    }}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="caseSensitive" className="text-sm text-gray-700">
+                    Case sensitive
+                  </label>
+                </div>
+                
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="replaceAll"
+                    checked={replaceAll}
+                    onChange={(e) => setReplaceAll(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="replaceAll" className="text-sm text-gray-700">
+                    Replace all occurrences
+                  </label>
+                </div>
+              </div>
+              
+              {/* Action Buttons */}
+              <div className="flex space-x-3 pt-4">
+                <Button
+                  onClick={handleFindAndReplace}
+                  disabled={!findText.trim() || findReplaceLoading}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {findReplaceLoading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div>
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <Replace className="w-4 h-4 mr-2" />
+                      {replaceAll ? 'Replace All' : 'Replace'}
+                    </>
+                  )}
+                </Button>
+                <Button
+                  onClick={() => setFindReplaceModalOpen(false)}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+              </div>
+              
+              {/* Help Text */}
+              <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md">
+                <p><strong>Shortcut:</strong> Press Ctrl+F to open this dialog</p>
+                <p><strong>Tip:</strong> Leave "Replace with" empty to delete found text</p>
+              </div>
             </div>
           </div>
         </div>
