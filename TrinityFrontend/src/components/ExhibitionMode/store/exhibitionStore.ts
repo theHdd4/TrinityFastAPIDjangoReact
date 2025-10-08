@@ -6,7 +6,34 @@ import { getActiveProjectContext } from '@/utils/projectEnv';
 export type CardColor = 'default' | 'blue' | 'purple' | 'green' | 'orange';
 export type CardWidth = 'M' | 'L';
 export type ContentAlignment = 'top' | 'center' | 'bottom';
-export type CardLayout = 'blank' | 'horizontal-split' | 'vertical-split' | 'content-right' | 'full';
+export type CardLayout = 'none' | 'top' | 'bottom' | 'right' | 'left' | 'full';
+
+const DEFAULT_CARD_LAYOUT: CardLayout = 'right';
+
+const CARD_LAYOUTS: readonly CardLayout[] = ['none', 'top', 'bottom', 'right', 'left', 'full'] as const;
+
+const LEGACY_CARD_LAYOUTS: Record<string, CardLayout> = {
+  blank: 'none',
+  'horizontal-split': 'top',
+  'vertical-split': 'left',
+  'content-right': 'right',
+  full: 'full',
+};
+
+const ensureCardLayout = (layout: unknown): CardLayout => {
+  if (typeof layout === 'string') {
+    if ((CARD_LAYOUTS as readonly string[]).includes(layout)) {
+      return layout as CardLayout;
+    }
+
+    const legacyLayout = LEGACY_CARD_LAYOUTS[layout];
+    if (legacyLayout) {
+      return legacyLayout;
+    }
+  }
+
+  return DEFAULT_CARD_LAYOUT;
+};
 
 export interface PresentationSettings {
   cardColor: CardColor;
@@ -84,7 +111,7 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   cardWidth: 'L',
   contentAlignment: 'top',
   fullBleed: false,
-  cardLayout: 'content-right',
+  cardLayout: DEFAULT_CARD_LAYOUT,
   accentImage: null,
   accentImageName: null,
 };
@@ -92,16 +119,19 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
 const withPresentationDefaults = (card: LayoutCard): LayoutCard => {
   const slideAtoms = Array.isArray(card.atoms) ? card.atoms : [];
   const catalogueAtoms = mergeCatalogueAtoms(card.catalogueAtoms, slideAtoms);
+  const mergedSettings = {
+    ...DEFAULT_PRESENTATION_SETTINGS,
+    ...card.presentationSettings,
+  };
+
+  mergedSettings.cardLayout = ensureCardLayout(mergedSettings.cardLayout);
 
   return {
     ...card,
     atoms: slideAtoms,
     catalogueAtoms,
     exhibitionControlEnabled: card.exhibitionControlEnabled ?? false,
-    presentationSettings: {
-      ...DEFAULT_PRESENTATION_SETTINGS,
-      ...card.presentationSettings,
-    },
+    presentationSettings: mergedSettings,
   };
 };
 
@@ -156,6 +186,7 @@ const normalizeCard = (card: any): LayoutCard | null => {
       ? {
           ...DEFAULT_PRESENTATION_SETTINGS,
           ...card.presentationSettings,
+          cardLayout: ensureCardLayout((card.presentationSettings as any).cardLayout),
         }
       : undefined,
     exhibitionControlEnabled: 'exhibitionControlEnabled' in card
