@@ -10,8 +10,6 @@ import {
   Palette,
   Settings,
   Maximize2,
-  StickyNote,
-  Grid3x3,
   Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -20,8 +18,6 @@ import { cn } from '@/lib/utils';
 
 interface OperationsPaletteProps {
   onFullscreen: () => void;
-  onShowNotes?: () => void;
-  onShowThumbnails?: () => void;
   onExport?: () => void;
   onGridView?: () => void;
 }
@@ -43,8 +39,6 @@ const tools = [
 
 export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
   onFullscreen,
-  onShowNotes,
-  onShowThumbnails,
   onExport,
   onGridView,
 }) => {
@@ -73,42 +67,6 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
               </span>
             </Button>
           ))}
-        </div>
-      </div>
-
-      <Separator className="my-4 w-8" />
-
-      <div className="mb-6">
-        <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-3 text-center">
-          Views
-        </h3>
-        <div className="space-y-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="w-12 h-12 rounded-xl hover:bg-muted transition-all group relative hover:scale-110 hover:shadow-lg"
-            onClick={() => onShowThumbnails?.()}
-            title="Slide thumbnails"
-            type="button"
-          >
-            <Grid3x3 className="h-5 w-5 text-primary" />
-            <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-              Slides
-            </span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="w-12 h-12 rounded-xl hover:bg-muted transition-all group relative hover:scale-110 hover:shadow-lg"
-            onClick={() => onShowNotes?.()}
-            title="Speaker notes"
-            type="button"
-          >
-            <StickyNote className="h-5 w-5 text-amber-500" />
-            <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-              Notes
-            </span>
-          </Button>
         </div>
       </div>
 

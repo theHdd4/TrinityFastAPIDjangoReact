@@ -566,7 +566,7 @@ const ExhibitionMode = () => {
       {!isFullscreen && <Header />}
       {!isFullscreen && renderHeaderSection()}
 
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex overflow-hidden">
         {!isFullscreen && (
           isCatalogueOpen ? (
             <ExhibitionCatalogue
@@ -611,6 +611,18 @@ const ExhibitionMode = () => {
           )
         )}
 
+        {showThumbnails && (
+          <SlideThumbnails
+            cards={exhibitedCards}
+            currentSlide={currentSlide}
+            onSlideSelect={index => {
+              setCurrentSlide(index);
+              setShowThumbnails(false);
+            }}
+            onClose={() => setShowThumbnails(false)}
+          />
+        )}
+
         <div className="flex-1 flex flex-col overflow-hidden">
           {viewMode === 'horizontal' ? (
             <SlideCanvas
@@ -622,6 +634,7 @@ const ExhibitionMode = () => {
               canEdit={canEdit}
               onPresentationChange={handlePresentationChange}
               onRemoveAtom={handleRemoveAtom}
+              onShowNotes={() => setShowNotes(true)}
               viewMode="horizontal"
               isActive
             />
@@ -643,6 +656,7 @@ const ExhibitionMode = () => {
                     canEdit={canEdit}
                     onPresentationChange={handlePresentationChange}
                     onRemoveAtom={handleRemoveAtom}
+                    onShowNotes={() => setShowNotes(true)}
                     viewMode="vertical"
                     isActive={currentSlide === index}
                   />
@@ -655,22 +669,8 @@ const ExhibitionMode = () => {
         {!isFullscreen && (
           <OperationsPalette
             onFullscreen={toggleFullscreen}
-            onShowNotes={() => setShowNotes(true)}
-            onShowThumbnails={() => setShowThumbnails(true)}
             onExport={() => setIsExportOpen(true)}
             onGridView={() => setShowGridView(true)}
-          />
-        )}
-
-        {showThumbnails && (
-          <SlideThumbnails
-            cards={exhibitedCards}
-            currentSlide={currentSlide}
-            onSlideSelect={index => {
-              setCurrentSlide(index);
-              setShowThumbnails(false);
-            }}
-            onClose={() => setShowThumbnails(false)}
           />
         )}
       </div>

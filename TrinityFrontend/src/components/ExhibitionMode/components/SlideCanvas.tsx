@@ -3,6 +3,7 @@ import {
   User,
   Calendar,
   Sparkles,
+  StickyNote,
   Image as ImageIcon,
   Palette,
   Layout,
@@ -51,6 +52,7 @@ interface SlideCanvasProps {
   canEdit?: boolean;
   onPresentationChange?: (settings: PresentationSettings, cardId: string) => void;
   onRemoveAtom?: (atomId: string) => void;
+  onShowNotes?: () => void;
   viewMode?: 'horizontal' | 'vertical';
   isActive?: boolean;
 }
@@ -64,6 +66,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   canEdit = true,
   onPresentationChange,
   onRemoveAtom,
+  onShowNotes,
   viewMode = 'horizontal',
   isActive = false,
 }) => {
@@ -272,6 +275,15 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             </div>
           )}
           <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
+            <Button
+              size="icon"
+              variant="secondary"
+              className="w-8 h-8 bg-background/90 backdrop-blur-sm hover:bg-background shadow-lg"
+              onClick={() => onShowNotes?.()}
+              type="button"
+            >
+              <StickyNote className="w-4 h-4" />
+            </Button>
             <Button
               size="icon"
               variant="secondary"

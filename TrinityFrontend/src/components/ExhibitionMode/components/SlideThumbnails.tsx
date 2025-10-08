@@ -28,7 +28,7 @@ export const SlideThumbnails: React.FC<SlideThumbnailsProps> = ({
   };
 
   return (
-    <div className="absolute inset-y-0 left-0 w-80 bg-background border-r border-border shadow-xl z-40 animate-slide-in-right flex flex-col">
+    <div className="flex h-full w-80 flex-shrink-0 flex-col border-r border-border bg-background shadow-xl animate-slide-in-right">
       <div className="flex items-center justify-between p-4 border-b border-border flex-shrink-0">
         <h3 className="font-semibold text-lg">Slides</h3>
         <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8">
