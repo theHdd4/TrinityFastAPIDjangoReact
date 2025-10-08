@@ -2250,49 +2250,68 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     return frontendIndex;
   }, [data]);
 
-  // 1. Fix column insert/delete logic
+  // Simple and direct insert column implementation
   const handleInsertColumn = async (colIdx: number) => {
-    resetSaveSuccess();
     if (!data || !fileId) return;
+    
+    console.log('[DataFrameOperations] Insert column called with colIdx:', colIdx);
+    console.log('[DataFrameOperations] Current headers:', data.headers);
     
     // Save current state before making changes
     saveToUndoStack(data);
     
-    // Map frontend index to backend index
-    const backendIndex = getBackendColumnIndex(colIdx);
+    // Get the column name at the clicked position
+    const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+    const clickedColumn = visibleHeaders[colIdx];
     
-    const newColKey = getNextColKey(data.headers);
+    // Find the position of this column in the original headers array
+    const insertPosition = data.headers.indexOf(clickedColumn) + 1;
+    
+    console.log('[DataFrameOperations] Insert details:', {
+      colIdx,
+      clickedColumn,
+      insertPosition,
+      totalColumns: data.headers.length
+    });
+    
+    // Generate a unique column name
+    const newColumnName = getNextColKey(data.headers);
+    
+    setInsertLoading(true);
     try {
-      const resp = await apiInsertColumn(fileId, backendIndex, newColKey, '');
+      // Call the backend API with the exact position
+      const resp = await apiInsertColumn(fileId, insertPosition, newColumnName, '');
       
-       // Preserve deleted columns by filtering out columns that were previously deleted
-       const currentHiddenColumns = data.hiddenColumns || [];
-       const currentDeletedColumns = data.deletedColumns || [];
-       const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
-      
+      // Update the data with the response
       onDataChange({
-        headers: filtered.headers,
-        rows: filtered.rows,
+        headers: resp.headers,
+        rows: resp.rows,
         fileName: data.fileName,
-        columnTypes: filtered.columnTypes,
-        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+        columnTypes: resp.columnTypes,
+        pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-         hiddenColumns: currentHiddenColumns,
-         deletedColumns: currentDeletedColumns,
-       });
+        hiddenColumns: data.hiddenColumns,
+        deletedColumns: data.deletedColumns,
+      });
       
-      // Auto-select the newly inserted column for formula operations
-      if (filtered.headers.includes(newColKey)) {
-        setSelectedColumn(newColKey);
-        console.log('[DataFrameOperations] Auto-selected newly inserted column:', newColKey);
-      }
+      // Auto-select the newly inserted column
+      setSelectedColumn(newColumnName);
       
       // Add to history
-      addToHistory('Insert Column', `Inserted column "${newColKey}" at position ${colIdx + 1}`);
+      addToHistory('Insert Column', `Inserted column "${newColumnName}" after "${clickedColumn}"`);
+      
+      toast({
+        title: "Column Inserted",
+        description: `New column "${newColumnName}" inserted after "${clickedColumn}"`,
+      });
+      
     } catch (err) {
+      console.error('[DataFrameOperations] Insert column error:', err);
       handleApiError('Insert column failed', err);
-      addToHistory('Insert Column', `Failed to insert column at position ${colIdx + 1}`, 'error');
+      addToHistory('Insert Column', `Failed to insert column after "${clickedColumn}"`, 'error');
+    } finally {
+      setInsertLoading(false);
     }
   };
 
@@ -3243,6 +3262,21 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [data?.headers, data?.rows, permanentlyDeletedRows, processedData.filteredRows, handleUndo, handleRedo]);
 
+  // Debounced search effect
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (findText.trim()) {
+        handleCountMatches(findText, caseSensitive);
+      } else {
+        setMatchCount(0);
+        setMatchesByColumn({});
+        setHighlightedText('');
+      }
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [findText, caseSensitive]);
+
   return (
     <>
       <input
@@ -3729,7 +3763,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                             />
                           ) : (
                             <div 
-                              className="text-xs p-1 hover:bg-blue-50 rounded cursor-pointer min-h-[20px] flex items-center text-gray-800 overflow-hidden"
+                              className="text-xs p-1 hover:bg-blue-50 rounded cursor-pointer min-h-[20px] flex items-center justify-center text-gray-800 overflow-hidden"
                               style={{
                                 maxWidth: '100%',
                                 textOverflow: 'ellipsis',
@@ -4546,16 +4580,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 </label>
                 <Input
                   value={findText}
-                  onChange={(e) => {
-                    const newValue = e.target.value;
-                    setFindText(newValue);
-                    // Debounce the match counting
-                    setTimeout(() => {
-                      if (newValue === findText) {
-                        handleCountMatches(newValue, caseSensitive);
-                      }
-                    }, 300);
-                  }}
+                  onChange={(e) => setFindText(e.target.value)}
                   placeholder="Enter text to find..."
                   className="w-full"
                   autoFocus
@@ -4579,11 +4604,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         {matchCount > 0 && (
                           <div className="text-xs text-gray-500 mt-1">
                             {Object.entries(matchesByColumn)
-                              .filter(([_, count]) => count > 0)
+                              .filter(([_, count]) => (count as number) > 0)
                               .slice(0, 3)
                               .map(([col, count]) => `${col}: ${count}`)
                               .join(', ')}
-                            {Object.keys(matchesByColumn).filter(col => matchesByColumn[col] > 0).length > 3 && '...'}
+                            {Object.keys(matchesByColumn).filter(col => (matchesByColumn[col] as number) > 0).length > 3 && '...'}
                           </div>
                         )}
                       </div>
@@ -4617,13 +4642,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     type="checkbox"
                     id="caseSensitive"
                     checked={caseSensitive}
-                    onChange={(e) => {
-                      const newValue = e.target.checked;
-                      setCaseSensitive(newValue);
-                      if (findText.trim()) {
-                        handleCountMatches(findText, newValue);
-                      }
-                    }}
+                    onChange={(e) => setCaseSensitive(e.target.checked)}
                     className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
                   <label htmlFor="caseSensitive" className="text-sm text-gray-700">
