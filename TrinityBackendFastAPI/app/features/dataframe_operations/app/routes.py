@@ -920,6 +920,42 @@ async def round_column(df_id: str = Body(...), name: str = Body(...), decimal_pl
     return result
 
 
+@router.post("/transform_column_case")
+async def transform_column_case(df_id: str = Body(...), column: str = Body(...), case_type: str = Body(...)):
+    """Transform the case of text values in a column (lower, upper, camel)."""
+    df = _get_df(df_id)
+    
+    if column not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Column '{column}' not found")
+    
+    try:
+        # Convert column to string first to handle any data type
+        df = df.with_columns(pl.col(column).cast(pl.Utf8))
+        
+        if case_type == "lower":
+            # Convert to lowercase
+            df = df.with_columns(pl.col(column).str.to_lowercase())
+        elif case_type == "upper":
+            # Convert to uppercase
+            df = df.with_columns(pl.col(column).str.to_uppercase())
+        elif case_type == "camel":
+            # Convert to camelCase (first letter lowercase, rest as-is)
+            # This is a simplified camelCase - for proper camelCase we'd need more complex logic
+            df = df.with_columns(
+                pl.col(column).str.slice(0, 1).str.to_lowercase() + 
+                pl.col(column).str.slice(1)
+            )
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid case_type '{case_type}'. Must be 'lower', 'upper', or 'camel'")
+            
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    SESSIONS[df_id] = df
+    result = _df_payload(df, df_id)
+    return result
+
+
 @router.get("/preview")
 async def preview(df_id: str, n: int = 5):
     df = _get_df(df_id)

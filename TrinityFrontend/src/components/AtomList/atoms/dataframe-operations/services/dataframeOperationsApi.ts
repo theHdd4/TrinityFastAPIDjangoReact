@@ -115,3 +115,11 @@ export function describeColumn(dfId: string, column: string) {
     column,
   });
 }
+
+export function transformColumnCase(dfId: string, column: string, caseType: 'lower' | 'upper' | 'camel') {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/transform_column_case`, {
+    df_id: dfId,
+    column,
+    case_type: caseType,
+  });
+}

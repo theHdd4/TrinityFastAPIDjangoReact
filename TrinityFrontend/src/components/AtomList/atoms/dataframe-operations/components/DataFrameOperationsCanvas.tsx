@@ -41,6 +41,7 @@ import {
   applyFormula as apiApplyFormula,
   loadDataframeByKey,
   describeColumn as apiDescribeColumn,
+  transformColumnCase as apiTransformColumnCase,
 } from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
 import '@/templates/tables/table.css';
@@ -557,6 +558,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [isFormulaBarFrozen, setIsFormulaBarFrozen] = useState(false); // Track if formula bar should be frozen after application
   const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter' | 'operation' | 'round'>(null);
   const [convertSubmenuOpen, setConvertSubmenuOpen] = useState(false);
+  const [caseSubmenuOpen, setCaseSubmenuOpen] = useState(false);
   const [roundDecimalPlaces, setRoundDecimalPlaces] = useState(2);
   const [unhideSubmenuOpen, setUnhideSubmenuOpen] = useState(false);
   const [selectedHiddenColumns, setSelectedHiddenColumns] = useState<string[]>([]);
@@ -2630,6 +2632,63 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     }
   };
 
+  const handleTransformColumnCase = async (columns: string[], caseType: 'lower' | 'upper' | 'camel') => {
+    if (!data || !settings.fileId || columns.length === 0) return;
+    
+    const fileId = settings.fileId;
+    
+    setConvertLoading(true);
+    try {
+      console.log('[DataFrameOperations] Transform column case:', columns, 'to', caseType);
+      
+      // Process each column sequentially
+      let currentData = data;
+      for (const col of columns) {
+        // Check if column exists
+        if (!data.headers.includes(col)) {
+          throw new Error(`Column "${col}" does not exist`);
+        }
+        
+        const resp = await apiTransformColumnCase(fileId, col, caseType);
+        
+        // Preserve deleted columns by filtering out columns that were previously deleted
+        const currentHiddenColumns = currentData.hiddenColumns || [];
+        const currentDeletedColumns = currentData.deletedColumns || [];
+        const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+        
+        currentData = {
+          headers: filtered.headers,
+          rows: filtered.rows,
+          fileName: currentData.fileName,
+          columnTypes: filtered.columnTypes,
+          pinnedColumns: currentData.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+          frozenColumns: currentData.frozenColumns,
+          cellColors: currentData.cellColors,
+          hiddenColumns: currentHiddenColumns,
+          deletedColumns: currentDeletedColumns,
+        };
+      }
+      
+      onDataChange(currentData);
+      const caseTypeLabel = caseType === 'lower' ? 'lowercase' : caseType === 'upper' ? 'uppercase' : 'camelCase';
+      addToHistory('Transform Column Case', `${columns.length} columns transformed to ${caseTypeLabel}: ${columns.join(', ')}`);
+      
+      toast({
+        title: "Columns Case Transformed",
+        description: `${columns.length} columns transformed to ${caseTypeLabel}`,
+      });
+      
+      // Clear selection
+      setMultiSelectedColumns(new Set());
+    } catch (err) {
+      console.error('[DataFrameOperations] Transform column case error:', err);
+      handleApiError('Transform column case failed', err);
+      addToHistory('Transform Column Case', `Failed to transform ${columns.length} columns`, 'error');
+    } finally {
+      setConvertLoading(false);
+    }
+  };
+
   const handleDeleteRow = async (rowIdx: number) => {
     if (!data) return;
     
@@ -3835,6 +3894,33 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Category</button>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Decimal</button>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Object</button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+          {/* Letter Case - dropdown like Convert to */}
+          <div 
+            className="relative"
+            onMouseEnter={() => setCaseSubmenuOpen(true)}
+            onMouseLeave={() => setCaseSubmenuOpen(false)}
+          >
+            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100">
+              Letter Case <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
+            </button>
+            {caseSubmenuOpen && (
+              <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md min-w-[140px] max-h-[300px] overflow-y-auto z-50" style={{ scrollbarWidth: 'thin' }}>
+                {multiSelectedColumns.size > 1 ? (
+                  <>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'lower'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Lowercase (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'upper'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Uppercase (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'camel'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Camel Case (All)</button>
+                  </>
+                ) : (
+                  <>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'lower'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Lowercase</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'upper'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Uppercase</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'camel'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Camel Case</button>
                   </>
                 )}
               </div>
