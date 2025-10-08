@@ -852,16 +852,41 @@ async def duplicate_row(df_id: str = Body(...), index: int = Body(...)):
 
 @router.post("/duplicate_column")
 async def duplicate_column(df_id: str = Body(...), name: str = Body(...), new_name: str = Body(...)):
+    """Duplicate a column and place it right after the original column."""
     df = _get_df(df_id)
+    
     try:
-        idx = df.columns.index(name)
+        # Validate that the source column exists
+        if name not in df.columns:
+            raise HTTPException(status_code=404, detail=f"Column '{name}' not found")
+        
+        # Get the position of the original column
+        original_idx = df.columns.index(name)
+        
+        # Duplicate the column with the new name
         df = df.with_columns(pl.col(name).alias(new_name))
-        cols = df.columns
-        cols.remove(new_name)
-        cols.insert(idx, new_name)
-        df = df.select(cols)
+        
+        # Get all columns and reorder them
+        all_columns = df.columns.copy()
+        
+        # Remove the new column from the end
+        all_columns.remove(new_name)
+        
+        # Insert the new column right after the original column
+        insert_position = original_idx + 1
+        all_columns.insert(insert_position, new_name)
+        
+        # Reorder the dataframe with the new column order
+        df = df.select(all_columns)
+        
+        print(f"[Backend] Duplicated column '{name}' as '{new_name}' at position {insert_position}")
+        print(f"[Backend] New column order: {all_columns}")
+        
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Duplicate column operation failed: {str(e)}")
+    
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
     return result

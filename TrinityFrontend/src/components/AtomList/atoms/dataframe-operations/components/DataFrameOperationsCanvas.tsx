@@ -2387,46 +2387,75 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     }
   };
 
+  // Completely rewritten duplicate column functionality
   const handleDuplicateColumn = async (colIdx: number) => {
-    resetSaveSuccess();
     if (!data || !fileId) return;
+    
+    console.log('[DataFrameOperations] Duplicate column called with colIdx:', colIdx);
+    console.log('[DataFrameOperations] Current headers:', data.headers);
+    console.log('[DataFrameOperations] Hidden columns:', data.hiddenColumns);
     
     // Save current state before making changes
     saveToUndoStack(data);
     
     setDuplicateLoading(true);
-    const col = data.headers[colIdx];
-    let newName = `${col}_copy`;
-    while (data.headers.includes(newName)) {
-      newName += '_copy';
+    
+    // Get the actual column name from visible headers
+    const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+    const originalColumn = visibleHeaders[colIdx];
+    
+    // Find the position of the original column in the full headers array
+    const originalPosition = data.headers.indexOf(originalColumn);
+    
+    console.log('[DataFrameOperations] Duplicate details:', {
+      colIdx,
+      originalColumn,
+      originalPosition,
+      totalColumns: data.headers.length,
+      visibleHeaders,
+      allHeaders: data.headers
+    });
+    
+    // Generate unique name for the duplicated column
+    let newColumnName = `${originalColumn}_copy`;
+    while (data.headers.includes(newColumnName)) {
+      newColumnName += '_copy';
     }
+    
     try {
-      const resp = await apiDuplicateColumn(fileId, col, newName);
+      // Call the backend API to duplicate the column
+      const resp = await apiDuplicateColumn(fileId, originalColumn, newColumnName);
       
-       // Preserve deleted columns by filtering out columns that were previously deleted
-       const currentHiddenColumns = data.hiddenColumns || [];
-       const currentDeletedColumns = data.deletedColumns || [];
-       const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+      console.log('[DataFrameOperations] Duplicate response:', resp);
       
+      // Update the data with the response
       onDataChange({
-        headers: filtered.headers,
-        rows: filtered.rows,
+        headers: resp.headers,
+        rows: resp.rows,
         fileName: data.fileName,
-        columnTypes: filtered.columnTypes,
-        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+        columnTypes: resp.columnTypes,
+        pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-         hiddenColumns: currentHiddenColumns,
-         deletedColumns: currentDeletedColumns,
-       });
-      // Remember the source for this duplicated column
-      setDuplicateMap(prev => ({ ...prev, [newName]: prev[col] || col }));
+        hiddenColumns: data.hiddenColumns,
+        deletedColumns: data.deletedColumns,
+      });
+      
+      // Auto-select the newly duplicated column
+      setSelectedColumn(newColumnName);
       
       // Add to history
-      addToHistory('Duplicate Column', `Duplicated column "${col}" as "${newName}"`);
+      addToHistory('Duplicate Column', `Duplicated "${originalColumn}" as "${newColumnName}"`);
+      
+      toast({
+        title: "Column Duplicated",
+        description: `"${originalColumn}" duplicated as "${newColumnName}"`,
+      });
+      
     } catch (err) {
+      console.error('[DataFrameOperations] Duplicate column error:', err);
       handleApiError('Duplicate column failed', err);
-      addToHistory('Duplicate Column', `Failed to duplicate column "${col}"`, 'error');
+      addToHistory('Duplicate Column', `Failed to duplicate "${originalColumn}"`, 'error');
     } finally {
       setDuplicateLoading(false);
     }
