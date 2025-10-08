@@ -62,7 +62,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
               type="button"
             >
               <op.icon className={cn('h-4 w-4', op.color)} />
-              <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
                 {op.label}
               </span>
             </Button>
@@ -90,7 +90,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
               type="button"
             >
               <tool.icon className={cn('h-4 w-4', tool.color)} />
-              <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
                 {tool.label}
               </span>
             </Button>
@@ -110,7 +110,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
           type="button"
         >
           <Layers className="h-4 w-4 text-cyan-500" />
-          <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+          <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
             Grid View
           </span>
         </Button>
@@ -123,7 +123,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
           type="button"
         >
           <Download className="h-4 w-4 text-emerald-500" />
-          <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+          <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
             Export
           </span>
         </Button>
@@ -136,7 +136,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
           type="button"
         >
           <Maximize2 className="h-4 w-4 text-foreground" />
-          <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+          <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
             Fullscreen
           </span>
         </Button>

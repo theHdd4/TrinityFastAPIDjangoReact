@@ -28,7 +28,7 @@ export const SlideNotes: React.FC<SlideNotesProps> = ({
   };
 
   return (
-    <div className="fixed right-0 top-0 h-full w-96 bg-background border-l border-border shadow-xl z-40 animate-slide-in-right">
+    <div className="flex h-full w-80 flex-shrink-0 flex-col bg-background border-l border-border shadow-xl animate-slide-in-right">
       <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30">
         <div className="flex items-center gap-2">
           <StickyNote className="h-5 w-5 text-primary" />

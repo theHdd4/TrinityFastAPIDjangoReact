@@ -673,6 +673,15 @@ const ExhibitionMode = () => {
             onGridView={() => setShowGridView(true)}
           />
         )}
+
+        {showNotes && (
+          <SlideNotes
+            currentSlide={currentSlide}
+            notes={notes}
+            onNotesChange={handleNotesChange}
+            onClose={() => setShowNotes(false)}
+          />
+        )}
       </div>
 
       {exhibitedCards.length > 0 && (
@@ -689,15 +698,6 @@ const ExhibitionMode = () => {
           onToggleViewMode={handleToggleViewMode}
           viewMode={viewMode}
           canEdit={canEdit}
-        />
-      )}
-
-      {showNotes && (
-        <SlideNotes
-          currentSlide={currentSlide}
-          notes={notes}
-          onNotesChange={handleNotesChange}
-          onClose={() => setShowNotes(false)}
         />
       )}
 
