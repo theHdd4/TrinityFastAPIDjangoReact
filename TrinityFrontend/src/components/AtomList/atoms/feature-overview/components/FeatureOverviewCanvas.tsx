@@ -482,7 +482,7 @@ const loadCsvDataset = async (
   };
 };
 
-const cloneDeep = <T>(value: T): T => {
+function cloneDeep<T>(value: T): T {
   if (value === undefined) {
     return value;
   }
@@ -493,7 +493,7 @@ const cloneDeep = <T>(value: T): T => {
     console.warn("Unable to clone value for exhibition selection", error);
     return value;
   }
-};
+}
 
 const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   settings,
