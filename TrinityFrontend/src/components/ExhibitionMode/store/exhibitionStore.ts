@@ -439,7 +439,25 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
   setCards: (cards: LayoutCard[] | unknown) => {
     const safeCards = extractCards(cards);
-    const cardsWithDefaults = safeCards.map(withPresentationDefaults);
+
+    const cardsWithDefaults = safeCards.map(card => {
+      const slideAtoms = Array.isArray(card.atoms) ? card.atoms : [];
+      const isExhibited = Boolean(card.isExhibited);
+
+      if (!isExhibited || slideAtoms.length === 0) {
+        return withPresentationDefaults(card);
+      }
+
+      const catalogueAtoms = mergeCatalogueAtoms(card.catalogueAtoms, slideAtoms);
+
+      return withPresentationDefaults({
+        ...card,
+        atoms: [],
+        catalogueAtoms,
+        exhibitionControlEnabled: card.exhibitionControlEnabled ?? true,
+      });
+    });
+
     const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
     set({ cards: cardsWithDefaults, exhibitedCards });
   },
