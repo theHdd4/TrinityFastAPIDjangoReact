@@ -47,3 +47,66 @@ class ExhibitionConfigurationOut(ExhibitionConfigurationBase):
 
     class Config:
         orm_mode = True
+
+
+class ExhibitionCatalogueComponent(BaseModel):
+    id: str = Field(..., description="Unique identifier for the catalogue component")
+    atom_id: str = Field(
+        ...,
+        alias="atomId",
+        description="Identifier of the originating atom",
+    )
+    title: str = Field(..., description="Display title for the component")
+    category: Optional[str] = Field(
+        default=None,
+        description="Category grouping used when rendering the component",
+    )
+    color: Optional[str] = Field(
+        default=None,
+        description="Tailwind colour class applied to the component chip",
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Arbitrary metadata describing the component",
+    )
+
+    class Config:
+        allow_population_by_field_name = True
+        fields = {"atom_id": "atomId"}
+
+
+class ExhibitionCatalogueCard(BaseModel):
+    card_id: Optional[str] = Field(
+        default=None,
+        alias="cardId",
+        description="Identifier that links the catalogue section to a slide",
+    )
+    molecule_id: Optional[str] = Field(
+        default=None,
+        alias="moleculeId",
+        description="Identifier of the originating molecule, when available",
+    )
+    molecule_title: Optional[str] = Field(
+        default=None,
+        alias="moleculeTitle",
+        description="Human readable title for the originating atom or molecule",
+    )
+    atoms: List[ExhibitionCatalogueComponent] = Field(
+        default_factory=list,
+        description="Components that can be dragged onto exhibition slides",
+    )
+
+    class Config:
+        allow_population_by_field_name = True
+        fields = {
+            "card_id": "cardId",
+            "molecule_id": "moleculeId",
+            "molecule_title": "moleculeTitle",
+        }
+
+
+class ExhibitionCatalogueOut(BaseModel):
+    client_name: str = Field(..., min_length=1)
+    app_name: str = Field(..., min_length=1)
+    project_name: str = Field(..., min_length=1)
+    cards: List[ExhibitionCatalogueCard] = Field(default_factory=list)

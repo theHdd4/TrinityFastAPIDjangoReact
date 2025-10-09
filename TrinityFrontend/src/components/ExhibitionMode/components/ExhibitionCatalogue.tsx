@@ -72,7 +72,7 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
       <ScrollArea className="flex-1">
         <div className="p-2">
           {cards.map((card, index) => {
-            const availableAtoms = card.catalogueAtoms ?? card.atoms;
+            const availableAtoms = Array.isArray(card.catalogueAtoms) ? card.catalogueAtoms : [];
 
             return (
               <div key={card.id} className="mb-2">

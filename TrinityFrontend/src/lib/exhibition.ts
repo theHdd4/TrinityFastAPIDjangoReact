@@ -28,6 +28,29 @@ export interface ExhibitionConfigurationResponse extends ExhibitionConfiguration
   updated_at?: string;
 }
 
+export interface ExhibitionCatalogueComponentPayload {
+  id: string;
+  atom_id: string;
+  title: string;
+  category?: string;
+  color?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface ExhibitionCatalogueCardPayload {
+  card_id?: string;
+  molecule_id?: string;
+  molecule_title?: string;
+  atoms: ExhibitionCatalogueComponentPayload[];
+}
+
+export interface ExhibitionCatalogueResponse {
+  client_name: string;
+  app_name: string;
+  project_name: string;
+  cards: ExhibitionCatalogueCardPayload[];
+}
+
 const defaultHeaders = {
   'Content-Type': 'application/json',
 };
@@ -71,4 +94,25 @@ export async function fetchExhibitionConfiguration(
   }
 
   return response.json() as Promise<ExhibitionConfigurationResponse>;
+}
+
+export async function fetchExhibitionCatalogue(
+  params: ExhibitionConfigurationQuery,
+): Promise<ExhibitionCatalogueResponse | null> {
+  const search = new URLSearchParams(params as Record<string, string>);
+  const response = await fetch(`${EXHIBITION_API}/catalogue?${search.toString()}`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || 'Failed to fetch exhibition catalogue');
+  }
+
+  return response.json() as Promise<ExhibitionCatalogueResponse>;
 }

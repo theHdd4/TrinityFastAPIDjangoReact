@@ -1,6 +1,11 @@
 
 import { create } from 'zustand';
-import { fetchExhibitionConfiguration, ExhibitionFeatureOverviewPayload } from '@/lib/exhibition';
+import {
+  fetchExhibitionCatalogue,
+  fetchExhibitionConfiguration,
+  ExhibitionCatalogueCardPayload,
+  ExhibitionFeatureOverviewPayload,
+} from '@/lib/exhibition';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 
 export type CardColor = 'default' | 'blue' | 'purple' | 'green' | 'orange';
@@ -110,6 +115,143 @@ const mergeCatalogueAtoms = (
   return dedupeAtoms([...start, ...extra]);
 };
 
+const normaliseCatalogueString = (value: unknown): string | undefined => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+
+  const stringified = String(value).trim();
+  return stringified.length > 0 ? stringified : undefined;
+};
+
+const normaliseCatalogueKey = (value: unknown): string | undefined => {
+  const base = normaliseCatalogueString(value);
+  return base ? base.toLowerCase() : undefined;
+};
+
+interface CatalogueLookupEntry {
+  atoms: DroppedAtom[];
+  moleculeId?: string;
+  moleculeTitle?: string;
+}
+
+interface NormalisedCatalogueCardEntry {
+  keys: string[];
+  atoms: DroppedAtom[];
+  moleculeId?: string;
+  moleculeTitle?: string;
+}
+
+const normaliseCatalogueCardEntry = (entry: any): NormalisedCatalogueCardEntry | null => {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+
+  const atomCandidates = Array.isArray(entry.atoms)
+    ? entry.atoms
+    : Array.isArray(entry.components)
+      ? entry.components
+      : Array.isArray(entry.catalogueAtoms)
+        ? entry.catalogueAtoms
+        : Array.isArray(entry.items)
+          ? entry.items
+          : [];
+
+  const atoms = atomCandidates.map(normalizeAtom).filter(Boolean) as DroppedAtom[];
+
+  const moleculeId = normaliseCatalogueString(
+    entry.moleculeId ?? entry.molecule_id ?? entry.moleculeID,
+  );
+  const moleculeTitle = normaliseCatalogueString(
+    entry.moleculeTitle ?? entry.molecule_title ?? entry.atomTitle ?? entry.atom_title ?? entry.title,
+  );
+
+  const keyCandidates = [
+    normaliseCatalogueKey(entry.cardId),
+    normaliseCatalogueKey(entry.card_id),
+    normaliseCatalogueKey(entry.cardID),
+    normaliseCatalogueKey(entry.id),
+    normaliseCatalogueKey(entry.moleculeId),
+    normaliseCatalogueKey(entry.molecule_id),
+    normaliseCatalogueKey(entry.moleculeID),
+    normaliseCatalogueKey(entry.moleculeTitle),
+    normaliseCatalogueKey(entry.molecule_title),
+    normaliseCatalogueKey(entry.atomTitle),
+    normaliseCatalogueKey(entry.atom_title),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  if (keyCandidates.length === 0) {
+    const fallbackKey = normaliseCatalogueKey(moleculeTitle ?? moleculeId);
+    if (fallbackKey) {
+      keyCandidates.push(fallbackKey);
+    }
+  }
+
+  if (keyCandidates.length === 0) {
+    return null;
+  }
+
+  const uniqueKeys = Array.from(new Set(keyCandidates));
+
+  return {
+    keys: uniqueKeys,
+    atoms,
+    moleculeId: moleculeId ?? undefined,
+    moleculeTitle: moleculeTitle ?? undefined,
+  };
+};
+
+const buildCatalogueLookup = (entries: any[]): Map<string, CatalogueLookupEntry> => {
+  const lookup = new Map<string, CatalogueLookupEntry>();
+
+  entries.forEach(entry => {
+    const normalised = normaliseCatalogueCardEntry(entry);
+    if (!normalised) {
+      return;
+    }
+
+    normalised.keys.forEach(key => {
+      const existing = lookup.get(key);
+      if (existing) {
+        existing.atoms = mergeCatalogueAtoms(existing.atoms, normalised.atoms);
+        if (!existing.moleculeId && normalised.moleculeId) {
+          existing.moleculeId = normalised.moleculeId;
+        }
+        if (!existing.moleculeTitle && normalised.moleculeTitle) {
+          existing.moleculeTitle = normalised.moleculeTitle;
+        }
+        return;
+      }
+
+      lookup.set(key, {
+        atoms: mergeCatalogueAtoms(normalised.atoms),
+        moleculeId: normalised.moleculeId,
+        moleculeTitle: normalised.moleculeTitle,
+      });
+    });
+  });
+
+  return lookup;
+};
+
+const collectCardLookupKeys = (card: LayoutCard): string[] => {
+  const keys = new Set<string>();
+
+  [card.id, card.moleculeId, card.moleculeTitle].forEach(value => {
+    const key = normaliseCatalogueKey(value);
+    if (key) {
+      keys.add(key);
+    }
+  });
+
+  return Array.from(keys);
+};
+
 export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   cardColor: 'default',
   cardWidth: 'L',
@@ -124,7 +266,10 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
 
 const withPresentationDefaults = (card: LayoutCard): LayoutCard => {
   const slideAtoms = Array.isArray(card.atoms) ? card.atoms : [];
-  const catalogueAtoms = mergeCatalogueAtoms(card.catalogueAtoms, slideAtoms);
+  const hasExplicitCatalogue = Array.isArray(card.catalogueAtoms);
+  const catalogueAtoms = hasExplicitCatalogue
+    ? mergeCatalogueAtoms(card.catalogueAtoms)
+    : mergeCatalogueAtoms(undefined, slideAtoms);
   const isEditableSlide = Boolean(card.exhibitionControlEnabled);
   const safeSlideAtoms = isEditableSlide ? slideAtoms : [];
   const safeCatalogueAtoms = catalogueAtoms;
@@ -325,6 +470,8 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     let loadedCards: LayoutCard[] = [];
     const context = getActiveProjectContext();
 
+    let remoteCatalogueEntries: ExhibitionCatalogueCardPayload[] = [];
+
     if (context) {
       try {
         const remote = await fetchExhibitionConfiguration(context);
@@ -338,13 +485,53 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       } catch (error) {
         console.warn('Failed to fetch exhibition configuration', error);
       }
+
+      try {
+        const catalogue = await fetchExhibitionCatalogue(context);
+        if (catalogue && Array.isArray(catalogue.cards)) {
+          remoteCatalogueEntries = catalogue.cards;
+        }
+      } catch (error) {
+        console.warn('Failed to fetch exhibition catalogue', error);
+      }
     }
 
     if (loadedCards.length === 0) {
       loadedCards = loadCardsFromStorage();
     }
 
-    let cardsWithDefaults = loadedCards.map(withPresentationDefaults);
+    const catalogueLookup = buildCatalogueLookup(remoteCatalogueEntries);
+
+    let cardsWithDefaults = loadedCards.map(card => {
+      const baseCard: LayoutCard = {
+        ...card,
+        catalogueAtoms: Array.isArray(card.catalogueAtoms) && card.catalogueAtoms.length > 0
+          ? [...card.catalogueAtoms]
+          : undefined,
+      };
+
+      if (catalogueLookup.size > 0) {
+        const lookupKeys = collectCardLookupKeys(card);
+        for (const key of lookupKeys) {
+          const match = catalogueLookup.get(key);
+          if (!match) {
+            continue;
+          }
+
+          baseCard.catalogueAtoms = mergeCatalogueAtoms([], match.atoms);
+          if (!baseCard.moleculeId && match.moleculeId) {
+            baseCard.moleculeId = match.moleculeId;
+          }
+          if (!baseCard.moleculeTitle && match.moleculeTitle) {
+            baseCard.moleculeTitle = match.moleculeTitle;
+          }
+          break;
+        }
+      }
+
+      return withPresentationDefaults(baseCard);
+    });
+
     cardsWithDefaults = ensureBlankSlidePresence(cardsWithDefaults);
     const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
     set({ cards: cardsWithDefaults, exhibitedCards });
