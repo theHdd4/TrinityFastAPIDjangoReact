@@ -63,7 +63,22 @@ except Exception:  # pragma: no cover - fallback when app package imports fail
 
         return f"mongodb://{credentials}{host}:{port}{path}{query}"
 
-DEFAULT_DATABASE = os.getenv("MONGO_DB", "trinity_db")
+try:  # pragma: no cover - exhibition module should not depend on classifier config
+    from app.features.column_classifier.config import settings as _classifier_settings
+except Exception:  # pragma: no cover - fallback when classifier settings unavailable
+    _classifier_settings = None
+
+DEFAULT_DATABASE = (
+    os.getenv("EXHIBITION_MONGO_DB")
+    or os.getenv("EXHIBITION_DB")
+    or os.getenv("EXHIBITION_DATABASE")
+    or (
+        getattr(_classifier_settings, "classifier_configs_database", None)
+        if _classifier_settings is not None
+        else None
+    )
+    or "trinity_db"
+)
 DEFAULT_COLLECTION = os.getenv("EXHIBITION_COLLECTION", "exhibition_catalogue")
 
 _mongo_client: Optional[MongoClient] = None
@@ -152,14 +167,22 @@ def ensure_mongo_connection(*, force: bool = False) -> bool:
         client = MongoClient(uri, serverSelectionTimeoutMS=5000, **auth_kwargs)
         client.admin.command("ping")
 
-        database: Optional[Database]
-        try:
-            database = client.get_default_database()
-        except ConfigurationError:
-            database = None
+        desired_database_name = DEFAULT_DATABASE
 
-        if database is None:
-            database = client[DEFAULT_DATABASE]
+        database: Optional[Database] = None
+        try:
+            default_db = client.get_default_database()
+        except ConfigurationError:
+            default_db = None
+
+        if default_db is not None and default_db.name != desired_database_name:
+            logging.info(
+                "Exhibition catalogue overriding Mongo default database %s with %s",
+                default_db.name,
+                desired_database_name,
+            )
+
+        database = client[desired_database_name]
 
         try:
             existing_collections = set(database.list_collection_names())
