@@ -1006,7 +1006,7 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
       ) : headers.length === 0 || data.length === 0 ? (
         <div className="p-4 text-center text-gray-500">No results to display.</div>
       ) : (
-        <div className="mx-auto max-w-screen-2xl">
+        <div>
           <Table
             headers={headers.map((header, index) => (
               <ContextMenu key={header}>

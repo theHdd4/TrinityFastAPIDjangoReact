@@ -451,7 +451,7 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
           </div>
         </div>
       {!settings.isLoading && settings.enableDimensionMapping && (
-        <div className="border-t p-4 overflow-y-auto">
+        <div className="pt-1 px-4 pb-4 overflow-y-auto">
           <ColumnClassifierDimensionMapping
             customDimensions={
               classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}

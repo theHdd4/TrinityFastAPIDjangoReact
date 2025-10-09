@@ -629,12 +629,29 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         return;
       }
       
+      // Wait for column data to be loaded before processing dimension mapping
+      const hasColumnData = 
+        (Array.isArray(settings.allColumns) && settings.allColumns.length > 0) ||
+        (Array.isArray(settings.columnSummary) && settings.columnSummary.length > 0);
+      
+      if (!hasColumnData) {
+        // Column data not loaded yet, skip dimension mapping for now
+        return;
+      }
+      
       try {
-        const { mapping: rawMapping } = await fetchDimensionMapping({
-          objectName: settings.dataSource,
-        });
-        if (!active) return;
-        const mapping = filterUnattributed(rawMapping);
+        // First check if dimension mapping is already in settings (from manual file selection)
+        let mapping = filterUnattributed(settings.dimensionMap || {});
+        
+        // If no mapping in settings, fetch from backend
+        if (!mapping || Object.keys(mapping).length === 0) {
+          const { mapping: rawMapping } = await fetchDimensionMapping({
+            objectName: settings.dataSource,
+          });
+          if (!active) return;
+          mapping = filterUnattributed(rawMapping);
+        }
+        
         const summaryColumns = new Set(
           (
             Array.isArray(settings.allColumns) && settings.allColumns.length > 0
@@ -661,7 +678,12 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
             )
           : mapping;
         setDimensionMap(trimmedMapping);
-        onUpdateSettings({ dimensionMap: trimmedMapping });
+        
+        // Only update settings if the mapping changed
+        const currentMapping = filterUnattributed(settings.dimensionMap || {});
+        if (JSON.stringify(currentMapping) !== JSON.stringify(trimmedMapping)) {
+          onUpdateSettings({ dimensionMap: trimmedMapping });
+        }
 
         // Check if mapping has any valid entries
         const hasValidMapping = Object.values(trimmedMapping).some(
@@ -687,7 +709,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     return () => {
       active = false;
     };
-  }, [settings.dataSource]);
+  }, [settings.dataSource, settings.allColumns, settings.columnSummary, settings.dimensionMap]);
 
    useEffect(() => {
      if (!settings.dataSource) {
@@ -1825,7 +1847,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           </div> */}
 
           {skuRows.length > 0 && (
-            <div className="mt-8 mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="mt-8 rounded-2xl border border-slate-200 bg-white shadow-sm">
               <Table
                 headers={[
                   <ContextMenu key="SR NO.">

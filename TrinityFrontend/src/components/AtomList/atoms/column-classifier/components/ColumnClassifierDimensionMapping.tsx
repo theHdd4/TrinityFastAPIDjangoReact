@@ -229,27 +229,15 @@ const ColumnClassifierDimensionMapping: React.FC<DimensionMappingProps> = ({
     //   onDragEnd={handleDragEnd}
     // >
       <div>
-        <div className="flex items-center gap-3 mb-6">
-          <div className="p-2 bg-gradient-to-br from-blue-500/20 to-blue-400/10 rounded-xl">
-          </div>
-          <h3 className="text-xl font-bold text-foreground">Dimension Mapping</h3>
-          <Badge
-            variant="secondary"
-            className="bg-gradient-to-r from-blue-100 to-blue-50 text-blue-700 border-blue-200"
-          >
-            Assign identifiers to business dimensions
-          </Badge>
-        </div>
 
-        <div className="p-4 space-y-6">
+        <div className="px-4 pb-4">
           {/* Unified Dimension Mapping Box */}
-          <div className="p-4 w-full">
+          <div className="px-4 pb-4 w-full">
           <Card className="bg-white/80 backdrop-blur-sm overflow-hidden border-2 border-gray-200 rounded-xl">
-            <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-3">
-              <div className="w-2 h-4 rounded-full bg-gradient-to-r from-blue-500/60 to-blue-600/80" />
-              <h4 className="text-base font-semibold text-gray-900">Apply Dimension Mapping</h4>
-            </div>
-            <div className="p-5">
+             <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-3">
+               <h4 className="text-base font-semibold text-gray-900"><span className="text-green-600">(2/2)</span> Now assign each identifier to one of the dimensions. Unassigned identifiers may get ignored in some of the atoms. Ensure all identifiers are appropriately assigned</h4>
+             </div>
+            <div className="p-3">
               <div className="relative rounded-lg bg-white/50 p-4">
                 <div className="space-y-6">
                   {/* Unattributed Section */}

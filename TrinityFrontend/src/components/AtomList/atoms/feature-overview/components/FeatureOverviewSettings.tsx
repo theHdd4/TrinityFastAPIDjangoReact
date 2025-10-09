@@ -83,6 +83,24 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
       '';
 
     const lookupKey = normalized.split('/').pop() || normalized;
+    
+    // Get current project context from env
+    const envStr = localStorage.getItem('env');
+    let currentProjectPrefix = '';
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        const client = env.CLIENT_NAME || '';
+        const app = env.APP_NAME || '';
+        const project = env.PROJECT_NAME || '';
+        if (client && app && project) {
+          currentProjectPrefix = `${client}/${app}/${project}/`;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    
     try {
       const ticketRes = await fetch(
         `${VALIDATE_API}/latest_ticket/${encodeURIComponent(lookupKey)}`,
@@ -94,22 +112,26 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
       if (ticketRes.ok) {
         const ticket = await ticketRes.json();
         if (ticket?.arrow_name) {
-          activeSource = ticket.arrow_name;
+          // Extract just the filename and construct path with current project
+          const fileName = ticket.arrow_name.split('/').pop() || ticket.arrow_name;
+          activeSource = currentProjectPrefix ? `${currentProjectPrefix}${fileName}` : ticket.arrow_name;
         }
         if (ticket?.csv_name) {
           displayName = ticket.csv_name;
         }
         if (ticket?.arrow_name) {
+          const fileName = ticket.arrow_name.split('/').pop() || ticket.arrow_name;
+          const objectNameWithCurrentProject = currentProjectPrefix ? `${currentProjectPrefix}${fileName}` : ticket.arrow_name;
           setFrames(prev => {
             const existing = Array.isArray(prev) ? prev : [];
-            if (existing.some(f => f.object_name === ticket.arrow_name)) {
+            if (existing.some(f => f.object_name === objectNameWithCurrentProject)) {
               return existing;
             }
-            const baseName = ticket.arrow_name.split('/').pop() || ticket.arrow_name;
+            const baseName = fileName;
             return [
               ...existing,
               {
-                object_name: ticket.arrow_name,
+                object_name: objectNameWithCurrentProject,
                 arrow_name: baseName,
                 csv_name: ticket.csv_name || baseName,
               },
