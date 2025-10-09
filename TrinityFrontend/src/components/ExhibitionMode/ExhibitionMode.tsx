@@ -158,6 +158,13 @@ const ExhibitionMode = () => {
     ],
   );
 
+  const handleStopSlideshow = useCallback(() => {
+    setIsSlideshowActive(false);
+    clearSlideshowTimers();
+    setSlideshowTransform('translateX(0px) scale(1)');
+    setSlideshowOpacity(1);
+  }, [clearSlideshowTimers]);
+
   const goToSlide = useCallback(
     (targetIndex: number, direction: 'forward' | 'backward' = 'forward') => {
       if (targetIndex < 0 || targetIndex >= exhibitedCards.length) {
@@ -198,13 +205,6 @@ const ExhibitionMode = () => {
       return !prev;
     });
   }, [handleStopSlideshow, isSlideshowActive]);
-
-  const handleStopSlideshow = useCallback(() => {
-    setIsSlideshowActive(false);
-    clearSlideshowTimers();
-    setSlideshowTransform('translateX(0px) scale(1)');
-    setSlideshowOpacity(1);
-  }, [clearSlideshowTimers]);
 
   const handleStartSlideshow = useCallback(() => {
     if (exhibitedCards.length === 0) {
