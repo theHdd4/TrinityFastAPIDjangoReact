@@ -4,10 +4,13 @@ import { ChevronLeft, ChevronRight, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DroppedAtom, LayoutCard } from '../store/exhibitionStore';
 
+type SlideIndexLookup = ReadonlyMap<string, number> | Record<string, number>;
+
 interface ExhibitionCatalogueProps {
   cards: LayoutCard[];
   currentSlide: number;
-  onSlideSelect: (index: number) => void;
+  onSlideSelect?: (index: number) => void;
+  slideIndexByCardId?: SlideIndexLookup;
   onDragStart?: (atom: DroppedAtom, cardId: string, origin: 'catalogue' | 'slide') => void;
   onDragEnd?: () => void;
   enableDragging?: boolean;
@@ -18,11 +21,26 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
   cards,
   currentSlide,
   onSlideSelect,
+  slideIndexByCardId,
   onDragStart,
   onDragEnd,
   enableDragging = true,
   onCollapse,
 }) => {
+  const resolveSlideIndex = (cardId: string): number | undefined => {
+    if (!slideIndexByCardId) {
+      return undefined;
+    }
+
+    if (slideIndexByCardId instanceof Map) {
+      const mapped = slideIndexByCardId.get(cardId);
+      return typeof mapped === 'number' ? mapped : undefined;
+    }
+
+    const mapped = slideIndexByCardId[cardId];
+    return typeof mapped === 'number' ? mapped : undefined;
+  };
+
   const getCatalogueTitle = (card: LayoutCard): string => {
     if (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0) {
       return card.moleculeTitle.trim();
@@ -75,18 +93,28 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
 
       <ScrollArea className="flex-1">
         <div className="p-2">
-          {cards.map((card, index) => {
+          {cards.map(card => {
             const availableAtoms = card.catalogueAtoms ?? card.atoms;
             const catalogueTitle = getCatalogueTitle(card);
+            const slideIndex = resolveSlideIndex(card.id);
+            const isLinkedToSlide = typeof slideIndex === 'number';
+            const isActive = isLinkedToSlide && slideIndex === currentSlide;
 
             return (
               <div key={card.id} className="mb-2">
                 <button
                   type="button"
-                  onClick={() => onSlideSelect(index)}
+                  onClick={() => {
+                    if (!onSlideSelect || !isLinkedToSlide) {
+                      return;
+                    }
+                    onSlideSelect(slideIndex);
+                  }}
+                  disabled={!isLinkedToSlide || !onSlideSelect}
                   className={cn(
                     'w-full text-left px-3 py-2 rounded-lg transition-all group hover:bg-muted/50',
-                    currentSlide === index && 'bg-primary/10 border border-primary/30'
+                    isActive && 'bg-primary/10 border border-primary/30',
+                    (!isLinkedToSlide || !onSlideSelect) && 'opacity-70 cursor-default hover:bg-transparent'
                   )}
                   title={`Select ${catalogueTitle}`}
                 >
@@ -94,7 +122,7 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
                     <ChevronRight
                       className={cn(
                         'h-4 w-4 transition-transform',
-                        currentSlide === index && 'rotate-90'
+                        isActive && 'rotate-90'
                       )}
                     />
                     <span className="text-sm font-semibold truncate">{catalogueTitle}</span>

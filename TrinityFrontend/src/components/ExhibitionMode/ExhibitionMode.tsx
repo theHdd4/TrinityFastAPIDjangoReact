@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Download, FileText, Grid3x3, Presentation, Save, Share2, Undo2 } from 'lucide-react';
 import Header from '@/components/Header';
@@ -22,17 +22,41 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { saveExhibitionConfiguration } from '@/lib/exhibition';
-import { getActiveProjectContext } from '@/utils/projectEnv';
+import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
 const SLIDESHOW_ANIMATION_MS = 450;
 
+const contextsEqual = (a: ProjectContext | null, b: ProjectContext | null): boolean => {
+  if (!a && !b) {
+    return true;
+  }
+  if (!a || !b) {
+    return false;
+  }
+
+  return (
+    a.client_name === b.client_name &&
+    a.app_name === b.app_name &&
+    a.project_name === b.project_name
+  );
+};
+
 const ExhibitionMode = () => {
-  const { exhibitedCards, cards, loadSavedConfiguration, updateCard, addBlankSlide, setCards } =
-    useExhibitionStore();
+  const {
+    exhibitedCards,
+    cards,
+    catalogueCards,
+    loadSavedConfiguration,
+    updateCard,
+    addBlankSlide,
+    setCards,
+    lastLoadedContext,
+  } = useExhibitionStore();
   const { toast } = useToast();
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('exhibition:edit');
+  const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
 
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -72,6 +96,7 @@ const ExhibitionMode = () => {
   const lastSerializedCardsRef = useRef<string | null>(null);
   const autoAdvanceTimerRef = useRef<number | null>(null);
   const transitionTimerRef = useRef<number | null>(null);
+  const hasRequestedInitialLoadRef = useRef(false);
 
   const clearAutoAdvanceTimer = useCallback(() => {
     if (autoAdvanceTimerRef.current !== null) {
@@ -118,6 +143,14 @@ const ExhibitionMode = () => {
     },
     [],
   );
+
+  const slideIndexByCardId = useMemo(() => {
+    const lookup: Record<string, number> = {};
+    exhibitedCards.forEach((card, index) => {
+      lookup[card.id] = index;
+    });
+    return lookup;
+  }, [exhibitedCards]);
 
   const runSlideTransition = useCallback(
     (targetIndex: number, direction: 'forward' | 'backward' = 'forward') => {
@@ -339,10 +372,53 @@ const ExhibitionMode = () => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (cards.length === 0) {
-      void loadSavedConfiguration();
+    if (typeof window === 'undefined') {
+      return;
     }
-  }, [cards.length, loadSavedConfiguration]);
+
+    const syncContext = () => {
+      setProjectContext(prev => {
+        const next = getActiveProjectContext();
+        if (contextsEqual(prev, next)) {
+          return prev;
+        }
+        return next;
+      });
+    };
+
+    syncContext();
+
+    window.addEventListener('storage', syncContext);
+    window.addEventListener('focus', syncContext);
+
+    return () => {
+      window.removeEventListener('storage', syncContext);
+      window.removeEventListener('focus', syncContext);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasRequestedInitialLoadRef.current) {
+      hasRequestedInitialLoadRef.current = true;
+      if (projectContext) {
+        void loadSavedConfiguration(projectContext);
+      } else {
+        void loadSavedConfiguration(null);
+      }
+      return;
+    }
+
+    if (projectContext) {
+      if (!lastLoadedContext || !contextsEqual(projectContext, lastLoadedContext)) {
+        void loadSavedConfiguration(projectContext);
+      }
+      return;
+    }
+
+    if (!projectContext && lastLoadedContext) {
+      void loadSavedConfiguration(null);
+    }
+  }, [projectContext, lastLoadedContext, loadSavedConfiguration]);
 
   useEffect(() => {
     const serialized = JSON.stringify(cards);
@@ -906,9 +982,10 @@ const ExhibitionMode = () => {
 
             {isCatalogueOpen && (
               <ExhibitionCatalogue
-                cards={exhibitedCards}
+                cards={catalogueCards}
                 currentSlide={currentSlide}
                 onSlideSelect={handleSlideSelection}
+                slideIndexByCardId={slideIndexByCardId}
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
                 enableDragging={canEdit}

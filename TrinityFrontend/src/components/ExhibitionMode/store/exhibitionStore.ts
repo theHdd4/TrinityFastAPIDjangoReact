@@ -1,7 +1,11 @@
 
 import { create } from 'zustand';
-import { fetchExhibitionConfiguration, ExhibitionFeatureOverviewPayload } from '@/lib/exhibition';
-import { getActiveProjectContext } from '@/utils/projectEnv';
+import {
+  fetchExhibitionConfiguration,
+  ExhibitionFeatureOverviewPayload,
+  ExhibitionSkuPayload,
+} from '@/lib/exhibition';
+import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 
 export type CardColor = 'default' | 'blue' | 'purple' | 'green' | 'orange';
 export type CardWidth = 'M' | 'L';
@@ -72,7 +76,10 @@ export interface LayoutCard {
 interface ExhibitionStore {
   cards: LayoutCard[];
   exhibitedCards: LayoutCard[];
-  loadSavedConfiguration: () => Promise<void>;
+  catalogueCards: LayoutCard[];
+  featureOverviewConfigs: ExhibitionFeatureOverviewPayload[];
+  lastLoadedContext: ProjectContext | null;
+  loadSavedConfiguration: (context?: ProjectContext | null) => Promise<void>;
   toggleCardExhibition: (cardId: string) => void;
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => void;
   addBlankSlide: (afterSlideIndex?: number) => LayoutCard | null;
@@ -108,6 +115,197 @@ const mergeCatalogueAtoms = (
   const start = Array.isArray(base) ? base : [];
   const extra = Array.isArray(additions) ? additions : [];
   return dedupeAtoms([...start, ...extra]);
+};
+
+const isRecord = (value: unknown): value is Record<string, any> => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
+const normaliseSku = (
+  sku: unknown,
+  index: number,
+  fallbackPrefix: string,
+  sourceAtomTitle: string,
+): ExhibitionSkuPayload | null => {
+  if (!isRecord(sku)) {
+    return null;
+  }
+
+  const rawId = sku.id;
+  const rawTitle = sku.title;
+  const id = typeof rawId === 'string' && rawId.trim().length > 0 ? rawId.trim() : `${fallbackPrefix}-${index}`;
+  const title = typeof rawTitle === 'string' && rawTitle.trim().length > 0 ? rawTitle.trim() : `SKU ${index + 1}`;
+
+  const details = isRecord(sku.details) ? { ...sku.details } : undefined;
+  if (details) {
+    const rawSourceTitle = details.sourceAtomTitle;
+    if (typeof rawSourceTitle !== 'string' || rawSourceTitle.trim().length === 0) {
+      details.sourceAtomTitle = sourceAtomTitle;
+    }
+  }
+
+  return {
+    id,
+    title,
+    details,
+  };
+};
+
+const normaliseFeatureOverviewEntry = (
+  entry: unknown,
+): ExhibitionFeatureOverviewPayload | null => {
+  if (!isRecord(entry)) {
+    return null;
+  }
+
+  const atomId = typeof entry.atomId === 'string' && entry.atomId.trim().length > 0 ? entry.atomId.trim() : '';
+  if (!atomId) {
+    return null;
+  }
+
+  const fallbackCardId = atomId;
+  const rawCardId = entry.cardId;
+  const cardId = typeof rawCardId === 'string' && rawCardId.trim().length > 0 ? rawCardId.trim() : fallbackCardId;
+
+  const componentsRecord = isRecord(entry.components) ? entry.components : {};
+  const components = {
+    skuStatistics: Boolean(componentsRecord.skuStatistics),
+    trendAnalysis: Boolean(componentsRecord.trendAnalysis),
+  };
+
+  const deriveSourceTitle = (): string => {
+    if (!Array.isArray(entry.skus)) {
+      return atomId;
+    }
+
+    for (const sku of entry.skus) {
+      if (isRecord(sku.details) && typeof sku.details.sourceAtomTitle === 'string' && sku.details.sourceAtomTitle.trim()) {
+        return sku.details.sourceAtomTitle.trim();
+      }
+    }
+
+    return atomId;
+  };
+
+  const sourceAtomTitle = deriveSourceTitle();
+
+  const skus = Array.isArray(entry.skus)
+    ? (entry.skus
+        .map((sku, index) => normaliseSku(sku, index, `${cardId}-sku`, sourceAtomTitle))
+        .filter(Boolean) as ExhibitionSkuPayload[])
+    : [];
+
+  const chartSettings = isRecord(entry.chartSettings)
+    ? (entry.chartSettings as ExhibitionFeatureOverviewPayload['chartSettings'])
+    : undefined;
+  const skuStatisticsSettings = isRecord(entry.skuStatisticsSettings)
+    ? (entry.skuStatisticsSettings as ExhibitionFeatureOverviewPayload['skuStatisticsSettings'])
+    : undefined;
+
+  return {
+    atomId,
+    cardId,
+    components,
+    skus,
+    chartSettings,
+    skuStatisticsSettings,
+  };
+};
+
+const extractFeatureOverviewEntries = (raw: unknown): ExhibitionFeatureOverviewPayload[] => {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw.map(normaliseFeatureOverviewEntry).filter((entry): entry is ExhibitionFeatureOverviewPayload => entry !== null);
+};
+
+const humaniseIdentifier = (value: string): string => {
+  return value
+    .split(/[-_]/g)
+    .filter(Boolean)
+    .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
+};
+
+const deriveSourceTitleFromConfig = (config: ExhibitionFeatureOverviewPayload): string => {
+  const fromSku = config.skus
+    .map(sku => sku.details?.sourceAtomTitle)
+    .find(title => typeof title === 'string' && title.trim().length > 0);
+
+  if (fromSku) {
+    return fromSku.trim();
+  }
+
+  return humaniseIdentifier(config.atomId) || 'Exhibited Atom';
+};
+
+const createCatalogueAtomsFromConfig = (
+  config: ExhibitionFeatureOverviewPayload,
+  sourceAtomTitle: string,
+): DroppedAtom[] => {
+  return config.skus.map((sku, index) => {
+    const metadata = sku.details ? { ...sku.details, sourceAtomTitle } : { sourceAtomTitle };
+
+    return {
+      id: sku.id || `${config.cardId}-sku-${index}`,
+      atomId: SKU_ATOM_ID,
+      title: sku.title || `SKU ${index + 1}`,
+      category: 'Feature Overview',
+      color: 'bg-amber-500',
+      metadata,
+    };
+  });
+};
+
+const deriveCatalogueCards = (
+  cards: LayoutCard[],
+  featureOverview: ExhibitionFeatureOverviewPayload[],
+): LayoutCard[] => {
+  const catalogueMap = new Map<string, LayoutCard>();
+
+  cards.forEach(card => {
+    const entry: LayoutCard = {
+      ...card,
+      catalogueAtoms: Array.isArray(card.catalogueAtoms) ? [...card.catalogueAtoms] : [...card.atoms],
+    };
+    catalogueMap.set(card.id, entry);
+  });
+
+  featureOverview.forEach(config => {
+    const targetId = config.cardId;
+    const sourceTitle = deriveSourceTitleFromConfig(config);
+    const skuAtoms = createCatalogueAtomsFromConfig(config, sourceTitle);
+
+    if (catalogueMap.has(targetId)) {
+      const existing = catalogueMap.get(targetId)!;
+      catalogueMap.set(targetId, {
+        ...existing,
+        catalogueAtoms: mergeCatalogueAtoms(existing.catalogueAtoms, skuAtoms),
+        moleculeId: existing.moleculeId || config.atomId,
+        moleculeTitle:
+          existing.moleculeTitle && existing.moleculeTitle.trim().length > 0
+            ? existing.moleculeTitle
+            : sourceTitle,
+      });
+      return;
+    }
+
+    const fallbackId = `${config.cardId || config.atomId}-catalogue`;
+    const entry = withPresentationDefaults({
+      id: fallbackId,
+      atoms: [],
+      catalogueAtoms: skuAtoms,
+      isExhibited: false,
+      moleculeId: config.atomId,
+      moleculeTitle: sourceTitle,
+      exhibitionControlEnabled: true,
+    });
+
+    catalogueMap.set(entry.id, entry);
+  });
+
+  return Array.from(catalogueMap.values()).filter(card => (card.catalogueAtoms?.length ?? 0) > 0);
 };
 
 export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
@@ -332,20 +530,22 @@ const applyFeatureOverviewSelections = (
 export const useExhibitionStore = create<ExhibitionStore>(set => ({
   cards: [],
   exhibitedCards: [],
+  catalogueCards: [],
+  featureOverviewConfigs: [],
+  lastLoadedContext: null,
 
-  loadSavedConfiguration: async () => {
+  loadSavedConfiguration: async (explicitContext?: ProjectContext | null) => {
     let loadedCards: LayoutCard[] = [];
-    const context = getActiveProjectContext();
+    const context = explicitContext ?? getActiveProjectContext();
+    let featureOverviewConfigs: ExhibitionFeatureOverviewPayload[] = [];
 
     if (context) {
       try {
         const remote = await fetchExhibitionConfiguration(context);
         if (remote && Array.isArray(remote.cards)) {
           loadedCards = extractCards(remote.cards);
-          loadedCards = applyFeatureOverviewSelections(
-            loadedCards,
-            Array.isArray(remote.feature_overview) ? remote.feature_overview : undefined
-          );
+          featureOverviewConfigs = extractFeatureOverviewEntries(remote.feature_overview);
+          loadedCards = applyFeatureOverviewSelections(loadedCards, featureOverviewConfigs);
         }
       } catch (error) {
         console.warn('Failed to fetch exhibition configuration', error);
@@ -358,7 +558,15 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
     const cardsWithDefaults = loadedCards.map(withPresentationDefaults);
     const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
-    set({ cards: cardsWithDefaults, exhibitedCards });
+    const catalogueCards = deriveCatalogueCards(cardsWithDefaults, featureOverviewConfigs);
+
+    set({
+      cards: cardsWithDefaults,
+      exhibitedCards,
+      catalogueCards,
+      featureOverviewConfigs,
+      lastLoadedContext: context ?? null,
+    });
   },
 
   toggleCardExhibition: (cardId: string) => {
@@ -375,6 +583,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       return {
         cards: updatedCards,
         exhibitedCards,
+        catalogueCards: deriveCatalogueCards(updatedCards, state.featureOverviewConfigs),
       };
     });
   },
@@ -429,6 +638,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       return {
         cards: updatedCards,
         exhibitedCards,
+        catalogueCards: deriveCatalogueCards(updatedCards, state.featureOverviewConfigs),
       };
     });
   },
@@ -468,6 +678,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       return {
         cards,
         exhibitedCards,
+        catalogueCards: deriveCatalogueCards(cards, state.featureOverviewConfigs),
       };
     });
 
@@ -496,9 +707,19 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     });
 
     const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
-    set({ cards: cardsWithDefaults, exhibitedCards });
+    set(state => ({
+      cards: cardsWithDefaults,
+      exhibitedCards,
+      catalogueCards: deriveCatalogueCards(cardsWithDefaults, state.featureOverviewConfigs),
+    }));
   },
   reset: () => {
-    set({ cards: [], exhibitedCards: [] });
-  }
+    set({
+      cards: [],
+      exhibitedCards: [],
+      catalogueCards: [],
+      featureOverviewConfigs: [],
+      lastLoadedContext: null,
+    });
+  },
 }));
