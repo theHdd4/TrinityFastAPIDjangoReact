@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,6 +9,19 @@ from threading import Lock
 from typing import Any, Dict, Iterable, List, Optional
 
 from fastapi.concurrency import run_in_threadpool
+
+try:  # pragma: no cover - pymongo should be installed but we guard for tests
+    from pymongo import MongoClient
+    from pymongo.collection import Collection
+    from pymongo.errors import PyMongoError
+except Exception:  # pragma: no cover - executed only if pymongo missing
+    MongoClient = None  # type: ignore
+    Collection = None  # type: ignore
+    PyMongoError = Exception  # type: ignore
+
+DEFAULT_DATABASE = os.getenv("MONGO_DB", "trinity_db")
+DEFAULT_COLLECTION = os.getenv("EXHIBITION_COLLECTION", "exhibition_catalogue")
+DISABLE_MONGO = os.getenv("EXHIBITION_DISABLE_MONGO", "").strip().lower() in {"1", "true", "yes"}
 
 
 def _default_storage_path() -> Path:
@@ -18,21 +32,17 @@ def _default_storage_path() -> Path:
 
 
 class ExhibitionStorage:
-    """Persist exhibition configurations to a JSON file.
-
-    The production service uses MongoDB, however the developer environment that
-    powers the automated tests does not ship with Mongo. To keep the API fully
-    functional we persist the payloads to a JSON file instead. The helper wraps
-    all file operations in a threadpool to avoid blocking the event loop when
-    the FastAPI routes execute.
-    """
+    """Persist exhibition configurations to MongoDB with a JSON fallback."""
 
     def __init__(self, storage_file: Optional[os.PathLike[str] | str] = None) -> None:
         self._path = Path(storage_file) if storage_file is not None else _default_storage_path()
         self._lock = Lock()
+        self._mongo_client: Optional[MongoClient] = None
+        self._mongo_collection: Optional[Collection] = None
+        self._initialise_mongo()
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # Internal helpers - file storage
     # ------------------------------------------------------------------
     def _read_all_sync(self) -> List[Dict[str, Any]]:
         with self._lock:
@@ -77,12 +87,181 @@ class ExhibitionStorage:
         return datetime.now(timezone.utc).isoformat()
 
     # ------------------------------------------------------------------
+    # Mongo helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _mongo_auth_kwargs(uri: str) -> Dict[str, str]:
+        if "@" in uri.split("//", 1)[-1]:
+            return {}
+
+        username = os.getenv("MONGO_USERNAME", "").strip()
+        password = os.getenv("MONGO_PASSWORD", "").strip()
+        auth_source = os.getenv("MONGO_AUTH_SOURCE", "").strip() or os.getenv("MONGO_AUTH_DB", "admin").strip()
+        auth_mechanism = os.getenv("MONGO_AUTH_MECHANISM", "").strip()
+
+        kwargs: Dict[str, str] = {}
+        if username:
+            kwargs["username"] = username
+        if password:
+            kwargs["password"] = password
+        if (username or password) and auth_source:
+            kwargs["authSource"] = auth_source
+        if auth_mechanism:
+            kwargs["authMechanism"] = auth_mechanism
+
+        return kwargs
+
+    @staticmethod
+    def _build_host_mongo_uri() -> str:
+        host = next(
+            (
+                value.strip()
+                for value in (os.getenv("HOST_IP"), os.getenv("MONGO_HOST"))
+                if isinstance(value, str) and value.strip()
+            ),
+            "localhost",
+        )
+        port_env = os.getenv("MONGO_PORT")
+        port = port_env.strip() if isinstance(port_env, str) and port_env.strip() else "9005"
+
+        username_env = os.getenv("MONGO_USERNAME")
+        password_env = os.getenv("MONGO_PASSWORD")
+        username = username_env.strip() if isinstance(username_env, str) and username_env.strip() else "admin_dev"
+        password = password_env.strip() if isinstance(password_env, str) and password_env.strip() else "pass_dev"
+
+        auth_env = os.getenv("MONGO_AUTH_SOURCE") or os.getenv("MONGO_AUTH_DB")
+        auth_source = auth_env.strip() if isinstance(auth_env, str) and auth_env.strip() else "admin"
+
+        credentials = ""
+        if username and password:
+            credentials = f"{username}:{password}@"
+        elif username:
+            credentials = f"{username}@"
+
+        query = f"?authSource={auth_source}" if auth_source else ""
+
+        return f"mongodb://{credentials}{host}:{port}/{DEFAULT_DATABASE}{query}"
+
+    def _initialise_mongo(self) -> None:
+        if DISABLE_MONGO:
+            logging.info("ExhibitionStorage Mongo integration disabled via environment")
+            return
+
+        if MongoClient is None:
+            logging.warning("pymongo not available; exhibition catalogue will use file storage only")
+            return
+
+        uri = (
+            os.getenv("EXHIBITION_MONGO_URI")
+            or os.getenv("MONGO_URI")
+            or self._build_host_mongo_uri()
+        )
+
+        auth_kwargs = self._mongo_auth_kwargs(uri)
+        try:
+            client = MongoClient(uri, serverSelectionTimeoutMS=5000, **auth_kwargs)
+            client.admin.command("ping")
+        except Exception as exc:  # pragma: no cover - best effort logging
+            logging.warning("MongoDB connection unavailable for exhibition catalogue: %s", exc)
+            return
+
+        try:
+            database = client.get_default_database() or client[DEFAULT_DATABASE]
+            if DEFAULT_COLLECTION not in database.list_collection_names():
+                database.create_collection(DEFAULT_COLLECTION)
+        except Exception as exc:  # pragma: no cover - best effort logging
+            logging.warning("Unable to ensure exhibition catalogue collection: %s", exc)
+            try:
+                client.close()
+            except Exception:  # pragma: no cover - ignore close errors
+                pass
+            return
+
+        self._mongo_client = client
+        self._mongo_collection = database[DEFAULT_COLLECTION]
+        logging.info("ExhibitionStorage initialised Mongo collection %s.%s", database.name, DEFAULT_COLLECTION)
+
+    def _mongo_document_id(self, client: str, app: str, project: str) -> str:
+        return f"{client}/{app}/{project}"
+
+    def _fetch_from_mongo(self, document_id: str) -> Optional[Dict[str, Any]]:
+        if self._mongo_collection is None:
+            return None
+
+        try:
+            document = self._mongo_collection.find_one({"_id": document_id})
+        except PyMongoError as exc:  # pragma: no cover - best effort logging
+            logging.error("MongoDB read error for exhibition catalogue: %s", exc)
+            return None
+
+        if not document:
+            return None
+
+        payload = dict(document)
+        payload.pop("_id", None)
+        return payload
+
+    def _persist_to_mongo(self, payload: Dict[str, Any]) -> None:
+        if self._mongo_collection is None:
+            return
+
+        client = payload.get("client_name", "")
+        app = payload.get("app_name", "")
+        project = payload.get("project_name", "")
+        if not client or not app or not project:
+            return
+
+        document_id = self._mongo_document_id(client, app, project)
+        mongo_payload = dict(payload)
+        mongo_payload["_id"] = document_id
+
+        try:
+            existing = self._mongo_collection.find_one({"_id": document_id})
+            if existing and "created_at" in existing and "created_at" not in mongo_payload:
+                mongo_payload["created_at"] = existing["created_at"]
+            self._mongo_collection.replace_one({"_id": document_id}, mongo_payload, upsert=True)
+        except PyMongoError as exc:  # pragma: no cover - best effort logging
+            logging.error("MongoDB save error for exhibition catalogue: %s", exc)
+
+    def _list_from_mongo(self) -> List[Dict[str, Any]]:
+        if self._mongo_collection is None:
+            return []
+
+        try:
+            documents = list(self._mongo_collection.find())
+        except PyMongoError as exc:  # pragma: no cover - best effort logging
+            logging.error("MongoDB list error for exhibition catalogue: %s", exc)
+            return []
+
+        payloads: List[Dict[str, Any]] = []
+        for document in documents:
+            entry = dict(document)
+            entry.pop("_id", None)
+            payloads.append(entry)
+        return payloads
+
+    # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
     async def list_configurations(self) -> List[Dict[str, Any]]:
+        mongo_records: List[Dict[str, Any]] = []
+        if self._mongo_collection is not None:
+            mongo_records = await run_in_threadpool(self._list_from_mongo)
+        if mongo_records:
+            return mongo_records
         return await run_in_threadpool(self._read_all_sync)
 
     async def get_configuration(self, client_name: str, app_name: str, project_name: str) -> Optional[Dict[str, Any]]:
+        if self._mongo_collection is not None:
+            document_id = self._mongo_document_id(
+                self._normalise_identity(client_name),
+                self._normalise_identity(app_name),
+                self._normalise_identity(project_name),
+            )
+            mongo_result = await run_in_threadpool(lambda: self._fetch_from_mongo(document_id))
+            if mongo_result:
+                return mongo_result
+
         def _lookup() -> Optional[Dict[str, Any]]:
             client = self._normalise_identity(client_name)
             app = self._normalise_identity(app_name)
@@ -136,6 +315,7 @@ class ExhibitionStorage:
                 records.append(updated_payload)
 
             self._write_all_sync(records)
+            self._persist_to_mongo(updated_payload)
             return updated_payload
 
         return await run_in_threadpool(_save)

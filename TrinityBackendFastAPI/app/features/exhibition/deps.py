@@ -9,7 +9,7 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection, Asyn
 from app.core.mongo import build_host_mongo_uri
 
 DEFAULT_DATABASE = os.getenv("MONGO_DB", "trinity_db")
-DEFAULT_COLLECTION = os.getenv("EXHIBITION_COLLECTION", "Exhibition_Configuration")
+DEFAULT_COLLECTION = os.getenv("EXHIBITION_COLLECTION", "exhibition_catalogue")
 
 
 def _default_mongo_uri() -> str:
