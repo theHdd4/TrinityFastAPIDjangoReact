@@ -35,6 +35,8 @@ const ensureCardLayout = (layout: unknown): CardLayout => {
   return DEFAULT_CARD_LAYOUT;
 };
 
+export type SlideshowTransition = 'fade' | 'slide' | 'zoom';
+
 export interface PresentationSettings {
   cardColor: CardColor;
   cardWidth: CardWidth;
@@ -43,6 +45,8 @@ export interface PresentationSettings {
   cardLayout: CardLayout;
   accentImage?: string | null;
   accentImageName?: string | null;
+  slideshowDuration: number;
+  slideshowTransition: SlideshowTransition;
 }
 
 export interface DroppedAtom {
@@ -114,6 +118,8 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   cardLayout: DEFAULT_CARD_LAYOUT,
   accentImage: null,
   accentImageName: null,
+  slideshowDuration: 8,
+  slideshowTransition: 'fade',
 };
 
 const withPresentationDefaults = (card: LayoutCard): LayoutCard => {
