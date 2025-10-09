@@ -482,6 +482,19 @@ const loadCsvDataset = async (
   };
 };
 
+const cloneDeep = <T>(value: T): T => {
+  if (value === undefined) {
+    return value;
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch (error) {
+    console.warn("Unable to clone value for exhibition selection", error);
+    return value;
+  }
+};
+
 const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   settings,
   onUpdateSettings,
@@ -531,10 +544,17 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   // Chart display options state
   const [showDataLabels, setShowDataLabels] = useState<boolean>(false);
   const [showAxisLabels, setShowAxisLabels] = useState<boolean>(true);
-  
+
   // State for managing expanded views
   const [showStatsSummary, setShowStatsSummary] = useState<boolean>(false);
   const [expandedMetrics, setExpandedMetrics] = useState<Set<string>>(new Set());
+
+  const dataSourceName = typeof settings?.dataSource === "string" ? settings.dataSource : "";
+  const xAxisField = settings?.xAxis || "date";
+  const availableMetrics = React.useMemo(
+    () => (Array.isArray(settings?.yAxes) ? [...settings.yAxes] : []),
+    [settings?.yAxes],
+  );
 
   const numericColumnSet = React.useMemo(() => {
     const set = new Set<string>();
@@ -580,7 +600,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       window.open(`/dataframe?name=${encodeURIComponent(inputFileName)}`, '_blank');
     }
   };
-  
+
   // Sorting and filtering state for SKU Table
   const [skuSortColumn, setSkuSortColumn] = useState<string>('');
   const [skuSortDirection, setSkuSortDirection] = useState<'asc' | 'desc'>('asc');
@@ -1011,31 +1031,85 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const updateExhibitionSelection = React.useCallback(
     (row: any, metric: string, checked: boolean | "indeterminate") => {
       const descriptor = createSelectionDescriptor(row, metric);
-      const alreadySelected = exhibitionSelections.some((entry) => entry.key === descriptor.key);
+      const existingIndex = exhibitionSelections.findIndex((entry) => entry.key === descriptor.key);
       const nextChecked = checked === true;
 
       if (nextChecked) {
-        if (alreadySelected) {
-          return;
-        }
-        const nextSelections: FeatureOverviewExhibitionSelection[] = [
-          ...exhibitionSelections,
-          {
-            key: descriptor.key,
-            metric,
-            combination: descriptor.combination,
-            dimensions: descriptor.dimensions,
-            rowId: row?.id ?? undefined,
-            label: descriptor.label,
+        const metricData = statDataMap?.[metric];
+        const metricSnapshot = metricData ? cloneDeep(metricData) : undefined;
+        const dimensionContext = Object.entries(dimensionMap || {}).reduce<Record<string, string[]>>(
+          (acc, [key, values]) => {
+            if (Array.isArray(values)) {
+              acc[key] = [...values];
+            }
+            return acc;
           },
-        ];
+          {},
+        );
+
+        const selectionSnapshot: FeatureOverviewExhibitionSelection = {
+          key: descriptor.key,
+          metric,
+          combination: descriptor.combination,
+          dimensions: descriptor.dimensions,
+          rowId: row?.id ?? undefined,
+          label: descriptor.label,
+          statisticalDetails: metricSnapshot
+            ? {
+                summary: metricSnapshot.summary ? cloneDeep(metricSnapshot.summary) : undefined,
+                timeseries: Array.isArray(metricSnapshot.timeseries)
+                  ? cloneDeep(metricSnapshot.timeseries)
+                  : undefined,
+                full: metricSnapshot,
+              }
+            : undefined,
+          chartState: {
+            chartType,
+            theme: chartTheme,
+            showDataLabels,
+            showAxisLabels,
+            xAxisField,
+            yAxisField: metric,
+          },
+          featureContext: {
+            dataSource: dataSourceName,
+            availableMetrics: [...availableMetrics],
+            xAxis: xAxisField,
+            dimensionMap: dimensionContext,
+          },
+          skuRow: row ? cloneDeep(row) : undefined,
+          capturedAt: new Date().toISOString(),
+        };
+
+        const nextSelections = [...exhibitionSelections];
+        if (existingIndex >= 0) {
+          nextSelections[existingIndex] = {
+            ...nextSelections[existingIndex],
+            ...selectionSnapshot,
+          };
+        } else {
+          nextSelections.push(selectionSnapshot);
+        }
         onUpdateSettings({ exhibitionSelections: nextSelections });
-      } else if (alreadySelected) {
+      } else if (existingIndex >= 0) {
         const nextSelections = exhibitionSelections.filter((entry) => entry.key !== descriptor.key);
         onUpdateSettings({ exhibitionSelections: nextSelections });
       }
     },
-    [createSelectionDescriptor, exhibitionSelections, onUpdateSettings],
+    [
+      availableMetrics,
+      chartTheme,
+      chartType,
+      createSelectionDescriptor,
+      dataSourceName,
+      dimensionMap,
+      exhibitionSelections,
+      onUpdateSettings,
+      showAxisLabels,
+      showDataLabels,
+      statDataMap,
+      xAxisField,
+    ],
   );
 
   const getSkuUniqueColumnValues = (column: string): string[] => {

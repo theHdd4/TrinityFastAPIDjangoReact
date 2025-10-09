@@ -29,6 +29,32 @@ const INITIAL_VISIBILITY = {
 
 type VisibilityKey = keyof typeof INITIAL_VISIBILITY;
 
+const formatStatValue = (value: unknown): string => {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      return String(value);
+    }
+    return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+
+  if (value == null) {
+    return '—';
+  }
+
+  if (typeof value === 'string') {
+    return value.trim() === '' ? '—' : value;
+  }
+
+  return String(value);
+};
+
+const humanizeLabel = (value?: string | null): string => {
+  if (!value) {
+    return '';
+  }
+  return value.replace(/_/g, ' ');
+};
+
 const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
   atomId,
   cardId,
@@ -116,6 +142,30 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
               const title = selection.label ||
                 (dimensionSummary ? `${selection.metric} · ${dimensionSummary}` : selection.metric);
 
+              const chartState = selection.chartState ?? {
+                chartType: 'line_chart',
+                theme: 'default',
+                showDataLabels: false,
+                showAxisLabels: true,
+                xAxisField: selection.featureContext?.xAxis || 'date',
+                yAxisField: selection.metric,
+              };
+
+              const featureContextDetails = selection.featureContext
+                ? {
+                    ...selection.featureContext,
+                    xAxis: selection.featureContext.xAxis || chartState.xAxisField,
+                  }
+                : undefined;
+
+              const statisticalDetails = selection.statisticalDetails
+                ? {
+                    summary: selection.statisticalDetails.summary,
+                    timeseries: selection.statisticalDetails.timeseries,
+                    full: selection.statisticalDetails.full,
+                  }
+                : undefined;
+
               return {
                 id: selection.key || `${atomId}-${index}`,
                 title,
@@ -124,6 +174,12 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                   combination: selection.combination,
                   dimensions: selection.dimensions,
                   rowId: selection.rowId,
+                  label: selection.label,
+                  chartState,
+                  featureContext: featureContextDetails,
+                  statisticalDetails,
+                  skuRow: selection.skuRow,
+                  capturedAt: selection.capturedAt,
                 },
               };
             }),
@@ -175,37 +231,90 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
           </div>
         ) : (
           <div className="space-y-3">
-            {selections.map(selection => (
-              <div
-                key={selection.key}
-                className="rounded-md border border-gray-200 bg-white/80 px-3 py-3 shadow-sm flex flex-col gap-2 md:flex-row md:items-start md:justify-between"
-              >
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-gray-900">
-                    {selection.label || selection.metric}
-                  </p>
-                  <div className="flex flex-wrap gap-1">
-                    {selection.dimensions.map(dimension => (
-                      <Badge key={`${selection.key}-${dimension.name}`} variant="outline" className="text-[11px]">
-                        {dimension.name}: {dimension.value || '—'}
-                      </Badge>
-                    ))}
+            {selections.map(selection => {
+              const summary = (selection.statisticalDetails?.summary ?? null) as
+                | Record<string, any>
+                | null;
+              const summaryPairs = summary
+                ? Object.entries(summary).filter(([, value]) =>
+                    value !== undefined && value !== null && typeof value !== 'object',
+                  )
+                : [];
+              const chartState = selection.chartState;
+              const featureContext = selection.featureContext;
+
+              return (
+                <div
+                  key={selection.key}
+                  className="rounded-md border border-gray-200 bg-white/80 px-3 py-3 shadow-sm flex flex-col gap-3"
+                >
+                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-gray-900">
+                        {selection.label || selection.metric}
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {selection.dimensions.map(dimension => (
+                          <Badge key={`${selection.key}-${dimension.name}`} variant="outline" className="text-[11px]">
+                            {dimension.name}: {dimension.value || '—'}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    {onRemoveSelection && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="ml-auto text-gray-500 hover:text-gray-700"
+                        onClick={() => onRemoveSelection(selection.key)}
+                      >
+                        <X className="h-4 w-4" />
+                        <span className="sr-only">Remove selection</span>
+                      </Button>
+                    )}
                   </div>
+
+                  {summaryPairs.length > 0 && (
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+                      {summaryPairs.map(([key, value]) => (
+                        <span key={key} className="font-medium">
+                          {humanizeLabel(key)}:{' '}
+                          <span className="font-normal">{formatStatValue(value)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {chartState && (
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] uppercase tracking-wide text-gray-500">
+                      <span>Type: {humanizeLabel(chartState.chartType)}</span>
+                      <span>Theme: {humanizeLabel(chartState.theme)}</span>
+                      <span>Labels: {chartState.showDataLabels ? 'On' : 'Off'}</span>
+                      <span>Axis Labels: {chartState.showAxisLabels ? 'On' : 'Off'}</span>
+                      <span>X: {humanizeLabel(chartState.xAxisField)}</span>
+                      <span>Y: {humanizeLabel(chartState.yAxisField)}</span>
+                    </div>
+                  )}
+
+                  {featureContext && (
+                    <div className="text-[11px] text-gray-400 flex flex-wrap gap-x-3 gap-y-1">
+                      {featureContext.dataSource && <span>Data: {featureContext.dataSource}</span>}
+                      {featureContext.xAxis && <span>X axis: {featureContext.xAxis}</span>}
+                      {Array.isArray(featureContext.availableMetrics) && featureContext.availableMetrics.length > 0 && (
+                        <span>Y axes: {featureContext.availableMetrics.join(', ')}</span>
+                      )}
+                    </div>
+                  )}
+
+                  {selection.capturedAt && (
+                    <div className="text-[10px] text-gray-400">
+                      Captured at {new Date(selection.capturedAt).toLocaleString()}
+                    </div>
+                  )}
                 </div>
-                {onRemoveSelection && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="ml-auto text-gray-500 hover:text-gray-700"
-                    onClick={() => onRemoveSelection(selection.key)}
-                  >
-                    <X className="h-4 w-4" />
-                    <span className="sr-only">Remove selection</span>
-                  </Button>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Card>
