@@ -13,7 +13,7 @@ from fastapi.concurrency import run_in_threadpool
 try:  # pragma: no cover - pymongo should be installed but we guard for tests
     from pymongo import MongoClient
     from pymongo.collection import Collection
-    from pymongo.errors import PyMongoError
+    from pymongo.errors import CollectionInvalid, ConfigurationError, PyMongoError
 except Exception:  # pragma: no cover - executed only if pymongo missing
     MongoClient = None  # type: ignore
     Collection = None  # type: ignore
@@ -165,11 +165,28 @@ class ExhibitionStorage:
             logging.warning("MongoDB connection unavailable for exhibition catalogue: %s", exc)
             return
 
+        database = None
         try:
-            database = client.get_default_database() or client[DEFAULT_DATABASE]
-            if DEFAULT_COLLECTION not in database.list_collection_names():
-                database.create_collection(DEFAULT_COLLECTION)
+            database = client.get_default_database()
+        except ConfigurationError:
+            database = None
         except Exception as exc:  # pragma: no cover - best effort logging
+            logging.warning("Unable to determine exhibition catalogue database: %s", exc)
+            try:
+                client.close()
+            except Exception:  # pragma: no cover - ignore close errors
+                pass
+            return
+
+        if database is None:
+            database = client[DEFAULT_DATABASE]
+
+        try:
+            database.create_collection(DEFAULT_COLLECTION)
+        except CollectionInvalid:
+            # Collection already exists; nothing to do.
+            pass
+        except PyMongoError as exc:  # pragma: no cover - best effort logging
             logging.warning("Unable to ensure exhibition catalogue collection: %s", exc)
             try:
                 client.close()
