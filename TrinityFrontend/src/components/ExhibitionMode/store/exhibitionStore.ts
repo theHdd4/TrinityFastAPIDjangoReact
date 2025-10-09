@@ -273,21 +273,58 @@ const applyFeatureOverviewSelections = (
     const baseCatalogue = (card.catalogueAtoms ?? card.atoms).filter(
       atom => atom.atomId !== SKU_ATOM_ID,
     );
+
+    const deriveSourceTitle = (): string => {
+      if (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0) {
+        return card.moleculeTitle.trim();
+      }
+
+      const fromSku = Array.isArray(config.skus)
+        ? config.skus
+            .map(entry => entry.details?.sourceAtomTitle)
+            .find(title => typeof title === 'string' && title.trim().length > 0)
+        : undefined;
+
+      if (typeof fromSku === 'string' && fromSku.trim().length > 0) {
+        return fromSku.trim();
+      }
+
+      return config.atomId
+        .split(/[-_]/g)
+        .filter(Boolean)
+        .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
+        .join(' ') || 'Exhibited Atom';
+    };
+
+    const sourceAtomTitle = deriveSourceTitle();
+
     const skuAtoms = Array.isArray(config.skus)
-      ? config.skus.map((sku, index) => ({
-          id: `${config.atomId}-sku-${sku.id ?? index}`,
-          atomId: SKU_ATOM_ID,
-          title: sku.title || `SKU ${sku.id ?? index + 1}`,
-          category: 'Feature Overview',
-          color: 'bg-amber-500',
-          metadata: sku.details,
-        }))
+      ? config.skus.map((sku, index) => {
+          const rawDetails = sku.details && typeof sku.details === 'object' ? sku.details : undefined;
+          const metadata = {
+            ...(rawDetails ?? {}),
+            sourceAtomTitle:
+              rawDetails && typeof rawDetails.sourceAtomTitle === 'string' && rawDetails.sourceAtomTitle.trim().length > 0
+                ? rawDetails.sourceAtomTitle
+                : sourceAtomTitle,
+          };
+
+          return {
+            id: `${config.atomId}-sku-${sku.id ?? index}`,
+            atomId: SKU_ATOM_ID,
+            title: sku.title || `SKU ${sku.id ?? index + 1}`,
+            category: 'Feature Overview',
+            color: 'bg-amber-500',
+            metadata,
+          };
+        })
       : [];
 
     return withPresentationDefaults({
       ...card,
       atoms: baseAtoms,
       catalogueAtoms: mergeCatalogueAtoms(baseCatalogue, skuAtoms),
+      moleculeTitle: card.moleculeTitle && card.moleculeTitle.trim().length > 0 ? card.moleculeTitle : sourceAtomTitle,
     });
   });
 };

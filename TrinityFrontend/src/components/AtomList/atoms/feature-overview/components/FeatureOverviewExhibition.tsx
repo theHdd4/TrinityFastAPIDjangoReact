@@ -12,6 +12,7 @@ import {
   type ExhibitionFeatureOverviewPayload,
 } from '@/lib/exhibition';
 import type { FeatureOverviewExhibitionSelection } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface FeatureOverviewExhibitionProps {
   atomId: string;
@@ -109,6 +110,42 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
   }, [selectionCount]);
 
   const cardIdentifier = cardId || atomId;
+  const sourceAtomTitle = useLaboratoryStore(state => {
+    const card = state.cards.find(entry => entry.id === cardIdentifier);
+    if (!card) {
+      return '';
+    }
+
+    if (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0) {
+      return card.moleculeTitle.trim();
+    }
+
+    if (Array.isArray(card.atoms) && card.atoms.length > 0) {
+      const fallback = card.atoms.find(atom => typeof atom.title === 'string' && atom.title.trim().length > 0);
+      if (fallback) {
+        return fallback.title.trim();
+      }
+    }
+
+    return '';
+  });
+  const resolvedAtomTitle = useMemo(() => {
+    if (sourceAtomTitle && sourceAtomTitle.trim().length > 0) {
+      return sourceAtomTitle.trim();
+    }
+
+    const humanisedFromId = atomId
+      .split(/[-_]/g)
+      .filter(Boolean)
+      .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
+      .join(' ');
+
+    if (humanisedFromId.trim().length > 0) {
+      return humanisedFromId;
+    }
+
+    return 'Exhibited Atom';
+  }, [atomId, sourceAtomTitle]);
 
   const toggleVisibility = (key: VisibilityKey) => {
     setVisibility(prev => ({
@@ -217,6 +254,7 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
           featureContext: featureContextDetails,
           statisticalDetails,
           selection,
+          sourceAtomTitle: resolvedAtomTitle,
         };
       });
 
@@ -250,7 +288,15 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
               skuStatistics: true,
               trendAnalysis: true,
             },
-            skus: processedSelections.map(({ id, title, chartState: normalisedChartState, featureContext, statisticalDetails, selection: baseSelection }) => ({
+            skus: processedSelections.map(({
+              id,
+              title,
+              chartState: normalisedChartState,
+              featureContext,
+              statisticalDetails,
+              selection: baseSelection,
+              sourceAtomTitle: originatingAtomTitle,
+            }) => ({
               id,
               title,
               details: {
@@ -264,6 +310,7 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                 statisticalDetails,
                 skuRow: baseSelection.skuRow,
                 capturedAt: baseSelection.capturedAt,
+                sourceAtomTitle: originatingAtomTitle,
               },
             })),
             chartSettings,
