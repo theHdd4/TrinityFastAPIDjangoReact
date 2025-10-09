@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from functools import lru_cache
 
@@ -7,6 +8,12 @@ from fastapi import Depends
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection, AsyncIOMotorDatabase
 
 from app.core.mongo import build_host_mongo_uri
+
+try:  # pragma: no cover - pymongo should be present but guard for tests
+    from pymongo.errors import CollectionInvalid, PyMongoError
+except Exception:  # pragma: no cover - executed only when pymongo missing
+    CollectionInvalid = Exception  # type: ignore[assignment]
+    PyMongoError = Exception  # type: ignore[assignment]
 
 DEFAULT_DATABASE = os.getenv("MONGO_DB", "trinity_db")
 DEFAULT_COLLECTION = os.getenv("EXHIBITION_COLLECTION", "exhibition_catalogue")
@@ -83,7 +90,27 @@ def get_database(client: AsyncIOMotorClient = Depends(get_mongo_client)) -> Asyn
     return client[DEFAULT_DATABASE]
 
 
-def get_exhibition_collection(
+async def get_exhibition_collection(
     database: AsyncIOMotorDatabase = Depends(get_database),
 ) -> AsyncIOMotorCollection:
+    async def _ensure_collection() -> None:
+        try:
+            collections = await database.list_collection_names()
+        except PyMongoError as exc:  # pragma: no cover - best effort logging
+            logging.warning("Unable to list Mongo collections for exhibition catalogue: %s", exc)
+            return
+
+        if DEFAULT_COLLECTION in collections:
+            return
+
+        try:
+            await database.create_collection(DEFAULT_COLLECTION)
+        except CollectionInvalid:
+            # Collection created concurrently by another process.
+            pass
+        except PyMongoError as exc:  # pragma: no cover - best effort logging
+            logging.warning("Unable to create exhibition catalogue collection: %s", exc)
+
+    await _ensure_collection()
+
     return database[DEFAULT_COLLECTION]

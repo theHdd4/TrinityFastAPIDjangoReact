@@ -11,16 +11,32 @@ from typing import Any, Dict, Iterable, List, Optional
 from fastapi.concurrency import run_in_threadpool
 
 try:  # pragma: no cover - pymongo should be installed but we guard for tests
-    from pymongo import MongoClient
     from pymongo.collection import Collection
-    from pymongo.errors import CollectionInvalid, ConfigurationError, PyMongoError
+    from pymongo.errors import PyMongoError
 except Exception:  # pragma: no cover - executed only if pymongo missing
-    MongoClient = None  # type: ignore
     Collection = None  # type: ignore
     PyMongoError = Exception  # type: ignore
 
-DEFAULT_DATABASE = os.getenv("MONGO_DB", "trinity_db")
-DEFAULT_COLLECTION = os.getenv("EXHIBITION_COLLECTION", "exhibition_catalogue")
+if __package__:
+    from .mongo import ensure_mongo_connection, get_mongo_collection
+else:  # pragma: no cover - allows direct module loading in unit tests
+    import importlib.util
+
+    _mongo_path = Path(__file__).resolve().parent / "mongo.py"
+    _mongo_spec = importlib.util.spec_from_file_location("exhibition.mongo", _mongo_path)
+    _mongo_module = importlib.util.module_from_spec(_mongo_spec) if _mongo_spec else None
+    if _mongo_spec and _mongo_spec.loader and _mongo_module:
+        _mongo_spec.loader.exec_module(_mongo_module)
+        ensure_mongo_connection = _mongo_module.ensure_mongo_connection  # type: ignore[attr-defined]
+        get_mongo_collection = _mongo_module.get_mongo_collection  # type: ignore[attr-defined]
+    else:  # pragma: no cover - fallback when spec cannot be resolved
+        def ensure_mongo_connection(*_args: Any, **_kwargs: Any) -> bool:
+            logging.warning("ExhibitionStorage could not import Mongo helpers; Mongo disabled")
+            return False
+
+        def get_mongo_collection() -> Optional[Collection]:  # type: ignore[override]
+            return None
+
 DISABLE_MONGO = os.getenv("EXHIBITION_DISABLE_MONGO", "").strip().lower() in {"1", "true", "yes"}
 
 
@@ -37,7 +53,6 @@ class ExhibitionStorage:
     def __init__(self, storage_file: Optional[os.PathLike[str] | str] = None) -> None:
         self._path = Path(storage_file) if storage_file is not None else _default_storage_path()
         self._lock = Lock()
-        self._mongo_client: Optional[MongoClient] = None
         self._mongo_collection: Optional[Collection] = None
         self._initialise_mongo()
 
@@ -89,120 +104,34 @@ class ExhibitionStorage:
     # ------------------------------------------------------------------
     # Mongo helpers
     # ------------------------------------------------------------------
-    @staticmethod
-    def _mongo_auth_kwargs(uri: str) -> Dict[str, str]:
-        if "@" in uri.split("//", 1)[-1]:
-            return {}
-
-        username = os.getenv("MONGO_USERNAME", "").strip()
-        password = os.getenv("MONGO_PASSWORD", "").strip()
-        auth_source = os.getenv("MONGO_AUTH_SOURCE", "").strip() or os.getenv("MONGO_AUTH_DB", "admin").strip()
-        auth_mechanism = os.getenv("MONGO_AUTH_MECHANISM", "").strip()
-
-        kwargs: Dict[str, str] = {}
-        if username:
-            kwargs["username"] = username
-        if password:
-            kwargs["password"] = password
-        if (username or password) and auth_source:
-            kwargs["authSource"] = auth_source
-        if auth_mechanism:
-            kwargs["authMechanism"] = auth_mechanism
-
-        return kwargs
-
-    @staticmethod
-    def _build_host_mongo_uri() -> str:
-        host = next(
-            (
-                value.strip()
-                for value in (os.getenv("HOST_IP"), os.getenv("MONGO_HOST"))
-                if isinstance(value, str) and value.strip()
-            ),
-            "localhost",
-        )
-        port_env = os.getenv("MONGO_PORT")
-        port = port_env.strip() if isinstance(port_env, str) and port_env.strip() else "9005"
-
-        username_env = os.getenv("MONGO_USERNAME")
-        password_env = os.getenv("MONGO_PASSWORD")
-        username = username_env.strip() if isinstance(username_env, str) and username_env.strip() else "admin_dev"
-        password = password_env.strip() if isinstance(password_env, str) and password_env.strip() else "pass_dev"
-
-        auth_env = os.getenv("MONGO_AUTH_SOURCE") or os.getenv("MONGO_AUTH_DB")
-        auth_source = auth_env.strip() if isinstance(auth_env, str) and auth_env.strip() else "admin"
-
-        credentials = ""
-        if username and password:
-            credentials = f"{username}:{password}@"
-        elif username:
-            credentials = f"{username}@"
-
-        query = f"?authSource={auth_source}" if auth_source else ""
-
-        return f"mongodb://{credentials}{host}:{port}/{DEFAULT_DATABASE}{query}"
-
     def _initialise_mongo(self) -> None:
         if DISABLE_MONGO:
             logging.info("ExhibitionStorage Mongo integration disabled via environment")
             return
 
-        if MongoClient is None:
-            logging.warning("pymongo not available; exhibition catalogue will use file storage only")
+        if not ensure_mongo_connection():
             return
 
-        uri = (
-            os.getenv("EXHIBITION_MONGO_URI")
-            or os.getenv("MONGO_URI")
-            or self._build_host_mongo_uri()
-        )
+        self._mongo_collection = get_mongo_collection()
+        if self._mongo_collection is None:
+            logging.warning("ExhibitionStorage could not obtain Mongo collection reference")
 
-        auth_kwargs = self._mongo_auth_kwargs(uri)
-        try:
-            client = MongoClient(uri, serverSelectionTimeoutMS=5000, **auth_kwargs)
-            client.admin.command("ping")
-        except Exception as exc:  # pragma: no cover - best effort logging
-            logging.warning("MongoDB connection unavailable for exhibition catalogue: %s", exc)
-            return
+    def _ensure_mongo_ready(self) -> bool:
+        if self._mongo_collection is not None:
+            return True
 
-        database = None
-        try:
-            database = client.get_default_database()
-        except ConfigurationError:
-            database = None
-        except Exception as exc:  # pragma: no cover - best effort logging
-            logging.warning("Unable to determine exhibition catalogue database: %s", exc)
-            try:
-                client.close()
-            except Exception:  # pragma: no cover - ignore close errors
-                pass
-            return
+        if ensure_mongo_connection():
+            self._mongo_collection = get_mongo_collection()
+            if self._mongo_collection is not None:
+                return True
 
-        if database is None:
-            database = client[DEFAULT_DATABASE]
-
-        try:
-            database.create_collection(DEFAULT_COLLECTION)
-        except CollectionInvalid:
-            # Collection already exists; nothing to do.
-            pass
-        except PyMongoError as exc:  # pragma: no cover - best effort logging
-            logging.warning("Unable to ensure exhibition catalogue collection: %s", exc)
-            try:
-                client.close()
-            except Exception:  # pragma: no cover - ignore close errors
-                pass
-            return
-
-        self._mongo_client = client
-        self._mongo_collection = database[DEFAULT_COLLECTION]
-        logging.info("ExhibitionStorage initialised Mongo collection %s.%s", database.name, DEFAULT_COLLECTION)
+        return False
 
     def _mongo_document_id(self, client: str, app: str, project: str) -> str:
         return f"{client}/{app}/{project}"
 
     def _fetch_from_mongo(self, document_id: str) -> Optional[Dict[str, Any]]:
-        if self._mongo_collection is None:
+        if not self._ensure_mongo_ready():
             return None
 
         try:
@@ -219,7 +148,7 @@ class ExhibitionStorage:
         return payload
 
     def _persist_to_mongo(self, payload: Dict[str, Any]) -> None:
-        if self._mongo_collection is None:
+        if not self._ensure_mongo_ready():
             return
 
         client = payload.get("client_name", "")
@@ -241,7 +170,7 @@ class ExhibitionStorage:
             logging.error("MongoDB save error for exhibition catalogue: %s", exc)
 
     def _list_from_mongo(self) -> List[Dict[str, Any]]:
-        if self._mongo_collection is None:
+        if not self._ensure_mongo_ready():
             return []
 
         try:
@@ -262,14 +191,14 @@ class ExhibitionStorage:
     # ------------------------------------------------------------------
     async def list_configurations(self) -> List[Dict[str, Any]]:
         mongo_records: List[Dict[str, Any]] = []
-        if self._mongo_collection is not None:
+        if self._ensure_mongo_ready():
             mongo_records = await run_in_threadpool(self._list_from_mongo)
         if mongo_records:
             return mongo_records
         return await run_in_threadpool(self._read_all_sync)
 
     async def get_configuration(self, client_name: str, app_name: str, project_name: str) -> Optional[Dict[str, Any]]:
-        if self._mongo_collection is not None:
+        if self._ensure_mongo_ready():
             document_id = self._mongo_document_id(
                 self._normalise_identity(client_name),
                 self._normalise_identity(app_name),
