@@ -900,7 +900,7 @@ const ExhibitionMode = () => {
             </div>
             <h3 className="text-2xl font-semibold text-foreground mb-3">No Slides to Present</h3>
             <p className="text-muted-foreground mb-6">
-              Go to Laboratory mode and toggle "Exhibit the Card" on the cards you want to display here, then click Save.
+              Go to Laboratory mode, exhibit the components you want to showcase so they appear in the catalogue, then click Save.
             </p>
             <div className="p-4 bg-muted/50 rounded-lg border border-border">
               <p className="text-sm text-muted-foreground">
