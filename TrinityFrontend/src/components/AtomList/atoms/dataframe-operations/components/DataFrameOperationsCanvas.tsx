@@ -18,7 +18,8 @@ import {
 import {
   Upload, Download, Search, Filter, ArrowUpDown, Pin, Palette, Trash2, Plus, 
   GripVertical, RotateCcw, FileText, Check, AlertCircle, Info, Edit2,
-  ChevronDown, ChevronUp, X, PlusCircle, MinusCircle, Save, Replace
+  ChevronDown, ChevronUp, X, PlusCircle, MinusCircle, Save, Replace,
+  AlignLeft, AlignCenter, AlignRight
 } from 'lucide-react';
 import { DataFrameData, DataFrameSettings } from '../DataFrameOperationsAtom';
 import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
@@ -485,7 +486,14 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [forceRefresh, setForceRefresh] = useState(0);
   const [isProcessingOperation, setIsProcessingOperation] = useState(false);
   const operationQueueRef = useRef<Array<() => Promise<void>>>([]);
+  const [cellAlignment, setCellAlignment] = useState<'left' | 'center' | 'right'>('left');
+  const [columnAlignments, setColumnAlignments] = useState<Record<string, 'left' | 'center' | 'right'>>({});
   const headersKey = useMemo(() => (data?.headers || []).join('|'), [data?.headers]);
+
+  // Helper function to get alignment for a column
+  const getColumnAlignment = (column: string): 'left' | 'center' | 'right' => {
+    return columnAlignments[column] || cellAlignment;
+  };
 
   // Function to process operations sequentially
   const processOperationQueue = useCallback(async () => {
@@ -1645,24 +1653,89 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   saveToUndoStack(data);
   
   try {
+    console.log('[DataFrameOperations] Renaming column:', { oldHeader, newHeader, currentHeaders: data.headers });
+    
     const resp = await apiRenameColumn(fileId, oldHeader, newHeader);
     
-    // Preserve deleted columns by filtering out columns that were previously deleted
+    console.log('[DataFrameOperations] Backend response after rename:', {
+      headers: resp.headers,
+      oldHeader,
+      newHeader
+    });
+    
+    // Create updated column order by replacing old name with new name BEFORE filtering
+    const updatedColumnOrder = columnOrder.map(col => col === oldHeader ? newHeader : col);
+    
+    console.log('[DataFrameOperations] Column order mapping:', {
+      oldColumnOrder: columnOrder,
+      updatedColumnOrder,
+      oldHeader,
+      newHeader
+    });
+    
+    // Update the columnOrder state
+    setColumnOrder(updatedColumnOrder);
+    
+    // Now manually preserve the column order instead of using filterBackendResponse
+    // which relies on the OLD columnOrder state (React state updates are async)
     const currentHiddenColumns = data.hiddenColumns || [];
     const currentDeletedColumns = data.deletedColumns || [];
-    const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+    
+    // Filter out hidden and deleted columns from backend response
+    const columnsToFilter = [...currentHiddenColumns, ...currentDeletedColumns];
+    const availableHeaders = resp.headers.filter((header: string) => !columnsToFilter.includes(header));
+    
+    // Use the UPDATED column order (not the state which is async)
+    let orderedHeaders: string[];
+    if (updatedColumnOrder.length === 0) {
+      orderedHeaders = availableHeaders;
+    } else {
+      // Preserve order using the updated column order
+      orderedHeaders = updatedColumnOrder.filter((header: string) => availableHeaders.includes(header));
+      // Add any new columns that aren't in our tracked order
+      const newColumns = availableHeaders.filter((header: string) => !updatedColumnOrder.includes(header));
+      orderedHeaders = [...orderedHeaders, ...newColumns];
+    }
+    
+    console.log('[DataFrameOperations] Final ordered headers:', {
+      availableHeaders,
+      orderedHeaders,
+      updatedColumnOrder
+    });
+    
+    // Filter rows to match ordered headers
+    const filteredRows = resp.rows.map((row: any) => {
+      const filteredRow: any = {};
+      orderedHeaders.forEach((header: string) => {
+        if (row.hasOwnProperty(header)) {
+          filteredRow[header] = row[header];
+        }
+      });
+      return filteredRow;
+    });
+    
+    // Normalize column types
+    const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+    const filteredColumnTypes: any = {};
+    orderedHeaders.forEach((header: string) => {
+      if (columnTypes[header]) {
+        filteredColumnTypes[header] = columnTypes[header];
+      }
+    });
     
     onDataChange({
-      headers: filtered.headers,
-      rows: filtered.rows,
+      headers: orderedHeaders,
+      rows: filteredRows,
       fileName: data.fileName,
-      columnTypes: filtered.columnTypes,
-      pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+      columnTypes: filteredColumnTypes,
+      pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)).map(p => p === oldHeader ? newHeader : p),
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
-         hiddenColumns: currentHiddenColumns,
-         deletedColumns: currentDeletedColumns,
-       });
+      hiddenColumns: currentHiddenColumns,
+      deletedColumns: currentDeletedColumns,
+    });
+    
+    // Update formulas for the renamed column
     setColumnFormulas(prev => {
       if (!Object.prototype.hasOwnProperty.call(prev, oldHeader)) {
         return prev;
@@ -1675,6 +1748,12 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     
     // Add to history
     addToHistory('Rename Column', `Renamed column "${oldHeader}" to "${newHeader}"`);
+    
+    toast({
+      title: "Column Renamed",
+      description: `Column "${oldHeader}" renamed to "${newHeader}"`,
+    });
+    
   } catch (err) {
     handleApiError('Rename column failed', err);
     addToHistory('Rename Column', `Failed to rename column "${oldHeader}"`, 'error');
@@ -3332,7 +3411,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
         )}
         {/* Controls section */}
-            <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
+            <div 
+              className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3"
+              onClick={(e) => {
+                // Deselect column when clicking in controls area (but not on buttons/inputs)
+                if (selectedColumn && e.target === e.currentTarget) {
+                  setSelectedColumn(null);
+                }
+              }}
+            >
           <div className="flex items-center space-x-4">
               <div className="relative">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -3344,6 +3431,91 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   className="pl-9 w-64"
                 />
               </div>
+              
+              {/* Alignment Control */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    title={`Text Alignment${selectedColumn ? ` (${selectedColumn})` : ' (All Columns)'}`}
+                  >
+                    {(() => {
+                      const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
+                      if (currentAlignment === 'left') return <AlignLeft className="h-4 w-4" />;
+                      if (currentAlignment === 'center') return <AlignCenter className="h-4 w-4" />;
+                      if (currentAlignment === 'right') return <AlignRight className="h-4 w-4" />;
+                      return <AlignLeft className="h-4 w-4" />;
+                    })()}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-48 p-2">
+                  <div className="space-y-1">
+                    <div className="text-xs font-medium text-gray-700 mb-2">
+                      Text Alignment{selectedColumn ? ` - ${selectedColumn}` : ' - All Columns'}
+                    </div>
+                    <Button
+                      variant={(() => {
+                        const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
+                        return currentAlignment === 'left' ? 'default' : 'ghost';
+                      })()}
+                      size="sm"
+                      className="w-full justify-start h-8"
+                      onClick={() => {
+                        if (selectedColumn) {
+                          setColumnAlignments(prev => ({ ...prev, [selectedColumn]: 'left' }));
+                        } else {
+                          setCellAlignment('left');
+                          setColumnAlignments({}); // Reset column-specific alignments
+                        }
+                      }}
+                    >
+                      <AlignLeft className="h-4 w-4 mr-2" />
+                      Left Align
+                    </Button>
+                    <Button
+                      variant={(() => {
+                        const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
+                        return currentAlignment === 'center' ? 'default' : 'ghost';
+                      })()}
+                      size="sm"
+                      className="w-full justify-start h-8"
+                      onClick={() => {
+                        if (selectedColumn) {
+                          setColumnAlignments(prev => ({ ...prev, [selectedColumn]: 'center' }));
+                        } else {
+                          setCellAlignment('center');
+                          setColumnAlignments({}); // Reset column-specific alignments
+                        }
+                      }}
+                    >
+                      <AlignCenter className="h-4 w-4 mr-2" />
+                      Center Align
+                    </Button>
+                    <Button
+                      variant={(() => {
+                        const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
+                        return currentAlignment === 'right' ? 'default' : 'ghost';
+                      })()}
+                      size="sm"
+                      className="w-full justify-start h-8"
+                      onClick={() => {
+                        if (selectedColumn) {
+                          setColumnAlignments(prev => ({ ...prev, [selectedColumn]: 'right' }));
+                        } else {
+                          setCellAlignment('right');
+                          setColumnAlignments({}); // Reset column-specific alignments
+                        }
+                      }}
+                    >
+                      <AlignRight className="h-4 w-4 mr-2" />
+                      Right Align
+                    </Button>
+                  </div>
+                </PopoverContent>
+              </Popover>
+              
               <div className="flex items-center space-x-3">
                 <Button
                   variant="outline"
@@ -3391,9 +3563,25 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
 
           {/* Table section - Excel-like appearance */}
-          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+          <div 
+            className="flex-1 flex flex-col overflow-hidden min-h-0"
+            onClick={(e) => {
+              // Deselect column when clicking in empty area above the table
+              if (selectedColumn && e.target === e.currentTarget) {
+                setSelectedColumn(null);
+              }
+            }}
+          >
             {data && (
-              <div className="flex items-center border-b border-slate-200 min-h-0">
+              <div 
+                className="flex items-center border-b border-slate-200 min-h-0"
+                onClick={(e) => {
+                  // Deselect column when clicking in formula bar area
+                  if (selectedColumn && e.target === e.currentTarget) {
+                    setSelectedColumn(null);
+                  }
+                }}
+              >
                 <div className="flex-1 min-w-0">
                   <div className="relative w-full" style={{ position: 'relative', zIndex: 1 }}>
                     <FormularBar
@@ -3533,7 +3721,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     <TableHead
                       key={header + '-' + colIdx}
                       data-col={header}
-                       className={`table-header-cell text-center bg-white border-r border-gray-200 relative sticky top-0 z-10 ${
+                       className={`table-header-cell bg-white border-r border-gray-200 relative sticky top-0 z-10 ${
                          selectedColumn === header ? 'border-2 border-blue-500 bg-blue-100' : ''
                        } ${
                          multiSelectedColumns.has(header) ? 'bg-blue-100 border-blue-500' : ''
@@ -3574,7 +3762,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           borderRight: colIdx === data.frozenColumns - 1 ? '2px solid #22c55e' : '1px solid #d1d5db',
                           borderTop: '1px solid #d1d5db',
                           borderBottom: '1px solid #d1d5db'
-                        } : {})
+                        } : {}),
+                        textAlign: `${getColumnAlignment(header)} !important`
                       }}
                       draggable
                       onDragStart={() => handleDragStart(header)}
@@ -3614,8 +3803,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       {editingHeader === colIdx ? (
                         <input
                           type="text"
-                          className="h-7 text-xs outline-none border-none bg-white px-0 font-bold text-black truncate text-center w-full"
-                          style={{ width: '100%', boxSizing: 'border-box', background: 'inherit', textAlign: 'center', padding: 0, margin: 0 }}
+                          className="h-7 text-xs outline-none border-none bg-white px-0 font-bold text-black truncate w-full"
+                          style={{ width: '100%', boxSizing: 'border-box', background: 'inherit', textAlign: `${getColumnAlignment(header)} !important`, padding: 0, margin: 0 }}
                           value={editingHeaderValue}
                           autoFocus
                           onChange={e => setEditingHeaderValue(e.target.value)}
@@ -3627,19 +3816,21 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         />
                       ) : (
                          <div
-                           className="flex items-center justify-center cursor-pointer w-full h-full overflow-hidden"
+                           className="flex items-center cursor-pointer w-full h-full overflow-hidden"
+                           style={{
+                             justifyContent: getColumnAlignment(header) === 'left' ? 'flex-start' : 
+                                           getColumnAlignment(header) === 'center' ? 'center' : 'flex-end',
+                             width: '100%', 
+                             height: '100%',
+                             textOverflow: 'ellipsis',
+                             whiteSpace: 'nowrap'
+                           }}
                            onDoubleClick={() => {
                              // Always allow header editing regardless of enableEditing setting
                              setEditingHeader(colIdx);
                              setEditingHeaderValue(header);
                            }}
                            title={`Click to select • Ctrl+Click for multi-select • Double-click to edit • Delete key to delete selected\nHeader: ${headerDisplayNames[header] ?? header}`}
-                           style={{ 
-                             width: '100%', 
-                             height: '100%',
-                             textOverflow: 'ellipsis',
-                             whiteSpace: 'nowrap'
-                           }}
                          >
                            <span className="flex items-center gap-1 font-bold text-black overflow-hidden" style={{ maxWidth: '100%' }}>
                              <span className="truncate">{headerDisplayNames[header] ?? header}</span>
@@ -3734,7 +3925,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           <TableCell
                             key={colIdx}
                             data-col={column}
-                            className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-500 bg-blue-50' : selectedColumn === column ? 'border border-blue-500 bg-blue-50' : ''} ${isRowSelected ? 'bg-blue-100' : ''} ${data.frozenColumns && colIdx < data.frozenColumns ? 'frozen-column' : ''}`}
+                            className={`table-cell font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-500 bg-blue-50' : selectedColumn === column ? 'border border-blue-500 bg-blue-50' : ''} ${isRowSelected ? 'bg-blue-100' : ''} ${data.frozenColumns && colIdx < data.frozenColumns ? 'frozen-column' : ''}`}
                             style={{
                               ...(settings.columnWidths?.[column] ? { 
                                 width: settings.columnWidths[column], 
@@ -3767,7 +3958,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                                 borderRight: colIdx === data.frozenColumns - 1 ? '2px solid #22c55e' : '1px solid #d1d5db',
                                 borderTop: '1px solid #d1d5db',
                                 borderBottom: '1px solid #d1d5db'
-                              } : {})
+                              } : {}),
+                              textAlign: `${getColumnAlignment(column)} !important`
                             }}
                             onClick={() => handleCellClick(rowIndex, column)}
                             onDoubleClick={() => {
@@ -3792,12 +3984,14 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                             />
                           ) : (
                             <div 
-                              className="text-xs p-1 hover:bg-blue-50 rounded cursor-pointer min-h-[20px] flex items-center justify-center text-gray-800 overflow-hidden"
+                              className="text-xs p-1 hover:bg-blue-50 rounded cursor-pointer min-h-[20px] flex items-center text-gray-800 overflow-hidden"
                               style={{
                                 maxWidth: '100%',
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap',
-                                wordBreak: 'break-all'
+                                wordBreak: 'break-all',
+                                justifyContent: getColumnAlignment(column) === 'left' ? 'flex-start' : 
+                                              getColumnAlignment(column) === 'center' ? 'center' : 'flex-end'
                               }}
                               onDoubleClick={() => {
                                 // Always allow cell editing regardless of enableEditing setting
