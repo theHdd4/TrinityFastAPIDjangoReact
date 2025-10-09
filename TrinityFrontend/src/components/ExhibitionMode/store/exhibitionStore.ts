@@ -334,7 +334,7 @@ const withPresentationDefaults = (card: LayoutCard): LayoutCard => {
     ...card,
     atoms: slideAtoms,
     catalogueAtoms,
-    exhibitionControlEnabled: card.exhibitionControlEnabled ?? false,
+    exhibitionControlEnabled: card.exhibitionControlEnabled ?? true,
     presentationSettings: mergedSettings,
   };
 };
@@ -395,7 +395,7 @@ const normalizeCard = (card: any): LayoutCard | null => {
       : undefined,
     exhibitionControlEnabled: 'exhibitionControlEnabled' in card
       ? Boolean(card.exhibitionControlEnabled)
-      : false,
+      : true,
   };
 
   return withPresentationDefaults(normalized);

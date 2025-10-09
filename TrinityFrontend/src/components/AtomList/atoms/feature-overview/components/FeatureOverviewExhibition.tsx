@@ -13,6 +13,7 @@ import {
 } from '@/lib/exhibition';
 import type { FeatureOverviewExhibitionSelection } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 
 interface FeatureOverviewExhibitionProps {
   atomId: string;
@@ -100,6 +101,7 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
   const [visibility, setVisibility] = useState(INITIAL_VISIBILITY);
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
+  const loadSavedConfiguration = useExhibitionStore(state => state.loadSavedConfiguration);
 
   const selectionCount = selections.length;
   const selectionBadgeLabel = useMemo(() => {
@@ -320,6 +322,7 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
       };
 
       await saveExhibitionConfiguration(payload);
+      await loadSavedConfiguration(context);
       console.info(
         `[Exhibition] exhibition_catalogue collection successfully updated for project ${client_name}/${app_name}/${project_name} with ${selections.length} exhibited combination(s)`,
       );
