@@ -23,13 +23,25 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
   enableDragging = true,
   onCollapse,
 }) => {
-  const getSlideTitle = (card: LayoutCard, index: number) => {
-    if (card.moleculeTitle) {
-      return card.atoms.length > 0
-        ? `${card.moleculeTitle} - ${card.atoms[0].title}`
-        : card.moleculeTitle;
+  const getCatalogueHeading = (card: LayoutCard, index: number) => {
+    if (card.moleculeTitle && card.moleculeTitle.trim().length > 0) {
+      return card.moleculeTitle;
     }
-    return card.atoms.length > 0 ? card.atoms[0].title : `Slide ${index + 1}`;
+
+    const firstCatalogueAtom = (card.catalogueAtoms ?? card.atoms)[0];
+    if (firstCatalogueAtom && firstCatalogueAtom.title.trim().length > 0) {
+      return firstCatalogueAtom.title;
+    }
+
+    if (card.atoms.length > 0 && card.atoms[0].title.trim().length > 0) {
+      return card.atoms[0].title;
+    }
+
+    if (card.exhibitionControlEnabled) {
+      return 'Untitled Slide';
+    }
+
+    return `Catalogue Item ${index + 1}`;
   };
 
   return (
@@ -80,44 +92,48 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
                       )}
                     />
                     <span className="text-sm font-medium truncate">
-                      {index + 1}. {getSlideTitle(card, index)}
+                      {getCatalogueHeading(card, index)}
                     </span>
                   </div>
                 </button>
 
-                {currentSlide === index && availableAtoms.length > 0 && (
+                {currentSlide === index && (
                   <div className="ml-6 mt-2 space-y-1">
-                    {availableAtoms.map(atom => (
-                      <div
-                        key={atom.id}
-                        draggable={enableDragging && Boolean(onDragStart)}
-                        onDragStart={event => {
-                          if (!enableDragging || !onDragStart) {
-                            return;
-                          }
-                          try {
-                            event.dataTransfer.effectAllowed = 'move';
-                            event.dataTransfer.setData('application/json', JSON.stringify({ atomId: atom.id }));
-                          } catch {
-                            /* ignore browsers without dataTransfer */
-                          }
-                          onDragStart(atom, card.id, 'catalogue');
-                        }}
-                        onDragEnd={() => enableDragging && onDragEnd?.()}
-                        className={cn(
-                          'flex items-center gap-2 px-2 py-1.5 rounded bg-muted/50 hover:bg-muted group transition-colors',
-                          enableDragging && onDragStart ? 'cursor-move' : 'cursor-not-allowed opacity-70'
-                        )}
-                      >
-                        <div className={`w-2 h-2 ${atom.color} rounded-full flex-shrink-0`} />
-                        <span className="text-xs truncate">{atom.title}</span>
-                        {enableDragging && onDragStart && (
-                          <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
-                            <span className="text-[10px] text-muted-foreground">Drag</span>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                    {availableAtoms.length > 0 ? (
+                      availableAtoms.map(atom => (
+                        <div
+                          key={atom.id}
+                          draggable={enableDragging && Boolean(onDragStart)}
+                          onDragStart={event => {
+                            if (!enableDragging || !onDragStart) {
+                              return;
+                            }
+                            try {
+                              event.dataTransfer.effectAllowed = 'move';
+                              event.dataTransfer.setData('application/json', JSON.stringify({ atomId: atom.id }));
+                            } catch {
+                              /* ignore browsers without dataTransfer */
+                            }
+                            onDragStart(atom, card.id, 'catalogue');
+                          }}
+                          onDragEnd={() => enableDragging && onDragEnd?.()}
+                          className={cn(
+                            'flex items-center gap-2 px-2 py-1.5 rounded bg-muted/50 hover:bg-muted group transition-colors',
+                            enableDragging && onDragStart ? 'cursor-move' : 'cursor-not-allowed opacity-70'
+                          )}
+                        >
+                          <div className={`w-2 h-2 ${atom.color} rounded-full flex-shrink-0`} />
+                          <span className="text-xs truncate">{atom.title}</span>
+                          {enableDragging && onDragStart && (
+                            <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+                              <span className="text-[10px] text-muted-foreground">Drag</span>
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-muted-foreground">No components in this catalogue yet.</p>
+                    )}
                   </div>
                 )}
               </div>
