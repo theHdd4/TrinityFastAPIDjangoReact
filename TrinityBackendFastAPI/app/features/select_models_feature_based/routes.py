@@ -2374,6 +2374,18 @@ async def calculate_ensemble_actual_vs_predicted(
         ensemble_data = ensemble_response.results[0]
         weighted_metrics = ensemble_data.weighted
         
+        # Get weighted transformation metadata using ensemble metric calculation
+        from .ensemble_metric_calculation import calculate_weighted_transformation_metadata
+        
+        logger.info(f"🔍 Calculating weighted transformation metadata for ensemble...")
+        transformation_metadata = await calculate_weighted_transformation_metadata(
+            db, client_name, app_name, project_name, combination_id, ensemble_data
+        )
+        logger.info(f"✅ Weighted transformation metadata calculated: {len(transformation_metadata)} variables")
+        
+        # Import apply_transformation_steps from s_curve.py
+        from .s_curve import apply_transformation_steps
+
         # Get the source file data
         try:
             response = minio_client.get_object(MINIO_BUCKET, source_file_key)
@@ -2440,6 +2452,9 @@ async def calculate_ensemble_actual_vs_predicted(
             actual_values = df[y_variable].tolist()
             predicted_values = []
             
+            # Check if transformations are available
+            has_transformations = transformation_metadata and len(transformation_metadata) > 0
+            
             for index, row in df.iterrows():
                 predicted_value = intercept
                 
@@ -2449,6 +2464,15 @@ async def calculate_ensemble_actual_vs_predicted(
                         beta_key = f"{col}_beta"
                         if beta_key in weighted_metrics:
                             x_value = row[col] if pd.notna(row[col]) else 0
+                            
+                            # Apply transformations if available
+                            if has_transformations and col in transformation_metadata:
+                                transformation_steps = transformation_metadata[col].get('transformation_steps', [])
+                                if transformation_steps:
+                                    # Apply transformations to the single value
+                                    transformed_value = apply_transformation_steps([x_value], transformation_steps)[0]
+                                    x_value = transformed_value
+                            
                             beta_value = weighted_metrics[beta_key]
                             contribution = beta_value * x_value
                             predicted_value += contribution
@@ -2473,6 +2497,48 @@ async def calculate_ensemble_actual_vs_predicted(
             else:
                 mae = mse = rmse = r2 = mape = 0
             
+            # ---- Save ensemble results to MongoDB build config ----
+            try:
+                # Extract x_variables from weighted_metrics
+                x_variables = [key.replace('_beta', '') for key in weighted_metrics.keys() if key.endswith('_beta')]
+                
+                # Build coefficients dictionary in the same format as individual models
+                ensemble_coefficients = {}
+                for key in weighted_metrics.keys():
+                    if key.endswith('_beta'):
+                        var_name = key.replace('_beta', '')
+                        ensemble_coefficients[f'Beta_{var_name}'] = float(weighted_metrics[key])
+                
+                # Build the ensemble model data structure
+                ensemble_model_data = {
+                    'intercept': float(intercept),
+                    'coefficients': ensemble_coefficients,
+                    'x_variables': x_variables,
+                    'y_variable': y_variable,
+                    'transformation_metadata': transformation_metadata if transformation_metadata else {}
+                }
+                
+                # Update the build config with ensemble results
+                update_result = await client["trinity_db"]["build-model_featurebased_configs"].update_one(
+                    {"_id": document_id},
+                    {
+                        "$set": {
+                            f"model_coefficients.{combination_id}.Ensemble": ensemble_model_data,
+                            "updated_at": datetime.now()
+                        }
+                    },
+                    upsert=False
+                )
+                
+                if update_result.modified_count > 0:
+                    logger.info(f"✅ Successfully saved Ensemble coefficients to MongoDB for combination: {combination_id}")
+                else:
+                    logger.warning(f"⚠️ No documents updated when saving Ensemble coefficients for combination: {combination_id}")
+                    
+            except Exception as mongo_error:
+                logger.error(f"❌ Error saving Ensemble coefficients to MongoDB: {str(mongo_error)}")
+                # Continue with response even if MongoDB save fails
+            
             return {
                 "success": True,
                 "combination_name": combination_id,
@@ -2491,10 +2557,11 @@ async def calculate_ensemble_actual_vs_predicted(
                 "model_info": {
                     "intercept": intercept,
                     "coefficients": weighted_metrics,
-                    "x_variables": [key.replace('_beta', '') for key in weighted_metrics.keys() if key.endswith('_beta')],
+                    "x_variables": x_variables,
                     "y_variable": y_variable
                 },
-                "data_points": len(actual_values)
+                "data_points": len(actual_values),
+                "ensemble_saved_to_mongodb": True
             }
             
         except Exception as e:
@@ -2566,6 +2633,18 @@ async def calculate_ensemble_yoy(
         
         ensemble_data = ensemble_response.results[0]
         weighted_metrics = ensemble_data.weighted
+        
+        # Get weighted transformation metadata using ensemble metric calculation
+        from .ensemble_metric_calculation import calculate_weighted_transformation_metadata
+        
+        logger.info(f"🔍 Calculating weighted transformation metadata for ensemble YoY...")
+        transformation_metadata = await calculate_weighted_transformation_metadata(
+            db, client_name, app_name, project_name, combination_id, ensemble_data
+        )
+        logger.info(f"✅ Weighted transformation metadata calculated: {len(transformation_metadata)} variables")
+        
+        # Import apply_transformation_steps from s_curve.py
+        from .s_curve import apply_transformation_steps
         
         # Get the source file data
         try:
@@ -2666,6 +2745,9 @@ async def calculate_ensemble_yoy(
             explained_delta = 0.0
             contributions = []
             
+            # Check if transformations are available
+            has_transformations = transformation_metadata and len(transformation_metadata) > 0
+            
             # Get all variables that have betas in the ensemble results
             for key in weighted_metrics.keys():
                 if key.endswith('_beta'):
@@ -2676,6 +2758,16 @@ async def calculate_ensemble_yoy(
                         # Calculate mean values for each year
                         x_first_mean = df_first_year[x_var].mean()
                         x_last_mean = df_last_year[x_var].mean()
+                        
+                        # Apply transformations if available
+                        if has_transformations and x_var in transformation_metadata:
+                            transformation_steps = transformation_metadata[x_var].get('transformation_steps', [])
+                            if transformation_steps:
+                                # Apply transformations to both year means
+                                x_first_mean_transformed = apply_transformation_steps([x_first_mean], transformation_steps)[0]
+                                x_last_mean_transformed = apply_transformation_steps([x_last_mean], transformation_steps)[0]
+                                x_first_mean = x_first_mean_transformed
+                                x_last_mean = x_last_mean_transformed
                         
                         # Calculate contribution: beta * (mean_last_year - mean_first_year)
                         delta_contribution = beta_value * (x_last_mean - x_first_mean)
@@ -2704,6 +2796,48 @@ async def calculate_ensemble_yoy(
             waterfall_labels = [f"Base {year_first}"] + [c["variable"] for c in contributions] + ["Residual", f"Final {year_last}"]
             waterfall_values = [y_first_mean] + [c["delta_contribution"] for c in contributions] + [residual, y_last_mean]
             
+            # ---- Save ensemble results to MongoDB build config ----
+            try:
+                # Extract x_variables from weighted_metrics
+                x_variables = [key.replace('_beta', '') for key in weighted_metrics.keys() if key.endswith('_beta')]
+                
+                # Build coefficients dictionary in the same format as individual models
+                ensemble_coefficients = {}
+                for key in weighted_metrics.keys():
+                    if key.endswith('_beta'):
+                        var_name = key.replace('_beta', '')
+                        ensemble_coefficients[f'Beta_{var_name}'] = float(weighted_metrics[key])
+                
+                # Build the ensemble model data structure
+                ensemble_model_data = {
+                    'intercept': float(intercept),
+                    'coefficients': ensemble_coefficients,
+                    'x_variables': x_variables,
+                    'y_variable': y_variable,
+                    'transformation_metadata': transformation_metadata if transformation_metadata else {}
+                }
+                
+                # Update the build config with ensemble results
+                update_result = await client["trinity_db"]["build-model_featurebased_configs"].update_one(
+                    {"_id": document_id},
+                    {
+                        "$set": {
+                            f"model_coefficients.{combination_id}.Ensemble": ensemble_model_data,
+                            "updated_at": datetime.now()
+                        }
+                    },
+                    upsert=False
+                )
+                
+                if update_result.modified_count > 0:
+                    logger.info(f"✅ Successfully saved Ensemble coefficients to MongoDB for combination: {combination_id}")
+                else:
+                    logger.warning(f"⚠️ No documents updated when saving Ensemble coefficients for combination: {combination_id}")
+                    
+            except Exception as mongo_error:
+                logger.error(f"❌ Error saving Ensemble coefficients to MongoDB: {str(mongo_error)}")
+                # Continue with response even if MongoDB save fails
+            
             return {
                 "success": True,
                 "combination_name": combination_id,
@@ -2730,9 +2864,10 @@ async def calculate_ensemble_yoy(
                 "model_info": {
                     "intercept": intercept,
                     "coefficients": weighted_metrics,
-                    "x_variables": [key.replace('_beta', '') for key in weighted_metrics.keys() if key.endswith('_beta')],
+                    "x_variables": x_variables,
                     "y_variable": y_variable
-                }
+                },
+                "ensemble_saved_to_mongodb": True
             }
             
         except Exception as e:
@@ -2922,6 +3057,10 @@ async def calculate_actual_vs_predicted(
             coefficients = model_coeffs.get("coefficients", {})
             x_variables = model_coeffs.get("x_variables", [])
             y_variable = model_coeffs.get("y_variable", "")
+            transformation_metadata = model_coeffs.get("transformation_metadata", {})
+            
+            # Import apply_transformation_steps from s_curve.py
+            from .s_curve import apply_transformation_steps
             
             # Find date column
             date_column = None
@@ -2942,17 +3081,31 @@ async def calculate_actual_vs_predicted(
             actual_values = df[y_variable].tolist() if y_variable in df.columns else []
             predicted_values = []
             
+            # Check if transformations are available
+            has_transformations = transformation_metadata and len(transformation_metadata) > 0
+            
             for index, row in df.iterrows():
                 # Calculate predicted value: intercept + sum(beta_i * x_i)
                 predicted_value = intercept
                 
                 for x_var in x_variables:
                     beta_key = f"Beta_{x_var}"
-                    if beta_key in coefficients and x_var in df.columns:
-                        x_value = row[x_var]
-                        beta_value = coefficients[beta_key]
-                        contribution = beta_value * x_value
-                        predicted_value += contribution
+                    if beta_key in coefficients:
+                        # Get the raw x value
+                        if x_var in df.columns:
+                            x_value = row[x_var]
+                            
+                            # Apply transformations if available
+                            if has_transformations and x_var in transformation_metadata:
+                                transformation_steps = transformation_metadata[x_var].get('transformation_steps', [])
+                                if transformation_steps:
+                                    # Apply transformations to the single value
+                                    transformed_value = apply_transformation_steps([x_value], transformation_steps)[0]
+                                    x_value = transformed_value
+                            
+                            beta_value = coefficients[beta_key]
+                            contribution = beta_value * x_value
+                            predicted_value += contribution
                 
                 predicted_values.append(predicted_value)
 
@@ -3062,6 +3215,12 @@ async def calculate_yoy(
                 detail=f"No coefficients found for combination '{combination_name}' and model '{model_name}'"
             )
         
+        # Get transformation metadata
+        transformation_metadata = model_coeffs.get("transformation_metadata", {})
+        
+        # Import apply_transformation_steps from s_curve.py
+        from .s_curve import apply_transformation_steps
+        
         # Get the file key for this combination
         combination_file_keys = build_config.get("combination_file_keys", [])
         file_key = None
@@ -3157,6 +3316,9 @@ async def calculate_yoy(
             explained_delta = 0.0
             contributions = []
             
+            # Check if transformations are available
+            has_transformations = transformation_metadata and len(transformation_metadata) > 0
+            
             for x_var in x_variables:
                 beta_key = f"Beta_{x_var}"
                 if beta_key in coefficients and x_var in df.columns:
@@ -3165,6 +3327,16 @@ async def calculate_yoy(
                     # Calculate mean values for each year
                     x_first_mean = df_first_year[x_var].mean()
                     x_last_mean = df_last_year[x_var].mean()
+                    
+                    # Apply transformations if available
+                    if has_transformations and x_var in transformation_metadata:
+                        transformation_steps = transformation_metadata[x_var].get('transformation_steps', [])
+                        if transformation_steps:
+                            # Apply transformations to both year means
+                            x_first_mean_transformed = apply_transformation_steps([x_first_mean], transformation_steps)[0]
+                            x_last_mean_transformed = apply_transformation_steps([x_last_mean], transformation_steps)[0]
+                            x_first_mean = x_first_mean_transformed
+                            x_last_mean = x_last_mean_transformed
                     
                     # Calculate contribution: beta * (mean_last_year - mean_first_year)
                     delta_contribution = beta_value * (x_last_mean - x_first_mean)

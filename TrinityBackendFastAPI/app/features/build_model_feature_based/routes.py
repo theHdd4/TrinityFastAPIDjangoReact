@@ -1032,8 +1032,11 @@ async def train_models_direct(request: dict):
                 # Get column values for this combination from source file
                 column_values = {}
                 
-                # Check if this is a stack model (file_key starts with 'mmm_stack_model_')
-                if combo_result.get('file_key', '').startswith('mmm_stack_model_'):
+                # Check if this is a stack model by looking at model names (they start with 'Stack_')
+                model_results = combo_result.get('model_results', [])
+                is_stack_model = any(model.get('model_name', '').startswith('Stack_') for model in model_results)
+                
+                if is_stack_model:
                     # For stack models, use default values since the file doesn't exist in MinIO
                     logger.info(f"📊 Stack model detected for {combination_id}, using default column values")
                     column_values = {identifier: "Stack Model" for identifier in identifiers}
@@ -2880,15 +2883,23 @@ async def train_mmm_models(request: dict):
         
         # MMM Stack modeling integration (similar to general models)
         if stack_modeling:
+            logger.info(f"🔍 Starting MMM stack modeling with {len(combinations)} combinations")
+            logger.info(f"🔍 Stack models to run: {stack_models_to_run}")
+            logger.info(f"🔍 Pool by identifiers: {pool_by_identifiers}")
+            logger.info(f"🔍 Apply clustering: {apply_clustering}")
+            logger.info(f"🔍 Numerical columns for clustering: {numerical_columns_for_clustering}")
+            
             try:
                 # Import MMM stack trainer
                 from .mmm_stack_training import MMMStackModelDataProcessor
                 
                 # Initialize MMM stack trainer
                 mmm_stack_trainer = MMMStackModelDataProcessor()
+                logger.info("✅ MMM stack trainer initialized")
                 
                 # Step 1: Prepare stack model data (get split clustered data)
                 training_progress[run_id]["current_step"] = f"Reading and pooling data by {pool_by_identifiers}"
+                logger.info(f"🔍 Step 1: Preparing stack model data...")
                 stack_data_result = await mmm_stack_trainer.prepare_stack_model_data(
                     scope_number=scope_number,
                     combinations=combinations,
@@ -2901,13 +2912,20 @@ async def train_mmm_models(request: dict):
                     clustering_columns=numerical_columns_for_clustering
                 )
                 
+                logger.info(f"🔍 Stack data preparation result: {stack_data_result.get('status')}")
+                
                 if stack_data_result.get('status') != 'success':
-                    raise Exception(f"Failed to prepare MMM stack model data: {stack_data_result.get('error', 'Unknown error')}")
+                    error_msg = stack_data_result.get('error', 'Unknown error')
+                    logger.error(f"❌ Failed to prepare MMM stack model data: {error_msg}")
+                    raise Exception(f"Failed to prepare MMM stack model data: {error_msg}")
                 
                 split_clustered_data = stack_data_result.get('split_clustered_data', {})
+                logger.info(f"✅ Stack data prepared successfully with {len(split_clustered_data)} pools")
+                logger.info(f"🔍 Split clustered data keys: {list(split_clustered_data.keys())}")
                 
                 # Step 2: Train MMM stack models on prepared data
                 training_progress[run_id]["current_step"] = f"Training {len(stack_models_to_run)} model(s) on {len(split_clustered_data)} pools"
+                logger.info(f"🔍 Step 2: Training MMM stack models...")
                 stack_training_result = await mmm_stack_trainer.train_mmm_models_for_stack_data(
                     split_clustered_data=split_clustered_data,
                     x_variables=x_variables,
@@ -2928,20 +2946,50 @@ async def train_mmm_models(request: dict):
                     training_progress=training_progress
                 )
                 
+                logger.info(f"🔍 Stack training result status: {stack_training_result.get('status') if stack_training_result else 'None'}")
+                
                 if stack_training_result and stack_training_result.get('status') == 'success':
+                    logger.info("✅ Stack training completed successfully")
                     
                     # Process stack model results and merge them into existing combination results
                     # The stack_training_result contains individual_combination_metrics
                     stack_combination_results = stack_training_result.get('individual_combination_metrics', {})
+                    logger.info(f"🔍 Stack combination results count: {len(stack_combination_results)}")
+                    logger.info(f"🔍 Stack combination keys: {list(stack_combination_results.keys())}")
                     
                     # Process individual combination metrics (dictionary format)
                     for combination, model_results_dict in stack_combination_results.items():
+                        logger.info(f"🔍 Processing stack results for combination: {combination}")
+                        logger.info(f"🔍 Model results dict keys: {list(model_results_dict.keys())}")
+                        
                         # Convert stack model results to match individual model format
                         stack_model_results_formatted = []
                         for param_model_key, model_result in model_results_dict.items():
+                            logger.info(f"🔍 Processing model: {param_model_key}")
+                            
                             # Safety check - ensure model_result is a dictionary
                             if not isinstance(model_result, dict):
+                                logger.warning(f"⚠️ Model result is not a dictionary: {type(model_result)}")
                                 continue
+                            
+                            # Format coefficients with Beta_ prefix for consistency
+                            unstandardized_coeffs = model_result.get('unstandardized_coefficients', {})
+                            standardized_coeffs = model_result.get('coefficients', {})
+                            
+                            # Add Beta_ prefix to coefficient keys if not already present
+                            formatted_unstandardized_coeffs = {}
+                            for key, value in unstandardized_coeffs.items():
+                                if key.lower() != 'intercept' and not key.startswith('Beta_'):
+                                    formatted_unstandardized_coeffs[f"Beta_{key}"] = value
+                                elif key.lower() != 'intercept':
+                                    formatted_unstandardized_coeffs[key] = value
+                            
+                            formatted_standardized_coeffs = {}
+                            for key, value in standardized_coeffs.items():
+                                if key.lower() != 'intercept' and not key.startswith('Beta_'):
+                                    formatted_standardized_coeffs[f"Beta_{key}"] = value
+                                elif key.lower() != 'intercept':
+                                    formatted_standardized_coeffs[key] = value
                             
                             stack_model_result = {
                                 "model_name": f"Stack_{model_result.get('model_name', 'Unknown')}",
@@ -2949,8 +2997,8 @@ async def train_mmm_models(request: dict):
                                 "mape_test": model_result.get('mape_test', 0.0),
                                 "r2_train": model_result.get('r2_train', 0.0),
                                 "r2_test": model_result.get('r2_test', 0.0),
-                                "coefficients": model_result.get('unstandardized_coefficients', {}),
-                                "standardized_coefficients": model_result.get('coefficients', {}),
+                                "coefficients": formatted_unstandardized_coeffs,
+                                "standardized_coefficients": formatted_standardized_coeffs,
                                 "intercept": model_result.get('intercept', 0.0),
                                 "unstandardized_intercept": model_result.get('unstandardized_intercept', 0.0),
                                 "aic": model_result.get('aic', 0.0),
@@ -2984,9 +3032,32 @@ async def train_mmm_models(request: dict):
                                 # Note: Don't increment completed_combinations here as it was already counted for individual models
                             else:
                                 # If no existing combination found, create a new entry (fallback)
+                                # For stack models, we need to preserve a source file key for S-curve module
+                                # Try to find the original source file key from existing combinations
+                                source_file_key = None
+                                for existing_combo in combination_results:
+                                    if existing_combo.get('combination_id') == combination:
+                                        source_file_key = existing_combo.get('file_key')
+                                        break
+                                
+                                # If no source file key found, try to construct the expected MinIO path
+                                if not source_file_key:
+                                    # Try to construct the expected file key based on the pattern used by individual models
+                                    try:
+                                        from ..scope_selector.config import get_settings
+                                        scope_settings = get_settings()
+                                        bucket_name = scope_settings.minio_bucket
+                                        object_prefix = await get_object_prefix()
+                                        source_file_key = f"{bucket_name}/{object_prefix}data/{combination}.arrow"
+                                        logger.info(f"🔍 Constructed source file key for stack model: {source_file_key}")
+                                    except Exception as e:
+                                        logger.warning(f"⚠️ Could not construct source file key for {combination}: {e}")
+                                        source_file_key = combination  # Fallback to combination name
+                                        logger.warning(f"⚠️ Using combination name as fallback: {source_file_key}")
+                                
                                 combination_results.append({
                                     "combination_id": combination,
-                                    "file_key": f"mmm_stack_model_{combination}",
+                                    "file_key": source_file_key,  # Use original source file key for S-curve compatibility
                                     "total_records": 0,  # Individual metrics don't have total_records
                                     "model_results": stack_model_results_formatted
                                 })
@@ -3021,7 +3092,11 @@ async def train_mmm_models(request: dict):
                         all_variable_stats[combination] = combination_variable_stats
                     
                     training_progress[run_id]["current_step"] = "Stack modeling completed"
+                    logger.info("✅ MMM stack modeling completed successfully")
                 else:
+                    logger.error(f"❌ Stack training failed with status: {stack_training_result.get('status')}")
+                    logger.error(f"   Error: {stack_training_result.get('error', 'Unknown error')}")
+                    
                     # Add error details to combination_results for debugging
                     combination_results.append({
                         "combination_id": "mmm_stack_modeling_error",
@@ -3053,6 +3128,10 @@ async def train_mmm_models(request: dict):
                     })
                     
             except Exception as e:
+                logger.error(f"❌ Exception in MMM stack modeling: {str(e)}")
+                import traceback
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+                
                 # Add error details to combination_results for debugging
                 combination_results.append({
                     "combination_id": "mmm_stack_modeling_error",
@@ -3116,10 +3195,28 @@ async def train_mmm_models(request: dict):
                     ensemble_summary = ensemble_calculator.create_ensemble_summary(ensemble_results)
                     logger.info(f"📊 Ensemble calculation completed: {ensemble_summary}")
                     
+                    # Create validation summary to ensure proper combination and model tracking
+                    validation_summary = ensemble_calculator.create_validation_summary(ensemble_results)
+                    logger.info(f"🔍 Ensemble validation summary: {validation_summary['overall_stats']}")
+                    
+                    # Log any validation issues
+                    if validation_summary['overall_stats']['validation_failed'] > 0:
+                        logger.warning(f"⚠️ {validation_summary['overall_stats']['validation_failed']} validation issues found in ensemble calculation")
+                        for model_key, model_val in validation_summary['model_validation'].items():
+                            if not model_val.get('validation_passed', False):
+                                logger.warning(f"   Validation failed for {model_key}: {model_val}")
+                    
+                    # Debug: Log ensemble results keys and combination results keys
+                    logger.info(f"🔍 Ensemble results keys: {list(ensemble_results.keys())}")
+                    combination_names = [combo.get('combination_id') for combo in combination_results]
+                    logger.info(f"🔍 Combination results keys: {combination_names}")
+                    
                     # Update combination_results with ensemble results
                     # Replace individual model results with ensemble results for each combination
                     for i, combo_result in enumerate(combination_results):
                         combination_name = combo_result.get('combination_id', f'combination_{i}')
+                        logger.info(f"🔍 Processing combination: '{combination_name}'")
+                        
                         if combination_name in ensemble_results:
                             # Replace model_results with ensemble results
                             ensemble_data = ensemble_results[combination_name]
@@ -3168,6 +3265,10 @@ async def train_mmm_models(request: dict):
                             combo_result['model_results'] = ensemble_model_results
                             combo_result['ensemble_applied'] = True
                             logger.info(f"✅ Applied ensemble calculation to {combination_name}: {len(ensemble_model_results)} model types")
+                        else:
+                            logger.warning(f"⚠️ No ensemble results found for combination: '{combination_name}'")
+                            logger.warning(f"   Available ensemble keys: {list(ensemble_results.keys())}")
+                            combo_result['ensemble_applied'] = False
                         
                 else:
                     logger.warning("No valid combinations to save to MongoDB")
@@ -3317,8 +3418,11 @@ async def train_mmm_models(request: dict):
                 # Get column values for this combination from source file
                 column_values = {}
                 
-                # Check if this is a stack model (file_key starts with 'mmm_stack_model_')
-                if combo_result.get('file_key', '').startswith('mmm_stack_model_'):
+                # Check if this is a stack model by looking at model names (they start with 'Stack_')
+                model_results = combo_result.get('model_results', [])
+                is_stack_model = any(model.get('model_name', '').startswith('Stack_') for model in model_results)
+                
+                if is_stack_model:
                     # For stack models, use default values since the file doesn't exist in MinIO
                     logger.info(f"📊 Stack model detected for {combination_id}, using default column values")
                     column_values = {identifier: "Stack Model" for identifier in identifiers}
@@ -3587,14 +3691,18 @@ async def train_mmm_models(request: dict):
                 if 'combination_id' in combo_result:
                     combination_name = combo_result['combination_id']
                     
-                    # Add original file key if available (remove mmm_stack_modeling prefix)
+                    # Add original file key if available (skip for stack models)
                     if 'file_key' in combo_result:
                         file_key = combo_result['file_key']
-                        # Remove mmm_stack_modeling prefix if present
-                        if file_key.startswith('mmm_stack_model_'):
-                            # For stack models, use a placeholder or skip file_key
-                            logger.info(f"📊 Skipping stack model file_key for {combination_name}")
-                            file_key = None
+                        # Check if this is a stack model by looking at model names
+                        model_results = combo_result.get('model_results', [])
+                        is_stack_model = any(model.get('model_name', '').startswith('Stack_') for model in model_results)
+                        
+                        if is_stack_model:
+                            # For stack models, keep the source file key for S-curve compatibility
+                            # The file_key should be the original source file key, not a stack-specific key
+                            logger.info(f"📊 Using source file key for stack model {combination_name}: {file_key}")
+                            # Don't set file_key = None, keep the original source file key
                         
                         if file_key:  # Only add if file_key is not None
                             combination_file_keys.append({
@@ -3611,6 +3719,16 @@ async def train_mmm_models(request: dict):
                             coefficients = model_result.get('coefficients', {})
                             intercept = model_result.get('intercept', 0)
                             
+                            # Debug: Check for None values that could cause multiplication errors
+                            if intercept is None:
+                                logger.warning(f"⚠️ Found None intercept for {model_name} in {combination_name}, setting to 0")
+                                intercept = 0
+                            
+                            # Check coefficients for None values
+                            if coefficients is None:
+                                logger.warning(f"⚠️ Found None coefficients for {model_name} in {combination_name}, setting to empty dict")
+                                coefficients = {}
+                            
                             transformation_metadata = model_result.get('transformation_metadata', {})
                             
                             combination_coefficients[model_name] = {
@@ -3624,45 +3742,46 @@ async def train_mmm_models(request: dict):
                         model_coefficients[combination_name] = combination_coefficients
             
             # Prepare comprehensive build configuration data
+            # Ensure no None values that could cause MongoDB errors
             build_config_data = {
-                "run_id": run_id,
-                "scope_number": scope_number,
-                "combinations": combinations,
-                "x_variables": x_variables,
-                "y_variable": y_variable,
+                "run_id": run_id or "",
+                "scope_number": scope_number or "",
+                "combinations": combinations or [],
+                "x_variables": x_variables or [],
+                "y_variable": y_variable or "",
                 "standardization": "mmm_per_variable",
-                "k_folds": individual_k_folds,
-                "models_to_run": individual_models_to_run,
-                "total_combinations_processed": len(combination_results),
-                "total_models_saved": len([r for r in combination_results if 'model_results' in r]),
-                "combination_file_keys": combination_file_keys,
-                "model_coefficients": model_coefficients,
+                "k_folds": individual_k_folds if individual_k_folds is not None else 5,
+                "models_to_run": individual_models_to_run or [],
+                "total_combinations_processed": len(combination_results) if combination_results else 0,
+                "total_models_saved": len([r for r in combination_results if 'model_results' in r]) if combination_results else 0,
+                "combination_file_keys": combination_file_keys or [],
+                "model_coefficients": model_coefficients or {},
                 "created_at": datetime.now().isoformat(),
                 "training_status": "completed",
                 
                 # Individual modeling configuration
-                "individual_modeling": individual_modeling,
-                "individual_k_folds": individual_k_folds,
-                "individual_test_size": individual_test_size,
-                "individual_models_to_run": individual_models_to_run,
-                "individual_custom_model_configs": individual_custom_model_configs,
+                "individual_modeling": individual_modeling if individual_modeling is not None else True,
+                "individual_k_folds": individual_k_folds if individual_k_folds is not None else 5,
+                "individual_test_size": individual_test_size if individual_test_size is not None else 0.2,
+                "individual_models_to_run": individual_models_to_run or [],
+                "individual_custom_model_configs": individual_custom_model_configs or {},
                 
                 # Stack modeling configuration
-                "stack_modeling": stack_modeling,
-                "stack_k_folds": stack_k_folds,
-                "stack_test_size": stack_test_size,
-                "stack_models_to_run": stack_models_to_run,
-                "stack_custom_model_configs": stack_custom_model_configs,
-                "pool_by_identifiers": pool_by_identifiers,
+                "stack_modeling": stack_modeling if stack_modeling is not None else False,
+                "stack_k_folds": stack_k_folds if stack_k_folds is not None else 5,
+                "stack_test_size": stack_test_size if stack_test_size is not None else 0.2,
+                "stack_models_to_run": stack_models_to_run or [],
+                "stack_custom_model_configs": stack_custom_model_configs or {},
+                "pool_by_identifiers": pool_by_identifiers or [],
                 
                 # Clustering configuration
-                "apply_clustering": apply_clustering,
-                "numerical_columns_for_clustering": numerical_columns_for_clustering,
-                "n_clusters": n_clusters,
+                "apply_clustering": apply_clustering if apply_clustering is not None else False,
+                "numerical_columns_for_clustering": numerical_columns_for_clustering or [],
+                "n_clusters": n_clusters if n_clusters is not None else None,
                 
                 # Interaction terms configuration
-                "apply_interaction_terms": apply_interaction_terms,
-                "numerical_columns_for_interaction": numerical_columns_for_interaction,
+                "apply_interaction_terms": apply_interaction_terms if apply_interaction_terms is not None else False,
+                "numerical_columns_for_interaction": numerical_columns_for_interaction or [],
                 
                 # ROI configuration (if available in request)
                 "roi_config": request.get('roi_config', {}),
@@ -3671,10 +3790,10 @@ async def train_mmm_models(request: dict):
                 "constraints_config": request.get('constraints_config', {}),
                 
                 # Price column configuration
-                "price_column": request.get('price_column'),
+                "price_column": request.get('price_column') or "",
                 
                 # Test size configuration
-                "test_size": request.get('test_size', 0.2),
+                "test_size": request.get('test_size', 0.2) if request.get('test_size') is not None else 0.2,
                 "mmm_training": True,
                 
                 # Additional metadata
@@ -3683,22 +3802,44 @@ async def train_mmm_models(request: dict):
                 "project_name": project_name,
             }
             
-            # Save to MongoDB
-            mongo_result = await save_build_config(
-                client_name=client_name,
-                app_name=app_name,
-                project_name=project_name,
-                build_data=build_config_data,
-                user_id="",  # You can add user_id if available
-                project_id=None  # You can add project_id if available
-            )
+            # Debug: Check build_config_data for None values before saving to MongoDB
+            logger.info("🔍 Checking build_config_data for None values before MongoDB save...")
+            none_values_found = []
+            for key, value in build_config_data.items():
+                if value is None:
+                    none_values_found.append(key)
+                    logger.warning(f"⚠️ Found None value for key '{key}' in build_config_data")
             
-            if mongo_result["status"] == "success":
-                logger.info(f"📦 MMM Build configuration saved to MongoDB: {mongo_result['mongo_id']}")
+            if none_values_found:
+                logger.warning(f"⚠️ Found {len(none_values_found)} None values in build_config_data: {none_values_found}")
             else:
-                logger.error(f"❌ Failed to save MMM build configuration to MongoDB: {mongo_result['error']}")
+                logger.info("✅ No None values found in build_config_data")
+            
+            # Save to MongoDB with detailed error handling
+            try:
+                mongo_result = await save_build_config(
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
+                    build_data=build_config_data,
+                    user_id="",  # You can add user_id if available
+                    project_id=None  # You can add project_id if available
+                )
+                
+                if mongo_result["status"] == "success":
+                    logger.info(f"📦 MMM Build configuration saved to MongoDB: {mongo_result['mongo_id']}")
+                else:
+                    logger.error(f"❌ Failed to save MMM build configuration to MongoDB: {mongo_result['error']}")
+            except Exception as mongo_error:
+                logger.error(f"❌ Exception during MongoDB save: {str(mongo_error)}")
+                logger.error(f"   Error type: {type(mongo_error)}")
+                import traceback
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+                # Don't fail the entire request if MongoDB save fails
         except Exception as e:
             logger.error(f"❌ Error saving MMM build configuration to MongoDB: {str(e)}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
             # Don't fail the entire request if MongoDB save fails
         
         return ModelTrainingResponse(

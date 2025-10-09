@@ -1167,6 +1167,9 @@ class MMMModelTrainer:
                         unstandardized_intercept = intercept - intercept_adjustment
                     # For "none" or "media" transformations, intercept remains as-is
                     
+
+                    logger.info(f"Unstandardized coefficients: {unstandardized_coefficients}")
+                    logger.info(f"standardized coefficients: {coefficients}")
                     # Calculate AIC and BIC
                     n_samples = len(y_train)
                     n_params = len(x_variables_lower) + 1  # +1 for intercept

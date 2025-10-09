@@ -1326,7 +1326,7 @@ class MMMStackModelDataProcessor:
                             
                             # Generate transformation metadata for this individual combination
                             # This is crucial for proper unstandardization
-                            transformed_df, transformation_metadata = transformation_engine.apply_variable_transformations(
+                            transformed_df, transformation_metadata, updated_combo_config = transformation_engine.apply_variable_transformations(
                                 df, modified_combo_config
                             )
                             
@@ -1373,7 +1373,7 @@ class MMMStackModelDataProcessor:
                             transformation_engine = MMMTransformationEngine()
 
                             # Apply transformations to individual data
-                            transformed_individual_df, individual_transformation_metadata = transformation_engine.apply_variable_transformations(
+                            transformed_individual_df, individual_transformation_metadata, updated_combo_config = transformation_engine.apply_variable_transformations(
                                 df, combo_config
                             )
                         
@@ -1443,7 +1443,7 @@ class MMMStackModelDataProcessor:
                                 logger.info(f"   Unstandardized coefficients: {unstandardized_coefficients}")
                                 
                                 # Apply transformations to FULL dataset first for consistent standardization
-                                transformed_df_full, transformation_metadata = transformation_engine.apply_variable_transformations(
+                                transformed_df_full, transformation_metadata, updated_combo_config = transformation_engine.apply_variable_transformations(
                                     df, combo_config
                                 )
                                 
@@ -1496,11 +1496,13 @@ class MMMStackModelDataProcessor:
                                 'unstandardized_coefficients': unstandardized_coefficients,  # Unstandardized coefficients for individual combination
                                 'unstandardized_intercept': unstandardized_intercept,  # Unstandardized intercept for individual combination
                                 'roi_results': roi_results,  # ROI results for selected features
-                                'variable_configs': combo_config,  # Variable configuration for this combination
+                                'variable_configs': updated_combo_config,  # Variable configuration for this combination
                                 'transformation_metadata': transformation_metadata,  # Transformation metadata for this combination
                                 'variable_averages': variable_averages,  # Variable averages for this combination
                                 'train_size': stack_metrics.get('train_size', 0),
-                                'test_size': stack_metrics.get('test_size', 0)
+                                'test_size': stack_metrics.get('test_size', 0), 
+                                'individual_transformation_metadata': individual_transformation_metadata,  # Individual transformation metadata for this combination
+                                "n_parameters": len(x_variables_lower) + 1  # Number of parameters for this combination
                             }
                     
                     individual_metrics[combination] = combination_metrics
@@ -2016,7 +2018,7 @@ class MMMStackModelDataProcessor:
                 logger.info(f"Transforming combination '{combination}' with {len(combo_data)} records")
                 
                 # Apply MMM transformations
-                transformed_combo, metadata = transformation_engine.apply_variable_transformations(
+                transformed_combo, metadata, updated_combo_config = transformation_engine.apply_variable_transformations(
                     combo_data, combo_config
                 )
                 

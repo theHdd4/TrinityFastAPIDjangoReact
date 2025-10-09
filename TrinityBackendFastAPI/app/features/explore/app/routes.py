@@ -49,7 +49,7 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
-OBJECT_PREFIX = os.getenv("OBJECT_PREFIX", "qmmqq/sales/")
+OBJECT_PREFIX = os.getenv("OBJECT_PREFIX", "")
 
 minio_client = Minio(
     MINIO_ENDPOINT,

@@ -295,10 +295,35 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
   // Fetch S-curve data when model is selected
   useEffect(() => {
-    if (data.selectedCombinationId && data.selectedModel && data.selectedModel !== 'Select Model to View Model Performance' && data.selectedModel !== 'no-models') {
+    if (data.selectedCombinationId && data.selectedModel && data.selectedModel !== 'no-models') {
       fetchSCurveData(data.selectedCombinationId, data.selectedModel);
     }
   }, [data.selectedCombinationId, data.selectedModel]);
+
+  // Fetch all data when Ensemble is selected as default
+  useEffect(() => {
+    if (data.selectedCombinationId && data.selectedModel === 'Ensemble' && data.selectedDataset && data.weightedEnsembleData && data.weightedEnsembleData.length > 0) {
+      // Fetch ensemble performance metrics
+      const ensemble = data.weightedEnsembleData[0];
+      if (ensemble && ensemble.weighted_metrics) {
+        const ensemblePerformance = [
+          { name: 'MAPE Train', value: ensemble.weighted_metrics?.mape_train || 0 },
+          { name: 'MAPE Test', value: ensemble.weighted_metrics?.mape_test || 0 },
+          { name: 'R² Train', value: ensemble.weighted_metrics?.r2_train || 0 },
+          { name: 'R² Test', value: ensemble.weighted_metrics?.r2_test || 0 },
+          { name: 'AIC', value: ensemble.weighted_metrics?.aic || 0 },
+          { name: 'BIC', value: ensemble.weighted_metrics?.bic || 0 }
+        ];
+        handleDataChange({ selectedModelPerformance: ensemblePerformance });
+        
+        // Fetch all ensemble data
+        fetchActualVsPredictedEnsemble(data.selectedCombinationId);
+        fetchModelContributionEnsemble(data.selectedCombinationId, data.selectedDataset);
+        fetchYoYDataEnsemble(data.selectedCombinationId);
+        fetchSCurveData(data.selectedCombinationId, 'Ensemble');
+      }
+    }
+  }, [data.selectedCombinationId, data.selectedModel, data.selectedDataset, data.weightedEnsembleData]);
 
   // Fetch cardinality data when dataset is selected
   useEffect(() => {
@@ -356,7 +381,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
   const handleCombinationChange = (value: string) => {
     handleDataChange({ 
       selectedCombinationId: value,
-      selectedModel: 'Select Model to View Model Performance',
+      selectedModel: 'Ensemble',
       selectedModelPerformance: [],
       actualVsPredictedData: [],
       contributionData: [],
@@ -1315,7 +1340,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
   // Function to save selected model
   const handleSaveModel = async () => {
-    if (!data.selectedModel || data.selectedModel === 'Select Model to View Model Performance' || !data.selectedDataset) {
+    if (!data.selectedModel || data.selectedModel === 'no-models' || !data.selectedDataset) {
       return;
     }
 
@@ -1680,9 +1705,14 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           return a.actual - b.actual;
         });
         
+        // Transform data for single y-axis with legend
+        const transformedData = actualVsPredictedData.flatMap(item => [
+          { date: item.date, value: item.actual, series: 'Actual' },
+          { date: item.date, value: item.predicted, series: 'Predicted' }
+        ]);
         
         handleDataChange({
-          actualVsPredictedData: actualVsPredictedData,
+          actualVsPredictedData: transformedData,
           actualVsPredictedMetrics: result.performance_metrics
         });
         
@@ -1892,7 +1922,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
   // Function to fetch S-curve data
   const fetchSCurveData = async (combinationId: string, modelName: string) => {
-    if (!combinationId || combinationId === 'all' || !modelName || modelName === 'Select Model to View Model Performance' || modelName === 'no-models') {
+    if (!combinationId || combinationId === 'all' || !modelName || modelName === 'no-models') {
       return;
     }
     
@@ -2656,11 +2686,10 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     yAxisLabel={data.selectedMethod ? data.selectedMethod.charAt(0).toUpperCase() + data.selectedMethod.slice(1) : 'Value'}
                     theme={methodByModelChartTheme}
                     enableScroll={false}
-                    width="100%"
                     height={300}
                     showDataLabels={methodByModelChartDataLabels}
                     showLegend={true}
-                    sortOrder={methodByModelChartSortOrder}
+                    sortOrder={methodByModelChartSortOrder as 'asc' | 'desc' | null}
                     onThemeChange={handleMethodByModelChartThemeChange}
                     onChartTypeChange={handleMethodByModelChartTypeChange}
                     onDataLabelsToggle={handleMethodByModelChartDataLabelsChange}
@@ -3507,7 +3536,17 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                           <Select value={data.selectedModel} onValueChange={(value) => {
                 handleDataChange({ selectedModel: value });
                 if (value && value !== 'no-models' && data.selectedDataset && data.selectedCombinationId) {
+                  // Clear existing data first
+                  handleDataChange({
+                    selectedModelPerformance: [],
+                    actualVsPredictedData: [],
+                    contributionData: [],
+                    yoyData: [],
+                    sCurveData: null
+                  });
+                  
                   if (value === 'Ensemble') {
+                    console.log('🔄 Fetching Ensemble data for:', value);
                     // Use ensemble data for all calculations
                     if (data.weightedEnsembleData && data.weightedEnsembleData.length > 0) {
                       const ensemble = data.weightedEnsembleData[0];
@@ -3524,26 +3563,43 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                       handleDataChange({ selectedModelPerformance: ensemblePerformance });
                       
                       // Calculate actual vs predicted using ensemble betas but same source file concept
+                      console.log('📊 Fetching Actual vs Predicted Ensemble...');
                       fetchActualVsPredictedEnsemble(data.selectedCombinationId);
                       
                       // Fetch ensemble contribution data
+                      console.log('📊 Fetching Contribution Ensemble...');
                       fetchModelContributionEnsemble(data.selectedCombinationId, data.selectedDataset);
                       
                       // Calculate YoY using ensemble betas but same source file concept
+                      console.log('📊 Fetching YoY Ensemble...');
                       fetchYoYDataEnsemble(data.selectedCombinationId);
+                      
+                      // Fetch S-curve data for ensemble
+                      console.log('📊 Fetching S-Curve Ensemble...');
+                      fetchSCurveData(data.selectedCombinationId, value);
                     }
                   } else {
+                    console.log('🔄 Fetching Individual model data for:', value);
                     // Use individual model data
+                    console.log('📊 Fetching Performance...');
                     fetchModelPerformance(value, data.selectedCombinationId, data.selectedDataset);
+                    console.log('📊 Fetching Actual vs Predicted...');
                     fetchActualVsPredicted(value, data.selectedCombinationId);
+                    console.log('📊 Fetching Contribution...');
                     fetchModelContribution(value, data.selectedCombinationId, data.selectedDataset);
+                    console.log('📊 Fetching YoY...');
                     fetchYoYData(value, data.selectedCombinationId);
+                    console.log('📊 Fetching Weighted Ensemble...');
                     fetchWeightedEnsembleData(data.selectedDataset, data.selectedCombinationId);
+                    
+                    // Fetch S-curve data for individual model
+                    console.log('📊 Fetching S-Curve...');
+                    fetchSCurveData(data.selectedCombinationId, value);
                   }
                 }
               }}>
               <SelectTrigger className="w-full max-w-md border-orange-200 focus:border-orange-500 focus:ring-orange-200">
-                <SelectValue placeholder="Select Model to View Model Performance" />
+                <SelectValue placeholder="Ensemble (Default)" />
               </SelectTrigger>
               <SelectContent className="border-orange-200">
                 {data.elasticityData && data.elasticityData.length > 0 ? (
@@ -3608,16 +3664,16 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     type={predictedVsActualChartType}
                     data={data.actualVsPredictedData}
                     xField="date"
-                    yFields={["actual", "predicted"]}
+                    yField="value"
+                    legendField="series"
                     xAxisLabel="Date"
                     yAxisLabel="Value"
                     theme={predictedVsActualChartTheme}
                     enableScroll={false}
-                    width="100%"
                     height={300}
                     showDataLabels={predictedVsActualChartDataLabels}
-                    showLegend={predictedVsActualChartType === 'pie_chart'}
-                    sortOrder={predictedVsActualChartSortOrder}
+                    showLegend={true}
+                    sortOrder={predictedVsActualChartSortOrder as 'asc' | 'desc' | null}
                     onThemeChange={handlePredictedVsActualChartThemeChange}
                     onChartTypeChange={handlePredictedVsActualChartTypeChange}
                     onDataLabelsToggle={handlePredictedVsActualChartDataLabelsChange}
@@ -3653,11 +3709,10 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                       yAxisLabel="Contribution"
                       theme={contributionChartTheme}
                       enableScroll={false}
-                      width="100%"
                       height={300}
                       showDataLabels={contributionChartDataLabels}
                       showLegend={contributionChartType === 'pie_chart'}
-                      sortOrder={contributionChartSortOrder}
+                      sortOrder={contributionChartSortOrder as 'asc' | 'desc' | null}
                       onThemeChange={handleContributionChartThemeChange}
                       onChartTypeChange={handleContributionChartTypeChange}
                       onDataLabelsToggle={handleContributionChartDataLabelsChange}
@@ -3690,11 +3745,10 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     yAxisLabel="Growth Value"
                     theme={yoyChartTheme}
                     enableScroll={false}
-                    width="100%"
                     height={300}
                     showDataLabels={yoyChartDataLabels}
                     showLegend={yoyChartType === 'pie_chart'}
-                    sortOrder={yoyChartSortOrder}
+                    sortOrder={yoyChartSortOrder as 'asc' | 'desc' | null}
                     onThemeChange={handleYoyChartThemeChange}
                     onChartTypeChange={handleYoyChartTypeChange}
                     onDataLabelsToggle={handleYoyChartDataLabelsChange}
@@ -3721,10 +3775,10 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           {/* S-Curve Analysis - Full Width */}
           <div className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 mb-6">
             {data.sCurveData && data.sCurveData.success ? (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-6">
                 {Object.entries(data.sCurveData.s_curves).slice(0, 2).map(([variable, curveData]: [string, any]) => (
-                  <div key={variable} className="border border-gray-200 rounded-lg p-3">
-                    <div className="w-full h-[250px]">
+                  <div key={variable} className="border border-gray-200 rounded-lg p-4">
+                    <div className="w-full h-[350px]">
                       <RechartsChartRenderer
                         type="line_chart"
                         data={curveData.percent_changes.map((percent: number, index: number) => ({
@@ -3738,8 +3792,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                         yAxisLabel="Total Volume"
                         theme="default"
                         enableScroll={false}
-                        width="100%"
-                        height={250}
+                        height={350}
                         showDataLabels={false}
                         showLegend={false}
                       />
@@ -3763,7 +3816,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           <div className="pt-4 border-t border-orange-200/50">
             <Button 
               onClick={handleSaveModel}
-              disabled={isSaving || !data.selectedModel || data.selectedModel === 'Select Model to View Model Performance'}
+              disabled={isSaving || !data.selectedModel || data.selectedModel === 'no-models'}
               className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Save className="h-4 w-4 mr-2" />

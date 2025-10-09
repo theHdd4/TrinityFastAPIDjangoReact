@@ -66,10 +66,10 @@ def _infer_content_type(key: str) -> str:
     return ctype or "application/octet-stream"
 
 
-def _extract_betas_from_results_file(results_df: pd.DataFrame, combination_id: str) -> tuple[Dict[str, float], float]:
+def _extract_betas_from_results_file(results_df: pd.DataFrame, combination_id: str) -> tuple[Dict[str, float], float, Dict[str, Any]]:
     """
-    Extract betas and intercept from the results file for a specific combination.
-    Returns a tuple of (betas_dict, intercept_value).
+    Extract betas, intercept, and transformation metadata from the results file for a specific combination.
+    Returns a tuple of (betas_dict, intercept_value, transformation_metadata).
     """
     # Find combination_id column (case-insensitive)
     combination_id_column = None
@@ -139,7 +139,21 @@ def _extract_betas_from_results_file(results_df: pd.DataFrame, combination_id: s
             variable_name = col.replace('_beta', '').replace('_Beta', '')
             betas[variable_name] = float(value)
     
-    return betas, intercept
+    # Extract transformation metadata (if available)
+    transformation_metadata = {}
+    if 'transformation_metadata' in results_df.columns:
+        metadata_value = combination_row['transformation_metadata']
+        if pd.notna(metadata_value):
+            # Try to parse as JSON if it's a string
+            if isinstance(metadata_value, str):
+                try:
+                    transformation_metadata = json.loads(metadata_value)
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse transformation_metadata as JSON: {metadata_value}")
+            elif isinstance(metadata_value, dict):
+                transformation_metadata = metadata_value
+    
+    return betas, intercept, transformation_metadata
 
 
 # ---------- Arrow readers / filters ----------
@@ -301,7 +315,6 @@ def _coeff_pack(build_cfg: dict, combination_name: str, model_name: str):
     intercept = float(coeffs.get("intercept", 0.0))
     x_vars = coeffs.get("x_variables") or list((coeffs.get("coefficients") or {}).keys())
     if not x_vars:
-        # logger.error(f"No x_variables found for {combination_name} / {model_name}")
         raise HTTPException(status_code=400, detail=f"No x_variables for {combination_name} / {model_name}")
     
     y_var = coeffs.get("y_variable") or build_cfg.get("y_variable") or "Volume"
@@ -365,7 +378,7 @@ def _metrics(actual: np.ndarray, pred: np.ndarray) -> Dict[str, float]:
 
 
 def _year_col(df: pd.DataFrame) -> Optional[str]:
-    for c in ["Year", "year", "YEAR"]:
+    for c in ["year"]:  # Since columns are converted to lowercase
         if c in df.columns:
             return c
     return None
@@ -512,11 +525,15 @@ async def selected_actual_vs_predicted(
 ):
     """
     For every row flagged in `selected_models`, compute actual vs predicted using the model
-    coefficients + source data (intercept + sum(beta*x)).
+    coefficients + source data (intercept + sum(beta*x)) WITH TRANSFORMATION SUPPORT.
     Returns an array of items, one per (combination_id, model_name).
     """
+    # Import apply_transformation_steps from select models feature
+    from ..select_models_feature_based.s_curve import apply_transformation_steps
+    
     # 1) read results and collect (combination_id, model_name) pairs
     results_df = _read_minio_dataframe(minio_client, bucket, results_file_key)
+    results_df.columns = results_df.columns.str.lower()
     selected_pairs = _collect_selected_rows(results_df)[:limit_models]
 
     build_cfg = await _get_build_config(client_name, app_name, project_name)
@@ -525,20 +542,40 @@ async def selected_actual_vs_predicted(
     for combination_id, model_name in selected_pairs:
         file_key = _file_key_for_combo(build_cfg, combination_id)
         src_df = _read_minio_dataframe(minio_client, bucket, file_key)
+        src_df.columns = src_df.columns.str.lower()
         
-        # Get betas and intercept from the results file instead of MongoDB
-        betas, intercept = _extract_betas_from_results_file(results_df, combination_id)
+        # Get betas and intercept from the results file
+        betas, intercept, _ = _extract_betas_from_results_file(results_df, combination_id)
+        
+        # Get transformation_metadata from MongoDB (same as select models feature)
+        transformation_metadata = {}
+        try:
+            model_coeffs_in_mongo = build_cfg.get("model_coefficients", {})
+            combo_coeffs = model_coeffs_in_mongo.get(combination_id, {})
+            model_coeffs = combo_coeffs.get(model_name, {})
+            transformation_metadata = model_coeffs.get("transformation_metadata", {})
+            logger.info(f"✅ Transformation metadata from MongoDB for {combination_id}/{model_name}: {transformation_metadata}")
+        except Exception as e:
+            logger.warning(f"Failed to get transformation metadata from MongoDB: {str(e)}")
         
         # Get x_variables from the source data columns that have betas
         x_vars = list(betas.keys())
         y_var = build_cfg.get("y_variable") or "Volume"
+        
+        # Convert y_var to lowercase to match the DataFrame columns
+        y_var = y_var.lower()
 
         # coerce y to numeric
         if y_var not in src_df.columns:
             raise HTTPException(status_code=404, detail=f"y_variable '{y_var}' not in source for {combination_id}")
         actual = pd.to_numeric(src_df[y_var], errors="coerce").fillna(0.0).to_numpy(dtype=float)
         
-        # Calculate predictions manually to match original logic
+        # Check if transformations are available
+        has_transformations = transformation_metadata and len(transformation_metadata) > 0
+        if has_transformations:
+            logger.info(f"✅ Transformations available for combination {combination_id}: {list(transformation_metadata.keys())}")
+        
+        # Calculate predictions with transformation support
         predicted_values = []
         
         for index, row in src_df.iterrows():
@@ -547,7 +584,31 @@ async def selected_actual_vs_predicted(
             
             for x_var in x_vars:
                 if x_var in src_df.columns:
+                    # Get the raw x value
                     x_value = row[x_var]
+                    
+                    # Apply transformations if available (check both original and lowercased variable names)
+                    if has_transformations:
+                        # Try to find the transformation metadata with case-insensitive matching
+                        transformation_steps = None
+                        if x_var in transformation_metadata:
+                            transformation_steps = transformation_metadata[x_var].get('transformation_steps', [])
+                        elif x_var.lower() in transformation_metadata:
+                            transformation_steps = transformation_metadata[x_var.lower()].get('transformation_steps', [])
+                        elif x_var.upper() in transformation_metadata:
+                            transformation_steps = transformation_metadata[x_var.upper()].get('transformation_steps', [])
+                        
+                        if transformation_steps:
+                            try:
+                                # Apply transformations to the single value
+                                original_value = x_value
+                                transformed_value = apply_transformation_steps([x_value], transformation_steps)[0]
+                                x_value = transformed_value
+                                if index == 0:  # Log only for first row to avoid spam
+                                    logger.info(f"🔄 Applied transformation to {x_var}: {original_value} → {transformed_value}")
+                            except Exception as e:
+                                logger.warning(f"Failed to apply transformations for {x_var}: {str(e)}")
+                    
                     beta_value = betas.get(x_var, 0.0)
                     contribution = beta_value * x_value
                     predicted_value += contribution
@@ -626,6 +687,7 @@ async def selected_contributions_yoy(
     Returns one block per model with {yearly_contributions, yoy_contributions}.
     """
     results_df = _read_minio_dataframe(minio_client, bucket, results_file_key)
+    results_df.columns = results_df.columns.str.lower()
     selected_pairs = _collect_selected_rows(results_df)
 
     build_cfg = await _get_build_config(client_name, app_name, project_name)
@@ -636,7 +698,7 @@ async def selected_contributions_yoy(
         df = _read_minio_dataframe(minio_client, bucket, file_key)
         
         # Get betas and intercept from the results file instead of MongoDB
-        betas, intercept = _extract_betas_from_results_file(results_df, combination_id)
+        betas, intercept, _ = _extract_betas_from_results_file(results_df, combination_id)
         
         # Get x_variables from the source data columns that have betas
         x_vars = list(betas.keys())
@@ -839,7 +901,6 @@ async def get_combinations_from_dataset(
                         if identifier_column:
                             # Filter rows where identifier value is in the selected values
                             filtered_df = filtered_df[filtered_df[identifier_column].astype(str).isin(selected_values)]
-                            logger.info(f"Filtered by {identifier_name} ({identifier_column}): {len(filtered_df)} rows remaining")
                         else:
                             logger.warning(f"Identifier column '{identifier_name}' not found in dataset")
                 
@@ -1018,9 +1079,12 @@ async def calculate_yoy_growth(
     bucket: str = Query(default=MINIO_BUCKET),
 ):
     """
-    Calculate Year-over-Year (YoY) growth for each selected combination using stored coefficients and actual X values.
+    Calculate Year-over-Year (YoY) growth for each selected combination using stored coefficients and actual X values WITH TRANSFORMATION SUPPORT.
     Returns YoY growth data for all combinations where selected_models = 'yes'.
     """
+    # Import apply_transformation_steps from select models feature
+    from ..select_models_feature_based.s_curve import apply_transformation_steps
+    
     try:
         # logger.info(f"Calculating YoY growth for results file: {results_file_key}")
         # logger.info(f"Client: {client_name}, App: {app_name}, Project: {project_name}")
@@ -1058,19 +1122,52 @@ async def calculate_yoy_growth(
                 # logger.info(f"Processing YoY growth for combination: {combination_id}, model: {model_name}")
                 
                 # Get betas and intercept from the results file instead of MongoDB
-                betas, intercept = _extract_betas_from_results_file(results_df, combination_id)
+                betas, intercept, transformation_metadata = _extract_betas_from_results_file(results_df, combination_id)
                 
                 # Get x_variables from the source data columns that have betas
                 x_vars = list(betas.keys())
                 y_var = build_cfg.get("y_variable") or "Volume"
                 
+                # Get transformation_metadata from MongoDB (same as select models feature)
+                try:
+                    model_coeffs_in_mongo = build_cfg.get("model_coefficients", {})
+                    combo_coeffs = model_coeffs_in_mongo.get(combination_id, {})
+                    model_coeffs = combo_coeffs.get(model_name, {})
+                    transformation_metadata = model_coeffs.get("transformation_metadata", {})
+                    
+                    # Parse transformation_metadata if it's a string (JSON)
+                    if isinstance(transformation_metadata, str):
+                        import json
+                        try:
+                            transformation_metadata = json.loads(transformation_metadata)
+                            logger.info(f"✅ YoY Growth - Parsed transformation metadata from JSON string")
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"Failed to parse transformation metadata JSON: {str(e)}")
+                            transformation_metadata = {}
+                    
+                    logger.info(f"✅ YoY Growth - Transformation metadata from MongoDB for {combination_id}/{model_name}: {transformation_metadata}")
+                except Exception as e:
+                    logger.warning(f"Failed to get transformation metadata from MongoDB for YoY growth: {str(e)}")
+                    transformation_metadata = {}
+                
+                # Check if transformations are available
+                has_transformations = transformation_metadata and len(transformation_metadata) > 0
+                # logger.info(f"✅ YoY Growth - Has transformations: {has_transformations}")
+                # logger.info(f"✅ YoY Growth - Transformation metadata structure: {type(transformation_metadata)}")
+                # logger.info(f"✅ YoY Growth - Transformation metadata keys: {list(transformation_metadata.keys()) if isinstance(transformation_metadata, dict) else 'Not a dict'}")
+                # logger.info(f"✅ YoY Growth - Available x_vars: {x_vars}")
+                
                 # Get source file for this combination
                 file_key = _file_key_for_combo(build_cfg, combination_id)
                 df = _read_minio_dataframe(minio_client, bucket, file_key)
+                df.columns = df.columns.str.lower()
                 
-                # Detect date column
+                # Convert y_var to lowercase to match the DataFrame columns
+                y_var = y_var.lower()
+                
+                # Detect date column (since columns are lowercase, look for lowercase versions)
                 date_column = None
-                date_columns = ["Date", "date", "Invoice_Date", "Bill_Date", "Order_Date", "Month", "month", "Period", "period", "Year", "year"]
+                date_columns = ["date", "invoice_date", "bill_date", "order_date", "month", "period", "year"]
                 for col in date_columns:
                     if col in df.columns:
                         date_column = col
@@ -1124,13 +1221,87 @@ async def calculate_yoy_growth(
                         beta_value = betas[x_var]
                         logger.info(f"🔍 DEBUG: Processing variable {x_var} with beta {beta_value}")
                         
-                        # Calculate mean values for each year
-                        x_first_mean = df_first_year[x_var].mean()
-                        x_last_mean = df_last_year[x_var].mean()
+                        # Apply transformations if available (same logic as actual-vs-predicted)
+                        if has_transformations and x_var in transformation_metadata:
+                            try:
+                                # Get raw values first for comparison
+                                x_first_raw = df_first_year[x_var].mean()
+                                x_last_raw = df_last_year[x_var].mean()
+                                
+                                # logger.info(f"✅ YoY Growth - Looking for {x_var} in transformation_metadata")
+                                # logger.info(f"✅ YoY Growth - transformation_metadata type: {type(transformation_metadata)}")
+                                # logger.info(f"✅ YoY Growth - transformation_metadata keys: {list(transformation_metadata.keys()) if isinstance(transformation_metadata, dict) else 'Not a dict'}")
+                                
+                                # Parse individual variable transformation metadata if it's a string
+                                var_transformation_metadata = transformation_metadata[x_var]
+                                # logger.info(f"✅ YoY Growth - Retrieved {x_var} metadata: {type(var_transformation_metadata)}")
+                                
+                                # Extract transformation_steps from the variable metadata
+                                if isinstance(var_transformation_metadata, dict) and "transformation_steps" in var_transformation_metadata:
+                                    var_transformation_metadata = var_transformation_metadata["transformation_steps"]
+                                    # logger.info(f"✅ YoY Growth - Extracted transformation_steps for {x_var}: {type(var_transformation_metadata)}")
+                                elif isinstance(var_transformation_metadata, str):
+                                    import json
+                                    try:
+                                        var_transformation_metadata = json.loads(var_transformation_metadata)
+                                        # Check if it's a dict with transformation_steps
+                                        if isinstance(var_transformation_metadata, dict) and "transformation_steps" in var_transformation_metadata:
+                                            var_transformation_metadata = var_transformation_metadata["transformation_steps"]
+                                        # logger.info(f"✅ YoY Growth - Parsed transformation metadata for {x_var} from JSON string")
+                                    except json.JSONDecodeError as e:
+                                        logger.warning(f"Failed to parse transformation metadata for {x_var}: {str(e)}")
+                                        var_transformation_metadata = []
+                                else:
+                                    # logger.warning(f"Transformation metadata for {x_var} is not in expected format, skipping transformations")
+                                    var_transformation_metadata = []
+                                
+                                # Ensure transformation_metadata is a list (as expected by apply_transformation_steps)
+                                if not isinstance(var_transformation_metadata, list):
+                                    logger.warning(f"Transformation metadata for {x_var} is not a list, skipping transformations")
+                                    var_transformation_metadata = []
+                                
+                                # logger.info(f"✅ YoY Growth - {x_var} transformation metadata type: {type(var_transformation_metadata)}, length: {len(var_transformation_metadata) if isinstance(var_transformation_metadata, list) else 'N/A'}")
+                                
+                                # Apply transformations to first year data
+                                x_first_transformed = apply_transformation_steps(
+                                    [x_first_raw], 
+                                    var_transformation_metadata
+                                )
+                                # Apply transformations to last year data
+                                x_last_transformed = apply_transformation_steps(
+                                    [x_last_raw], 
+                                    var_transformation_metadata
+                                )
+                                
+                                # Calculate mean values for each year (using transformed data)
+                                # apply_transformation_steps returns a list, so we need to get the first element
+                                x_first_mean = x_first_transformed[0] if len(x_first_transformed) > 0 else x_first_raw
+                                x_last_mean = x_last_transformed[0] if len(x_last_transformed) > 0 else x_last_raw
+                                
+                                # logger.info(f"✅ YoY Growth - {x_var}: Raw means ({x_first_raw:.2f}, {x_last_raw:.2f}) -> Transformed means ({x_first_mean:.2f}, {x_last_mean:.2f})")
+                            except Exception as e:
+                                # logger.warning(f"Failed to apply transformations to {x_var}: {str(e)}")
+                                # Fallback to raw values
+                                x_first_mean = df_first_year[x_var].mean()
+                                x_last_mean = df_last_year[x_var].mean()
+                        else:
+                            # No transformations available, use raw values
+                            x_first_mean = df_first_year[x_var].mean()
+                            x_last_mean = df_last_year[x_var].mean()
+                            if has_transformations:
+                                logger.info(f"✅ YoY Growth - {x_var}: Variable not found in transformation metadata, using raw means ({x_first_mean:.2f}, {x_last_mean:.2f})")
+                            else:
+                                logger.info(f"✅ YoY Growth - {x_var}: No transformations available, using raw means ({x_first_mean:.2f}, {x_last_mean:.2f})")
+                        
+                        # Check for unusually large beta coefficients
+                        if abs(beta_value) > 10000:
+                            logger.warning(f"⚠️ YoY Growth - {x_var}: Beta coefficient is very large ({beta_value:.2f}), this may cause billion-scale contributions")
                         
                         # Calculate contribution: beta * (mean_last_year - mean_first_year)
                         delta_contribution = beta_value * (x_last_mean - x_first_mean)
                         explained_delta += delta_contribution
+                        
+                        # logger.info(f"✅ YoY Growth - {x_var}: Beta={beta_value:.6f}, Delta={x_last_mean-x_first_mean:.2f}, Contribution={delta_contribution:.2f}")
                         
                         contributions.append({
                             "variable": x_var,
@@ -1344,6 +1515,109 @@ async def get_contribution_data(
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
 
 
+@router.get("/roi", tags=["Evaluate"])
+async def get_roi_data(
+    results_file_key: str = Query(..., description="MinIO file key for the results file"),
+    combination_id: str = Query(..., description="Combination ID to filter by"),
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
+):
+    """
+    Get ROI data for a specific combination from the results file.
+    Returns data from columns that end with _roi for chart.
+    """
+    try:
+        # Read the results file
+        df = _read_minio_dataframe(minio_client, MINIO_BUCKET, results_file_key)
+        if df is None or df.empty:
+            raise HTTPException(status_code=404, detail="Results file not found or empty")
+        df.columns = df.columns.str.lower()
+        # Find combination_id column (case-insensitive)
+        combination_id_column = None
+        for col in df.columns:
+            col_lower = col.lower()
+            if (col_lower == 'combination_id' or 
+                col_lower == 'combo_id' or 
+                col_lower == 'combinationid' or
+                'combination_id' in col_lower or 
+                'combo_id' in col_lower or 
+                'combination' in col_lower):
+                combination_id_column = col
+                break
+        
+        if not combination_id_column:
+            raise HTTPException(status_code=404, detail="No combination_id column found in results file")
+        
+        # Find selected_models column (case-insensitive)
+        selected_models_column = None
+        for col in df.columns:
+            col_lower = col.lower()
+            if (col_lower == 'selected_models' or 
+                col_lower == 'selectedmodels' or
+                'selected_models' in col_lower or 
+                'selectedmodels' in col_lower):
+                selected_models_column = col
+                break
+        
+        if not selected_models_column:
+            raise HTTPException(status_code=404, detail="No selected_models column found in results file")
+        
+        # Filter by combination_id AND selected_models = 'yes'
+        filtered_df = df[
+            (df[combination_id_column] == combination_id) & 
+            (df[selected_models_column].str.lower() == 'yes')
+        ]
+        
+        if filtered_df.empty:
+            raise HTTPException(status_code=404, detail=f"No data found for combination_id: {combination_id} with selected_models = 'yes'")
+        
+        # Get the first row (should be only one for a specific combination)
+        combination_row = filtered_df.iloc[0]
+        
+        # Find columns that end with _roi
+        roi_columns = []
+        for col in df.columns:
+            if col.lower().endswith('_roi'):
+                roi_columns.append(col)
+                logger.info(f"Found ROI column: {col}")
+        
+        if not roi_columns:
+            return {
+                "file_key": results_file_key,
+                "combination_id": combination_id,
+                "roi_data": []
+            }
+        
+        # Extract ROI data
+        roi_data = []
+        for col in roi_columns:
+            value = combination_row[col]
+            logger.info(f"Column {col}: value = {value}, type = {type(value)}")
+            if pd.notna(value):  # Check if value is not NaN
+                # Extract variable name from column (remove _roi suffix)
+                variable_name = col.replace('_roi', '').replace('_ROI', '').replace('_Roi', '')
+                roi_data.append({
+                    "name": variable_name,
+                    "value": float(value)
+                })
+        logger.info(f"Found ROI data: {roi_data}")
+        if not roi_data:
+            raise HTTPException(status_code=404, detail="No valid ROI data found")
+        
+        return {
+            "file_key": results_file_key,
+            "combination_id": combination_id,
+            "roi_data": roi_data
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+
+
 @router.get("/beta", tags=["Evaluate"])
 async def get_beta_data(
     results_file_key: str = Query(..., description="MinIO file key for the results file"),
@@ -1469,6 +1743,109 @@ async def get_beta_data(
         import traceback
         # logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+
+
+@router.get("/s-curve", tags=["Evaluate"])
+async def get_s_curve_data(
+    results_file_key: str = Query(..., description="MinIO key of the results file with selected_models flags"),
+    client_name: str = Query(...),
+    app_name: str = Query(...),
+    project_name: str = Query(...),
+    bucket: str = Query(default=MINIO_BUCKET, description="MinIO bucket for both results & sources"),
+    limit_models: int = Query(default=1000, ge=1, le=10000),
+):
+    """
+    Generate S-curve data for all selected models and combinations.
+    Returns S-curve data for each (combination_id, model_name) pair where selected_models = 'yes'.
+    """
+    try:
+        # Create MinIO client
+        minio_client = Minio(
+            MINIO_ENDPOINT,
+            access_key=MINIO_ACCESS_KEY,
+            secret_key=MINIO_SECRET_KEY,
+            secure=False
+        )
+        
+        # Create MongoDB client
+        from .database import get_authenticated_client
+        mongo_client = get_authenticated_client()
+        db = mongo_client["trinity_db"]
+        
+        # Import the S-curve endpoint from select models feature
+        from ..select_models_feature_based.s_curve import get_s_curve_endpoint
+        
+        # 1) read results and collect (combination_id, model_name) pairs
+        results_df = _read_minio_dataframe(minio_client, bucket, results_file_key)
+        results_df.columns = results_df.columns.str.lower()
+        selected_pairs = _collect_selected_rows(results_df)[:limit_models]
+        
+        if not selected_pairs:
+            return {
+                "success": False,
+                "error": "No selected models found in results file",
+                "s_curves": {}
+            }
+        
+        logger.info(f"✅ Found {len(selected_pairs)} selected model combinations for S-curve generation")
+        
+        # Process each selected combination and model
+        all_s_curves = {}
+        errors = []
+        
+        for combination_id, model_name in selected_pairs:
+            try:
+                logger.info(f"🔍 Generating S-curve for {combination_id}/{model_name}")
+                
+                # Call the S-curve endpoint for this specific combination and model
+                s_curve_result = await get_s_curve_endpoint(
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name,
+                    combination_name=combination_id,
+                    model_name=model_name,
+                    db=db,
+                    minio_client=minio_client,
+                    MINIO_BUCKET=bucket
+                )
+                
+                if s_curve_result.get("success", False):
+                    # Store the S-curve data with a unique key
+                    key = f"{combination_id}_{model_name}"
+                    all_s_curves[key] = s_curve_result
+                    logger.info(f"✅ S-curve generated successfully for {combination_id}/{model_name}")
+                else:
+                    error_msg = s_curve_result.get("error", "Unknown error")
+                    errors.append(f"{combination_id}/{model_name}: {error_msg}")
+                    logger.warning(f"⚠️ S-curve generation failed for {combination_id}/{model_name}: {error_msg}")
+                    
+            except Exception as e:
+                error_msg = f"Error generating S-curve for {combination_id}/{model_name}: {str(e)}"
+                errors.append(error_msg)
+                logger.error(error_msg)
+                continue
+        
+        # Return results
+        if all_s_curves:
+            return {
+                "success": True,
+                "results_file_key": results_file_key,
+                "bucket": bucket,
+                "models_count": len(all_s_curves),
+                "s_curves": all_s_curves,
+                "errors": errors if errors else None
+            }
+        else:
+            return {
+                "success": False,
+                "error": "No S-curves could be generated for any selected models",
+                "errors": errors,
+                "s_curves": {}
+            }
+        
+    except Exception as e:
+        logger.error(f"Error generating S-curves: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generating S-curves: {str(e)}")
 
 
 @router.get("/elasticity", tags=["Evaluate"])
