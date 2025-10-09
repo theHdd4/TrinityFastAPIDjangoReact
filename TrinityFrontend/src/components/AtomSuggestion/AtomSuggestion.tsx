@@ -93,6 +93,26 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
     return allAtoms.some(atom => atom.atomId === 'clustering');
   }, [allAtoms]);
 
+  const hasBuildFeatureBasedAtom = useMemo(() => {
+    return allAtoms.some(atom => atom.atomId === 'build-model-feature-based');
+  }, [allAtoms]);
+
+  const hasBuildAutoregressiveAtom = useMemo(() => {
+    return allAtoms.some(atom => atom.atomId === 'auto-regressive-models');
+  }, [allAtoms]);
+
+  const hasSelectModelsFeatureAtom = useMemo(() => {
+    return allAtoms.some(atom => atom.atomId === 'select-models-feature');
+  }, [allAtoms]);
+
+  const hasEvaluateModelsFeatureAtom = useMemo(() => {
+    return allAtoms.some(atom => atom.atomId === 'evaluate-models-feature');
+  }, [allAtoms]);
+
+  const hasScenarioPlannerAtom = useMemo(() => {
+    return allAtoms.some(atom => atom.atomId === 'scenario-planner');
+  }, [allAtoms]);
+
   // Fetch saved dataframes
   const fetchSavedDataframes = async () => {
     setIsLoadingDataframes(true);
@@ -136,7 +156,7 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
   const suggestedAtoms = useMemo(() => {
     const suggestions = [];
     
-    // Check if the card above has column classifier, feature overview, data upload, explore, dataframe operations, groupby, or merge
+    // Check if the card above has column classifier, feature overview, data upload, explore, dataframe operations, groupby, merge, scope selector, or build model feature based
     const cardIndex = cards.findIndex(card => card.id === cardId);
     const cardAbove = cardIndex > 0 ? cards[cardIndex - 1] : null;
     const cardAboveHasColumnClassifier = cardAbove?.atoms.some(atom => atom.atomId === 'column-classifier') || false;
@@ -146,6 +166,116 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
     const cardAboveHasDataframeOperations = cardAbove?.atoms.some(atom => atom.atomId === 'dataframe-operations') || false;
     const cardAboveHasGroupBy = cardAbove?.atoms.some(atom => atom.atomId === 'groupby-wtg-avg') || false;
     const cardAboveHasMerge = cardAbove?.atoms.some(atom => atom.atomId === 'merge') || false;
+    const cardAboveHasScopeSelector = cardAbove?.atoms.some(atom => atom.atomId === 'scope-selector') || false;
+    const cardAboveHasBuildModelFeatureBased = cardAbove?.atoms.some(atom => atom.atomId === 'build-model-feature-based') || false;
+    const cardAboveHasBuildAutoregressive = cardAbove?.atoms.some(atom => atom.atomId === 'auto-regressive-models') || false;
+    const cardAboveHasSelectModelsFeature = cardAbove?.atoms.some(atom => atom.atomId === 'select-models-feature') || false;
+    const cardAboveHasEvaluateModelsFeature = cardAbove?.atoms.some(atom => atom.atomId === 'evaluate-models-feature') || false;
+    
+    // If card above has evaluate models - feature based, suggest scenario planner, explore, and dataframe operations
+    if (cardAboveHasEvaluateModelsFeature) {
+      suggestions.push({
+        id: 'scenario-planner',
+        name: 'Scenario planner',
+        color: 'bg-cyan-500'
+      });
+      
+      suggestions.push({
+        id: 'explore',
+        name: 'Explore',
+        color: 'bg-teal-500'
+      });
+      
+      suggestions.push({
+        id: 'dataframe-operations',
+        name: 'Dataframe operations',
+        color: 'bg-purple-500'
+      });
+    }
+    
+    // If card above has select models - feature based, suggest evaluate feature based, scenario planner, and explore
+    if (cardAboveHasSelectModelsFeature) {
+      suggestions.push({
+        id: 'evaluate-models-feature',
+        name: 'Evaluate feature based',
+        color: 'bg-emerald-500'
+      });
+      
+      suggestions.push({
+        id: 'scenario-planner',
+        name: 'Scenario planner',
+        color: 'bg-cyan-500'
+      });
+      
+      suggestions.push({
+        id: 'explore',
+        name: 'Explore',
+        color: 'bg-teal-500'
+      });
+    }
+    
+    // If card above has build autoregressive, suggest explore, chart maker, and correlation
+    if (cardAboveHasBuildAutoregressive) {
+      suggestions.push({
+        id: 'explore',
+        name: 'Explore',
+        color: 'bg-teal-500'
+      });
+      
+      suggestions.push({
+        id: 'chart-maker',
+        name: 'Chart maker',
+        color: 'bg-pink-500'
+      });
+      
+      suggestions.push({
+        id: 'correlation',
+        name: 'Correlation',
+        color: 'bg-red-500'
+      });
+    }
+    
+    // If card above has build model feature based, suggest select models - feature based, explore, and chart maker
+    if (cardAboveHasBuildModelFeatureBased) {
+      suggestions.push({
+        id: 'select-models-feature',
+        name: 'Select models - feature based',
+        color: 'bg-slate-500'
+      });
+      
+      suggestions.push({
+        id: 'explore',
+        name: 'Explore',
+        color: 'bg-teal-500'
+      });
+      
+      suggestions.push({
+        id: 'chart-maker',
+        name: 'Chart maker',
+        color: 'bg-pink-500'
+      });
+    }
+    
+    // If card above has scope selector, suggest build feature based, build autoregressive, and clustering
+    if (cardAboveHasScopeSelector) {
+      suggestions.push({
+        id: 'build-model-feature-based',
+        name: 'Build feature based',
+        color: 'bg-amber-500'
+      });
+      
+      suggestions.push({
+        id: 'auto-regressive-models',
+        name: 'Build autoregressive',
+        color: 'bg-lime-500'
+      });
+      
+      suggestions.push({
+        id: 'clustering',
+        name: 'Clustering',
+        color: 'bg-rose-500'
+      });
+    }
     
     // If card above has merge, suggest scope selector, clustering, and dataframe operations
     if (cardAboveHasMerge) {
@@ -321,7 +451,7 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
     
     
     return suggestions;
-  }, [hasDataUploadAtom, hasColumnClassifierAtom, hasDataframeOperationsAtom, hasFeatureOverviewAtom, hasExploreAtom, hasCorrelationAtom, hasCreateAndTransformAtom, hasChartMakerAtom, hasGroupByAtom, hasMergeAtom, hasConcatAtom, hasScopeSelectorAtom, hasClusteringAtom, savedDataframes.length, cards, cardId, allAtoms.length]);
+  }, [hasDataUploadAtom, hasColumnClassifierAtom, hasDataframeOperationsAtom, hasFeatureOverviewAtom, hasExploreAtom, hasCorrelationAtom, hasCreateAndTransformAtom, hasChartMakerAtom, hasGroupByAtom, hasMergeAtom, hasConcatAtom, hasScopeSelectorAtom, hasClusteringAtom, hasBuildFeatureBasedAtom, hasBuildAutoregressiveAtom, hasSelectModelsFeatureAtom, hasEvaluateModelsFeatureAtom, hasScenarioPlannerAtom, savedDataframes.length, cards, cardId, allAtoms.length]);
 
   // Check if we should show the suggestion
   const shouldShowSuggestion = useMemo(() => {
