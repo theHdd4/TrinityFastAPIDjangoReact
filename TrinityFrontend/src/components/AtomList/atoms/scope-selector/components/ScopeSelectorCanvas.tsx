@@ -33,11 +33,7 @@ interface ScopeSelectorCanvasProps {
 const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataChange, atomId }) => {
   // Debug log to track data updates
   useEffect(() => {
-    console.log('ScopeSelectorCanvas data updated:', {
-      dataSource: data.dataSource,
-      selectedIdentifiers: data.selectedIdentifiers,
-      hasRequiredData: data.dataSource && data.selectedIdentifiers?.length > 0
-    });
+    // Data updated
   }, [data]);
   const [uniqueValues, setUniqueValues] = useState<{ [key: string]: string[] }>({});
   // Scope-specific filtered values and their loading flags
@@ -46,11 +42,17 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
   const [filteredLoading, setFilteredLoading] = useState<{ [scopeId: string]: { [key: string]: boolean } }>({});
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
+  // Message for removed columns
+  const [removedColumnsMessage, setRemovedColumnsMessage] = useState<{ text: string; visible: boolean }>({ text: '', visible: false });
   // Get atom settings to access the input file name
   const atom = useLaboratoryStore(state => atomId ? state.getAtom(atomId) : undefined);
   const updateAtomSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const atomSettings = (atom?.settings as any) || {};
   const inputFileName = atomSettings.dataSource || data.dataSource || '';
+  
+  // Auto-initialization state (same as properties panel)
+  const [isCanvasInitialized, setIsCanvasInitialized] = useState(false);
+  const [lastCanvasDataSource, setLastCanvasDataSource] = useState<string>('');
 
   // Preview row counts per scope after save
   type PreviewRow = { scopeId: string; values: Record<string, string>; count: number; pctPass?: boolean };
@@ -64,6 +66,124 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
       setPreviewRows(atomSettings.previewRows);
     }
   }, [atomSettings.previewRows]);
+
+  // Auto-initialization: Initialize file data if dataSource exists but required data is missing
+  // This allows the canvas to auto-initialize even if the properties panel hasn't been opened
+  React.useEffect(() => {
+    // Reset initialization flag when dataSource changes
+    if (data.dataSource !== lastCanvasDataSource) {
+      setLastCanvasDataSource(data.dataSource || '');
+      setIsCanvasInitialized(false);
+      return; // Let the next render handle initialization
+    }
+    
+    // Check if we have all required data
+    const hasAllColumns = data.allColumns && data.allColumns.length > 0;
+    const hasSelectedIdentifiers = data.selectedIdentifiers && data.selectedIdentifiers.length > 0;
+    const hasAvailableIdentifiers = data.availableIdentifiers && data.availableIdentifiers.length > 0;
+    
+    const needsInitialization = data.dataSource && (!hasAllColumns || !hasSelectedIdentifiers || !hasAvailableIdentifiers);
+    
+    if (needsInitialization && !isCanvasInitialized && atomId) {
+      // Set initialized flag immediately to prevent duplicate calls
+      setIsCanvasInitialized(true);
+      
+      // Initialize the file data
+      const initializeFileData = async () => {
+        try {
+          const val = data.dataSource;
+          if (!val) return;
+          
+          // Fetch column summary
+          const res = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`);
+          if (res.ok) {
+            const fetchedData = await res.json();
+            const allColumns = Array.isArray(fetchedData.summary) ? fetchedData.summary.filter(Boolean) : [];
+
+            // Determine all categorical identifiers
+            const allCats = allColumns
+              .filter(col => {
+                const dataType = col.data_type?.toLowerCase() || '';
+                return (dataType === 'object' || dataType === 'category') && col.column;
+              })
+              .map(col => col.column);
+
+            // Fetch identifiers from column classifier configuration (file-specific)
+            let classifierIdentifiers: string[] = [];
+            try {
+              const envStr = localStorage.getItem('env');
+              if (envStr) {
+                const env = JSON.parse(envStr);
+                const url = `${SCOPE_SELECTOR_API}/identifier_options?` +
+                  new URLSearchParams({
+                    client_name: env.CLIENT_NAME || '',
+                    app_name: env.APP_NAME || '',
+                    project_name: env.PROJECT_NAME || '',
+                    file_name: val
+                  }).toString();
+                
+                const identifierRes = await fetch(url);
+                
+                if (identifierRes.ok) {
+                  const identifierData = await identifierRes.json();
+                  classifierIdentifiers = Array.isArray(identifierData.identifiers) ? identifierData.identifiers : [];
+                }
+              }
+            } catch (err) {
+              // Silent error handling
+            }
+
+            // Use classifier identifiers if available, otherwise use all categorical columns
+            let availableIdentifiers = classifierIdentifiers.length > 0 ? classifierIdentifiers : allCats;
+            let selectedIdentifiers = classifierIdentifiers;
+            
+            // If no classifier identifiers, filter by unique count > 1
+            if (classifierIdentifiers.length === 0 && allCats.length > 0) {
+              const filteredIdentifiers: string[] = [];
+              
+              for (const identifier of allCats) {
+                try {
+                  const res = await fetch(
+                    `${SCOPE_SELECTOR_API}/unique_values?object_name=${encodeURIComponent(val)}&column_name=${encodeURIComponent(identifier)}`
+                  );
+                  if (res.ok) {
+                    const json = await res.json();
+                    if (Array.isArray(json.unique_values) && json.unique_values.length > 1) {
+                      filteredIdentifiers.push(identifier);
+                    }
+                  }
+                } catch (err) {
+                  // Silent error handling
+                }
+              }
+              
+              selectedIdentifiers = filteredIdentifiers;
+            }
+            
+            // Update settings with the initialized data and reset scopes
+            if (updateAtomSettings && atomId) {
+              updateAtomSettings(atomId, {
+                dataSource: val,
+                allColumns,
+                availableIdentifiers,
+                selectedIdentifiers,
+                scopes: [], // Reset scopes when file changes
+              });
+            }
+          }
+        } catch (error) {
+          // Silent error handling
+        }
+      };
+      
+      initializeFileData();
+    } else if (data.dataSource && hasAllColumns && hasSelectedIdentifiers && hasAvailableIdentifiers) {
+      // Data is complete, mark as initialized
+      if (!isCanvasInitialized) {
+        setIsCanvasInitialized(true);
+      }
+    }
+  }, [data.dataSource, isCanvasInitialized, lastCanvasDataSource, data.allColumns, data.selectedIdentifiers, data.availableIdentifiers, atomId, updateAtomSettings]);
 
   // Handle opening the input file in a new tab
   const handleViewDataClick = () => {
@@ -94,15 +214,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
   
   // Debug log
   useEffect(() => {
-    console.log('ScopeSelectorCanvas data updated', {
-      dataSource: data.dataSource,
-      selectedIdentifiers: data.selectedIdentifiers,
-      scopes: data.scopes,
-      uniqueValues: Object.keys(uniqueValues),
-      filteredValuesKeys: Object.keys(filteredValues),
-      loadingValues: Object.entries(loadingValues).filter(([_, v]) => v).map(([k]) => k),
-      filteredLoading: Object.entries(filteredLoading).flatMap(([s, obj]) => Object.entries(obj).filter(([_, v]) => v).map(([k]) => `${s}:${k}`))
-    });
+    // Data updated
   }, [data, uniqueValues, loadingValues]);
 
   // Drag and drop handlers
@@ -163,12 +275,75 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.selectedIdentifiers]);
 
+  // Auto-create scope when identifiers are selected and no scopes exist
+  useEffect(() => {
+    if (data.selectedIdentifiers.length > 0 && data.scopes.length === 0 && data.dataSource) {
+      // Initialize identifiers with empty strings for all selected identifiers
+      const initialIdentifiers = Object.fromEntries(
+        data.selectedIdentifiers.map(id => [id, ''])
+      );
+
+      const newScope: ScopeData = {
+        id: Date.now().toString(),
+        name: `Scope 1`,
+        identifiers: initialIdentifiers,
+        timeframe: {
+          from: dateRange.available
+            ? (dateRange.min ?? new Date().toISOString().split('T')[0])
+            : new Date().toISOString().split('T')[0],
+          to: dateRange.available
+            ? (dateRange.max ?? new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0])
+            : new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0]
+        }
+      };
+      
+      onDataChange({
+        scopes: [newScope]
+      });
+
+      // Trigger fetching of unique values for the selected identifiers
+      if (data.dataSource && data.selectedIdentifiers.length > 0) {
+        data.selectedIdentifiers.forEach((identifier) => {
+          if (!uniqueValues[identifier] && !loadingValues[identifier]) {
+            setLoadingValues(prev => ({ ...prev, [identifier]: true }));
+            fetch(
+              `${SCOPE_SELECTOR_API}/unique_values?object_name=${encodeURIComponent(
+                data.dataSource || ''
+              )}&column_name=${encodeURIComponent(identifier)}`
+            )
+              .then(response => {
+                if (response.ok) {
+                  return response.json();
+                }
+                throw new Error('Failed to fetch unique values');
+              })
+              .then(json => {
+                if (Array.isArray(json.unique_values)) {
+                  setUniqueValues(prev => ({
+                    ...prev,
+                    [identifier]: json.unique_values
+                  }));
+                }
+              })
+              .catch(error => {
+                // Error fetching unique values
+              })
+              .finally(() => {
+                setLoadingValues(prev => ({ ...prev, [identifier]: false }));
+              });
+          }
+        });
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.selectedIdentifiers, data.scopes.length, data.dataSource]);
+
   // =============================
   // SAVE HANDLER
   // =============================
   const handleSave = async () => {
     if (!data.dataSource) {
-      console.warn('No dataSource selected');
+      // No dataSource selected
       return;
     }
 
@@ -239,7 +414,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
       }
 
       const result = await response.json();
-      console.log('Save successful:', result);
+      // Save successful
       // Generate preview rows per combination
       const previewRowsAccum: PreviewRow[] = [];
       const comboPromises: Promise<void>[] = [];
@@ -315,7 +490,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                   pctPass
                 });
               } catch (err) {
-                console.error('Preview generation error', err);
+                // Preview generation error
                 previewRowsAccum.push({
                   scopeId: scope.id,
                   values: Object.fromEntries(valuesArr.map((v, i) => [keys[i], v])),
@@ -342,7 +517,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
       // Notify other components (e.g., SavedDataFramesPanel) to refresh list
       window.dispatchEvent(new CustomEvent('savedDataFrame'));
     } catch (error) {
-      console.error('Error saving scope:', error);
+      // Error saving scope
       const message = (error instanceof Error ? error.message : 'Failed to save scope');
       toast({ title: 'Error', description: message, variant: 'destructive' });
     } finally {
@@ -397,7 +572,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
           onDataChange({ scopes: updatedScopes });
         }
       } catch (err) {
-        console.warn('Date range unavailable:', err);
+        // Date range unavailable
         setDateRange({ min: null, max: null, available: false });
       }
     };
@@ -415,10 +590,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
 
   // Combined effect to handle data source and identifier changes
   useEffect(() => {
-    console.log('Data source or selected identifiers changed:', {
-      dataSource: data.dataSource,
-      selectedIdentifiers: data.selectedIdentifiers
-    });
+    // Data source or selected identifiers changed
     
     let isMounted = true;
     const abortController = new AbortController();
@@ -432,23 +604,17 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
       
       // Skip if no data source or no selected identifiers
       if (!data.dataSource || !data.selectedIdentifiers || !Array.isArray(data.selectedIdentifiers)) {
-        console.log('Missing required data, skipping fetch:', {
-          hasDataSource: !!data.dataSource,
-          hasSelectedIdentifiers: !!data.selectedIdentifiers,
-          isArray: Array.isArray(data.selectedIdentifiers)
-        });
+        // Missing required data, skipping fetch
         return;
       }
       
       // Skip if no identifiers to fetch
       if (data.selectedIdentifiers.length === 0) {
-        console.log('No identifiers selected, skipping fetch');
+        // No identifiers selected, skipping fetch
         return;
       }
       
-      console.log('\n=== Starting to fetch unique values ===');
-      console.log('Data source:', data.dataSource);
-      console.log('Selected identifiers:', data.selectedIdentifiers);
+      // Starting to fetch unique values
       
       // Set loading state for all selected identifiers
       const newLoadingValues: Record<string, boolean> = {};
@@ -461,8 +627,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
         // Fetch all unique values in parallel
         const fetchPromises = data.selectedIdentifiers.map(async (identifier) => {
           try {
-            console.log(`\n=== Fetching unique values for ${identifier} ===`);
-            console.log(`URL: ${SCOPE_SELECTOR_API}/unique_values?object_name=${encodeURIComponent(data.dataSource || '')}&column_name=${encodeURIComponent(identifier)}`);
+            // Fetching unique values for identifier
             
             const response = await fetch(
               `${SCOPE_SELECTOR_API}/unique_values?object_name=${encodeURIComponent(data.dataSource || '')}&column_name=${encodeURIComponent(identifier)}`,
@@ -474,14 +639,14 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
               }
             );
             
-            console.log(`Response status for ${identifier}:`, response.status);
+            // Response status received
             
             if (response.ok) {
               const result = await response.json();
-              console.log(`API Response for ${identifier}:`, result);
+              // API Response received
               
               if (result.unique_values && isMounted) {
-                console.log(`✅ Successfully received ${result.unique_values.length} unique values for ${identifier}`);
+                // Successfully received unique values
                 
                 // Update the unique values in state
                 setUniqueValues(prev => ({
@@ -489,17 +654,15 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                   [identifier]: result.unique_values
                 }));
                 
-                return { identifier, success: true };
+                return { identifier, success: true, uniqueValues: result.unique_values };
               } else {
-                console.warn(`⚠️ No unique_values in response for ${identifier}:`, result);
+                // No unique_values in response
                 return { identifier, success: false, error: 'No unique_values in response' };
               }
             } else {
-              console.error(`❌ Error fetching unique values for ${identifier}:`, response.statusText);
               return { identifier, success: false, error: response.statusText };
             }
           } catch (error) {
-            console.error(`❌ Error fetching unique values for ${identifier}:`, error);
             return { identifier, success: false, error: error.message };
           } finally {
             // Update loading state when done
@@ -514,10 +677,41 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
         
         // Wait for all fetches to complete
         const results = await Promise.all(fetchPromises);
-        console.log('All fetches completed:', results);
+        
+        // Auto-select identifiers that have unique count > 1
+        const identifiersToKeep: string[] = [];
+        
+        // Use the unique values directly from the fetch results
+        for (const result of results) {
+          if (result.success && result.uniqueValues) {
+            const identifierUniqueValues = result.uniqueValues;
+            
+            if (Array.isArray(identifierUniqueValues) && identifierUniqueValues.length > 1) {
+              identifiersToKeep.push(result.identifier);
+            }
+          }
+        }
+        
+        // Update selectedIdentifiers to only include those with unique count > 1
+        if (identifiersToKeep.length !== data.selectedIdentifiers.length) {
+          const removedIdentifiers = data.selectedIdentifiers.filter(id => !identifiersToKeep.includes(id));
+          
+          // Show message about removed columns
+          const message = removedIdentifiers.length === 1
+            ? `Column "${removedIdentifiers[0]}" is not shown as it has only a single value`
+            : `Columns "${removedIdentifiers.join('", "')}" are not shown as they have only a single value`;
+          setRemovedColumnsMessage({ text: message, visible: true });
+          
+          // Auto-hide message after 10 seconds
+          setTimeout(() => {
+            setRemovedColumnsMessage(prev => ({ ...prev, visible: false }));
+          }, 10000);
+          
+          onDataChange({ selectedIdentifiers: identifiersToKeep });
+        }
         
       } catch (error) {
-        console.error('Error in fetchUniqueValues:', error);
+        // Silent error handling
       }
     };
     
@@ -600,7 +794,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
               }
             }
           } catch (error) {
-            console.error(`Error fetching unique values for ${identifier}:`, error);
+            // Silent error handling
           } finally {
             setLoadingValues(prev => ({ ...prev, [identifier]: false }));
           }
@@ -631,6 +825,8 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
       updateScope(scopeId, { identifiers: updatedIdentifiers });
 
     // Cascade: update options for the other identifiers *within this scope* based on this selection
+    // COMMENTED OUT - Filtering logic disabled
+    /*
     if (data.dataSource) {
       data.selectedIdentifiers.forEach(async (otherId) => {
         if (otherId === identifierKey) return; // skip the one we just set
@@ -656,11 +852,9 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                 [scopeId]: { ...(prev[scopeId] || {}), [otherId]: json.unique_values }
               }));
             }
-          } else {
-            console.warn('Filtered unique values failed', res.status);
           }
         } catch (err) {
-          console.error('Error fetching filtered unique values', err);
+          // Silent error handling
         } finally {
           setFilteredLoading(prev => ({
             ...prev,
@@ -669,6 +863,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
         }
       });
     }
+    */
     }
   };
 
@@ -1062,30 +1257,24 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     );
   };
 
-  // Check if we have the required data - add debug logging
+  // Check if we have the required data
   const hasRequiredData = Boolean(data.dataSource && data.selectedIdentifiers?.length > 0);
-  console.log('hasRequiredData check:', {
-    hasRequiredData,
-    dataSource: data.dataSource,
-    selectedIdentifiers: data.selectedIdentifiers,
-    selectedIdentifiersLength: data.selectedIdentifiers?.length
-  });
   
-  // Show a message if we don't have the required data
-  const renderNoDataSourceMessage = () => (
-    <div className="mb-6 p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-r">
-      <div className="flex">
-        <div className="flex-shrink-0">
-          <Target className="h-5 w-5 text-yellow-400" />
-        </div>
-        <div className="ml-3">
-          <p className="text-sm text-yellow-700">
-            Please select a data source and identifiers in the Input Files and Settings tabs
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+  // // Show a message if we don't have the required data
+  // const renderNoDataSourceMessage = () => (
+  //   <div className="mb-6 p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded-r">
+  //     <div className="flex">
+  //       <div className="flex-shrink-0">
+  //         <Target className="h-5 w-5 text-yellow-400" />
+  //       </div>
+  //       <div className="ml-3">
+  //         <p className="text-sm text-yellow-700">
+  //           Please select a data source and identifiers in the Input Files and Settings tabs
+  //         </p>
+  //       </div>
+  //     </div>
+  //   </div>
+  // );
 
   // Show placeholder when no data source is selected
   if (!data.dataSource) {
@@ -1123,33 +1312,10 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
   if (data.scopes.length === 0) {
     return (
       <div className="w-full h-full bg-gradient-to-br from-blue-50 via-white to-indigo-50 rounded-lg border border-blue-200 overflow-auto p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg">
-              <Settings className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h3 className="font-bold text-gray-900 text-lg">Manage Scopes</h3>
-              <p className="text-sm text-gray-600">Define data scopes with identifier selections</p>
-            </div>
-          </div>
-          <Button 
-            onClick={addScope}
-            disabled={!hasRequiredData}
-            className={`bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg hover:shadow-xl transition-all duration-200 ${
-              !hasRequiredData ? 'opacity-50 cursor-not-allowed' : 'hover:from-blue-600 hover:to-indigo-700'
-            }`}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add Scope
-          </Button>
-        </div>
-
-        {!hasRequiredData && renderNoDataSourceMessage()}
-
         <div className="w-full flex-1 flex flex-col items-center justify-center p-8 text-center">
           <p className="text-gray-500 text-lg">
-            Please Configure scope-selector options.
+            {/* Click on properties gear icon to confirm the selected file and to choose identifers for defining combinations to be modeled. */}
+            Click on properties gear icon to confirm the selected file 
           </p>
         </div>
 
@@ -1159,13 +1325,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
   }
 
   return (
-    <div className="w-full h-full bg-gradient-to-br from-blue-50 via-white to-indigo-50 rounded-lg border border-blue-200 overflow-auto">
-      {!hasRequiredData && (
-        <div className="m-4 flex items-center text-sm text-yellow-700 bg-yellow-50 px-3 py-1.5 rounded-md">
-          <Target className="w-4 h-4 mr-1.5 text-yellow-500" />
-          Select a data source and identifiers first
-        </div>
-      )}
+    <div className="w-full h-full rounded-lg border border-blue-200 overflow-auto">
 
       <div className="p-4 space-y-6">
         {/* Cardinality View */}
@@ -1380,17 +1540,41 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
           </div>
         )}
 
+        {/* Message for removed columns */}
+        {removedColumnsMessage.visible && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-center justify-between">
+            <div className="flex items-center">
+              <div className="w-2 h-2 bg-amber-400 rounded-full mr-3"></div>
+              <p className="text-amber-800 text-sm font-medium">
+                {removedColumnsMessage.text}
+              </p>
+            </div>
+            <Button
+              onClick={() => setRemovedColumnsMessage(prev => ({ ...prev, visible: false }))}
+              variant="ghost"
+              size="sm"
+              className="w-6 h-6 p-0 text-amber-600 hover:text-amber-800 hover:bg-amber-100 rounded-full"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+        )}
+
         {data.scopes.map((scope, index) => (
           <Card key={scope.id} className="group relative bg-gradient-to-br from-white to-blue-50/50 border-2 border-blue-200/50 shadow-lg hover:shadow-2xl hover:border-blue-300 transition-all duration-300 transform hover:-translate-y-1">
 
             
-            <CardHeader className="pb-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-t-lg border-b border-blue-100">
+            <CardHeader className={`${index === 0 ? 'pb-4' : 'pb-2'} bg-gradient-to-r from-blue-50 to-indigo-50 rounded-t-lg border-b border-blue-100`}>
               <CardTitle className="text-lg font-bold text-gray-800 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-3 h-3 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full shadow-md animate-pulse"></div>
-                <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                  {scope.name}
-                </span>
+                {index === 0 && (
+                  <>
+                    {/* <div className="w-3 h-3 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full shadow-md animate-pulse"></div> */}
+                    <span className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+                      From the dropdowns below, select specific values of each identifier for which models need to be built
+                    </span>
+                  </>
+                )}
               </div>
               <Button
                 onClick={(e) => {
@@ -1405,7 +1589,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
               </Button>
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-6 pt-4">
               {/* Identifiers Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
                 {data.selectedIdentifiers.map((identifier) => (
@@ -1562,13 +1746,30 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
         {/* Buttons Row */}
         <div className="flex justify-between items-center pt-4">
           {/* Add Scope Button */}
-          <Button
+          <button
             onClick={addScope}
-            className="bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-lg hover:shadow-xl transition-all duration-200"
+            className="flex items-center justify-center px-2 py-2 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-lg hover:shadow-xl transition-all duration-500 ease-in-out rounded-md relative overflow-hidden"
+            onMouseEnter={(e) => {
+              const span = e.currentTarget.querySelector('.expand-text');
+              if (span) {
+                span.classList.remove('w-0', 'h-0', 'ml-0');
+                span.classList.add('ml-2', 'w-[490px]', 'h-auto');
+              }
+            }}
+            onMouseLeave={(e) => {
+              const span = e.currentTarget.querySelector('.expand-text');
+              if (span) {
+                span.classList.add('w-0', 'h-0', 'ml-0');
+                span.classList.remove('ml-2', 'w-[490px]', 'h-auto');
+              }
+            }}
           >
-            <Plus className="w-4 h-4 mr-2" />
-            Add a Scope
-          </Button>
+            <Plus className="w-4 h-4 text-white transition-transform duration-500" />
+            <span className="expand-text w-0 h-0 overflow-hidden ml-0 text-white font-medium whitespace-nowrap transition-all duration-500 ease-in-out">
+              {/* Add a scope if you want to select modeling levels for a different timeframe. */}
+              Click here to build specific models for a different timeframe 
+            </span>
+          </button>
 
           {/* Save Button */}
           <Button

@@ -15,12 +15,12 @@ logger = logging.getLogger("trinity.groupby.app")
 # Standalone configuration functions (no circular imports)
 def get_llm_config():
     """Return LLM configuration from environment variables."""
-    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
+    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP"))
     llm_port = os.getenv("OLLAMA_PORT", "11434")
     api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
     return {
         "api_url": api_url,
-        "model_name": os.getenv("LLM_MODEL_NAME", "qwen3:30b"),
+        "model_name": os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b"),
         "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
     }
 
@@ -49,6 +49,9 @@ agent = SmartGroupByAgent(
 class GroupByRequest(BaseModel):
     prompt: str
     session_id: Optional[str] = None
+    client_name: str = ""
+    app_name: str = ""
+    project_name: str = ""
 
 @router.post("/groupby")
 def groupby_files(request: GroupByRequest):
@@ -61,7 +64,8 @@ def groupby_files(request: GroupByRequest):
     
     try:
         # Process with complete memory context
-        result = agent.process_request(request.prompt, request.session_id)
+        result = agent.process_request(request.prompt, request.session_id, 
+                                     request.client_name, request.app_name, request.project_name)
 
         # Add timing
         processing_time = round(time.time() - start_time, 2)
@@ -70,6 +74,12 @@ def groupby_files(request: GroupByRequest):
         logger.info(f"GROUPBY REQUEST COMPLETED:")
         logger.info(f"Success: {result.get('success', False)}")
         logger.info(f"Processing Time: {processing_time}s")
+
+        # 🔧 MINIMAL SMART RESPONSE FALLBACK: Only create if missing
+        if "smart_response" not in result or not result["smart_response"]:
+            logger.warning("⚠️ No smart_response found in LLM result, creating minimal fallback")
+            result["smart_response"] = "I'm here to help you perform groupby operations on your data. Please describe what you'd like to group and aggregate or ask me for suggestions."
+            logger.info(f"✅ Created minimal fallback smart_response")
 
         if result.get("success") and result.get("groupby_json"):
             cfg = result["groupby_json"]
@@ -93,6 +103,7 @@ def groupby_files(request: GroupByRequest):
         error_result = {
             "success": False,
             "error": str(e),
+            "smart_response": "I encountered an error while processing your groupby request. Please try again or check your input.",
             "processing_time": round(time.time() - start_time, 2)
         }
         return error_result

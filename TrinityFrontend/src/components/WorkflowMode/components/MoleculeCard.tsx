@@ -25,6 +25,7 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit }) => {
       case 'Explore': return 'border-green-300 bg-green-50';
       case 'Engineer': return 'border-orange-300 bg-orange-50';
       case 'Pre Process': return 'border-yellow-300 bg-yellow-50';
+      case 'Data Exploration': return 'border-pink-300 bg-pink-50';
       default: return 'border-gray-300 bg-gray-50';
     }
   };

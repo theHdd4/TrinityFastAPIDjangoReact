@@ -14,6 +14,10 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
   const [tab, setTab] = useState('settings');
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const cardId = useLaboratoryStore(state => {
+    const card = state.cards.find(card => card.atoms.some(atom => atom.id === atomId));
+    return card?.id;
+  });
   const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS };
 
   const [pendingY, setPendingY] = useState<string[]>(settings.yAxes || []);
@@ -34,6 +38,17 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
   const applyVisual = () => {
     updateSettings(atomId, { yAxes: pendingY, xAxis: pendingX });
   };
+
+  const handleRemoveExhibitionSelection = React.useCallback(
+    (key: string) => {
+      const current = Array.isArray(settings.exhibitionSelections)
+        ? settings.exhibitionSelections
+        : [];
+      const next = current.filter(selection => selection.key !== key);
+      updateSettings(atomId, { exhibitionSelections: next });
+    },
+    [atomId, settings.exhibitionSelections, updateSettings],
+  );
 
   return (
     <div className="h-full flex flex-col">
@@ -82,7 +97,16 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
           />
         </TabsContent>
         <TabsContent value="exhibition" className="flex-1 mt-0" forceMount>
-          <FeatureOverviewExhibition />
+          <FeatureOverviewExhibition
+            atomId={atomId}
+            cardId={cardId}
+            selections={
+              Array.isArray(settings.exhibitionSelections)
+                ? settings.exhibitionSelections
+                : []
+            }
+            onRemoveSelection={handleRemoveExhibitionSelection}
+          />
         </TabsContent>
       </Tabs>
     </div>

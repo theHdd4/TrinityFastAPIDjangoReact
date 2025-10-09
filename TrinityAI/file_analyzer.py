@@ -135,7 +135,7 @@ class FileAnalyzer:
                     logger.error(f"Error analyzing file {filename}: {str(e)}")
                     analysis_results["failed_analyses"] += 1
             
-            logger.info(f"File analysis completed. Successfully analyzed {files_analyzed} files")
+            # logger.info(f"File analysis completed. Successfully analyzed {files_analyzed} files")
             return analysis_results
             
         except S3Error as e:
@@ -219,7 +219,7 @@ class FileAnalyzer:
             try:
                 buffer.seek(0)  # Reset buffer position
                 table = reader_func()
-                logger.info(f"Successfully read {filename} as {format_name}")
+                # logger.info(f"Successfully read {filename} as {format_name}")
                 return table
             except Exception as e:
                 logger.debug(f"Failed to read {filename} as {format_name}: {str(e)}")

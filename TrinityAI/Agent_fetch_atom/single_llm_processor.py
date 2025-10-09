@@ -984,7 +984,7 @@ class SingleLLMProcessor:
             "Select Models - Feature Based", "Evaluate Models - Feature Based",
             "Auto-regressive Models", "Select Models - Auto Regressive", 
             "Evaluate Models - Auto Regressive", "Scenario Planner", "Optimizer",
-            "Base Price Estimator", "Promo Estimator"
+            "Base Price Estimator", "Promo Estimator", "Fetch Atom"
         ]
         
         # Complete atom descriptions from paste file
@@ -1012,7 +1012,8 @@ class SingleLLMProcessor:
             "Scenario Planner": "Simulates business outcomes under different assumptions. What-if analysis for planning.",
             "Optimizer": "Solves constrained optimization problems (maximize sales, minimize cost, resource allocation).",
             "Base Price Estimator": "Estimates underlying base price removing promotional effects using regression/smoothing.",
-            "Promo Estimator": "Measures promotional uplift using causal inference. Evaluates campaign effectiveness and ROI."
+            "Promo Estimator": "Measures promotional uplift using causal inference. Evaluates campaign effectiveness and ROI.",
+            "Fetch Atom": "AI-powered query processor that analyzes user requests and determines the most suitable atom/tool for data analytics tasks. Provides intelligent recommendations, query enhancement, and domain classification."
         }
         
         # Complete atom categories with keywords from paste file
@@ -1181,16 +1182,12 @@ Analyze and respond with JSON only:"""
         }
         
         try:
-            print(f"\n🔄 Single LLM Processing: '{raw_query}'")
             response = requests.post(self.api_url, headers=self.headers, json=payload, timeout=30)
-            
-            print(f"📥 LLM Response Status: {response.status_code}")
             
             if response.status_code != 200:
                 return self._create_error_response(raw_query)
             
             content = response.json().get('message', {}).get('content', '')
-            print(f"\n📋 Raw LLM Output:\n{content}")
             
             # Clean and extract JSON
             json_content = self._extract_json_from_content(content)
@@ -1202,11 +1199,9 @@ Analyze and respond with JSON only:"""
                 return self._format_response_with_optimal_length(result, raw_query)
                 
             except json.JSONDecodeError as e:
-                print(f"❌ JSON Parse Error: {str(e)}")
                 return self._create_error_response(raw_query)
                 
         except Exception as e:
-            print(f"❌ Request Exception: {str(e)}")
             return self._create_error_response(raw_query)
 
     def _format_response_with_optimal_length(self, llm_result: Dict, raw_query: str) -> Dict:
@@ -1442,7 +1437,6 @@ Response:"""
             return content
             
         except Exception as e:
-            print(f"Response generation error: {e}")
             return ""
 
     def _extract_json_from_content(self, content: str) -> str:

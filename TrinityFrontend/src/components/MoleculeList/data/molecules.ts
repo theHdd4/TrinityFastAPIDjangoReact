@@ -6,11 +6,7 @@ export const molecules = [
     title: 'Build',
     subtitle: 'Model building and creation',
     tag: 'Modeling',
-    atoms: [
-      'Auto-regressive models',
-      'Model Output - Non CSF',
-      'Single Modeling'
-    ]
+    atoms: ["scope-selector", "build-model-feature-based"]
   },
   {
     id: 'data-pre-process',
@@ -87,11 +83,11 @@ export const molecules = [
     atoms: []
   },
   {
-    id: 'report',
-    type: 'Report',
-    title: 'Report',
-    subtitle: 'Reporting and presentation',
-    tag: 'Reporting',
-    atoms: []
+    id: 'EDA',
+    type: 'Data Exploration',
+    title: 'EDA',
+    subtitle: 'Data Exploration and Analysis',
+    tag: 'Data Exploration',
+    atoms: ["data-upload-validate", "column-classifier", "feature-overview", "explore"]
   }
 ];

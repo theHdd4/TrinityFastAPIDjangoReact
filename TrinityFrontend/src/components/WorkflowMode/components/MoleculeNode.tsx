@@ -39,6 +39,8 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
         return 'border-orange-300 bg-orange-50';
       case 'Pre Process':
         return 'border-yellow-300 bg-yellow-50';
+      case 'Data Exploration':
+        return 'border-pink-300 bg-pink-50';
       default:
         return 'border-gray-300 bg-gray-50';
     }

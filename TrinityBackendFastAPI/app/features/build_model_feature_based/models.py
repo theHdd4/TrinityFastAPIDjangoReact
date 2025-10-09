@@ -556,6 +556,14 @@ class StackConstrainedRidge(BaseEstimator, RegressorMixin):
             + 2 * self.l2_penalty * self.W
         ) / self.m
         grad_b = -(2 / self.m) * np.sum(self.Y - Y_pred)
+        
+        # Check for NaN/Inf in gradients
+        if np.any(np.isnan(grad_w)) or np.any(np.isinf(grad_w)):
+            print(f"⚠️ Warning: NaN/Inf detected in grad_w, skipping update")
+            return
+        if np.isnan(grad_b) or np.isinf(grad_b):
+            print(f"⚠️ Warning: NaN/Inf detected in grad_b, skipping update")
+            return
 
         if self.adam:
             self.t += 1
@@ -577,9 +585,25 @@ class StackConstrainedRidge(BaseEstimator, RegressorMixin):
             W_temp = self.W - self.learning_rate * grad_w
             b_temp = self.b - self.learning_rate * grad_b
         
+        # Check for NaN/Inf in temporary weights
+        if np.any(np.isnan(W_temp)) or np.any(np.isinf(W_temp)):
+            print(f"⚠️ Warning: NaN/Inf detected in W_temp, skipping update")
+            return
+        if np.isnan(b_temp) or np.isinf(b_temp):
+            print(f"⚠️ Warning: NaN/Inf detected in b_temp, skipping update")
+            return
+        
         # Project onto constraint set
         self.W = self.project_onto_constraints(W_temp)
         self.b = b_temp
+        
+        # Final check for NaN/Inf after projection
+        if np.any(np.isnan(self.W)) or np.any(np.isinf(self.W)):
+            print(f"❌ Error: NaN/Inf detected in W after projection!")
+            self.W = np.zeros(self.n)  # Reset to zeros
+        if np.isnan(self.b) or np.isinf(self.b):
+            print(f"❌ Error: NaN/Inf detected in b after projection!")
+            self.b = 0  # Reset to zero
 
     def project_onto_constraints(self, W):
         """Project weights onto combination constraints using improved mapping"""
@@ -599,7 +623,7 @@ class StackConstrainedRidge(BaseEstimator, RegressorMixin):
         # Apply positive constraints: base + interaction ≥ 0
         for base_idx, interaction_indices in self.positive_constraint_map.items():
             for inter_idx in interaction_indices:
-                if 0 <= base_idx < len(W) and 0 <= inter_idx <= len(W):
+                if 0 <= base_idx < len(W) and 0 <= inter_idx < len(W):
                     total_beta = W[base_idx] + W[inter_idx]
                     if total_beta < 0:  # Violation
                         deficit = -total_beta
@@ -724,6 +748,14 @@ class StackConstrainedLinearRegression(BaseEstimator, RegressorMixin):
         Y_pred = self.predict(self.X)
         grad_w = -(2 * (self.X.T).dot(self.Y - Y_pred)) / self.m
         grad_b = -(2 / self.m) * np.sum(self.Y - Y_pred)
+        
+        # Check for NaN/Inf in gradients
+        if np.any(np.isnan(grad_w)) or np.any(np.isinf(grad_w)):
+            print(f"⚠️ Warning: NaN/Inf detected in grad_w, skipping update")
+            return
+        if np.isnan(grad_b) or np.isinf(grad_b):
+            print(f"⚠️ Warning: NaN/Inf detected in grad_b, skipping update")
+            return
 
         if self.adam:
             self.t += 1
@@ -745,9 +777,25 @@ class StackConstrainedLinearRegression(BaseEstimator, RegressorMixin):
             W_temp = self.W - self.learning_rate * grad_w
             b_temp = self.b - self.learning_rate * grad_b
         
+        # Check for NaN/Inf in temporary weights
+        if np.any(np.isnan(W_temp)) or np.any(np.isinf(W_temp)):
+            print(f"⚠️ Warning: NaN/Inf detected in W_temp, skipping update")
+            return
+        if np.isnan(b_temp) or np.isinf(b_temp):
+            print(f"⚠️ Warning: NaN/Inf detected in b_temp, skipping update")
+            return
+        
         # Project onto constraint set
         self.W = self.project_onto_constraints(W_temp)
         self.b = b_temp
+        
+        # Final check for NaN/Inf after projection
+        if np.any(np.isnan(self.W)) or np.any(np.isinf(self.W)):
+            print(f"❌ Error: NaN/Inf detected in W after projection!")
+            self.W = np.zeros(self.n)  # Reset to zeros
+        if np.isnan(self.b) or np.isinf(self.b):
+            print(f"❌ Error: NaN/Inf detected in b after projection!")
+            self.b = 0  # Reset to zero
 
     def project_onto_constraints(self, W):
         """Project weights onto combination constraints using improved mapping"""

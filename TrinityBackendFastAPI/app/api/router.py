@@ -20,6 +20,7 @@ from app.features.scenario_planner_category_forecasting.endpoint import router a
 from app.features.select_models_feature_based.endpoint import router as select_router
 from app.features.select_models_feature_based.endpoint import router as select_models_router
 from app.features.evaluate_models_feature_based.endpoint import router as evaluate_router
+from app.features.exhibition.endpoint import router as exhibition_router
 from app.features.explore.endpoint import router as explore_router
 from app.features.correlation.endpoint import router as correlation_router
 from app.features.build_autoregressive.endpoint import router as autoregressive_router
@@ -53,6 +54,7 @@ api_router.include_router(scenario_planner_router)
 # api_router.include_router(autoregressive_router)
 
 api_router.include_router(correlation_router)
+api_router.include_router(exhibition_router)
 
 # Machine learning and model routers
 api_router.include_router(build_model_router)

@@ -1024,8 +1024,8 @@ class StackModelDataProcessor:
                 }
                 return transformed_df, metadata
             
-            # Apply standardization to x_variables and y_variable
-            variables_to_standardize = x_variables + [y_variable]
+            # Apply standardization to x_variables ONLY (never standardize y_variable)
+            variables_to_standardize = x_variables
             scalers = {}
             
             for var in variables_to_standardize:
@@ -1033,14 +1033,14 @@ class StackModelDataProcessor:
                     if standardization_type == 'standard':
                         # StandardScaler (mean=0, std=1)
                         scaler = StandardScaler()
-                        transformed_df[f'standard_{var}'] = scaler.fit_transform(transformed_df[[var]])
+                        transformed_df[f'{var}'] = scaler.fit_transform(transformed_df[[var]])
                         scalers[var] = scaler
                         logger.info(f"Applied standard scaling to {var}")
                         
                     elif standardization_type == 'minmax':
                         # MinMaxScaler (0-1 range)
                         scaler = MinMaxScaler()
-                        transformed_df[f'minmax_{var}'] = scaler.fit_transform(transformed_df[[var]])
+                        transformed_df[f'{var}'] = scaler.fit_transform(transformed_df[[var]])
                         scalers[var] = scaler
                         logger.info(f"Applied minmax scaling to {var}")
             
