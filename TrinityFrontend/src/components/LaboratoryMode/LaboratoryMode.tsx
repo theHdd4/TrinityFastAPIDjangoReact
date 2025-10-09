@@ -39,7 +39,7 @@ const LaboratoryMode = () => {
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
-  const [auxActive, setAuxActive] = useState<string | null>(null);
+  const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'superagent' | null>(null);
   const { toast } = useToast();
   const { cards, setCards: setLabCards } = useLaboratoryStore();
   const setExhibitionCards = useExhibitionStore(state => state.setCards);

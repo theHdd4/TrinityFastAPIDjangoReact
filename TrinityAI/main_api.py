@@ -370,6 +370,7 @@ GROUPBY_PATH = Path(__file__).resolve().parent / "Agent_groupby"
 CHARTMAKER_PATH = Path(__file__).resolve().parent / "Agent_chartmaker"
 EXPLORE_PATH = Path(__file__).resolve().parent / "Agent_explore"
 DATAFRAME_OPERATIONS_PATH = Path(__file__).resolve().parent / "Agent_dataframe_operations"
+SUPERAGENT_PATH = Path(__file__).resolve().parent / "SUPERAGENT"
 sys.path.append(str(MERGE_PATH))
 sys.path.append(str(CONCAT_PATH))
 sys.path.append(str(CREATE_TRANSFORM_PATH))
@@ -377,6 +378,7 @@ sys.path.append(str(GROUPBY_PATH))
 sys.path.append(str(CHARTMAKER_PATH))
 sys.path.append(str(EXPLORE_PATH))
 sys.path.append(str(DATAFRAME_OPERATIONS_PATH))
+sys.path.append(str(SUPERAGENT_PATH))
 
 from single_llm_processor import SingleLLMProcessor
 from Agent_Merge.main_app import router as merge_router
@@ -386,6 +388,7 @@ from Agent_groupby.main_app import router as groupby_router
 from Agent_chartmaker.main_app import router as chartmaker_router
 from Agent_explore.main_app import router as explore_router
 from Agent_dataframe_operations.main_app import router as dataframe_operations_router
+from SUPERAGENT.main_app import router as superagent_router
 from insight import router as insight_router
 
 def convert_numpy(obj):
@@ -582,6 +585,7 @@ api_router.include_router(groupby_router)
 api_router.include_router(chartmaker_router)
 api_router.include_router(explore_router)
 api_router.include_router(dataframe_operations_router)
+api_router.include_router(superagent_router)
 api_router.include_router(insight_router)
 
 # Enable CORS for browser-based clients
