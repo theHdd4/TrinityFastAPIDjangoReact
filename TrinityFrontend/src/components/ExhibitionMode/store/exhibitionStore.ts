@@ -125,6 +125,9 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
 const withPresentationDefaults = (card: LayoutCard): LayoutCard => {
   const slideAtoms = Array.isArray(card.atoms) ? card.atoms : [];
   const catalogueAtoms = mergeCatalogueAtoms(card.catalogueAtoms, slideAtoms);
+  const isEditableSlide = Boolean(card.exhibitionControlEnabled);
+  const safeSlideAtoms = isEditableSlide ? slideAtoms : [];
+  const safeCatalogueAtoms = catalogueAtoms;
   const mergedSettings = {
     ...DEFAULT_PRESENTATION_SETTINGS,
     ...card.presentationSettings,
@@ -134,8 +137,8 @@ const withPresentationDefaults = (card: LayoutCard): LayoutCard => {
 
   return {
     ...card,
-    atoms: slideAtoms,
-    catalogueAtoms,
+    atoms: safeSlideAtoms,
+    catalogueAtoms: safeCatalogueAtoms,
     exhibitionControlEnabled: card.exhibitionControlEnabled ?? false,
     presentationSettings: mergedSettings,
   };
@@ -292,6 +295,28 @@ const applyFeatureOverviewSelections = (
   });
 };
 
+const createBlankSlide = (): LayoutCard => {
+  const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return withPresentationDefaults({
+    id: `exhibition-slide-${uniqueSuffix}`,
+    atoms: [],
+    catalogueAtoms: [],
+    isExhibited: true,
+    moleculeTitle: 'Untitled Slide',
+    exhibitionControlEnabled: true,
+  });
+};
+
+const ensureBlankSlidePresence = (cards: LayoutCard[]): LayoutCard[] => {
+  const hasEditableSlide = cards.some(card => card.exhibitionControlEnabled && card.isExhibited);
+
+  if (hasEditableSlide) {
+    return cards;
+  }
+
+  return [createBlankSlide(), ...cards];
+};
+
 export const useExhibitionStore = create<ExhibitionStore>(set => ({
   cards: [],
   exhibitedCards: [],
@@ -319,7 +344,8 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       loadedCards = loadCardsFromStorage();
     }
 
-    const cardsWithDefaults = loadedCards.map(withPresentationDefaults);
+    let cardsWithDefaults = loadedCards.map(withPresentationDefaults);
+    cardsWithDefaults = ensureBlankSlidePresence(cardsWithDefaults);
     const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
     set({ cards: cardsWithDefaults, exhibitedCards });
   },
@@ -400,15 +426,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     let createdCard: LayoutCard | null = null;
 
     set(state => {
-      const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const newCard = withPresentationDefaults({
-        id: `exhibition-slide-${uniqueSuffix}`,
-        atoms: [],
-        catalogueAtoms: [],
-        isExhibited: true,
-        moleculeTitle: 'Untitled Slide',
-        exhibitionControlEnabled: true,
-      });
+      const newCard = createBlankSlide();
 
       createdCard = newCard;
 
@@ -439,9 +457,19 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
   setCards: (cards: LayoutCard[] | unknown) => {
     const safeCards = extractCards(cards);
-    const cardsWithDefaults = safeCards.map(withPresentationDefaults);
-    const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
-    set({ cards: cardsWithDefaults, exhibitedCards });
+    set(state => {
+      const cardsWithDefaults = safeCards.map(withPresentationDefaults);
+      const preservedEditableSlides = state.cards.filter(card => card.exhibitionControlEnabled);
+      const mergedCards = [
+        ...cardsWithDefaults,
+        ...preservedEditableSlides.filter(
+          editable => !cardsWithDefaults.some(card => card.id === editable.id),
+        ),
+      ];
+      const cardsWithBlankSlide = ensureBlankSlidePresence(mergedCards);
+      const exhibitedCards = cardsWithBlankSlide.filter(card => card.isExhibited);
+      return { cards: cardsWithBlankSlide, exhibitedCards };
+    });
   },
   reset: () => {
     set({ cards: [], exhibitedCards: [] });
