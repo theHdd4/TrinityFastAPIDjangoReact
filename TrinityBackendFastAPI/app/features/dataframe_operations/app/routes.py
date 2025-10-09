@@ -603,6 +603,19 @@ async def delete_row(df_id: str = Body(...), index: int = Body(...)):
     return result
 
 
+@router.post("/delete_rows_bulk")
+async def delete_rows_bulk(df_id: str = Body(...), indices: list = Body(...)):
+    df = _get_df(df_id)
+    try:
+        # Convert indices to a list of row numbers to exclude
+        df = df.with_row_count().filter(~pl.col("row_nr").is_in(indices)).drop("row_nr")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    result = _df_payload(df, df_id)
+    return result
+
+
 @router.post("/insert_column")
 async def insert_column(
     df_id: str = Body(...),
@@ -849,11 +862,29 @@ async def move_column(df_id: str = Body(...), from_col: str = Body(..., alias="f
     df = _get_df(df_id)
     try:
         cols = df.columns
+        
+        # Validate column exists
+        if from_col not in cols:
+            available_cols = ", ".join(cols)
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Column '{from_col}' not found. Available columns: {available_cols}"
+            )
+        
+        # Validate to_index is within bounds
+        if to_index < 0 or to_index >= len(cols):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Index {to_index} is out of bounds. Valid range: 0-{len(cols)-1} (total columns: {len(cols)})"
+            )
+        
         cols.remove(from_col)
         cols.insert(to_index, from_col)
         df = df.select(cols)
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Move column operation failed: {str(e)}")
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
     return result
@@ -869,6 +900,19 @@ async def retype_column(df_id: str = Body(...), name: str = Body(...), new_type:
             df = df.with_columns(pl.col(name).cast(pl.Utf8))
         else:
             df = df.with_columns(pl.col(name).cast(pl.Utf8))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    result = _df_payload(df, df_id)
+    return result
+
+
+@router.post("/round_column")
+async def round_column(df_id: str = Body(...), name: str = Body(...), decimal_places: int = Body(...)):
+    df = _get_df(df_id)
+    try:
+        # Round the specified column to the given decimal places
+        df = df.with_columns(pl.col(name).round(decimal_places))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     SESSIONS[df_id] = df
@@ -896,6 +940,102 @@ async def info(df_id: str):
         "column_count": df.width,
         "types": {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)},
     }
+
+
+@router.post("/describe_column")
+async def describe_column(df_id: str = Body(...), column: str = Body(...)):
+    """Get statistical description of a specific column."""
+    df = _get_df(df_id)
+    
+    if column not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Column '{column}' not found")
+    
+    try:
+        series = df.get_column(column)
+        dtype = str(series.dtype)
+        
+        # Check if column is numeric
+        is_numeric = dtype in ['Float64', 'Int64', 'Float32', 'Int32', 'Float16', 'Int16', 'Int8', 'UInt8', 'UInt16', 'UInt32', 'UInt64']
+        
+        # Basic stats that apply to all columns
+        total_count = len(series)
+        null_count = series.null_count()
+        non_null_count = total_count - null_count
+        unique_count = series.n_unique()
+        
+        result = {
+            "column": column,
+            "dtype": dtype,
+            "is_numeric": is_numeric,
+            "total_count": total_count,
+            "null_count": null_count,
+            "non_null_count": non_null_count,
+            "unique_count": unique_count,
+            "null_percentage": round((null_count / total_count) * 100, 2) if total_count > 0 else 0,
+        }
+        
+        if is_numeric and non_null_count > 0:
+            # Convert to numeric for calculations
+            numeric_series = series.cast(pl.Float64, strict=False).fill_nan(None)
+            
+            # Calculate numeric statistics
+            try:
+                mean_val = numeric_series.mean()
+                median_val = numeric_series.median()
+                std_val = numeric_series.std()
+                min_val = numeric_series.min()
+                max_val = numeric_series.max()
+                sum_val = numeric_series.sum()
+                
+                # Calculate quartiles
+                q25 = numeric_series.quantile(0.25)
+                q75 = numeric_series.quantile(0.75)
+                
+                result.update({
+                    "mean": float(mean_val) if mean_val is not None else None,
+                    "median": float(median_val) if median_val is not None else None,
+                    "std": float(std_val) if std_val is not None else None,
+                    "min": float(min_val) if min_val is not None else None,
+                    "max": float(max_val) if max_val is not None else None,
+                    "sum": float(sum_val) if sum_val is not None else None,
+                    "q25": float(q25) if q25 is not None else None,
+                    "q75": float(q75) if q75 is not None else None,
+                    "range": float(max_val - min_val) if max_val is not None and min_val is not None else None,
+                })
+            except Exception as e:
+                # If numeric calculations fail, mark as non-numeric
+                result["is_numeric"] = False
+                result["numeric_error"] = str(e)
+        else:
+            # For categorical columns, show NaN for mathematical operations
+            result.update({
+                "mean": None,
+                "median": None,
+                "std": None,
+                "min": None,
+                "max": None,
+                "sum": None,
+                "q25": None,
+                "q75": None,
+                "range": None,
+            })
+            
+            # For categorical columns, show most frequent values
+            if non_null_count > 0:
+                try:
+                    value_counts = series.value_counts().sort("count", descending=True)
+                    top_values = value_counts.head(5).to_dicts()
+                    result["top_values"] = [
+                        {"value": str(item["column"]), "count": item["count"]} 
+                        for item in top_values
+                    ]
+                except Exception:
+                    result["top_values"] = []
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error describing column: {str(e)}")
 
 
 @router.post("/ai/execute_operations")

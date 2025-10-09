@@ -23,7 +23,7 @@ Files are stored in paths like:
 - **Backend APIs**: Expect specific path formats
 
 ### 3. **Environment Variable Conflicts**
-- `HOST_IP` set to external IP (`172.22.64.1`)
+- `HOST_IP` set to external IP (`10.2.2.131`)
 - Docker containers can't reach external IPs
 - Path resolution fails at network level
 

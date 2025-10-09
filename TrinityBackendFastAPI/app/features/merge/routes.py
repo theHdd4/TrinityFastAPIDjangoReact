@@ -189,6 +189,12 @@ async def perform_merge(
             print(f"   Raw join_columns: {join_columns}")
             raise ValueError(f"Invalid join_columns JSON: {e}")
         
+        # Ensure files have .arrow extension (same as concat)
+        if not file1.endswith('.arrow'):
+            file1 += '.arrow'
+        if not file2.endswith('.arrow'):
+            file2 += '.arrow'
+        
         # Get the current object prefix for proper path resolution
         prefix = await get_object_prefix()
         

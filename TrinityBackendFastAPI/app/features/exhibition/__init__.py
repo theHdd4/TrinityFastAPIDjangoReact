@@ -1,0 +1,1 @@
+"""Exhibition configuration feature package."""

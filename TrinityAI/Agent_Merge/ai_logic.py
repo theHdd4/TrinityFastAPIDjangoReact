@@ -33,6 +33,7 @@ SUCCESS RESPONSE (when you have all required info):
     "join_type": "outer"
   }},
   "message": "Merge configuration completed successfully",
+  "smart_response": "I've configured the merge operation for you. The files will be joined using the specified columns and join type. You can now proceed with the merge or make adjustments as needed.",
   "reasoning": "Found all required components with context from history",
   "used_memory": true
 }}
@@ -49,6 +50,7 @@ GENERAL RESPONSE (for questions, file info, suggestions):
     "Or say 'yes' to use my suggestions"
   ],
   "message": "Here's what I can help you with",
+  "smart_response": "I'd be happy to help you with Merge operations! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you merge your data files using various join strategies. What files would you like to merge?",
   "reasoning": "Providing helpful information and guidance",
   "file_analysis": {{
     "total_files": "number",
@@ -66,14 +68,22 @@ GENERAL RESPONSE (for questions, file info, suggestions):
 
 INTELLIGENCE RULES:
 
-1. USE COMPLETE HISTORY: Reference previous interactions, successful configs, and user preferences
-2. SMART FILE SELECTION: Analyze user's request to identify the most appropriate files from the available list
-3. CONTEXT AWARENESS: Understand "yes", "no", "use those", "merge them" based on conversation
-4. MEMORY UTILIZATION: Suggest files user has successfully used before
-5. PATTERN RECOGNITION: Identify user's preferred file combinations and join types
-6. AUTOMATIC COLUMN DETECTION: When files are selected, automatically find common columns between them
-7. SMART JOIN TYPE: Use "outer" as default if no join type specified, otherwise use user preference
-8. FILE VALIDATION: Always ensure suggested files exist in the AVAILABLE FILES AND COLUMNS section
+1. **CRITICAL: ALWAYS include "smart_response" field in your JSON output** - This is the user-friendly message displayed in the chat
+2. USE COMPLETE HISTORY: Reference previous interactions, successful configs, and user preferences
+3. SMART FILE SELECTION: Analyze user's request to identify the most appropriate files from the available list
+4. CONTEXT AWARENESS: Understand "yes", "no", "use those", "merge them" based on conversation
+5. MEMORY UTILIZATION: Suggest files user has successfully used before
+6. PATTERN RECOGNITION: Identify user's preferred file combinations and join types
+7. AUTOMATIC COLUMN DETECTION: When files are selected, automatically find common columns between them
+8. SMART JOIN TYPE: Use "outer" as default if no join type specified, otherwise use user preference
+9. FILE VALIDATION: Always ensure suggested files exist in the AVAILABLE FILES AND COLUMNS section
+
+### FILE DISPLAY RULES:
+When user asks to "show files", "show all files", "show file names", "show columns", or similar:
+- ALWAYS use GENERAL RESPONSE format (success: false)
+- Include detailed file information in smart_response
+- Format: **filename.arrow** (X columns) - column1, column2, column3, etc.
+- List ALL available files with their column counts and sample columns
 
 COLUMN HANDLING INSTRUCTIONS:
 - CRITICAL: Use ONLY the columns provided in the COLUMN ANALYSIS section and join_columns are common columns in files that has been choosen .
@@ -109,6 +119,10 @@ EXAMPLES OF SMART BEHAVIOR:
 
 - Always verify file names exist in the AVAILABLE FILES AND COLUMNS before suggesting them
 
+**CRITICAL REMINDER:** 
+Your JSON response MUST include the "smart_response" field. This is the primary message shown to the user.
+Never return JSON without "smart_response" - it's required in both success and failure cases.
+
 Return ONLY the JSON response:"""
 
     logger.info(f"BUILDING MERGE PROMPT:")
@@ -116,6 +130,10 @@ Return ONLY the JSON response:"""
     logger.info(f"Available Files: {list(available_files_with_columns.keys())}")
     logger.info(f"Context Length: {len(context)}")
     logger.info(f"Generated Prompt Length: {len(prompt)}")
+    logger.info(f"🔍 FULL PROMPT TO AI:")
+    logger.info(f"{'='*80}")
+    logger.info(f"{prompt}")
+    logger.info(f"{'='*80}")
     
     return prompt
 
@@ -134,7 +152,7 @@ def call_merge_llm(api_url: str, model_name: str, bearer_token: str, prompt: str
         "stream": False,
         "options": {
             "temperature": 0.1,
-            "num_predict": 1500,
+            "num_predict": 4000,  # Increased to handle long smart_response with file listings
             "top_p": 0.9,
             "repeat_penalty": 1.1
         }
@@ -144,18 +162,27 @@ def call_merge_llm(api_url: str, model_name: str, bearer_token: str, prompt: str
         "Content-Type": "application/json"
     }
     
+    logger.info(f"🔍 API REQUEST PAYLOAD:")
+    logger.info(f"{'='*80}")
+    logger.info(f"URL: {api_url}")
+    logger.info(f"Headers: {headers}")
+    logger.info(f"Payload: {json.dumps(payload, indent=2)}")
+    logger.info(f"{'='*80}")
+    
     try:
         logger.info(f"Sending request to LLM...")
-        response = requests.post(api_url, json=payload, headers=headers, timeout=120)
+        response = requests.post(api_url, json=payload, headers=headers, timeout=300)
         response.raise_for_status()
         
         response_data = response.json()
         logger.info(f"LLM Response Status: {response.status_code}")
         logger.info(f"LLM Response Data Keys: {list(response_data.keys()) if isinstance(response_data, dict) else 'Not a dict'}")
+        logger.info(f"🔍 FULL LLM RESPONSE DATA: {json.dumps(response_data, indent=2)}")
         
         content = response_data.get('message', {}).get('content', '')
         logger.info(f"LLM Content Length: {len(content)}")
         logger.info(f"LLM Content Preview: {content[:200]}...")
+        logger.info(f"🔍 FULL LLM CONTENT: {content}")
         
         return content
         
@@ -165,65 +192,115 @@ def call_merge_llm(api_url: str, model_name: str, bearer_token: str, prompt: str
 
 def extract_json(response: str):
     """
-    Extract JSON object from LLM response.
+    SIMPLIFIED JSON extraction - only check for required keys:
+    1. Clean response (remove <think> tags)
+    2. Find JSON using brace counting (respecting strings)
+    3. Parse JSON
+    4. Validate: success=true needs smart_response+merge_json, success=false needs smart_response
     """
-    logger.info(f"EXTRACTING JSON FROM RESPONSE:")
-    logger.info(f"Response Length: {len(response)}")
-    logger.info(f"Response Preview: {response[:300]}...")
+    logger.info(f"🔍 Extracting JSON (response length: {len(response)})")
     
     if not response:
-        logger.warning("Empty response received")
+        logger.error("❌ Empty response")
         return None
 
-    cleaned = re.sub(r"```", "", response)
+    # Step 1: Clean response - remove thinking tags and code blocks
+    cleaned = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
+    cleaned = re.sub(r"<reasoning>.*?</reasoning>", "", cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r"```json\s*", "", cleaned)
     cleaned = re.sub(r"```\s*", "", cleaned)
+    cleaned = cleaned.strip()
     
-    logger.info(f"Cleaned Response Preview: {cleaned[:300]}...")
-
+    logger.info(f"📋 Cleaned response length: {len(cleaned)}")
+    
+    # Step 2: Try multiple extraction methods (like dataframe operations)
+    
+    # Method 1: Try regex patterns first
     json_patterns = [
-        r"\{[^{}]*\{[^{}]*\}[^{}]*\}",  
-        r"\{[^{}]+\}",                  
-        r"\{.*?\}(?=\s*$)",             
-        r"\{.*\}"                       
+        r'```json\s*(\{.*?\})\s*```',
+        r'```\s*(\{.*?\})\s*```',
     ]
     
-    for i, pattern in enumerate(json_patterns):
-        matches = re.findall(pattern, cleaned, re.DOTALL)
-        logger.info(f"Pattern {i+1} found {len(matches)} matches")
-        for j, match in enumerate(matches):
+    for pattern in json_patterns:
+        matches = re.findall(pattern, cleaned, re.DOTALL | re.IGNORECASE)
+        for match in matches:
             try:
-                parsed = json.loads(match)
-                if isinstance(parsed, dict) and ("success" in parsed or "suggestions" in parsed):
-                    logger.info(f"Successfully parsed JSON with pattern {i+1}, match {j+1}")
-                    logger.info(f"Parsed JSON: {json.dumps(parsed, indent=2)}")
-                    return parsed
+                result = json.loads(match)
+                logger.info("✅ Successfully extracted JSON using pattern matching")
+                return result
             except json.JSONDecodeError as e:
-                logger.debug(f"JSON decode failed for pattern {i+1}, match {j+1}: {e}")
+                logger.debug(f"JSON decode error with pattern {pattern}: {e}")
                 continue
 
-    # Brace balancing fallback
-    logger.info("Trying brace balancing fallback...")
+    # Method 2: Try brace counting
     try:
         start_idx = cleaned.find("{")
-        if start_idx != -1:
-            brace_count = 0
-            end_idx = start_idx
-            for i in range(start_idx, len(cleaned)):
-                if cleaned[i] == "{":
+        if start_idx == -1:
+            logger.error("❌ No opening brace found")
+            return None
+        
+        # Count braces (respecting strings to avoid counting braces inside strings)
+        brace_count = 0
+        in_string = False
+        escape_next = False
+        end_idx = start_idx
+        
+        for i in range(start_idx, len(cleaned)):
+            char = cleaned[i]
+            
+            # Handle escape sequences (\", \\, etc.)
+            if escape_next:
+                escape_next = False
+                continue
+            if char == '\\':
+                escape_next = True
+                continue
+            
+            # Track if we're inside a string (to ignore braces in strings)
+            if char == '"':
+                in_string = not in_string
+                continue
+            
+            # Only count braces outside of strings
+            if not in_string:
+                if char == "{":
                     brace_count += 1
-                elif cleaned[i] == "}":
+                elif char == "}":
                     brace_count -= 1
-                if brace_count == 0:
-                    end_idx = i + 1
-                    break
-            if end_idx > start_idx:
-                extracted = cleaned[start_idx:end_idx]
-                logger.info(f"Brace balancing extracted: {extracted}")
-                result = json.loads(extracted)
-                logger.info(f"Brace balancing successful: {json.dumps(result, indent=2)}")
-                return result
+                    if brace_count == 0:
+                        end_idx = i + 1
+                        break
+        
+        if brace_count != 0:
+            logger.error(f"❌ Unbalanced braces (remaining count: {brace_count})")
+            return None
+        
+        # Extract and parse JSON
+        json_str = cleaned[start_idx:end_idx]
+        logger.info(f"📦 Extracted JSON string (length: {len(json_str)})")
+        
+        result = json.loads(json_str)
+        logger.info("✅ Successfully extracted JSON using brace counting")
+        return result
+        
+    except json.JSONDecodeError as e:
+        logger.debug(f"Brace counting JSON decode failed: {e}")
     except Exception as e:
-        logger.error(f"Brace balancing failed: {e}")
+        logger.debug(f"Brace counting failed: {e}")
 
-    logger.warning("No valid JSON could be extracted")
+    # Method 3: Try simple bracket matching (fallback)
+    try:
+        start = cleaned.find('{')
+        end = cleaned.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            json_str = cleaned[start:end+1]
+            result = json.loads(json_str)
+            logger.info("✅ Successfully extracted JSON using bracket matching")
+            return result
+    except json.JSONDecodeError as e:
+        logger.debug(f"Bracket matching JSON decode failed: {e}")
+
+    # If all methods fail, return None and let fallback handle it
+    logger.warning("❌ All JSON extraction methods failed")
+    logger.warning(f"Response preview for debugging: {cleaned[:500]}")
     return None

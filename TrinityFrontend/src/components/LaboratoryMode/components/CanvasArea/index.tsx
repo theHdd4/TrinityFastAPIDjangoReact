@@ -35,8 +35,6 @@ import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom
 import CorrelationAtom from '@/components/AtomList/atoms/correlation/CorrelationAtom';
 import ChartMakerAtom from '@/components/AtomList/atoms/chart-maker/ChartMakerAtom';
 import BuildModelFeatureBasedAtom from '@/components/AtomList/atoms/build-model-feature-based/BuildModelFeatureBasedAtom';
-import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAtom';
-import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/ScenarioPlannerAtom';
 import ExploreAtom from '@/components/AtomList/atoms/explore/ExploreAtom';
 import EvaluateModelsFeatureAtom from '@/components/AtomList/atoms/evaluate-models-feature/EvaluateModelsFeatureAtom';
 import AutoRegressiveModelsAtom from '@/components/AtomList/atoms/auto-regressive-models/AutoRegressiveModelsAtom';
@@ -58,7 +56,6 @@ import {
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
   DEFAULT_CHART_MAKER_SETTINGS,
-  DEFAULT_SCENARIO_PLANNER_SETTINGS,
   DEFAULT_SELECT_MODELS_FEATURE_SETTINGS,
   DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS,
   DEFAULT_AUTO_REGRESSIVE_MODELS_DATA,
@@ -89,6 +86,7 @@ const LLM_MAP: Record<string, string> = {
   'create-column': 'Agent Create Transform',
   'groupby-wtg-avg': 'Agent GroupBy',
   'explore': 'Agent Explore',
+  'dataframe-operations': 'Agent DataFrame Operations',
 };
 
 const hydrateDroppedAtom = (atom: any): DroppedAtom => {
@@ -1017,20 +1015,20 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         color: info?.color || atom.color || 'bg-gray-400',
         source: 'manual',
         llm: LLM_MAP[atom.id],
-                 settings:
-           atom.id === 'text-box'
-             ? { ...DEFAULT_TEXTBOX_SETTINGS }
-             : atom.id === 'data-upload-validate'
-             ? createDefaultDataUploadSettings()
-             : atom.id === 'feature-overview'
-             ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
-             : atom.id === 'explore'
+        settings:
+          atom.id === 'text-box'
+            ? { ...DEFAULT_TEXTBOX_SETTINGS }
+            : atom.id === 'data-upload-validate'
+            ? createDefaultDataUploadSettings()
+            : atom.id === 'feature-overview'
+            ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+            : atom.id === 'explore'
             ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
             : atom.id === 'chart-maker'
-             ? { ...DEFAULT_CHART_MAKER_SETTINGS }
-             : atom.id === 'scenario-planner'
-             ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
-             : atom.id === 'select-models-feature'
+            ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+            : atom.id === 'dataframe-operations'
+            ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+            : atom.id === 'select-models-feature'
             ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
             : atom.id === 'auto-regressive-models'
             ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
@@ -1075,6 +1073,17 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     ]);
   }
   setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
+  
+  // Scroll to the newly created card after a short delay to ensure it's rendered
+  setTimeout(() => {
+    const cardElement = document.querySelector(`[data-card-id="${newCard.id}"]`);
+    if (cardElement) {
+      cardElement.scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'center' 
+      });
+    }
+  }, 100);
 };
 
 const addNewCardWithAtom = (
@@ -1103,8 +1112,8 @@ const addNewCardWithAtom = (
         ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
         : atomId === 'chart-maker'
         ? { ...DEFAULT_CHART_MAKER_SETTINGS }
-        : atomId === 'scenario-planner'
-        ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
+        : atomId === 'dataframe-operations'
+        ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
         : atomId === 'select-models-feature'
         ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
         : atomId === 'auto-regressive-models'
@@ -1200,18 +1209,16 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       color: info.color,
       source: 'ai',
       llm: LLM_MAP[info.id] || info.id,
-             settings:
-         info.id === 'text-box'
-           ? { ...DEFAULT_TEXTBOX_SETTINGS }
-           : info.id === 'data-upload-validate'
-           ? createDefaultDataUploadSettings()
-           : info.id === 'feature-overview'
-           ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
-           : info.id === 'scenario-planner'
-           ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
-           : info.id === 'dataframe-operations'
-           ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
-           : info.id === 'chart-maker'
+      settings:
+        info.id === 'text-box'
+          ? { ...DEFAULT_TEXTBOX_SETTINGS }
+          : info.id === 'data-upload-validate'
+          ? createDefaultDataUploadSettings()
+          : info.id === 'feature-overview'
+          ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+          : info.id === 'dataframe-operations'
+          ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+          : info.id === 'chart-maker'
           ? { ...DEFAULT_CHART_MAKER_SETTINGS }
           : info.id === 'explore'
           ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
@@ -1524,10 +1531,6 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                       <DataUploadValidateAtom atomId={atom.id} />
                                     ) : atom.atomId === 'feature-overview' ? (
                                       <FeatureOverviewAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'clustering' ? (
-                                      <ClusteringAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'scenario-planner' ? (
-                                      <ScenarioPlannerAtom atomId={atom.id} />
                                     ) : atom.atomId === 'chart-maker' ? (
                                       <ChartMakerAtom atomId={atom.id} />
                                     ) : atom.atomId === 'evaluate-models-feature' ? (
@@ -1750,8 +1753,6 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <DataUploadValidateAtom atomId={atom.id} />
                       ) : atom.atomId === 'feature-overview' ? (
                         <FeatureOverviewAtom atomId={atom.id} />
-                      ) : atom.atomId === 'clustering' ? (
-                        <ClusteringAtom atomId={atom.id} />
                       ) : atom.atomId === 'explore' ? (
                         <ExploreAtom atomId={atom.id} />
                       ) : atom.atomId === 'chart-maker' ? (
@@ -1770,8 +1771,6 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <GroupByAtom atomId={atom.id} />
                       ) : atom.atomId === 'build-model-feature-based' ? (
                           <BuildModelFeatureBasedAtom atomId={atom.id} />
-                       ) : atom.atomId === 'scenario-planner' ? (
-                        <ScenarioPlannerAtom atomId={atom.id} />
                        ) : atom.atomId === 'select-models-feature' ? (
                         <SelectModelsFeatureAtom atomId={atom.id} />
                        ) : atom.atomId === 'evaluate-models-feature' ? (

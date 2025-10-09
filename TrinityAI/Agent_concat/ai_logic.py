@@ -3,14 +3,14 @@ import re
 import requests
 
 
-def build_prompt(user_prompt: str, available_files: list[str], context: str) -> str:
+def build_prompt(user_prompt: str, available_files_with_columns: dict, context: str) -> str:
     """Return the LLM prompt for the concat assistant."""
     return f"""You are an intelligent concatenation assistant with perfect memory access to complete conversation history.
 
 USER INPUT: "{user_prompt}"
 
-AVAILABLE FILES:
-{json.dumps(available_files, indent=2)}
+AVAILABLE FILES WITH COLUMNS:
+{json.dumps(available_files_with_columns, indent=2)}
 
 COMPLETE CONVERSATION CONTEXT:
 {context}
@@ -27,6 +27,7 @@ SUCCESS RESPONSE (when you have all required info):
     "concat_direction": "vertical"
   }},
   "message": "Concatenation configuration completed successfully",
+  "smart_response": "I've configured the concatenation operation for you. The files will be combined using the specified direction. You can now proceed with the concatenation or make adjustments as needed.",
   "reasoning": "Found all required components with context from history",
   "used_memory": true
 }}
@@ -42,6 +43,7 @@ GENERAL RESPONSE (for questions, file info, suggestions):
     "Or say 'yes' to use my suggestions"
   ],
   "message": "Here's what I can help you with",
+  "smart_response": "I'd be happy to help you with Concatenation operations! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you combine your data files using various strategies. What files would you like to combine?",
   "reasoning": "Providing helpful information and guidance",
   "file_analysis": {{
     "total_files": "number",
@@ -62,6 +64,13 @@ INTELLIGENCE RULES:
 3. CONTEXT AWARENESS: Understand "yes", "no", "use those", "combine them" based on conversation
 4. MEMORY UTILIZATION: Suggest files user has successfully used before
 5. PATTERN RECOGNITION: Identify user's preferred file combinations and directions
+
+### FILE DISPLAY RULES:
+When user asks to "show files", "show all files", "show file names", "show columns", or similar:
+- ALWAYS use GENERAL RESPONSE format (success: false)
+- Include detailed file information in smart_response
+- Format: **filename.arrow** (X columns) - column1, column2, column3, etc.
+- List ALL available files with their column counts and sample columns
 
 CONVERSATIONAL HANDLING:
 - "yes" after suggestions → Use the suggested configuration
@@ -94,7 +103,7 @@ def call_llm(api_url: str, model_name: str, bearer_token: str, prompt: str) -> s
         "options": {"temperature": 0.2, "top_p": 0.9, "num_predict": 1000},
     }
     headers = {"Authorization": f"Bearer {bearer_token}", "Content-Type": "application/json"}
-    response = requests.post(api_url, json=payload, headers=headers, timeout=90)
+    response = requests.post(api_url, json=payload, headers=headers, timeout=300)
     response.raise_for_status()
     return response.json().get("message", {}).get("content", "")
 

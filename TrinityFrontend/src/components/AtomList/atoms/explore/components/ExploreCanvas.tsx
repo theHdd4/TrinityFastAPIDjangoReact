@@ -427,6 +427,17 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         
         setChartConfigs(safeData.chartConfigs);
         
+        // 🔧 CRITICAL: Automatically generate charts for AI configurations
+        safeData.chartConfigs.forEach((config, idx) => {
+          if (config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes[0]) {
+            console.log(`🎯 Auto-generating chart ${idx + 1} for AI configuration:`, config);
+            // Generate chart with a small delay to ensure state is updated
+            setTimeout(() => {
+              generateChart(idx, false, config);
+            }, 100 * (idx + 1)); // Stagger the generation to avoid conflicts
+          }
+        });
+        
         // Verify after setting
         // setTimeout(() => {
         //   console.log(`🔍 Verification - chartConfigs after setting:`, chartConfigs);
