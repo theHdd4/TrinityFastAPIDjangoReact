@@ -2,8 +2,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Download, FileText, Grid3x3, Presentation, Save, Share2, Undo2 } from 'lucide-react';
 import Header from '@/components/Header';
-import { useExhibitionStore } from './store/exhibitionStore';
-import type { DroppedAtom, PresentationSettings, LayoutCard } from './store/exhibitionStore';
+import {
+  useExhibitionStore,
+  DEFAULT_PRESENTATION_SETTINGS,
+  type DroppedAtom,
+  type PresentationSettings,
+  type LayoutCard,
+  type SlideshowTransition,
+} from './store/exhibitionStore';
 import { ExhibitionCatalogue } from './components/ExhibitionCatalogue';
 import { SlideCanvas } from './components/SlideCanvas';
 import { OperationsPalette } from './components/OperationsPalette';
@@ -19,6 +25,7 @@ import { saveExhibitionConfiguration } from '@/lib/exhibition';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
+const SLIDESHOW_ANIMATION_MS = 450;
 
 const ExhibitionMode = () => {
   const { exhibitedCards, cards, loadSavedConfiguration, updateCard, addBlankSlide, setCards } =
@@ -54,11 +61,246 @@ const ExhibitionMode = () => {
     }
   });
 
+  const [isSlideshowActive, setIsSlideshowActive] = useState(false);
+  const [slideshowTransform, setSlideshowTransform] = useState('translateX(0px) scale(1)');
+  const [slideshowOpacity, setSlideshowOpacity] = useState(1);
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const verticalSlideRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const undoStackRef = useRef<LayoutCard[][]>([]);
   const isRestoringSnapshotRef = useRef(false);
   const lastSerializedCardsRef = useRef<string | null>(null);
+  const autoAdvanceTimerRef = useRef<number | null>(null);
+  const transitionTimerRef = useRef<number | null>(null);
+
+  const clearAutoAdvanceTimer = useCallback(() => {
+    if (autoAdvanceTimerRef.current !== null) {
+      window.clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+  }, []);
+
+  const clearTransitionTimer = useCallback(() => {
+    if (transitionTimerRef.current !== null) {
+      window.clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = null;
+    }
+  }, []);
+
+  const clearSlideshowTimers = useCallback(() => {
+    clearAutoAdvanceTimer();
+    clearTransitionTimer();
+  }, [clearAutoAdvanceTimer, clearTransitionTimer]);
+
+  const getTransitionStates = useCallback(
+    (transition: SlideshowTransition, direction: 'forward' | 'backward') => {
+      switch (transition) {
+        case 'slide': {
+          const exitOffset = direction === 'forward' ? -48 : 48;
+          const enterOffset = -exitOffset;
+          return {
+            exit: { opacity: 0, transform: `translateX(${exitOffset}px) scale(1)` },
+            enter: { opacity: 0, transform: `translateX(${enterOffset}px) scale(1)` },
+          };
+        }
+        case 'zoom':
+          return {
+            exit: { opacity: 0, transform: 'scale(0.96)' },
+            enter: { opacity: 0, transform: 'scale(1.04)' },
+          };
+        case 'fade':
+        default:
+          return {
+            exit: { opacity: 0, transform: 'translateX(0px) scale(1)' },
+            enter: { opacity: 0, transform: 'translateX(0px) scale(1)' },
+          };
+      }
+    },
+    [],
+  );
+
+  const runSlideTransition = useCallback(
+    (targetIndex: number, direction: 'forward' | 'backward' = 'forward') => {
+      if (targetIndex === currentSlide || targetIndex < 0 || targetIndex >= exhibitedCards.length) {
+        return;
+      }
+
+      const nextCard = exhibitedCards[targetIndex];
+      const transitionType =
+        nextCard?.presentationSettings?.slideshowTransition ??
+        DEFAULT_PRESENTATION_SETTINGS.slideshowTransition;
+
+      const { exit, enter } = getTransitionStates(transitionType, direction);
+      clearSlideshowTimers();
+      setSlideshowTransform(exit.transform);
+      setSlideshowOpacity(exit.opacity);
+
+      transitionTimerRef.current = window.setTimeout(() => {
+        setCurrentSlide(targetIndex);
+        setSlideshowTransform(enter.transform);
+        setSlideshowOpacity(enter.opacity);
+
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            setSlideshowTransform('translateX(0px) scale(1)');
+            setSlideshowOpacity(1);
+          });
+        });
+
+        transitionTimerRef.current = null;
+      }, SLIDESHOW_ANIMATION_MS);
+    },
+    [
+      clearSlideshowTimers,
+      currentSlide,
+      exhibitedCards,
+      getTransitionStates,
+    ],
+  );
+
+  const goToSlide = useCallback(
+    (targetIndex: number, direction: 'forward' | 'backward' = 'forward') => {
+      if (targetIndex < 0 || targetIndex >= exhibitedCards.length) {
+        return;
+      }
+
+      if (!isSlideshowActive) {
+        setCurrentSlide(targetIndex);
+        return;
+      }
+
+      runSlideTransition(targetIndex, direction);
+    },
+    [exhibitedCards.length, isSlideshowActive, runSlideTransition],
+  );
+
+  const handleSlideSelection = useCallback(
+    (index: number) => {
+      if (isSlideshowActive) {
+        handleStopSlideshow();
+      }
+
+      if (index === currentSlide) {
+        return;
+      }
+
+      const direction = index > currentSlide ? 'forward' : 'backward';
+      goToSlide(index, direction);
+    },
+    [currentSlide, goToSlide, handleStopSlideshow, isSlideshowActive],
+  );
+
+  const toggleFullscreen = useCallback(() => {
+    setIsFullscreen(prev => {
+      if (prev && isSlideshowActive) {
+        handleStopSlideshow();
+      }
+      return !prev;
+    });
+  }, [handleStopSlideshow, isSlideshowActive]);
+
+  const handleStopSlideshow = useCallback(() => {
+    setIsSlideshowActive(false);
+    clearSlideshowTimers();
+    setSlideshowTransform('translateX(0px) scale(1)');
+    setSlideshowOpacity(1);
+  }, [clearSlideshowTimers]);
+
+  const handleStartSlideshow = useCallback(() => {
+    if (exhibitedCards.length === 0) {
+      return;
+    }
+
+    clearSlideshowTimers();
+    setSlideshowTransform('translateX(0px) scale(1)');
+    setSlideshowOpacity(1);
+    setIsSlideshowActive(true);
+    setShowThumbnails(false);
+    setShowGridView(false);
+    setShowNotes(false);
+
+    if (!isFullscreen) {
+      setIsFullscreen(true);
+    }
+
+    if (viewMode !== 'horizontal') {
+      setViewMode('horizontal');
+    }
+  }, [
+    currentSlide,
+    exhibitedCards,
+    isFullscreen,
+    clearSlideshowTimers,
+    setShowGridView,
+    setShowNotes,
+    setShowThumbnails,
+    viewMode,
+  ]);
+
+  const scheduleAutoAdvance = useCallback(() => {
+    if (!isSlideshowActive || exhibitedCards.length <= 1) {
+      clearAutoAdvanceTimer();
+      return;
+    }
+
+    const activeSlide = exhibitedCards[currentSlide];
+    const durationSeconds =
+      activeSlide?.presentationSettings?.slideshowDuration ??
+      DEFAULT_PRESENTATION_SETTINGS.slideshowDuration;
+    const normalizedSeconds = Number(durationSeconds);
+    const safeSeconds = Number.isFinite(normalizedSeconds)
+      ? normalizedSeconds
+      : DEFAULT_PRESENTATION_SETTINGS.slideshowDuration;
+    const delay = Math.max(1, safeSeconds) * 1000;
+
+    clearAutoAdvanceTimer();
+
+    autoAdvanceTimerRef.current = window.setTimeout(() => {
+      const nextIndex = (currentSlide + 1) % exhibitedCards.length;
+      runSlideTransition(nextIndex, 'forward');
+    }, delay);
+  }, [
+    clearAutoAdvanceTimer,
+    currentSlide,
+    exhibitedCards,
+    isSlideshowActive,
+    runSlideTransition,
+  ]);
+
+  const handleSlideshowSettingsChange = useCallback(
+    (partial: { slideshowDuration?: number; slideshowTransition?: SlideshowTransition }) => {
+      const targetCard = exhibitedCards[currentSlide];
+      if (!targetCard) {
+        return;
+      }
+
+      const merged: PresentationSettings = {
+        ...DEFAULT_PRESENTATION_SETTINGS,
+        ...targetCard.presentationSettings,
+      };
+
+      if (partial.slideshowDuration !== undefined) {
+        merged.slideshowDuration = Math.max(1, partial.slideshowDuration);
+      }
+
+      if (partial.slideshowTransition) {
+        merged.slideshowTransition = partial.slideshowTransition;
+      }
+
+      handlePresentationChange(merged, targetCard.id);
+
+      if (isSlideshowActive) {
+        clearAutoAdvanceTimer();
+      }
+    },
+    [
+      clearAutoAdvanceTimer,
+      currentSlide,
+      exhibitedCards,
+      handlePresentationChange,
+      isSlideshowActive,
+    ],
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -115,24 +357,39 @@ const ExhibitionMode = () => {
   }, [currentSlide, exhibitedCards.length]);
 
   useEffect(() => {
+    if (!isSlideshowActive) {
+      setSlideshowTransform('translateX(0px) scale(1)');
+      setSlideshowOpacity(1);
+    }
+  }, [currentSlide, isSlideshowActive]);
+
+  useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       if (exhibitedCards.length === 0) return;
 
       switch (e.key) {
         case 'ArrowLeft':
-        case 'PageUp':
-          setCurrentSlide(prev => Math.max(0, prev - 1));
+        case 'PageUp': {
+          const previousIndex = Math.max(0, currentSlide - 1);
+          goToSlide(previousIndex, 'backward');
           break;
+        }
         case 'ArrowRight':
         case 'PageDown':
         case ' ': {
-          e.preventDefault();
-          setCurrentSlide(prev => Math.min(exhibitedCards.length - 1, prev + 1));
+          if (e.key === ' ') {
+            e.preventDefault();
+          }
+          const nextIndex = Math.min(exhibitedCards.length - 1, currentSlide + 1);
+          goToSlide(nextIndex, 'forward');
           break;
         }
         case 'Escape':
           if (isFullscreen) {
             setIsFullscreen(false);
+          }
+          if (isSlideshowActive) {
+            handleStopSlideshow();
           }
           break;
         case 'f':
@@ -147,7 +404,28 @@ const ExhibitionMode = () => {
 
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [exhibitedCards.length, isFullscreen]);
+  }, [
+    currentSlide,
+    exhibitedCards.length,
+    goToSlide,
+    isFullscreen,
+    isSlideshowActive,
+    handleStopSlideshow,
+    toggleFullscreen,
+  ]);
+
+  useEffect(() => {
+    scheduleAutoAdvance();
+    return () => {
+      clearAutoAdvanceTimer();
+    };
+  }, [clearAutoAdvanceTimer, scheduleAutoAdvance]);
+
+  useEffect(() => {
+    return () => {
+      clearSlideshowTimers();
+    };
+  }, [clearSlideshowTimers]);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -172,16 +450,19 @@ const ExhibitionMode = () => {
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement) {
         setIsFullscreen(false);
+        handleStopSlideshow();
       }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
+  }, [handleStopSlideshow]);
 
-  const toggleFullscreen = () => {
-    setIsFullscreen(prev => !prev);
-  };
+  useEffect(() => {
+    if (!isFullscreen && isSlideshowActive) {
+      handleStopSlideshow();
+    }
+  }, [handleStopSlideshow, isFullscreen, isSlideshowActive]);
 
   const handleUndo = useCallback(() => {
     if (!canEdit) {
@@ -450,8 +731,11 @@ const ExhibitionMode = () => {
   }, [addBlankSlide, canEdit, currentSlide, exhibitedCards.length, toast]);
 
   const handleToggleViewMode = useCallback(() => {
+    if (isSlideshowActive) {
+      handleStopSlideshow();
+    }
     setViewMode(prev => (prev === 'horizontal' ? 'vertical' : 'horizontal'));
-  }, []);
+  }, [handleStopSlideshow, isSlideshowActive]);
 
   useEffect(() => {
     if (viewMode !== 'vertical') {
@@ -554,6 +838,17 @@ const ExhibitionMode = () => {
   }
 
   const currentCard = exhibitedCards[currentSlide];
+  const currentPresentationSettings: PresentationSettings = {
+    ...DEFAULT_PRESENTATION_SETTINGS,
+    ...currentCard?.presentationSettings,
+  };
+  const slideWrapperStyle: React.CSSProperties | undefined = isSlideshowActive
+    ? {
+        opacity: slideshowOpacity,
+        transform: slideshowTransform,
+        transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
+      }
+    : undefined;
 
   return (
     <div
@@ -613,7 +908,7 @@ const ExhibitionMode = () => {
               <ExhibitionCatalogue
                 cards={exhibitedCards}
                 currentSlide={currentSlide}
-                onSlideSelect={setCurrentSlide}
+                onSlideSelect={handleSlideSelection}
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
                 enableDragging={canEdit}
@@ -626,7 +921,7 @@ const ExhibitionMode = () => {
                 cards={exhibitedCards}
                 currentSlide={currentSlide}
                 onSlideSelect={index => {
-                  setCurrentSlide(index);
+                  handleSlideSelection(index);
                   setShowThumbnails(false);
                 }}
                 onClose={() => setShowThumbnails(false)}
@@ -637,19 +932,24 @@ const ExhibitionMode = () => {
 
         <div className="flex-1 flex flex-col overflow-hidden">
           {viewMode === 'horizontal' ? (
-            <SlideCanvas
-              card={currentCard}
-              slideNumber={currentSlide + 1}
-              totalSlides={exhibitedCards.length}
-              onDrop={handleDrop}
-              draggedAtom={draggedAtom}
-              canEdit={canEdit}
-              onPresentationChange={handlePresentationChange}
-              onRemoveAtom={handleRemoveAtom}
-              onShowNotes={() => setShowNotes(true)}
-              viewMode="horizontal"
-              isActive
-            />
+            <div
+              className={cn('flex-1 flex flex-col', isSlideshowActive && 'justify-center')}
+              style={slideWrapperStyle}
+            >
+              <SlideCanvas
+                card={currentCard}
+                slideNumber={currentSlide + 1}
+                totalSlides={exhibitedCards.length}
+                onDrop={handleDrop}
+                draggedAtom={draggedAtom}
+                canEdit={canEdit}
+                onPresentationChange={handlePresentationChange}
+                onRemoveAtom={handleRemoveAtom}
+                onShowNotes={() => setShowNotes(true)}
+                viewMode="horizontal"
+                isActive
+              />
+            </div>
           ) : (
             <div className="flex-1 overflow-y-auto bg-muted/10 px-6 py-6 space-y-6">
               {exhibitedCards.map((card, index) => (
@@ -700,16 +1000,34 @@ const ExhibitionMode = () => {
         <SlideNavigation
           currentSlide={currentSlide}
           totalSlides={exhibitedCards.length}
-          onPrevious={() => setCurrentSlide(prev => Math.max(0, prev - 1))}
-          onNext={() => setCurrentSlide(prev => Math.min(exhibitedCards.length - 1, prev + 1))}
-          onGridView={() => setShowGridView(true)}
+          onPrevious={() => goToSlide(currentSlide - 1, 'backward')}
+          onNext={() => goToSlide(currentSlide + 1, 'forward')}
+          onGridView={() => {
+            if (isSlideshowActive) {
+              handleStopSlideshow();
+            }
+            setShowGridView(true);
+          }}
           onFullscreen={toggleFullscreen}
-          onExport={() => setIsExportOpen(true)}
+          onExport={() => {
+            if (isSlideshowActive) {
+              handleStopSlideshow();
+            }
+            setIsExportOpen(true);
+          }}
           isFullscreen={isFullscreen}
           onAddSlide={handleAddSlide}
           onToggleViewMode={handleToggleViewMode}
           viewMode={viewMode}
           canEdit={canEdit}
+          onSlideshowStart={handleStartSlideshow}
+          onSlideshowStop={handleStopSlideshow}
+          isSlideshowActive={isSlideshowActive}
+          slideshowSettings={{
+            slideshowDuration: currentPresentationSettings.slideshowDuration,
+            slideshowTransition: currentPresentationSettings.slideshowTransition,
+          }}
+          onSlideshowSettingsChange={handleSlideshowSettingsChange}
         />
       )}
 
@@ -718,7 +1036,7 @@ const ExhibitionMode = () => {
           cards={exhibitedCards}
           currentSlide={currentSlide}
           onSlideSelect={index => {
-            setCurrentSlide(index);
+            handleSlideSelection(index);
             setShowGridView(false);
           }}
           onClose={() => setShowGridView(false)}
