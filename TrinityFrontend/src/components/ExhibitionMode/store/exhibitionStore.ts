@@ -267,8 +267,9 @@ const deriveCatalogueCards = (
   cards.forEach(card => {
     const entry: LayoutCard = {
       ...card,
-      catalogueAtoms: Array.isArray(card.catalogueAtoms) ? [...card.catalogueAtoms] : [...card.atoms],
+      catalogueAtoms: Array.isArray(card.catalogueAtoms) ? [...card.catalogueAtoms] : [],
     };
+
     catalogueMap.set(card.id, entry);
   });
 
@@ -322,7 +323,7 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
 
 const withPresentationDefaults = (card: LayoutCard): LayoutCard => {
   const slideAtoms = Array.isArray(card.atoms) ? card.atoms : [];
-  const catalogueAtoms = mergeCatalogueAtoms(card.catalogueAtoms, slideAtoms);
+  const catalogueAtoms = Array.isArray(card.catalogueAtoms) ? [...card.catalogueAtoms] : [];
   const mergedSettings = {
     ...DEFAULT_PRESENTATION_SETTINGS,
     ...card.presentationSettings,
@@ -413,33 +414,6 @@ const extractCards = (raw: unknown): LayoutCard[] => {
   return [];
 };
 
-const parseStoredCards = (value: string | null): LayoutCard[] => {
-  if (!value) {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(value);
-    return extractCards(parsed);
-  } catch (error) {
-    console.warn('Failed to parse stored exhibition cards', error);
-    return [];
-  }
-};
-
-const loadCardsFromStorage = (): LayoutCard[] => {
-  if (typeof window === 'undefined') {
-    return [];
-  }
-
-  const configCards = parseStoredCards(window.localStorage.getItem('laboratory-config'));
-  if (configCards.length > 0) {
-    return configCards;
-  }
-
-  return parseStoredCards(window.localStorage.getItem('laboratory-layout-cards'));
-};
-
 const SKU_ATOM_ID = 'feature-overview-sku';
 
 const applyFeatureOverviewSelections = (
@@ -468,9 +442,7 @@ const applyFeatureOverviewSelections = (
     }
 
     const baseAtoms = card.atoms.filter(atom => atom.atomId !== SKU_ATOM_ID);
-    const baseCatalogue = (card.catalogueAtoms ?? card.atoms).filter(
-      atom => atom.atomId !== SKU_ATOM_ID,
-    );
+    const baseCatalogue = (card.catalogueAtoms ?? []).filter(atom => atom.atomId !== SKU_ATOM_ID);
 
     const deriveSourceTitle = (): string => {
       if (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0) {
@@ -550,10 +522,6 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       } catch (error) {
         console.warn('Failed to fetch exhibition configuration', error);
       }
-    }
-
-    if (loadedCards.length === 0) {
-      loadedCards = loadCardsFromStorage();
     }
 
     const cardsWithDefaults = loadedCards.map(withPresentationDefaults);
