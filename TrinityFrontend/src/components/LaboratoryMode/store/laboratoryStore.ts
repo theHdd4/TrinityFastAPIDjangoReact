@@ -100,6 +100,28 @@ export interface FeatureOverviewExhibitionSelectionDimension {
   value: string;
 }
 
+export interface FeatureOverviewExhibitionSelectionStatistics {
+  summary?: Record<string, any>;
+  timeseries?: Array<Record<string, any>>;
+  full?: Record<string, any>;
+}
+
+export interface FeatureOverviewExhibitionSelectionChartState {
+  chartType: string;
+  theme: string;
+  showDataLabels: boolean;
+  showAxisLabels: boolean;
+  xAxisField: string;
+  yAxisField: string;
+}
+
+export interface FeatureOverviewExhibitionSelectionContext {
+  dataSource?: string;
+  availableMetrics?: string[];
+  xAxis?: string;
+  dimensionMap?: Record<string, string[]>;
+}
+
 export interface FeatureOverviewExhibitionSelection {
   key: string;
   metric: string;
@@ -107,6 +129,11 @@ export interface FeatureOverviewExhibitionSelection {
   dimensions: FeatureOverviewExhibitionSelectionDimension[];
   rowId?: string | number;
   label?: string;
+  statisticalDetails?: FeatureOverviewExhibitionSelectionStatistics;
+  chartState?: FeatureOverviewExhibitionSelectionChartState;
+  featureContext?: FeatureOverviewExhibitionSelectionContext;
+  skuRow?: Record<string, any>;
+  capturedAt?: string;
 }
 
 export interface FeatureOverviewSettings {
