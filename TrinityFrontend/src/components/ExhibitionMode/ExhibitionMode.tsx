@@ -267,6 +267,24 @@ const ExhibitionMode = () => {
     runSlideTransition,
   ]);
 
+  const handlePresentationChange = useCallback(
+    (settings: PresentationSettings, cardId?: string) => {
+      let targetId = cardId;
+
+      if (!targetId) {
+        const targetCard = exhibitedCards[currentSlide];
+        targetId = targetCard?.id;
+      }
+
+      if (!targetId) {
+        return;
+      }
+
+      updateCard(targetId, { presentationSettings: settings });
+    },
+    [currentSlide, exhibitedCards, updateCard]
+  );
+
   const handleSlideshowSettingsChange = useCallback(
     (partial: { slideshowDuration?: number; slideshowTransition?: SlideshowTransition }) => {
       const targetCard = exhibitedCards[currentSlide];
@@ -650,24 +668,6 @@ const ExhibitionMode = () => {
       setDraggedAtom(null);
     },
     [cards, exhibitedCards, toast, updateCard]
-  );
-
-  const handlePresentationChange = useCallback(
-    (settings: PresentationSettings, cardId?: string) => {
-      let targetId = cardId;
-
-      if (!targetId) {
-        const targetCard = exhibitedCards[currentSlide];
-        targetId = targetCard?.id;
-      }
-
-      if (!targetId) {
-        return;
-      }
-
-      updateCard(targetId, { presentationSettings: settings });
-    },
-    [currentSlide, exhibitedCards, updateCard]
   );
 
   const handleRemoveAtom = useCallback(
