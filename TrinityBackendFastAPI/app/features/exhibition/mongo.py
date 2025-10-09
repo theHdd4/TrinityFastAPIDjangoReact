@@ -1,4 +1,4 @@
-"""MongoDB helpers for the exhibition feature.
+"""Mongo helpers for the exhibition feature.
 
 This module mirrors the approach used by the column classifier feature where
 the ``column_classifier_config`` collection is initialised at import time and
