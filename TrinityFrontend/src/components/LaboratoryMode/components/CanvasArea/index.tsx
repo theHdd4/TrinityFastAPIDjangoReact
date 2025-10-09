@@ -1224,6 +1224,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
           ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
           : info.id === 'auto-regressive-models'
           ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
+          : info.id === 'select-models-feature'
+          ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
           : undefined,
     };
     setLayoutCards(
@@ -1847,16 +1849,16 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       {expandedCard &&
         createPortal(
           <div
-            className="fixed inset-0 z-[1000]"
+            className="fixed inset-0 z-40 pointer-events-none"
             role="dialog"
             aria-modal="true"
           >
             <div
-              className="absolute inset-0 bg-black/40"
+              className="absolute inset-0 bg-black/40 pointer-events-auto"
               aria-hidden="true"
               onClick={() => setExpandedCard(null)}
             />
-            <div className="relative z-10 flex h-full w-full flex-col bg-gray-50 shadow-2xl">
+            <div className="relative flex h-full w-full flex-col bg-gray-50 shadow-2xl pointer-events-auto">
               {/* Fullscreen Header */}
               <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
                 <div className="flex items-center space-x-2">
@@ -1905,11 +1907,11 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                     <p className="text-sm text-gray-400">Configure this atom for your application</p>
                   </div>
                 ) : (
-                  <div className={`grid gap-6 w-full ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
+                  <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
                     {card.atoms.map((atom) => (
                       <AtomBox
                         key={`${atom.id}-expanded`}
-                        className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col"
+                        className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
                       >
                         {/* Atom Header */}
                         <div className="flex items-center justify-between mb-4">
@@ -1929,7 +1931,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         </div>
 
                         {/* Atom Content */}
-                        <div className="w-full flex-1 overflow-hidden">
+                        <div className="w-full flex-1 overflow-visible">
                           {atom.atomId === 'text-box' ? (
                             <TextBoxEditor textId={atom.id} />
                           ) : atom.atomId === 'data-upload-validate' ? (

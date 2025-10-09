@@ -132,7 +132,16 @@ const ScopeSelectorSettings: React.FC<ScopeSelectorSettingsProps> = ({ data, onD
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between mb-2">
+      {/* Description paragraph - HIDDEN */}
+      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md" style={{ display: 'none' }}>
+        <p className="text-sm text-blue-800">
+          Select the categorical identifiers that will be used to define modeling levels. 
+          These identifiers will help you create meaningful subsets of your data for analysis.
+        </p>
+      </div>
+      
+      {/* Identifiers section - HIDDEN */}
+      <div className="flex items-center justify-between mb-2" style={{ display: 'none' }}>
         <h3 className="text-sm font-medium text-gray-700">Identifiers</h3>
         <div className="flex gap-2">
           <Button 
@@ -156,7 +165,8 @@ const ScopeSelectorSettings: React.FC<ScopeSelectorSettingsProps> = ({ data, onD
         </div>
       </div>
       
-      <div className="flex-1 overflow-y-auto pr-4">
+      {/* Identifiers checkboxes - HIDDEN */}
+      <div className="flex-1 overflow-y-auto pr-4" style={{ display: 'none' }}>
         <div className="grid grid-cols-1 gap-2">
           {availableIdentifiers.map((identifier) => (
              <div 
@@ -176,8 +186,8 @@ const ScopeSelectorSettings: React.FC<ScopeSelectorSettingsProps> = ({ data, onD
       </div>
 
       {/* Criteria Section */}
-       <div className="mt-4 pt-4 border-t border-gray-200 space-y-4 grid gap-4 overflow-x-auto pr-4">
-        <h4 className="text-sm font-medium text-gray-700">Criteria</h4>
+      <Card className="p-4 space-y-3">
+        <label className="text-sm font-medium text-gray-700 block">Select Criteria</label>
         {/* Min datapoints */}
          <div className="flex items-center gap-3">
            <CheckboxTemplate
@@ -254,7 +264,7 @@ const ScopeSelectorSettings: React.FC<ScopeSelectorSettingsProps> = ({ data, onD
             </SelectContent>
           </Select>
         </div>
-      </div>
+      </Card>
     </div>
   );
 };

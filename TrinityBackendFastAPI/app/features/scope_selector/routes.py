@@ -72,17 +72,26 @@ async def identifier_options(
     client_name: str = Query(..., description="Client name"),
     app_name: str = Query(..., description="App name"),
     project_name: str = Query(..., description="Project name"),
+    file_name: Optional[str] = Query(None, description="Specific file name for file-specific lookup"),
 ):
     """Return identifier column names using Redis ▶ Mongo ▶ fallback logic.
 
     1. Attempt to read JSON config from Redis key
-       `<client>/<app>/<project>/column_classifier_config`.
+       `<client>/<app>/<project>/column_classifier_config` (or file-specific key if file_name provided).
     2. If missing, fetch from Mongo (`column_classifier_config` collection).
        Cache the document back into Redis.
     3. If still unavailable, return empty list – the frontend will
        fall back to its existing column_summary extraction flow.
     """
-    key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
+    # Use file-specific key if file_name is provided, otherwise use project-level key
+    if file_name:
+        # Use the same URL-safe encoding as column classifier
+        from urllib.parse import quote
+        safe_file = quote(file_name, safe="")
+        key = f"{client_name}/{app_name}/{project_name}/column_classifier_config:{safe_file}"
+    else:
+        key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
+    
     cfg: dict[str, Any] | None = None
 
     # --- Redis lookup -------------------------------------------------------
@@ -96,18 +105,29 @@ async def identifier_options(
 
     # --- Mongo fallback ------------------------------------------------------
     if cfg is None:
-        cfg = get_classifier_config_from_mongo(client_name, app_name, project_name)
+        cfg = get_classifier_config_from_mongo(client_name, app_name, project_name, file_name)
         if cfg and _redis_client is not None:
             try:
                 _redis_client.setex(key, CLASSIFIER_CFG_TTL, json.dumps(cfg, default=str))
             except Exception as exc:
                 logger.warning(f"Redis write error for {key}: {exc}")
 
-    identifiers: list[str] = []
-    if cfg and isinstance(cfg.get("identifiers"), list):
-        identifiers = cfg["identifiers"]
+    # Return identifiers that are assigned to dimensions from the classifier config
+    # Exclude identifiers assigned to "unattributed" dimension
+    dimension_identifiers: list[str] = []
+    if cfg and isinstance(cfg.get("dimensions"), dict):
+        # Extract identifiers from all dimensions (dimensions is Dict[str, List[str]])
+        # Skip "unattributed" dimension as those columns shouldn't be used for scoping
+        for dimension_name, identifiers in cfg["dimensions"].items():
+            if isinstance(identifiers, list) and dimension_name.lower() != "unattributed":
+                dimension_identifiers.extend(identifiers)
+        # Remove duplicates while preserving order
+        dimension_identifiers = list(dict.fromkeys(dimension_identifiers))
+    elif cfg and isinstance(cfg.get("identifiers"), list):
+        # Fallback to all identifiers if dimensions dict is not available
+        dimension_identifiers = cfg["identifiers"]
 
-    return {"identifiers": identifiers}
+    return {"identifiers": dimension_identifiers}
 
 
 # Initialize settings
@@ -126,9 +146,6 @@ async def get_unique_values(
         # Get MinIO client from deps
         minio_client = get_minio_client()
         
-        # Log the bucket and object being accessed
-        logger.info(f"Accessing MinIO - Bucket: {settings.minio_bucket}, Object: {object_name}")
-        
         # Get the object from MinIO
         try:
             # Get the file from MinIO
@@ -145,11 +162,7 @@ async def get_unique_values(
                 try:
                     df = pd.read_parquet(io.BytesIO(file_bytes))
                 except Exception as e:
-                    logger.warning(f"Failed to read as Parquet, trying Arrow format: {str(e)}")
                     df = pd.read_feather(io.BytesIO(file_bytes))
-            
-            # Log the columns in the DataFrame
-            logger.info(f"Columns in DataFrame: {df.columns.tolist()}")
             
             # Create a case-insensitive column name mapping
             column_mapping = {col.lower(): col for col in df.columns}
@@ -159,30 +172,13 @@ async def get_unique_values(
             
             if actual_column:
                 unique_values = df[actual_column].dropna().astype(str).unique().tolist()
-                logger.info(f"Found {len(unique_values)} unique values for column '{actual_column}'")
                 return {"unique_values": sorted(unique_values) if unique_values else []}
             else:
                 error_msg = f"Column '{column_name}' not found in the data source. Available columns: {', '.join(df.columns)}"
-                logger.error(error_msg)
                 raise HTTPException(status_code=404, detail=error_msg)
                 
         except S3Error as e:
             error_msg = f"Error accessing MinIO object {object_name} in bucket {settings.minio_bucket}: {str(e)}"
-            logger.error(error_msg)
-            
-            # List available buckets for debugging
-            try:
-                buckets = minio_client.list_buckets()
-                bucket_names = [bucket.name for bucket in buckets]
-                logger.info(f"Available buckets: {bucket_names}")
-                
-                # If bucket exists, list objects for debugging
-                if settings.minio_bucket in bucket_names:
-                    objects = minio_client.list_objects(settings.minio_bucket, recursive=True)
-                    object_list = [obj.object_name for obj in objects]
-                    logger.info(f"Objects in bucket {settings.minio_bucket}: {object_list}")
-            except Exception as list_error:
-                logger.error(f"Error listing buckets/objects: {str(list_error)}")
             
             raise HTTPException(status_code=404, detail=error_msg)
             
@@ -191,7 +187,6 @@ async def get_unique_values(
         
     except Exception as e:
         error_msg = f"Error getting unique values: {str(e)}"
-        logger.error(error_msg, exc_info=True)
         raise HTTPException(status_code=500, detail=error_msg)
 
 
@@ -231,7 +226,6 @@ async def get_unique_values_filtered(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in unique_values_filtered: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/date_range")
@@ -246,7 +240,6 @@ async def get_date_range(
     """
     try:
         minio_client = get_minio_client()
-        logger.info(f"Fetching object '{object_name}' from bucket '{settings.minio_bucket}' for date range computation")
 
         response = minio_client.get_object(settings.minio_bucket, object_name)
         file_bytes = response.read()
@@ -272,7 +265,6 @@ async def get_date_range(
                 except Exception:
                     df = pd.read_feather(BytesIO(file_bytes))
         except Exception as e:
-            logger.error(f"Failed to load file '{object_name}': {e}")
             raise HTTPException(status_code=500, detail=f"Unable to read data file: {e}")
 
         if df is None:
@@ -288,7 +280,6 @@ async def get_date_range(
         try:
             date_series = pd.to_datetime(df[actual_col], errors='coerce').dropna()
         except Exception as e:
-            logger.error(f"Failed to convert column '{actual_col}' to datetime: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to parse dates in column '{actual_col}': {e}")
 
         if date_series.empty:
@@ -297,16 +288,13 @@ async def get_date_range(
         min_date = date_series.min().date().isoformat()
         max_date = date_series.max().date().isoformat()
 
-        logger.info(f"Date range for '{actual_col}' – min: {min_date}, max: {max_date}")
         return {"min_date": min_date, "max_date": max_date}
 
     except S3Error as e:
-        logger.error(f"MinIO error retrieving '{object_name}': {e}")
         raise HTTPException(status_code=500, detail=f"Error accessing MinIO object: {e}")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error computing date range: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error obtaining date range: {e}")
 
 # =============================================================================
