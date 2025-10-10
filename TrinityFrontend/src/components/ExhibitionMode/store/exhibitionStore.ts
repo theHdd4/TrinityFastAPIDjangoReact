@@ -423,7 +423,7 @@ const buildCardFromEntry = (entry: ExhibitionAtomPayload, index: number): Layout
 
   return withPresentationDefaults({
     id: identifier,
-    atoms: components,
+    atoms: [],
     catalogueAtoms: components,
     isExhibited: true,
     moleculeId: atomName,
