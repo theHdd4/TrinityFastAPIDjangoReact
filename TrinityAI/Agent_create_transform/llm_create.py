@@ -5,12 +5,6 @@ import logging
 import os
 from datetime import datetime
 from typing import Dict, Any, Optional, List
-import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
-import pyarrow.feather as pf
-from io import BytesIO
-from minio import Minio
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain.memory import ConversationBufferWindowMemory
 
@@ -19,9 +13,10 @@ from .ai_logic import (
     call_llm_create_transform,
     extract_json_from_response
 )
+from file_loader import FileLoader
 
 logger = logging.getLogger(__name__)
-ALLOWED_KEYS = {"success", "message", "json", "session_id", "suggestions"}
+ALLOWED_KEYS = {"success", "message", "json", "session_id", "suggestions", "reasoning", "used_memory", "next_steps", "error", "processing_time", "smart_response", "file_analysis"}
 
 
 class SmartCreateTransformAgent:
@@ -47,102 +42,178 @@ class SmartCreateTransformAgent:
         self.supported_operations = supported_operations
         self.operation_format = operation_format
         self.sessions: Dict[str, Dict[str, Any]] = {}
-        try:
-            self.minio_client = Minio(minio_endpoint, access_key=access_key, secret_key=secret_key, secure=False)
-        except Exception as e:
-            logger.critical(f"MinIO init failed: {e}")
-            self.minio_client = None
-        self.files_with_columns: Dict[str, List[str]] = {}
-        self._load_files()
         self.history_window_size = history_window_size
+        
+        # Initialize FileLoader for standardized file handling
+        self.file_loader = FileLoader(
+            minio_endpoint=minio_endpoint,
+            minio_access_key=access_key,
+            minio_secret_key=secret_key,
+            minio_bucket=bucket,
+            object_prefix=prefix
+        )
+        
+        # Files will be loaded lazily when needed
+        self._files_loaded = False
+    
+    def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
+        """
+        Set environment context for dynamic path resolution.
+        This ensures the API call will fetch the correct path for the current project.
+        """
+        if client_name or app_name or project_name:
+            if client_name:
+                os.environ["CLIENT_NAME"] = client_name
+            if app_name:
+                os.environ["APP_NAME"] = app_name
+            if project_name:
+                os.environ["PROJECT_NAME"] = project_name
+            logger.info(f"🔧 Environment context set for dynamic path resolution: {client_name}/{app_name}/{project_name}")
+        else:
+            logger.info("🔧 Using existing environment context for dynamic path resolution")
+
+    def _ensure_files_loaded(self) -> None:
+        """Ensure files are loaded before processing requests"""
+        if not self._files_loaded:
+            self._load_files()
+            self._files_loaded = True
+
+    def _maybe_update_prefix(self) -> None:
+        """Dynamically updates the MinIO prefix using the data_upload_validate API endpoint."""
+        try:
+            # Method 1: Call the data_upload_validate API endpoint
+            try:
+                import requests
+                import os
+                
+                client_name = os.getenv("CLIENT_NAME", "")
+                app_name = os.getenv("APP_NAME", "")
+                project_name = os.getenv("PROJECT_NAME", "")
+                
+                validate_api_url = os.getenv("VALIDATE_API_URL", "http://fastapi:8001")
+                if not validate_api_url.startswith("http"):
+                    validate_api_url = f"http://{validate_api_url}"
+                
+                url = f"{validate_api_url}/api/data-upload-validate/get_object_prefix"
+                params = {
+                    "client_name": client_name,
+                    "app_name": app_name,
+                    "project_name": project_name
+                }
+                
+                logger.info(f"🔍 Fetching dynamic path from: {url}")
+                logger.info(f"🔍 With params: {params}")
+                
+                response = requests.get(url, params=params, timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    current = data.get("prefix", "")
+                    if current and current != self.prefix:
+                        logger.info(f"✅ Dynamic path fetched successfully: {current}")
+                        logger.info("MinIO prefix updated from '%s' to '%s'", self.prefix, current)
+                        self.prefix = current
+                        self._load_files()
+                        return
+                    elif current:
+                        logger.info(f"✅ Dynamic path fetched: {current} (no change needed)")
+                        return
+                    else:
+                        logger.warning(f"API returned empty prefix: {data}")
+                else:
+                    logger.warning(f"API call failed with status {response.status_code}: {response.text}")
+                        
+            except Exception as e:
+                logger.warning(f"Failed to fetch dynamic path from API: {e}")
+            
+            # Method 2: Fallback to environment variables
+            import os
+            client_name = os.getenv("CLIENT_NAME", "default_client")
+            app_name = os.getenv("APP_NAME", "default_app")
+            project_name = os.getenv("PROJECT_NAME", "default_project")
+            current = f"{client_name}/{app_name}/{project_name}/"
+            
+            if self.prefix != current:
+                logger.info("MinIO prefix updated from '%s' to '%s' (env fallback)", self.prefix, current)
+                self.prefix = current
+                self._load_files()
+            else:
+                logger.info(f"Using current prefix: {current}")
+                
+        except Exception as e:
+            logger.error(f"Failed to update prefix: {e}")
 
     def _load_files(self):
-        """Loads files from MinIO, intelligently reading various Arrow formats."""
-        logger.info(f"Loading files from MinIO bucket '{self.bucket}' with prefix '{self.prefix}'...")
-        self.files_with_columns.clear()
-        
-        if not self.minio_client:
-            logger.error("No MinIO client.")
-            return
-            
+        """Load available files from MinIO with their columns using dynamic paths"""
         try:
-            objects = self.minio_client.list_objects(self.bucket, prefix=self.prefix, recursive=True)
+            try:
+                from minio import Minio
+                from minio.error import S3Error
+                import pyarrow as pa
+                import pyarrow.ipc as ipc
+                import pandas as pd
+                import io
+            except ImportError as ie:
+                logger.error(f"Failed to import required libraries: {ie}")
+                self.files_with_columns = {}
+                return
             
-            files_loaded = 0
+            # logger.info(f"Loading files with prefix: {self.prefix}")
+            
+            # Initialize MinIO client
+            minio_client = Minio(
+                self.file_loader.minio_endpoint,
+                access_key=self.file_loader.minio_access_key,
+                secret_key=self.file_loader.minio_secret_key,
+                secure=False
+            )
+            
+            # List objects in bucket with current prefix
+            objects = minio_client.list_objects(self.file_loader.minio_bucket, prefix=self.prefix, recursive=True)
+            
+            files_with_columns = {}
+            
             for obj in objects:
-                # Accept multiple file formats like the groupby agent
-                if not any(obj.object_name.endswith(ext) for ext in ['.arrow', '.parquet', '.feather', '.csv']):
-                    continue
-
-                filename = os.path.basename(obj.object_name)
-                full_object_path = obj.object_name
-                logger.info(f"Processing file: {filename}")
-                logger.info(f"Full MinIO object path: {full_object_path}")
-                logger.info(f"Bucket: {self.bucket}, Prefix: {self.prefix}")
-
                 try:
-                    # Use the full object path, not just the filename
-                    response = self.minio_client.get_object(self.bucket, full_object_path)
-                    file_data = response.read()
-                    logger.info(f"Successfully read file from MinIO path: {full_object_path}")
-                finally:
-                    response.close()
-                    response.release_conn()
-
-                table = None
-                # --- Enhanced Reading Logic ---
-                # Define a list of reading functions to try in order of likelihood.
-                # Each function takes a bytes buffer and returns a PyArrow Table.
-                readers = [
-                    ("Parquet", lambda buffer: pq.read_table(buffer)),
-                    ("Feather", lambda buffer: pf.read_table(buffer)),
-                    ("Arrow IPC", lambda buffer: pa.ipc.open_stream(buffer).read_all()),
-                    ("CSV", lambda buffer: pa.csv.read_csv(buffer))
-                ]
-
-                for format_name, reader_func in readers:
-                    try:
-                        # Use a BytesIO buffer to read the in-memory file data
-                        buffer = BytesIO(file_data)
-                        table = reader_func(buffer)
-                        logger.info(f"Successfully read '{filename}' as {format_name} format.")
-                        break  # Stop on the first successful read
-                    except Exception as e:
-                        logger.debug(f"Could not read '{filename}' as {format_name}: {e}")
-
-                # --- Column Extraction ---
-                if table is not None:
-                    columns = table.column_names
-                    self.files_with_columns[filename] = columns
-                    files_loaded += 1
+                    if obj.object_name.endswith('.arrow'):
+                        # Get Arrow file data
+                        response = minio_client.get_object(self.file_loader.minio_bucket, obj.object_name)
+                        data = response.read()
+                        
+                        # Read Arrow file
+                        with pa.ipc.open_file(pa.BufferReader(data)) as reader:
+                            table = reader.read_all()
+                            columns = table.column_names
+                            files_with_columns[obj.object_name] = {"columns": columns}
+                            
+                        # logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
                     
-                    # Enhanced column printing for better visibility
-                    logger.info(f"=== COLUMN EXTRACTION FOR '{filename}' ===")
-                    logger.info(f"Total columns: {len(columns)}")
-                    logger.info(f"Columns: {columns}")
-                    logger.info(f"Column types: {[table.schema.field(col).type for col in columns]}")
-                    logger.info(f"Row count: {table.num_rows}")
-                    logger.info(f"File size: {len(file_data)} bytes")
-                    logger.info("=" * 50)
-                    
-                    # Also print to console for immediate visibility
-                    print(f"\n📁 File: {filename}")
-                    print(f"📊 Columns ({len(columns)}): {columns}")
-                    print(f"📈 Rows: {table.num_rows}")
-                    print(f"💾 Size: {len(file_data)} bytes")
-                    print("-" * 40)
-                    
-                else:
-                    logger.warning(f"Could not read '{filename}' in any supported format.")
-                    
-            logger.info(f"Finished loading. Found and processed {files_loaded} files.")
-            print(f"\n🎯 SUMMARY: Loaded {files_loaded} files with columns:")
-            for filename, columns in self.files_with_columns.items():
-                print(f"  • {filename}: {len(columns)} columns")
-            print("=" * 50)
+                    elif obj.object_name.endswith(('.csv', '.xlsx', '.xls')):
+                        # For CSV/Excel files, try to read headers
+                        response = minio_client.get_object(self.file_loader.minio_bucket, obj.object_name)
+                        data = response.read()
+                        
+                        if obj.object_name.endswith('.csv'):
+                            # Read CSV headers
+                            df_sample = pd.read_csv(io.BytesIO(data), nrows=0)  # Just headers
+                            columns = list(df_sample.columns)
+                        else:
+                            # Read Excel headers
+                            df_sample = pd.read_excel(io.BytesIO(data), nrows=0)  # Just headers
+                            columns = list(df_sample.columns)
+                        
+                        files_with_columns[obj.object_name] = {"columns": columns}
+                        # logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to load file {obj.object_name}: {e}")
+                    continue
+            
+            self.files_with_columns = files_with_columns
+            logger.info(f"Loaded {len(files_with_columns)} files from MinIO")
             
         except Exception as e:
-            logger.error(f"MinIO list_objects failed: {e}")
+            logger.error(f"Error loading files from MinIO: {e}")
+            self.files_with_columns = {}
 
     def _build_history_string(self, history_msgs: List[BaseMessage]) -> str:
         if not history_msgs:
@@ -153,7 +224,10 @@ class SmartCreateTransformAgent:
             buf.append(f"\n--- {role} {i} ---\n{msg.content}")
         return "\n".join(buf)
 
-    def process_request(self, user_prompt: str, session_id: Optional[str] = None) -> dict:
+    def process_request(self, user_prompt: str, session_id: Optional[str] = None, client_name: str = "", app_name: str = "", project_name: str = "") -> dict:
+        # Set environment context for dynamic path resolution (like explore agent)
+        self.set_context(client_name, app_name, project_name)
+        
         if not user_prompt.strip():
             return {
                 "success": False,
@@ -161,8 +235,13 @@ class SmartCreateTransformAgent:
                 "session_id": session_id or str(uuid.uuid4()),
                 "suggestions": ["Please specify the desired operation."]
             }
-        if not self.files_with_columns:
-            self._load_files()
+        
+        # Check if MinIO prefix needs an update (and files need reloading)
+        self._maybe_update_prefix()
+        
+        # Load files lazily only when needed
+        self._ensure_files_loaded()
+        
         if not self.files_with_columns:
             return {
                 "success": False,
@@ -182,33 +261,10 @@ class SmartCreateTransformAgent:
         supported_ops = json.dumps(self.supported_operations, indent=2)
         prompt = build_prompt_create_transform(user_prompt, session_id, self.files_with_columns, supported_ops, self.operation_format, history_str)
 
-        # 🔍 DETAILED LOGGING: Print what we're sending to LLM
-        print("\n" + "="*80)
-        print("🚀 SENDING TO LLM (CREATE TRANSFORM AGENT):")
-        print("="*80)
-        print(f"📝 User Prompt: {user_prompt}")
-        print(f"🆔 Session ID: {session_id}")
-        print(f"📁 Files with Columns: {json.dumps(self.files_with_columns, indent=2)}")
-        print(f"⚙️ Supported Operations: {supported_ops}")
-        print(f"📋 Operation Format: {self.operation_format}")
-        print(f"📚 History: {history_str}")
-        print("="*80)
-        print("📤 FULL PROMPT SENT TO LLM:")
-        print("="*80)
-        print(prompt)
-        print("="*80)
 
         raw = call_llm_create_transform(self.api_url, self.model_name, self.bearer_token, prompt)
         
-        # 🔍 DETAILED LOGGING: Print what LLM returned
-        print("\n" + "="*80)
-        print("🤖 LLM RESPONSE RECEIVED:")
-        print("="*80)
-        print(f"📥 Raw Response: {raw}")
-        print("="*80)
-        
         if not raw:
-            print("❌ LLM returned NO response!")
             return {
                 "success": False,
                 "message": "LLM returned no response.",
@@ -217,11 +273,8 @@ class SmartCreateTransformAgent:
             }
         
         parsed = extract_json_from_response(raw) or {}
-        print(f"🔍 Parsed JSON: {json.dumps(parsed, indent=2)}")
         
         result = self._enforce_allowed_keys(parsed, session_id)
-        print(f"✅ Final Result: {json.dumps(result, indent=2)}")
-        print("="*80)
         
         memory.save_context({"input": user_prompt}, {"output": json.dumps(result)})
         return result
@@ -383,3 +436,24 @@ class SmartCreateTransformAgent:
 
     def clear_session(self, session_id):
         return self.sessions.pop(session_id, None) is not None
+    
+    def list_available_files(self) -> Dict[str, Any]:
+        """List all available files from MinIO for create/transform operations using dynamic paths"""
+        try:
+            # Check if MinIO prefix needs an update (and files need reloading)
+            self._maybe_update_prefix()
+            self._load_files()
+            return {
+                "success": True,
+                "files": self.files_with_columns,
+                "total_files": len(self.files_with_columns),
+                "dynamic_prefix": self.prefix
+            }
+        except Exception as e:
+            logger.error(f"Error listing available files: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "files": {},
+                "total_files": 0
+            }

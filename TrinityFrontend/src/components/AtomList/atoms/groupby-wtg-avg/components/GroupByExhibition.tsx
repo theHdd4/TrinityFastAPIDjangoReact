@@ -169,45 +169,6 @@ const GroupByExhibition: React.FC<GroupByExhibitionProps> = ({ settings, onPerfo
             </div>
           )}
 
-          {/* 🔧 CRITICAL FIX: Show AI results preview */}
-          {hasAIResults && (
-            <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-              <div className="flex items-center space-x-2 mb-4">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span className="text-sm font-medium text-green-900">AI Results Preview</span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-green-200">
-                      {Object.keys(settings.groupbyResults.unsaved_data[0] || {}).map((header, index) => (
-                        <th key={index} className="text-left p-2 font-medium text-green-800">
-                          {header}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {settings.groupbyResults.unsaved_data.slice(0, 5).map((row, rowIndex) => (
-                      <tr key={rowIndex} className="border-b border-green-100">
-                        {Object.keys(settings.groupbyResults.unsaved_data[0] || {}).map((header, colIndex) => (
-                          <td key={colIndex} className="p-2 text-green-700">
-                            {row[header] !== null && row[header] !== undefined && row[header] !== '' 
-                              ? (typeof row[header] === 'number' ? row[header].toLocaleString() : String(row[header]))
-                              : <span className="italic text-green-500">null</span>
-                            }
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div className="text-xs text-green-600 mt-2">
-                  Showing first 5 rows of {settings.groupbyResults.unsaved_data.length.toLocaleString()} total rows
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       )}
     </div>

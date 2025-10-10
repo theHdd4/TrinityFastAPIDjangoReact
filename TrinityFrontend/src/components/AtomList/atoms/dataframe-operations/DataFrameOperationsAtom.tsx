@@ -17,6 +17,7 @@ export interface DataFrameData {
   pinnedColumns: string[];
   frozenColumns: number;
   cellColors: { [key: string]: string }; // key format: "row-col"
+  hiddenColumns: string[]; // Array of hidden column names
 }
 
 export interface DataFrameSettings {
@@ -67,6 +68,13 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   const [originalData, setOriginalData] = useState<DataFrameData | null>(null);
   useEffect(() => {
     if (data && !originalData) {
+      setOriginalData(JSON.parse(JSON.stringify(data)));
+    }
+  }, [data, originalData]);
+  
+  // Update originalData when data changes (e.g., after save with deletions)
+  useEffect(() => {
+    if (data && originalData && data.rows.length !== originalData.rows.length) {
       setOriginalData(JSON.parse(JSON.stringify(data)));
     }
   }, [data, originalData]);
@@ -167,6 +175,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
           pinnedColumns: [],
           frozenColumns: 0,
           cellColors: {},
+          hiddenColumns: [],
         };
         updateSettings(atomId, {
           tableData: newData,

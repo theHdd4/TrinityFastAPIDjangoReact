@@ -48,6 +48,7 @@ You are an expert AI data transformation specialist that converts natural langua
     }}
   ],
   "message": "Create/Transform configuration completed successfully",
+  "smart_response": "I've configured the data transformation for you. The specified operations will be applied to create new columns. You can now proceed with the transformation or make adjustments as needed.",
   "session_id": "{session_id}"
 }}
 ```
@@ -59,6 +60,7 @@ You are an expert AI data transformation specialist that converts natural langua
 {{
   "success": false,
   "message": "I need more information to complete your request",
+  "smart_response": "I'd be happy to help you with Create/Transform operations! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you create new columns and transform your data. What specific transformations would you like to perform?",
   "suggestions": [
     "Specific suggestion 1",
     "Specific suggestion 2"
@@ -77,6 +79,13 @@ You are an expert AI data transformation specialist that converts natural langua
 **📝 Note: Use only the filename for `object_name`. The backend will automatically resolve the full MinIO path with client/app/project prefix.**
 
 **If ANY required field is missing or invalid, return success=false with specific guidance.**
+
+### FILE DISPLAY RULES:
+When user asks to "show files", "show all files", "show file names", "show columns", or similar:
+- ALWAYS use GUIDANCE RESPONSE format (success: false)
+- Include detailed file information in smart_response
+- Format: **filename.arrow** (X columns) - column1, column2, column3, etc.
+- List ALL available files with their column counts and sample columns
 
 ## 🔍 SUPPORTED OPERATIONS
 {supported_ops_detailed}
@@ -172,25 +181,37 @@ def _build_intelligent_suggestions(files_with_columns: dict) -> str:
     suggestions = []
     suggestions.append("💡 **INTELLIGENT SUGGESTIONS & CONTEXT:**")
     
-    # File analysis
+    # File analysis - Use same format as DataFrame Operations
     suggestions.append(f"\n📁 **Available Files ({len(files_with_columns)}):**")
-    for filename, columns in files_with_columns.items():
-        numeric_cols = [col for col in columns if _is_numeric_column(col)]
-        categorical_cols = [col for col in columns if _is_categorical_column(col)]
+    for filename, file_data in files_with_columns.items():
+        if isinstance(file_data, dict):
+            columns = file_data.get('columns', [])
+        elif isinstance(file_data, list):
+            columns = file_data
+        else:
+            columns = []
         
-        suggestions.append(f"  📄 **{filename}** ({len(columns)} columns)")
-        if numeric_cols:
-            suggestions.append(f"    🔢 Numeric: {', '.join(numeric_cols[:5])}{'...' if len(numeric_cols) > 5 else ''}")
-        if categorical_cols:
-            suggestions.append(f"    🏷️ Categorical: {', '.join(categorical_cols[:5])}{'...' if len(categorical_cols) > 5 else ''}")
+        display_name = filename.split('/')[-1] if '/' in filename else filename
+        column_list = ', '.join(columns[:8])  # Show first 8 columns
+        if len(columns) > 8:
+            column_list += f" ... (+{len(columns) - 8} more)"
+        suggestions.append(f"  • **{display_name}** ({len(columns)} columns): {column_list}")
     
     # Operation suggestions
     suggestions.append(f"\n🚀 **Operation Suggestions:**")
-    for filename, columns in files_with_columns.items():
+    for filename, file_data in files_with_columns.items():
+        if isinstance(file_data, dict):
+            columns = file_data.get('columns', [])
+        elif isinstance(file_data, list):
+            columns = file_data
+        else:
+            columns = []
+            
         numeric_cols = [col for col in columns if _is_numeric_column(col)]
         if len(numeric_cols) >= 2:
-            suggestions.append(f"  📊 **{filename}**: Add {', '.join(numeric_cols[:3])} → 'total_sum'")
-            suggestions.append(f"  📊 **{filename}**: Multiply {', '.join(numeric_cols[:2])} → 'product'")
+            display_name = filename.split('/')[-1] if '/' in filename else filename
+            suggestions.append(f"  📊 **{display_name}**: Add {', '.join(numeric_cols[:3])} → 'total_sum'")
+            suggestions.append(f"  📊 **{display_name}**: Multiply {', '.join(numeric_cols[:2])} → 'product'")
     
     # Examples
     suggestions.append(f"\n📝 **Example Requests:**")
@@ -256,7 +277,7 @@ def call_llm_create_transform(
     for attempt in range(retry):
         try:
             logger.info(f"Calling LLM API (attempt {attempt+1}/{retry})")
-            r = requests.post(api_url, json=payload, headers=headers, timeout=120)
+            r = requests.post(api_url, json=payload, headers=headers, timeout=300)
             r.raise_for_status()
             
             response = r.json()

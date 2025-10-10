@@ -92,18 +92,13 @@ const ColumnClassifierDimensions: React.FC<Props> = ({ atomId }) => {
     setLoading(true);
     setError('');
     try {
-      const dims = enableMapping
-        ? ['unattributed', ...selected]
-        : [];
+      const dims = ['unattributed', ...selected];
       updateSettings(atomId, {
-        enableDimensionMapping: enableMapping,
+        enableDimensionMapping: true,
         dimensions: dims
       });
       if (settings.data.files.length) {
         const updatedFiles = settings.data.files.map(file => {
-          if (!enableMapping) {
-            return { ...file, customDimensions: {} };
-          }
           const identifiers = file.columns
             .filter(c => c.category === 'identifiers')
             .map(c => c.name);
@@ -130,7 +125,7 @@ const ColumnClassifierDimensions: React.FC<Props> = ({ atomId }) => {
   return (
     <div className="space-y-4 p-2">
       <Card className="p-4 space-y-4">
-        <div className="flex items-center justify-between">
+        {/* <div className="flex items-center justify-between">
           <Label htmlFor={`${atomId}-enable-map`} className="text-sm">
             Enable Dimension Mapping
           </Label>
@@ -139,8 +134,8 @@ const ColumnClassifierDimensions: React.FC<Props> = ({ atomId }) => {
             checked={enableMapping}
             onCheckedChange={setEnableMapping}
           />
-        </div>
-        {enableMapping && (
+        </div> */}
+        {/* {enableMapping && ( */}
           <div>
             <Label className="text-sm mb-2 block">Business Dimensions</Label>
             <div className="mb-1">
@@ -186,11 +181,11 @@ const ColumnClassifierDimensions: React.FC<Props> = ({ atomId }) => {
               </div>
             )}
           </div>
-        )}
+        {/* )} */}
         {error && <p className="text-red-500 text-sm">{error}</p>}
         <Button
           onClick={save}
-          disabled={loading || (enableMapping && selected.length === 0)}
+          disabled={loading || selected.length === 0}
           className="w-full"
         >
           Save Dimensions

@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label';
 import { format } from 'date-fns';
 import { EnhancedCalendar } from '@/components/ui/enhanced-calendar';
 
-const defaultGraphLayout = { numberOfGraphsInRow: 0, rows: 1 };
+const defaultGraphLayout = { numberOfGraphsInRow: 1, rows: 1 };
 
 interface DateRangeData {
   min_date: string;
@@ -45,6 +45,15 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
   });
   const [availableDateRange, setAvailableDateRange] = useState<DateRangeData | null>(null);
   const [graphLayout, setGraphLayout] = useState(data.graphLayout || defaultGraphLayout);
+  
+  // Ensure graphLayout.numberOfGraphsInRow is always between 1 and 2
+  useEffect(() => {
+    if (graphLayout.numberOfGraphsInRow < 1) {
+      setGraphLayout(prev => ({ ...prev, numberOfGraphsInRow: 1 }));
+    } else if (graphLayout.numberOfGraphsInRow > 2) {
+      setGraphLayout(prev => ({ ...prev, numberOfGraphsInRow: 2 }));
+    }
+  }, [graphLayout.numberOfGraphsInRow]);
   const [fromOpen, setFromOpen] = useState(false);
   const [toOpen, setToOpen] = useState(false);
   const [isLoadingDateRange, setIsLoadingDateRange] = useState(false);

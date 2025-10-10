@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { safeStringify } from '@/utils/safeStringify';
 import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
-import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon } from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
@@ -35,8 +34,6 @@ import GroupByAtom from '@/components/AtomList/atoms/groupby-wtg-avg/GroupByAtom
 import CorrelationAtom from '@/components/AtomList/atoms/correlation/CorrelationAtom';
 import ChartMakerAtom from '@/components/AtomList/atoms/chart-maker/ChartMakerAtom';
 import BuildModelFeatureBasedAtom from '@/components/AtomList/atoms/build-model-feature-based/BuildModelFeatureBasedAtom';
-import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAtom';
-import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/ScenarioPlannerAtom';
 import ExploreAtom from '@/components/AtomList/atoms/explore/ExploreAtom';
 import EvaluateModelsFeatureAtom from '@/components/AtomList/atoms/evaluate-models-feature/EvaluateModelsFeatureAtom';
 import AutoRegressiveModelsAtom from '@/components/AtomList/atoms/auto-regressive-models/AutoRegressiveModelsAtom';
@@ -58,7 +55,6 @@ import {
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
   DEFAULT_CHART_MAKER_SETTINGS,
-  DEFAULT_SCENARIO_PLANNER_SETTINGS,
   DEFAULT_SELECT_MODELS_FEATURE_SETTINGS,
   DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS,
   DEFAULT_AUTO_REGRESSIVE_MODELS_DATA,
@@ -89,6 +85,7 @@ const LLM_MAP: Record<string, string> = {
   'create-column': 'Agent Create Transform',
   'groupby-wtg-avg': 'Agent GroupBy',
   'explore': 'Agent Explore',
+  'dataframe-operations': 'Agent DataFrame Operations',
 };
 
 const hydrateDroppedAtom = (atom: any): DroppedAtom => {
@@ -172,7 +169,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     };
   }, [expandedCard]);
 
-  const { updateCard, setCards } = useExhibitionStore();
+  const { setCards } = useExhibitionStore();
   const { toast } = useToast();
 
   interface ColumnInfo {
@@ -1017,20 +1014,20 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         color: info?.color || atom.color || 'bg-gray-400',
         source: 'manual',
         llm: LLM_MAP[atom.id],
-                 settings:
-           atom.id === 'text-box'
-             ? { ...DEFAULT_TEXTBOX_SETTINGS }
-             : atom.id === 'data-upload-validate'
-             ? createDefaultDataUploadSettings()
-             : atom.id === 'feature-overview'
-             ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
-             : atom.id === 'explore'
+        settings:
+          atom.id === 'text-box'
+            ? { ...DEFAULT_TEXTBOX_SETTINGS }
+            : atom.id === 'data-upload-validate'
+            ? createDefaultDataUploadSettings()
+            : atom.id === 'feature-overview'
+            ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+            : atom.id === 'explore'
             ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
             : atom.id === 'chart-maker'
-             ? { ...DEFAULT_CHART_MAKER_SETTINGS }
-             : atom.id === 'scenario-planner'
-             ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
-             : atom.id === 'select-models-feature'
+            ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+            : atom.id === 'dataframe-operations'
+            ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+            : atom.id === 'select-models-feature'
             ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
             : atom.id === 'auto-regressive-models'
             ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
@@ -1114,8 +1111,8 @@ const addNewCardWithAtom = (
         ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
         : atomId === 'chart-maker'
         ? { ...DEFAULT_CHART_MAKER_SETTINGS }
-        : atomId === 'scenario-planner'
-        ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
+        : atomId === 'dataframe-operations'
+        ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
         : atomId === 'select-models-feature'
         ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
         : atomId === 'auto-regressive-models'
@@ -1211,23 +1208,23 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       color: info.color,
       source: 'ai',
       llm: LLM_MAP[info.id] || info.id,
-             settings:
-         info.id === 'text-box'
-           ? { ...DEFAULT_TEXTBOX_SETTINGS }
-           : info.id === 'data-upload-validate'
-           ? createDefaultDataUploadSettings()
-           : info.id === 'feature-overview'
-           ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
-           : info.id === 'scenario-planner'
-           ? { ...DEFAULT_SCENARIO_PLANNER_SETTINGS }
-           : info.id === 'dataframe-operations'
-           ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
-           : info.id === 'chart-maker'
+      settings:
+        info.id === 'text-box'
+          ? { ...DEFAULT_TEXTBOX_SETTINGS }
+          : info.id === 'data-upload-validate'
+          ? createDefaultDataUploadSettings()
+          : info.id === 'feature-overview'
+          ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
+          : info.id === 'dataframe-operations'
+          ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
+          : info.id === 'chart-maker'
           ? { ...DEFAULT_CHART_MAKER_SETTINGS }
           : info.id === 'explore'
           ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
           : info.id === 'auto-regressive-models'
           ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
+          : info.id === 'select-models-feature'
+          ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
           : undefined,
     };
     setLayoutCards(
@@ -1346,15 +1343,6 @@ const handleAddDragLeave = (e: React.DragEvent) => {
     setExpandedCard(expandedCard === id ? null : id);
   };
 
-  const handleExhibitionToggle = (cardId: string, isExhibited: boolean) => {
-    const updated = (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
-      card.id === cardId ? { ...card, isExhibited } : card
-    );
-
-    setLayoutCards(updated);
-    setCards(updated);
-  };
-
   const refreshCardAtoms = async (cardId: string) => {
     const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
     if (!card) return;
@@ -1449,13 +1437,6 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                               />
                             </div>
                             <div className="flex items-center space-x-2">
-                              <span className="text-xs text-gray-500">Exhibit the Card</span>
-                              <Switch
-                                checked={card.isExhibited || false}
-                                onCheckedChange={checked => handleExhibitionToggle(card.id, checked)}
-                                onClick={e => e.stopPropagation()}
-                                className="data-[state=checked]:bg-[#458EE2]"
-                              />
                               <button
                                 onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
                                 className="p-1 hover:bg-gray-100 rounded"
@@ -1533,10 +1514,6 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                       <DataUploadValidateAtom atomId={atom.id} />
                                     ) : atom.atomId === 'feature-overview' ? (
                                       <FeatureOverviewAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'clustering' ? (
-                                      <ClusteringAtom atomId={atom.id} />
-                                    ) : atom.atomId === 'scenario-planner' ? (
-                                      <ScenarioPlannerAtom atomId={atom.id} />
                                     ) : atom.atomId === 'chart-maker' ? (
                                       <ChartMakerAtom atomId={atom.id} />
                                     ) : atom.atomId === 'evaluate-models-feature' ? (
@@ -1610,7 +1587,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, card.id)}
           >
-            {/* Card Header with Exhibition Toggle */}
+            {/* Card Header */}
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <div className="flex items-center space-x-2">
                 <Eye className={`w-4 h-4 ${card.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
@@ -1644,13 +1621,6 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                 </button>
               </div>
               <div className="flex items-center space-x-2">
-                <span className="text-xs text-gray-500">Exhibit the Card</span>
-                <Switch
-                  checked={card.isExhibited || false}
-                  onCheckedChange={(checked) => handleExhibitionToggle(card.id, checked)}
-                  onClick={e => e.stopPropagation()}
-                  className="data-[state=checked]:bg-[#458EE2]"
-                />
                 <button
                   onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
                   className="p-1 hover:bg-gray-100 rounded"
@@ -1759,8 +1729,6 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <DataUploadValidateAtom atomId={atom.id} />
                       ) : atom.atomId === 'feature-overview' ? (
                         <FeatureOverviewAtom atomId={atom.id} />
-                      ) : atom.atomId === 'clustering' ? (
-                        <ClusteringAtom atomId={atom.id} />
                       ) : atom.atomId === 'explore' ? (
                         <ExploreAtom atomId={atom.id} />
                       ) : atom.atomId === 'chart-maker' ? (
@@ -1779,8 +1747,6 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <GroupByAtom atomId={atom.id} />
                       ) : atom.atomId === 'build-model-feature-based' ? (
                           <BuildModelFeatureBasedAtom atomId={atom.id} />
-                       ) : atom.atomId === 'scenario-planner' ? (
-                        <ScenarioPlannerAtom atomId={atom.id} />
                        ) : atom.atomId === 'select-models-feature' ? (
                         <SelectModelsFeatureAtom atomId={atom.id} />
                        ) : atom.atomId === 'evaluate-models-feature' ? (
@@ -1859,16 +1825,16 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       {expandedCard &&
         createPortal(
           <div
-            className="fixed inset-0 z-[1000]"
+            className="fixed inset-0 z-40 pointer-events-none"
             role="dialog"
             aria-modal="true"
           >
             <div
-              className="absolute inset-0 bg-black/40"
+              className="absolute inset-0 bg-black/40 pointer-events-auto"
               aria-hidden="true"
               onClick={() => setExpandedCard(null)}
             />
-            <div className="relative z-10 flex h-full w-full flex-col bg-gray-50 shadow-2xl">
+            <div className="relative flex h-full w-full flex-col bg-gray-50 shadow-2xl pointer-events-auto">
               {/* Fullscreen Header */}
               <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
                 <div className="flex items-center space-x-2">
@@ -1886,12 +1852,6 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                 </span>
                 </div>
                 <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-500">Exhibit the Card</span>
-                <Switch
-                  checked={layoutCards.find(c => c.id === expandedCard)?.isExhibited || false}
-                  onCheckedChange={(checked) => handleExhibitionToggle(expandedCard, checked)}
-                  className="data-[state=checked]:bg-[#458EE2]"
-                />
                 <button
                   onClick={() => setExpandedCard(null)}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -1917,11 +1877,11 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                     <p className="text-sm text-gray-400">Configure this atom for your application</p>
                   </div>
                 ) : (
-                  <div className={`grid gap-6 w-full ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
+                  <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
                     {card.atoms.map((atom) => (
                       <AtomBox
                         key={`${atom.id}-expanded`}
-                        className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col"
+                        className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
                       >
                         {/* Atom Header */}
                         <div className="flex items-center justify-between mb-4">
@@ -1941,7 +1901,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         </div>
 
                         {/* Atom Content */}
-                        <div className="w-full flex-1 overflow-hidden">
+                        <div className="w-full flex-1 overflow-visible">
                           {atom.atomId === 'text-box' ? (
                             <TextBoxEditor textId={atom.id} />
                           ) : atom.atomId === 'data-upload-validate' ? (

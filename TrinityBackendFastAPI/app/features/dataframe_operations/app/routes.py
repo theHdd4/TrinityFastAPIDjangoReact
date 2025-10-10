@@ -603,6 +603,19 @@ async def delete_row(df_id: str = Body(...), index: int = Body(...)):
     return result
 
 
+@router.post("/delete_rows_bulk")
+async def delete_rows_bulk(df_id: str = Body(...), indices: list = Body(...)):
+    df = _get_df(df_id)
+    try:
+        # Convert indices to a list of row numbers to exclude
+        df = df.with_row_count().filter(~pl.col("row_nr").is_in(indices)).drop("row_nr")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    result = _df_payload(df, df_id)
+    return result
+
+
 @router.post("/insert_column")
 async def insert_column(
     df_id: str = Body(...),
@@ -611,14 +624,24 @@ async def insert_column(
     default: Any = Body(None),
 ):
     df = _get_df(df_id)
-    if index >= len(df.columns):
-        df = df.with_columns(pl.lit(default).alias(name))
-    else:
-        df = df.with_columns(pl.lit(default).alias(name))
-        cols = df.columns
-        cols.remove(name)
-        cols.insert(index, name)
-        df = df.select(cols)
+    
+    # Validate index
+    if index < 0:
+        index = 0
+    elif index > len(df.columns):
+        index = len(df.columns)
+    
+    # Add the new column with default value
+    df = df.with_columns(pl.lit(default).alias(name))
+    
+    # Get all columns and reorder them
+    cols = df.columns.copy()
+    cols.remove(name)  # Remove the new column from the end
+    cols.insert(index, name)  # Insert it at the specified position
+    
+    # Reorder the dataframe columns
+    df = df.select(cols)
+    
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
     return result
@@ -829,16 +852,41 @@ async def duplicate_row(df_id: str = Body(...), index: int = Body(...)):
 
 @router.post("/duplicate_column")
 async def duplicate_column(df_id: str = Body(...), name: str = Body(...), new_name: str = Body(...)):
+    """Duplicate a column and place it right after the original column."""
     df = _get_df(df_id)
+    
     try:
-        idx = df.columns.index(name)
+        # Validate that the source column exists
+        if name not in df.columns:
+            raise HTTPException(status_code=404, detail=f"Column '{name}' not found")
+        
+        # Get the position of the original column
+        original_idx = df.columns.index(name)
+        
+        # Duplicate the column with the new name
         df = df.with_columns(pl.col(name).alias(new_name))
-        cols = df.columns
-        cols.remove(new_name)
-        cols.insert(idx, new_name)
-        df = df.select(cols)
+        
+        # Get all columns and reorder them
+        all_columns = df.columns.copy()
+        
+        # Remove the new column from the end
+        all_columns.remove(new_name)
+        
+        # Insert the new column right after the original column
+        insert_position = original_idx + 1
+        all_columns.insert(insert_position, new_name)
+        
+        # Reorder the dataframe with the new column order
+        df = df.select(all_columns)
+        
+        print(f"[Backend] Duplicated column '{name}' as '{new_name}' at position {insert_position}")
+        print(f"[Backend] New column order: {all_columns}")
+        
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Duplicate column operation failed: {str(e)}")
+    
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
     return result
@@ -849,11 +897,29 @@ async def move_column(df_id: str = Body(...), from_col: str = Body(..., alias="f
     df = _get_df(df_id)
     try:
         cols = df.columns
+        
+        # Validate column exists
+        if from_col not in cols:
+            available_cols = ", ".join(cols)
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Column '{from_col}' not found. Available columns: {available_cols}"
+            )
+        
+        # Validate to_index is within bounds
+        if to_index < 0 or to_index >= len(cols):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Index {to_index} is out of bounds. Valid range: 0-{len(cols)-1} (total columns: {len(cols)})"
+            )
+        
         cols.remove(from_col)
         cols.insert(to_index, from_col)
         df = df.select(cols)
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Move column operation failed: {str(e)}")
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
     return result
@@ -871,6 +937,104 @@ async def retype_column(df_id: str = Body(...), name: str = Body(...), new_type:
             df = df.with_columns(pl.col(name).cast(pl.Utf8))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    result = _df_payload(df, df_id)
+    return result
+
+
+@router.post("/round_column")
+async def round_column(df_id: str = Body(...), name: str = Body(...), decimal_places: int = Body(...)):
+    df = _get_df(df_id)
+    try:
+        # Round the specified column to the given decimal places
+        df = df.with_columns(pl.col(name).round(decimal_places))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    SESSIONS[df_id] = df
+    result = _df_payload(df, df_id)
+    return result
+
+
+@router.post("/transform_column_case")
+async def transform_column_case(df_id: str = Body(...), column: str = Body(...), case_type: str = Body(...)):
+    """Transform the case of text values in a column with various case styles."""
+    df = _get_df(df_id)
+    
+    if column not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Column '{column}' not found")
+    
+    try:
+        # Convert column to string first to handle any data type
+        df = df.with_columns(pl.col(column).cast(pl.Utf8))
+        
+        if case_type == "lower":
+            # Convert to lowercase
+            df = df.with_columns(pl.col(column).str.to_lowercase())
+        elif case_type == "upper":
+            # Convert to uppercase
+            df = df.with_columns(pl.col(column).str.to_uppercase())
+        elif case_type == "pascal":
+            # Pascal Case: FirstLetterOfEachWord
+            df = df.with_columns(
+                pl.col(column).map_elements(
+                    lambda x: ''.join(word.capitalize() for word in re.split(r'[\s_\-]+', x)) if isinstance(x, str) and x.strip() else x,
+                    return_dtype=pl.Utf8
+                )
+            )
+        elif case_type == "lower_camel":
+            # Lower Camel Case: firstLetterOfEachWord
+            df = df.with_columns(
+                pl.col(column).map_elements(
+                    lambda x: ''.join(word.capitalize() if i > 0 else word.lower() for i, word in enumerate(re.split(r'[\s_\-]+', x))) if isinstance(x, str) and x.strip() else x,
+                    return_dtype=pl.Utf8
+                )
+            )
+        elif case_type == "snake":
+            # Snake Case: snake_case
+            df = df.with_columns(
+                pl.col(column).map_elements(
+                    lambda x: re.sub(r'(?<!^)(?=[A-Z])', '_', re.sub(r'[\s\-]+', '_', x)).lower() if isinstance(x, str) and x.strip() else x,
+                    return_dtype=pl.Utf8
+                )
+            )
+        elif case_type == "screaming_snake":
+            # Screaming Snake Case: SCREAMING_SNAKE_CASE
+            df = df.with_columns(
+                pl.col(column).map_elements(
+                    lambda x: re.sub(r'(?<!^)(?=[A-Z])', '_', re.sub(r'[\s\-]+', '_', x)).upper() if isinstance(x, str) and x.strip() else x,
+                    return_dtype=pl.Utf8
+                )
+            )
+        elif case_type == "kebab":
+            # Kebab Case: kebab-case
+            df = df.with_columns(
+                pl.col(column).map_elements(
+                    lambda x: re.sub(r'(?<!^)(?=[A-Z])', '-', re.sub(r'[\s_]+', '-', x)).lower() if isinstance(x, str) and x.strip() else x,
+                    return_dtype=pl.Utf8
+                )
+            )
+        elif case_type == "train":
+            # Train Case: Train-Case
+            df = df.with_columns(
+                pl.col(column).map_elements(
+                    lambda x: '-'.join(word.capitalize() for word in re.split(r'[\s_\-]+', x)) if isinstance(x, str) and x.strip() else x,
+                    return_dtype=pl.Utf8
+                )
+            )
+        elif case_type == "flat":
+            # Flat Case: flatcase
+            df = df.with_columns(
+                pl.col(column).map_elements(
+                    lambda x: re.sub(r'[\s_\-]+', '', x).lower() if isinstance(x, str) and x.strip() else x,
+                    return_dtype=pl.Utf8
+                )
+            )
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid case_type '{case_type}'. Supported types: lower, upper, pascal, lower_camel, snake, screaming_snake, kebab, train, flat")
+            
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
     return result
@@ -896,6 +1060,102 @@ async def info(df_id: str):
         "column_count": df.width,
         "types": {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)},
     }
+
+
+@router.post("/describe_column")
+async def describe_column(df_id: str = Body(...), column: str = Body(...)):
+    """Get statistical description of a specific column."""
+    df = _get_df(df_id)
+    
+    if column not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Column '{column}' not found")
+    
+    try:
+        series = df.get_column(column)
+        dtype = str(series.dtype)
+        
+        # Check if column is numeric
+        is_numeric = dtype in ['Float64', 'Int64', 'Float32', 'Int32', 'Float16', 'Int16', 'Int8', 'UInt8', 'UInt16', 'UInt32', 'UInt64']
+        
+        # Basic stats that apply to all columns
+        total_count = len(series)
+        null_count = series.null_count()
+        non_null_count = total_count - null_count
+        unique_count = series.n_unique()
+        
+        result = {
+            "column": column,
+            "dtype": dtype,
+            "is_numeric": is_numeric,
+            "total_count": total_count,
+            "null_count": null_count,
+            "non_null_count": non_null_count,
+            "unique_count": unique_count,
+            "null_percentage": round((null_count / total_count) * 100, 2) if total_count > 0 else 0,
+        }
+        
+        if is_numeric and non_null_count > 0:
+            # Convert to numeric for calculations
+            numeric_series = series.cast(pl.Float64, strict=False).fill_nan(None)
+            
+            # Calculate numeric statistics
+            try:
+                mean_val = numeric_series.mean()
+                median_val = numeric_series.median()
+                std_val = numeric_series.std()
+                min_val = numeric_series.min()
+                max_val = numeric_series.max()
+                sum_val = numeric_series.sum()
+                
+                # Calculate quartiles
+                q25 = numeric_series.quantile(0.25)
+                q75 = numeric_series.quantile(0.75)
+                
+                result.update({
+                    "mean": float(mean_val) if mean_val is not None else None,
+                    "median": float(median_val) if median_val is not None else None,
+                    "std": float(std_val) if std_val is not None else None,
+                    "min": float(min_val) if min_val is not None else None,
+                    "max": float(max_val) if max_val is not None else None,
+                    "sum": float(sum_val) if sum_val is not None else None,
+                    "q25": float(q25) if q25 is not None else None,
+                    "q75": float(q75) if q75 is not None else None,
+                    "range": float(max_val - min_val) if max_val is not None and min_val is not None else None,
+                })
+            except Exception as e:
+                # If numeric calculations fail, mark as non-numeric
+                result["is_numeric"] = False
+                result["numeric_error"] = str(e)
+        else:
+            # For categorical columns, show NaN for mathematical operations
+            result.update({
+                "mean": None,
+                "median": None,
+                "std": None,
+                "min": None,
+                "max": None,
+                "sum": None,
+                "q25": None,
+                "q75": None,
+                "range": None,
+            })
+            
+            # For categorical columns, show most frequent values
+            if non_null_count > 0:
+                try:
+                    value_counts = series.value_counts().sort("count", descending=True)
+                    top_values = value_counts.head(5).to_dicts()
+                    result["top_values"] = [
+                        {"value": str(item["column"]), "count": item["count"]} 
+                        for item in top_values
+                    ]
+                except Exception:
+                    result["top_values"] = []
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error describing column: {str(e)}")
 
 
 @router.post("/ai/execute_operations")
@@ -926,3 +1186,216 @@ async def ai_execute(df_id: str = Body(...), operations: List[Dict[str, Any]] = 
             ).drop("row_nr")
     SESSIONS[df_id] = df
     return _df_payload(SESSIONS[df_id], df_id)
+
+@router.post("/find_and_replace")
+async def find_and_replace(
+    df_id: str = Body(...), 
+    find_text: str = Body(...), 
+    replace_text: str = Body(...),
+    replace_all: bool = Body(False),
+    case_sensitive: bool = Body(False)
+):
+    df = _get_df(df_id)
+    try:
+        # Search and replace in all columns by converting them to strings
+        all_columns = df.columns
+        
+        if not all_columns:
+            raise HTTPException(status_code=400, detail="No columns found to search")
+        
+        # Apply find and replace to all columns
+        expressions = []
+        for col in all_columns:
+            try:
+                # Convert column to string and handle nulls
+                string_col = pl.col(col).cast(pl.Utf8).fill_null("")
+                
+                if case_sensitive:
+                    # Case sensitive replacement
+                    if replace_all:
+                        expr = string_col.str.replace_all(find_text, replace_text, literal=True)
+                    else:
+                        expr = string_col.str.replace(find_text, replace_text, literal=True)
+                else:
+                    # Case insensitive replacement using map_elements for better control
+                    def case_insensitive_replace(text, find_text, replace_text, replace_all=False):
+                        if not text or not find_text:
+                            return text
+                        text_str = str(text)
+                        find_lower = find_text.lower()
+                        text_lower = text_str.lower()
+                        
+                        if replace_all:
+                            # Replace all occurrences
+                            result = text_str
+                            start = 0
+                            while True:
+                                pos = text_lower.find(find_lower, start)
+                                if pos == -1:
+                                    break
+                                # Replace with original case preserved
+                                result = result[:pos] + replace_text + result[pos + len(find_text):]
+                                text_lower = result.lower()
+                                start = pos + len(replace_text)
+                            return result
+                        else:
+                            # Replace first occurrence only
+                            pos = text_lower.find(find_lower)
+                            if pos != -1:
+                                return text_str[:pos] + replace_text + text_str[pos + len(find_text):]
+                            return text_str
+                    
+                    if replace_all:
+                        expr = string_col.map_elements(
+                            lambda x: case_insensitive_replace(x, find_text, replace_text, True),
+                            return_dtype=pl.Utf8
+                        )
+                    else:
+                        expr = string_col.map_elements(
+                            lambda x: case_insensitive_replace(x, find_text, replace_text, False),
+                            return_dtype=pl.Utf8
+                        )
+                
+                expressions.append(expr.alias(col))
+                
+            except Exception as col_error:
+                # If column conversion fails, try a more robust approach
+                try:
+                    if case_sensitive:
+                        if replace_all:
+                            expr = pl.col(col).map_elements(
+                                lambda x: str(x).replace(find_text, replace_text) if x is not None else "",
+                                return_dtype=pl.Utf8
+                            )
+                        else:
+                            expr = pl.col(col).map_elements(
+                                lambda x: str(x).replace(find_text, replace_text, 1) if x is not None else "",
+                                return_dtype=pl.Utf8
+                            )
+                    else:
+                        def case_insensitive_replace_fallback(text, find_text, replace_text, replace_all=False):
+                            if not text or not find_text:
+                                return text
+                            text_str = str(text)
+                            find_lower = find_text.lower()
+                            text_lower = text_str.lower()
+                            
+                            if replace_all:
+                                # Replace all occurrences
+                                result = text_str
+                                start = 0
+                                while True:
+                                    pos = text_lower.find(find_lower, start)
+                                    if pos == -1:
+                                        break
+                                    # Replace with original case preserved
+                                    result = result[:pos] + replace_text + result[pos + len(find_text):]
+                                    text_lower = result.lower()
+                                    start = pos + len(replace_text)
+                                return result
+                            else:
+                                # Replace first occurrence only
+                                pos = text_lower.find(find_lower)
+                                if pos != -1:
+                                    return text_str[:pos] + replace_text + text_str[pos + len(find_text):]
+                                return text_str
+                        
+                        if replace_all:
+                            expr = pl.col(col).map_elements(
+                                lambda x: case_insensitive_replace_fallback(x, find_text, replace_text, True) if x is not None else "",
+                                return_dtype=pl.Utf8
+                            )
+                        else:
+                            expr = pl.col(col).map_elements(
+                                lambda x: case_insensitive_replace_fallback(x, find_text, replace_text, False) if x is not None else "",
+                                return_dtype=pl.Utf8
+                            )
+                    
+                    expressions.append(expr.alias(col))
+                    
+                except Exception as fallback_error:
+                    # If all else fails, keep the original column
+                    expressions.append(pl.col(col))
+        
+        # Apply the expressions
+        df = df.with_columns(expressions)
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    SESSIONS[df_id] = df
+    result = _df_payload(df, df_id)
+    return result
+
+@router.post("/count_matches")
+async def count_matches(
+    df_id: str = Body(...), 
+    find_text: str = Body(...), 
+    case_sensitive: bool = Body(False)
+):
+    """Count occurrences of text in the dataframe."""
+    df = _get_df(df_id)
+    try:
+        # Search in all columns by converting them to strings
+        all_columns = df.columns
+        
+        if not all_columns:
+            return {"total_matches": 0, "matches_by_column": {}, "string_columns": []}
+        
+        total_matches = 0
+        matches_by_column = {}
+        
+        for col in all_columns:
+            try:
+                # Convert column to string and handle nulls
+                string_col = pl.col(col).cast(pl.Utf8).fill_null("")
+                
+                if case_sensitive:
+                    # Case sensitive search
+                    matches = df.select(
+                        string_col.str.count_matches(find_text, literal=True).sum()
+                    ).item()
+                else:
+                    # Case insensitive search - convert both search term and column data to lowercase
+                    matches = df.select(
+                        string_col.str.to_lowercase().str.count_matches(find_text.lower(), literal=True).sum()
+                    ).item()
+                
+                matches_by_column[col] = matches
+                total_matches += matches
+                
+            except Exception as col_error:
+                # If column conversion fails, try a different approach
+                try:
+                    # Try using map_elements for more robust string conversion
+                    if case_sensitive:
+                        matches = df.select(
+                            pl.col(col).map_elements(
+                                lambda x: str(x).count(find_text) if x is not None else 0,
+                                return_dtype=pl.Int64
+                            ).sum()
+                        ).item()
+                    else:
+                        matches = df.select(
+                            pl.col(col).map_elements(
+                                lambda x: str(x).lower().count(find_text.lower()) if x is not None else 0,
+                                return_dtype=pl.Int64
+                            ).sum()
+                        ).item()
+                    
+                    matches_by_column[col] = matches
+                    total_matches += matches
+                    
+                except Exception as fallback_error:
+                    # If all else fails, set matches to 0 for this column
+                    matches_by_column[col] = 0
+        
+        return {
+            "total_matches": total_matches,
+            "matches_by_column": matches_by_column,
+            "string_columns": [col for col in all_columns if df[col].dtype == pl.Utf8],
+            "all_columns": all_columns
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
