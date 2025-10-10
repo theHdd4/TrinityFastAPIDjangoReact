@@ -252,6 +252,31 @@ const normaliseCatalogueComponent = (component: ExhibitionComponentPayload, atom
   return normalised;
 };
 
+type AtomEntryLike = ExhibitionAtomPayload & {
+  exhibited_cards?: ExhibitionComponentPayload[];
+  exhibitedCards?: ExhibitionComponentPayload[];
+  exhibitedComponents?: ExhibitionComponentPayload[];
+  ['exhibited components']?: ExhibitionComponentPayload[];
+};
+
+const extractExhibitedComponents = (entry: AtomEntryLike): ExhibitionComponentPayload[] => {
+  const candidates = [
+    entry?.exhibited_components,
+    entry?.exhibited_cards,
+    entry?.exhibitedCards,
+    entry?.exhibitedComponents,
+    entry?.['exhibited components'],
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+
+  return [];
+};
+
 const buildCardFromEntry = (entry: ExhibitionAtomPayload, index: number): LayoutCard | null => {
   if (!entry || typeof entry !== 'object') {
     return null;
@@ -263,11 +288,9 @@ const buildCardFromEntry = (entry: ExhibitionAtomPayload, index: number): Layout
   const rawName = typeof entry.atom_name === 'string' && entry.atom_name.trim().length > 0 ? entry.atom_name.trim() : '';
   const atomName = rawName || identifier;
 
-  const components = Array.isArray(entry.exhibited_components)
-    ? (entry.exhibited_components
-        .map(component => normaliseCatalogueComponent(component, atomName))
-        .filter((component): component is DroppedAtom => component !== null) as DroppedAtom[])
-    : [];
+  const components = extractExhibitedComponents(entry as AtomEntryLike)
+    .map(component => normaliseCatalogueComponent(component, atomName))
+    .filter((component): component is DroppedAtom => component !== null);
 
   if (components.length === 0) {
     return null;

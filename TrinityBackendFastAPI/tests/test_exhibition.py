@@ -74,6 +74,38 @@ async def test_exhibition_storage_roundtrip() -> None:
 
 
 @pytest.mark.anyio("asyncio")
+async def test_exhibition_storage_handles_legacy_exhibited_cards_key() -> None:
+    with TemporaryDirectory() as tmpdir:
+        storage_path = Path(tmpdir) / "config.json"
+        legacy_payload = [
+            {
+                "id": "legacy-atom",
+                "client_name": "Quant Matrix",
+                "app_name": "Insights",
+                "project_name": "Q3 Launch",
+                "atom_name": "Legacy Feature",
+                "exhibited_cards": [
+                    {
+                        "id": "legacy-component",
+                        "title": "Legacy Component",
+                        "color": "bg-blue-500",
+                    }
+                ],
+            }
+        ]
+        storage_path.write_text(json.dumps(legacy_payload))
+
+        storage = ExhibitionStorage(storage_path)
+        fetched = await storage.get_configuration("Quant Matrix", "Insights", "Q3 Launch")
+
+        assert fetched is not None
+        assert fetched["atoms"][0]["id"] == "legacy-atom"
+        components = fetched["atoms"][0]["exhibited_components"]
+        assert len(components) == 1
+        assert components[0]["id"] == "legacy-component"
+
+
+@pytest.mark.anyio("asyncio")
 async def test_exhibition_storage_returns_none_for_unknown_configuration() -> None:
     with TemporaryDirectory() as tmpdir:
         storage = ExhibitionStorage(Path(tmpdir) / "config.json")

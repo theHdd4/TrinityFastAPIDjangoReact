@@ -86,6 +86,29 @@ class ExhibitionStorage:
         return value.strip()
 
     @staticmethod
+    def _resolve_component_payload(atom_like: Any) -> Any:
+        """Return the raw component collection from a Mongo or file entry.
+
+        Historic documents have stored the exhibited components under a few
+        different keys (``exhibited_components``, ``exhibited_cards`` or even a
+        spaced variant).  The latest API contract standardises on
+        ``exhibited_components`` so we normalise any of these legacy keys here
+        before sanitising.
+        """
+
+        if isinstance(atom_like, dict):
+            for key in (
+                "exhibited_components",
+                "exhibited_cards",
+                "exhibitedComponents",
+                "exhibitedCards",
+                "exhibited components",
+            ):
+                if key in atom_like:
+                    return atom_like.get(key)
+        return []
+
+    @staticmethod
     def _sanitise_components(components: Any) -> List[Dict[str, Any]]:
         if not isinstance(components, list):
             return []
@@ -134,7 +157,8 @@ class ExhibitionStorage:
             if raw_identifier in seen_ids:
                 continue
 
-            components = ExhibitionStorage._sanitise_components(atom.get("exhibited_components"))
+            raw_components = ExhibitionStorage._resolve_component_payload(atom)
+            components = ExhibitionStorage._sanitise_components(raw_components)
             sanitised.append(
                 {
                     "id": raw_identifier,
@@ -247,6 +271,10 @@ class ExhibitionStorage:
 
                 incoming_ids.add(entry_id)
                 document_id = self._mongo_document_id(client, app, project, entry_id)
+                components = ExhibitionStorage._sanitise_components(
+                    ExhibitionStorage._resolve_component_payload(entry)
+                )
+
                 mongo_payload = {
                     "_id": document_id,
                     "id": entry_id,
@@ -254,7 +282,7 @@ class ExhibitionStorage:
                     "app_name": app,
                     "project_name": project,
                     "atom_name": atom_name,
-                    "exhibited_components": entry.get("exhibited_components", []),
+                    "exhibited_components": components,
                     "updated_at": entry.get("updated_at"),
                 }
 
@@ -426,7 +454,8 @@ class ExhibitionStorage:
             if not entry_id or not atom_name:
                 continue
 
-            components = self._sanitise_components(entry.get("exhibited_components", []))
+            raw_components = self._resolve_component_payload(entry)
+            components = self._sanitise_components(raw_components)
             atom_payload = {
                 "id": entry_id,
                 "atom_name": atom_name,
