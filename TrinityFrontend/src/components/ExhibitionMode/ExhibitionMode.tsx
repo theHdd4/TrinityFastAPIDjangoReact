@@ -940,7 +940,7 @@ const ExhibitionMode = () => {
     </div>
   );
 
-  if (exhibitedCards.length === 0) {
+  if (exhibitedCards.length === 0 && catalogueCards.length === 0) {
     return (
       <div className="h-screen bg-background flex flex-col">
         <Header />
@@ -966,7 +966,7 @@ const ExhibitionMode = () => {
     );
   }
 
-  const currentCard = exhibitedCards[currentSlide];
+  const currentCard = exhibitedCards[currentSlide] ?? null;
   const currentPresentationSettings: PresentationSettings = {
     ...DEFAULT_PRESENTATION_SETTINGS,
     ...currentCard?.presentationSettings,
@@ -978,6 +978,18 @@ const ExhibitionMode = () => {
         transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
       }
     : undefined;
+
+  const emptyCanvas = (
+    <div className="flex-1 flex items-center justify-center bg-muted/10">
+      <div className="max-w-md text-center space-y-3 px-6">
+        <h3 className="text-2xl font-semibold text-foreground">Create your first slide</h3>
+        <p className="text-muted-foreground">
+          Use the <span className="font-medium text-foreground">+</span> button below to create a slide, then drag exhibited
+          components from the catalogue to start building your presentation.
+        </p>
+      </div>
+    </div>
+  );
 
   return (
     <div
@@ -1066,21 +1078,25 @@ const ExhibitionMode = () => {
               className={cn('flex-1 flex flex-col', isSlideshowActive && 'justify-center')}
               style={slideWrapperStyle}
             >
-              <SlideCanvas
-                card={currentCard}
-                slideNumber={currentSlide + 1}
-                totalSlides={exhibitedCards.length}
-                onDrop={handleDrop}
-                draggedAtom={draggedAtom}
-                canEdit={canEdit}
-                onPresentationChange={handlePresentationChange}
-                onRemoveAtom={handleRemoveAtom}
-                onShowNotes={() => setShowNotes(true)}
-                viewMode="horizontal"
-                isActive
-              />
+              {currentCard ? (
+                <SlideCanvas
+                  card={currentCard}
+                  slideNumber={currentSlide + 1}
+                  totalSlides={exhibitedCards.length}
+                  onDrop={handleDrop}
+                  draggedAtom={draggedAtom}
+                  canEdit={canEdit}
+                  onPresentationChange={handlePresentationChange}
+                  onRemoveAtom={handleRemoveAtom}
+                  onShowNotes={() => setShowNotes(true)}
+                  viewMode="horizontal"
+                  isActive
+                />
+              ) : (
+                emptyCanvas
+              )}
             </div>
-          ) : (
+          ) : exhibitedCards.length > 0 ? (
             <div className="flex-1 overflow-y-auto bg-muted/10 px-6 py-6 space-y-6">
               {exhibitedCards.map((card, index) => (
                 <div
@@ -1105,6 +1121,8 @@ const ExhibitionMode = () => {
                 </div>
               ))}
             </div>
+          ) : (
+            emptyCanvas
           )}
         </div>
 
@@ -1126,40 +1144,38 @@ const ExhibitionMode = () => {
         )}
       </div>
 
-      {exhibitedCards.length > 0 && (
-        <SlideNavigation
-          currentSlide={currentSlide}
-          totalSlides={exhibitedCards.length}
-          onPrevious={() => goToSlide(currentSlide - 1, 'backward')}
-          onNext={() => goToSlide(currentSlide + 1, 'forward')}
-          onGridView={() => {
-            if (isSlideshowActive) {
-              handleStopSlideshow();
-            }
-            setShowGridView(true);
-          }}
-          onFullscreen={toggleFullscreen}
-          onExport={() => {
-            if (isSlideshowActive) {
-              handleStopSlideshow();
-            }
-            setIsExportOpen(true);
-          }}
-          isFullscreen={isFullscreen}
-          onAddSlide={handleAddSlide}
-          onToggleViewMode={handleToggleViewMode}
-          viewMode={viewMode}
-          canEdit={canEdit}
-          onSlideshowStart={handleStartSlideshow}
-          onSlideshowStop={handleStopSlideshow}
-          isSlideshowActive={isSlideshowActive}
-          slideshowSettings={{
-            slideshowDuration: currentPresentationSettings.slideshowDuration,
-            slideshowTransition: currentPresentationSettings.slideshowTransition,
-          }}
-          onSlideshowSettingsChange={handleSlideshowSettingsChange}
-        />
-      )}
+      <SlideNavigation
+        currentSlide={currentSlide}
+        totalSlides={exhibitedCards.length}
+        onPrevious={() => goToSlide(currentSlide - 1, 'backward')}
+        onNext={() => goToSlide(currentSlide + 1, 'forward')}
+        onGridView={() => {
+          if (isSlideshowActive) {
+            handleStopSlideshow();
+          }
+          setShowGridView(true);
+        }}
+        onFullscreen={toggleFullscreen}
+        onExport={() => {
+          if (isSlideshowActive) {
+            handleStopSlideshow();
+          }
+          setIsExportOpen(true);
+        }}
+        isFullscreen={isFullscreen}
+        onAddSlide={handleAddSlide}
+        onToggleViewMode={handleToggleViewMode}
+        viewMode={viewMode}
+        canEdit={canEdit}
+        onSlideshowStart={handleStartSlideshow}
+        onSlideshowStop={handleStopSlideshow}
+        isSlideshowActive={isSlideshowActive}
+        slideshowSettings={{
+          slideshowDuration: currentPresentationSettings.slideshowDuration,
+          slideshowTransition: currentPresentationSettings.slideshowTransition,
+        }}
+        onSlideshowSettingsChange={handleSlideshowSettingsChange}
+      />
 
       {showGridView && (
         <GridView

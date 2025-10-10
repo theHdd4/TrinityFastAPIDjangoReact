@@ -76,6 +76,9 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
 }) => {
   const [slideshowControlsOpen, setSlideshowControlsOpen] = React.useState(false);
 
+  const hasSlides = totalSlides > 0;
+  const displayIndex = hasSlides ? currentSlide + 1 : 0;
+
   React.useEffect(() => {
     if (!isSlideshowActive) {
       setSlideshowControlsOpen(false);
@@ -136,21 +139,21 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
         variant="ghost"
         size="icon"
         onClick={onPrevious}
-        disabled={currentSlide === 0}
+        disabled={!hasSlides || currentSlide === 0}
         className="rounded-full h-9 w-9"
       >
         <ChevronLeft className="h-5 w-5" />
       </Button>
 
       <Badge variant="secondary" className="px-4 py-1.5 font-medium">
-        {currentSlide + 1} / {totalSlides}
+        {displayIndex} / {totalSlides}
       </Badge>
 
       <Button
         variant="ghost"
         size="icon"
         onClick={onNext}
-        disabled={currentSlide === totalSlides - 1}
+        disabled={!hasSlides || currentSlide === totalSlides - 1}
         className="rounded-full h-9 w-9"
       >
         <ChevronRight className="h-5 w-5" />
@@ -163,7 +166,7 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
         size="icon"
         onClick={onGridView}
         className="rounded-full h-9 w-9"
-        disabled={isSlideshowActive}
+        disabled={!hasSlides || isSlideshowActive}
         title="Grid View"
       >
         <Grid3x3 className="h-4 w-4" />
@@ -175,6 +178,7 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
         onClick={onFullscreen}
         className="rounded-full h-9 w-9"
         title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen Presentation'}
+        disabled={!hasSlides && !isFullscreen}
       >
         {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
       </Button>
@@ -190,7 +194,7 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
             onClick={handleSlideshowButtonClick}
             className="rounded-full h-9 w-9"
             title={isSlideshowActive ? 'Adjust slideshow' : 'Start slideshow'}
-            disabled={totalSlides === 0}
+            disabled={!hasSlides}
           >
             <MonitorPlay className="h-4 w-4" />
           </Button>
@@ -260,7 +264,7 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
         size="icon"
         onClick={onExport}
         className="rounded-full h-9 w-9"
-        disabled={isSlideshowActive}
+        disabled={!hasSlides || isSlideshowActive}
         title="Export Presentation"
       >
         <Download className="h-4 w-4" />

@@ -498,12 +498,21 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
       const remoteCards = loadedCards.map(withPresentationDefaults);
       const hasRemoteCards = remoteCards.length > 0;
-      const baseCards = hasRemoteCards
-        ? remoteCards
-        : shouldResetSlides
-          ? []
-          : state.cards.map(withPresentationDefaults);
-      const ensuredCards = baseCards.length > 0 ? baseCards : [createBlankSlide()];
+      const preservedCards = state.cards.map(withPresentationDefaults);
+      const baseCards = shouldResetSlides ? [] : preservedCards;
+
+      let ensuredCards: LayoutCard[] = [];
+      let insertedBlankSlide = false;
+
+      if (baseCards.length > 0) {
+        ensuredCards = baseCards;
+      } else if (hasRemoteCards) {
+        ensuredCards = [];
+      } else {
+        ensuredCards = [createBlankSlide()];
+        insertedBlankSlide = true;
+      }
+
       const nextExhibitedCards = ensuredCards.filter(card => card.isExhibited);
       const nextCatalogueCards = hasRemoteCards
         ? computeCatalogueCards(remoteCards)
@@ -534,8 +543,12 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         );
       }
 
-      if (baseCards.length === 0) {
+      if (insertedBlankSlide) {
         console.info('[Exhibition] Inserted a blank slide to initialise exhibition mode');
+      } else if (hasRemoteCards && ensuredCards.length === 0) {
+        console.info(
+          '[Exhibition] Loaded catalogue components without slides so the canvas will start empty until a slide is created',
+        );
       }
 
       console.info(
