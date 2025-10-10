@@ -282,7 +282,7 @@ const withPresentationDefaults = (card: Partial<LayoutCard>): LayoutCard => {
     id,
     atoms,
     catalogueAtoms,
-    isExhibited: typeof card.isExhibited === 'boolean' ? card.isExhibited : false,
+    isExhibited: typeof card.isExhibited === 'boolean' ? card.isExhibited : true,
     moleculeId,
     moleculeTitle,
     presentationSettings: ensurePresentationSettings(card.presentationSettings),
@@ -414,7 +414,7 @@ const buildCardFromEntry = (entry: ExhibitionAtomPayload, index: number): Layout
 
   return withPresentationDefaults({
     id: identifier,
-    atoms: [],
+    atoms: components,
     catalogueAtoms: components,
     isExhibited: true,
     moleculeId: atomName,
@@ -482,34 +482,41 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       );
     }
 
-    const catalogueCards = computeCatalogueCards(loadedCards);
-
-    console.info(
-      `[Exhibition] Exhibition catalogue ready with ${catalogueCards.length} catalogue card(s)` +
-        (resolvedContext ? ` for ${contextLabel}` : ' without a remote context'),
-    );
-
-    if (catalogueCards.length > 0) {
-      catalogueCards.forEach(card => {
-        const availableCount = card.catalogueAtoms?.length ?? 0;
-        console.info(
-          `[Exhibition] Catalogue entry ${card.id} resolved with ${availableCount} exhibited component(s)` +
-            (card.moleculeTitle ? ` (${card.moleculeTitle})` : ''),
-        );
-      });
-    } else {
-      console.info('[Exhibition] Exhibition catalogue has no components to display after processing remote data');
-    }
-
     set(state => {
       const shouldResetSlides = resolvedContext
         ? !contextsMatch(state.lastLoadedContext, resolvedContext)
         : false;
 
-      const nextCards = shouldResetSlides
-        ? []
-        : state.cards.map(withPresentationDefaults);
-      const nextExhibitedCards = nextCards.filter(card => card.isExhibited);
+      const remoteCards = loadedCards.map(withPresentationDefaults);
+      const hasRemoteCards = remoteCards.length > 0;
+      const baseCards = hasRemoteCards
+        ? remoteCards
+        : shouldResetSlides
+          ? []
+          : state.cards.map(withPresentationDefaults);
+      const nextExhibitedCards = baseCards.filter(card => card.isExhibited);
+      const nextCatalogueCards = hasRemoteCards
+        ? computeCatalogueCards(remoteCards)
+        : computeCatalogueCards(baseCards);
+
+      console.info(
+        `[Exhibition] Exhibition catalogue ready with ${nextCatalogueCards.length} catalogue card(s)` +
+          (resolvedContext ? ` for ${contextLabel}` : ' without a remote context'),
+      );
+
+      if (nextCatalogueCards.length > 0) {
+        nextCatalogueCards.forEach(card => {
+          const availableCount = card.catalogueAtoms?.length ?? 0;
+          console.info(
+            `[Exhibition] Catalogue entry ${card.id} resolved with ${availableCount} exhibited component(s)` +
+              (card.moleculeTitle ? ` (${card.moleculeTitle})` : ''),
+          );
+        });
+      } else {
+        console.info(
+          '[Exhibition] Exhibition catalogue has no components to display after processing remote data',
+        );
+      }
 
       if (shouldResetSlides && state.cards.length > 0) {
         console.info(
@@ -518,14 +525,14 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       }
 
       console.info(
-        `[Exhibition] Exhibition slides ready with ${nextCards.length} slide card(s) and ${nextExhibitedCards.length} active slide(s)` +
+        `[Exhibition] Exhibition slides ready with ${baseCards.length} slide card(s) and ${nextExhibitedCards.length} active slide(s)` +
           (resolvedContext ? ` for ${contextLabel}` : ''),
       );
 
       return {
-        cards: nextCards,
+        cards: baseCards,
         exhibitedCards: nextExhibitedCards,
-        catalogueCards,
+        catalogueCards: nextCatalogueCards,
         catalogueEntries,
         lastLoadedContext: resolvedContext,
       };
@@ -568,7 +575,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         const fallbackCard: LayoutCard = withPresentationDefaults({
           id: cardId,
           atoms: [],
-          isExhibited: false,
+          isExhibited: true,
           ...updatedCard,
         });
         updatedCards = [...updatedCards, fallbackCard];
