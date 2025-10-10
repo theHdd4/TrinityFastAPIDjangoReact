@@ -216,6 +216,22 @@ const normaliseProjectContext = (context?: ProjectContext | null): ProjectContex
   };
 };
 
+const contextsMatch = (a?: ProjectContext | null, b?: ProjectContext | null): boolean => {
+  if (!a && !b) {
+    return true;
+  }
+
+  if (!a || !b) {
+    return false;
+  }
+
+  return (
+    a.client_name === b.client_name &&
+    a.app_name === b.app_name &&
+    a.project_name === b.project_name
+  );
+};
+
 const normaliseCatalogueComponent = (component: ExhibitionComponentPayload, atomName: string): DroppedAtom | null => {
   const normalised = normalizeAtom(component);
   if (!normalised) {
@@ -259,7 +275,7 @@ const buildCardFromEntry = (entry: ExhibitionAtomPayload, index: number): Layout
 
   return withPresentationDefaults({
     id: identifier,
-    atoms: components,
+    atoms: [],
     catalogueAtoms: components,
     isExhibited: true,
     moleculeId: atomName,
@@ -330,7 +346,7 @@ const computeCatalogueCards = (cards: LayoutCard[]): LayoutCard[] => {
   return cards
     .map(withPresentationDefaults)
     .filter(card => {
-      const catalogueCount = card.catalogueAtoms?.length ?? card.atoms.length ?? 0;
+      const catalogueCount = card.catalogueAtoms?.length ?? 0;
       return catalogueCount > 0;
     });
 };
@@ -395,18 +411,16 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       );
     }
 
-    const cardsWithDefaults = loadedCards.map(withPresentationDefaults);
-    const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
-    const catalogueCards = computeCatalogueCards(cardsWithDefaults);
+    const catalogueCards = computeCatalogueCards(loadedCards);
 
     console.info(
-      `[Exhibition] Exhibition catalogue ready with ${cardsWithDefaults.length} total card(s), ${exhibitedCards.length} exhibited card(s), and ${catalogueCards.length} catalogue card(s)` +
+      `[Exhibition] Exhibition catalogue ready with ${catalogueCards.length} catalogue card(s)` +
         (resolvedContext ? ` for ${contextLabel}` : ' without a remote context'),
     );
 
     if (catalogueCards.length > 0) {
       catalogueCards.forEach(card => {
-        const availableCount = card.catalogueAtoms?.length ?? card.atoms.length ?? 0;
+        const availableCount = card.catalogueAtoms?.length ?? 0;
         console.info(
           `[Exhibition] Catalogue entry ${card.id} resolved with ${availableCount} exhibited component(s)` +
             (card.moleculeTitle ? ` (${card.moleculeTitle})` : ''),
@@ -416,12 +430,34 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       console.info('[Exhibition] Exhibition catalogue has no components to display after processing remote data');
     }
 
-    set({
-      cards: cardsWithDefaults,
-      exhibitedCards,
-      catalogueCards,
-      catalogueEntries,
-      lastLoadedContext: resolvedContext,
+    set(state => {
+      const shouldResetSlides = resolvedContext
+        ? !contextsMatch(state.lastLoadedContext, resolvedContext)
+        : false;
+
+      const nextCards = shouldResetSlides
+        ? []
+        : state.cards.map(withPresentationDefaults);
+      const nextExhibitedCards = nextCards.filter(card => card.isExhibited);
+
+      if (shouldResetSlides && state.cards.length > 0) {
+        console.info(
+          '[Exhibition] Cleared existing exhibition slides to reflect the new project context',
+        );
+      }
+
+      console.info(
+        `[Exhibition] Exhibition slides ready with ${nextCards.length} slide card(s) and ${nextExhibitedCards.length} active slide(s)` +
+          (resolvedContext ? ` for ${contextLabel}` : ''),
+      );
+
+      return {
+        cards: nextCards,
+        exhibitedCards: nextExhibitedCards,
+        catalogueCards,
+        catalogueEntries,
+        lastLoadedContext: resolvedContext,
+      };
     });
   },
 
@@ -471,7 +507,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       return {
         cards: updatedCards,
         exhibitedCards,
-        catalogueCards: computeCatalogueCards(updatedCards),
+        catalogueCards: state.catalogueCards,
         catalogueEntries: state.catalogueEntries,
       };
     });
@@ -511,7 +547,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       return {
         cards,
         exhibitedCards,
-        catalogueCards: computeCatalogueCards(cards),
+        catalogueCards: state.catalogueCards,
         catalogueEntries: state.catalogueEntries,
       };
     });
@@ -522,28 +558,13 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   setCards: (cards: LayoutCard[] | unknown) => {
     const safeCards = extractCards(cards);
 
-    const cardsWithDefaults = safeCards.map(card => {
-      const slideAtoms = Array.isArray(card.atoms) ? card.atoms : [];
-      const isExhibited = card.isExhibited !== false;
-
-      if (!isExhibited || slideAtoms.length === 0) {
-        return withPresentationDefaults(card);
-      }
-
-      const catalogueAtoms = mergeCatalogueAtoms(card.catalogueAtoms, slideAtoms);
-
-      return withPresentationDefaults({
-        ...card,
-        atoms: [],
-        catalogueAtoms,
-      });
-    });
+    const cardsWithDefaults = safeCards.map(withPresentationDefaults);
 
     const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
     set(state => ({
       cards: cardsWithDefaults,
       exhibitedCards,
-      catalogueCards: computeCatalogueCards(cardsWithDefaults),
+      catalogueCards: state.catalogueCards,
       catalogueEntries: state.catalogueEntries,
     }));
   },
