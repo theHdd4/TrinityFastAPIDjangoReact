@@ -58,8 +58,12 @@ const ExhibitionMode = () => {
     lastLoadedContext,
   } = useExhibitionStore();
   const { toast } = useToast();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('exhibition:edit');
+  const presenterName = useMemo(
+    () => user?.username?.trim() || user?.email?.trim() || 'Unknown presenter',
+    [user],
+  );
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
 
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -746,6 +750,22 @@ const ExhibitionMode = () => {
     setDraggedAtom(null);
   }, [currentSlide]);
 
+  const markCardInteraction = useCallback(
+    (cardId: string, options?: { dismissPlaceholder?: boolean }) => {
+      const update: Partial<LayoutCard> = {
+        lastEditedAt: new Date().toISOString(),
+        lastEditedBy: presenterName,
+      };
+
+      if (options?.dismissPlaceholder) {
+        update.placeholderDismissed = true;
+      }
+
+      updateCard(cardId, update);
+    },
+    [presenterName, updateCard],
+  );
+
   const handleDrop = useCallback(
     (
       atom: DroppedAtom,
@@ -773,11 +793,22 @@ const ExhibitionMode = () => {
 
       const destinationAtoms = [...destinationCard.atoms, atom];
 
-      updateCard(destinationCard.id, { atoms: destinationAtoms });
+      const timestamp = new Date().toISOString();
+
+      updateCard(destinationCard.id, {
+        atoms: destinationAtoms,
+        placeholderDismissed: true,
+        lastEditedAt: timestamp,
+        lastEditedBy: presenterName,
+      });
 
       if (origin === 'slide' && sourceCard.id !== destinationCard.id) {
         const sourceAtoms = sourceCard.atoms.filter(a => a.id !== atom.id);
-        updateCard(sourceCard.id, { atoms: sourceAtoms });
+        updateCard(sourceCard.id, {
+          atoms: sourceAtoms,
+          lastEditedAt: timestamp,
+          lastEditedBy: presenterName,
+        });
       }
 
       const targetIndex = exhibitedCards.findIndex(card => card.id === destinationCard.id);
@@ -796,7 +827,7 @@ const ExhibitionMode = () => {
 
       setDraggedAtom(null);
     },
-    [cards, exhibitedCards, toast, updateCard]
+    [cards, exhibitedCards, presenterName, toast, updateCard]
   );
 
   const handleRemoveAtom = useCallback(
@@ -816,13 +847,47 @@ const ExhibitionMode = () => {
       }
 
       const nextAtoms = latestCard.atoms.filter(atom => atom.id !== atomId);
-      updateCard(latestCard.id, { atoms: nextAtoms });
+      updateCard(latestCard.id, {
+        atoms: nextAtoms,
+        lastEditedAt: new Date().toISOString(),
+        lastEditedBy: presenterName,
+      });
       toast({
         title: 'Component removed',
         description: 'The component has been removed from this slide.',
       });
     },
-    [cards, currentSlide, exhibitedCards, toast, updateCard]
+    [cards, currentSlide, exhibitedCards, presenterName, toast, updateCard]
+  );
+
+  const handleTitleChange = useCallback(
+    (cardId: string, title: string) => {
+      if (!canEdit) {
+        return;
+      }
+
+      const trimmed = title.trim();
+      const value = trimmed.length > 0 ? trimmed : 'Untitled Slide';
+
+      updateCard(cardId, {
+        moleculeTitle: value,
+        placeholderDismissed: true,
+        lastEditedAt: new Date().toISOString(),
+        lastEditedBy: presenterName,
+      });
+    },
+    [canEdit, presenterName, updateCard],
+  );
+
+  const handleCanvasInteraction = useCallback(
+    (cardId: string) => {
+      if (!canEdit) {
+        return;
+      }
+
+      markCardInteraction(cardId, { dismissPlaceholder: true });
+    },
+    [canEdit, markCardInteraction],
   );
 
   const handleNotesChange = (slideIndex: number, value: string) => {
@@ -1078,6 +1143,11 @@ const ExhibitionMode = () => {
                 onShowNotes={() => setShowNotes(true)}
                 viewMode="horizontal"
                 isActive
+                onTitleChange={handleTitleChange}
+                onCanvasInteraction={handleCanvasInteraction}
+                presenterName={presenterName}
+                lastEditedAt={currentCard?.lastEditedAt ?? null}
+                lastEditedBy={currentCard?.lastEditedBy ?? null}
               />
             </div>
           ) : (
@@ -1101,6 +1171,11 @@ const ExhibitionMode = () => {
                     onShowNotes={() => setShowNotes(true)}
                     viewMode="vertical"
                     isActive={currentSlide === index}
+                    onTitleChange={handleTitleChange}
+                    onCanvasInteraction={handleCanvasInteraction}
+                    presenterName={presenterName}
+                    lastEditedAt={card.lastEditedAt ?? null}
+                    lastEditedBy={card.lastEditedBy ?? null}
                   />
                 </div>
               ))}

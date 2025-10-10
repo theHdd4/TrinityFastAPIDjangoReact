@@ -70,6 +70,9 @@ export interface LayoutCard {
   moleculeId?: string;
   moleculeTitle?: string;
   presentationSettings?: PresentationSettings;
+  placeholderDismissed?: boolean;
+  lastEditedBy?: string | null;
+  lastEditedAt?: string | null;
 }
 
 interface ExhibitionStore {
@@ -399,6 +402,9 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         catalogueAtoms: [],
         isExhibited: true,
         moleculeTitle: 'Untitled Slide',
+        placeholderDismissed: false,
+        lastEditedBy: null,
+        lastEditedAt: new Date().toISOString(),
       });
 
       createdCard = newCard;

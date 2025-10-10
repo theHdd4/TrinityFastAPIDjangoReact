@@ -53,6 +53,11 @@ interface SlideCanvasProps {
   onShowNotes?: () => void;
   viewMode?: 'horizontal' | 'vertical';
   isActive?: boolean;
+  onTitleChange?: (cardId: string, title: string) => void;
+  onCanvasInteraction?: (cardId: string) => void;
+  presenterName?: string;
+  lastEditedAt?: string | null;
+  lastEditedBy?: string | null;
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -67,6 +72,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   onShowNotes,
   viewMode = 'horizontal',
   isActive = false,
+  onTitleChange,
+  onCanvasInteraction,
+  presenterName,
+  lastEditedAt,
+  lastEditedBy,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -74,6 +84,16 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     ...DEFAULT_PRESENTATION_SETTINGS,
     ...card.presentationSettings,
   }));
+  const derivedTitle = useMemo(() => {
+    if (card.moleculeTitle && card.moleculeTitle.trim().length > 0) {
+      return card.moleculeTitle.trim();
+    }
+    if (card.atoms.length > 0) {
+      return card.atoms[0].title;
+    }
+    return 'Untitled Slide';
+  }, [card.atoms, card.moleculeTitle]);
+  const [titleValue, setTitleValue] = useState<string>(derivedTitle);
   const accentImageInputRef = useRef<HTMLInputElement | null>(null);
   const formatPanelRef = useRef<HTMLDivElement | null>(null);
   const formatToggleRef = useRef<HTMLButtonElement | null>(null);
@@ -98,6 +118,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       ...card.presentationSettings,
     });
   }, [card]);
+
+  useEffect(() => {
+    setTitleValue(derivedTitle);
+  }, [derivedTitle, card.id]);
 
   useEffect(() => {
     if (!canEdit) {
@@ -334,13 +358,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const getSlideTitle = () => {
-    if (card.moleculeTitle) {
-      return card.atoms.length > 0 ? `${card.moleculeTitle}` : card.moleculeTitle;
-    }
-    return card.atoms.length > 0 ? card.atoms[0].title : 'Untitled Slide';
-  };
-
   const getSlideDescription = () => {
     if (card.atoms.length > 0) {
       return `Explore ${card.atoms.length} ${
@@ -349,6 +366,65 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
     return 'Add components from the catalogue to build your presentation slide.';
   };
+
+  const handleTitleBlur = () => {
+    if (!canEdit) {
+      return;
+    }
+
+    const nextValue = titleValue.trim();
+    const normalized = nextValue.length > 0 ? nextValue : 'Untitled Slide';
+
+    if (normalized !== derivedTitle) {
+      onTitleChange?.(card.id, normalized);
+    } else if (nextValue.length === 0) {
+      onTitleChange?.(card.id, normalized);
+    }
+
+    setTitleValue(normalized);
+  };
+
+  const handleTitleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      (event.target as HTMLInputElement).blur();
+    }
+  };
+
+  const handleTitleFocus = () => {
+    if (!canEdit) {
+      return;
+    }
+    if (!card.placeholderDismissed) {
+      onCanvasInteraction?.(card.id);
+    }
+  };
+
+  const handleCanvasClick = () => {
+    if (!canEdit) {
+      return;
+    }
+    if (!card.placeholderDismissed) {
+      onCanvasInteraction?.(card.id);
+    }
+  };
+
+  const presenterLabel =
+    (lastEditedBy && lastEditedBy.trim()) || presenterName || 'Unknown presenter';
+  const formattedLastEdited = useMemo(() => {
+    if (!lastEditedAt) {
+      return 'Not edited yet';
+    }
+
+    const parsed = new Date(lastEditedAt);
+    if (Number.isNaN(parsed.getTime())) {
+      return 'Not edited yet';
+    }
+
+    return parsed.toLocaleString();
+  }, [lastEditedAt]);
+
+  const shouldShowPlaceholder = !card.placeholderDismissed && card.atoms.length === 0;
 
   const cardColorClasses = {
     default: 'from-purple-500 via-pink-500 to-orange-400',
@@ -448,6 +524,23 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           </div>
         )}
 
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4 text-sm text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
+              <User className="w-4 h-4 text-primary-foreground" />
+            </div>
+            <span className="font-medium text-foreground">
+              Exhibition presenter: <span className="font-semibold">{presenterLabel}</span>
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4" />
+            <span className="text-foreground">
+              Last edited: <span className="font-semibold">{formattedLastEdited}</span>
+            </span>
+          </div>
+        </div>
+
         <div className="relative">
           <div
             className={cn(
@@ -460,6 +553,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
+            onClick={handleCanvasClick}
           >
             {accentOverlay}
 
@@ -517,24 +611,32 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                     layoutConfig.contentClass
                   )}
                 >
-                  <h1 className="text-4xl font-bold text-foreground mb-4">{getSlideTitle()}</h1>
+                  <input
+                    type="text"
+                    value={titleValue}
+                    onChange={event => setTitleValue(event.target.value)}
+                    onBlur={handleTitleBlur}
+                    onFocus={handleTitleFocus}
+                    onKeyDown={handleTitleKeyDown}
+                    disabled={!canEdit}
+                    className={cn(
+                      'mb-4 w-full border-none bg-transparent p-0 text-4xl font-bold text-foreground focus:outline-none focus:ring-0',
+                      !canEdit && 'cursor-default'
+                    )}
+                    aria-label="Slide title"
+                  />
 
-                  <p className="text-muted-foreground mb-6 leading-relaxed max-w-3xl">
-                    {getSlideDescription()}
-                  </p>
+                  {card.atoms.length > 0 && (
+                    <p className="text-muted-foreground mb-6 leading-relaxed max-w-3xl">
+                      {getSlideDescription()}
+                    </p>
+                  )}
 
-                  <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
-                        <User className="w-4 h-4 text-primary-foreground" />
-                      </div>
-                      <span className="font-medium">Exhibition Presenter</span>
+                  {shouldShowPlaceholder && canEdit && (
+                    <div className="text-muted-foreground mb-6 leading-relaxed max-w-3xl">
+                      Add components from the catalogue to build your presentation slide.
                     </div>
-                    <div className="flex items-center gap-1">
-                      <Calendar className="w-4 h-4" />
-                      <span>Last edited recently</span>
-                    </div>
-                  </div>
+                  )}
 
                   {card.atoms.length === 0 && canEdit && (
                     <div className="mt-6 rounded-xl border-2 border-dashed border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
