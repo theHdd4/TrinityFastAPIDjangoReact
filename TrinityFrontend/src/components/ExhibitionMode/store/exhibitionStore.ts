@@ -121,6 +121,26 @@ const isRecord = (value: unknown): value is Record<string, any> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
 
+const normaliseProjectContext = (context?: ProjectContext | null): ProjectContext | null => {
+  if (!context) {
+    return null;
+  }
+
+  const client = typeof context.client_name === 'string' ? context.client_name.trim() : '';
+  const app = typeof context.app_name === 'string' ? context.app_name.trim() : '';
+  const project = typeof context.project_name === 'string' ? context.project_name.trim() : '';
+
+  if (!client || !app || !project) {
+    return null;
+  }
+
+  return {
+    client_name: client,
+    app_name: app,
+    project_name: project,
+  };
+};
+
 const normaliseSku = (
   sku: unknown,
   index: number,
@@ -508,32 +528,58 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
   loadSavedConfiguration: async (explicitContext?: ProjectContext | null) => {
     let loadedCards: LayoutCard[] = [];
-    const context = explicitContext ?? getActiveProjectContext();
     let featureOverviewConfigs: ExhibitionFeatureOverviewPayload[] = [];
+    const resolvedContext = normaliseProjectContext(explicitContext ?? getActiveProjectContext());
+    const contextLabel = resolvedContext
+      ? `${resolvedContext.client_name}/${resolvedContext.app_name}/${resolvedContext.project_name}`
+      : 'local-cache';
 
-    if (context) {
+    if (resolvedContext) {
+      console.info(
+        `[Exhibition] Fetching exhibition catalogue from trinity_db.exhibition_catalogue for ${contextLabel}`,
+      );
       try {
-        const remote = await fetchExhibitionConfiguration(context);
+        const remote = await fetchExhibitionConfiguration(resolvedContext);
         if (remote && Array.isArray(remote.cards)) {
+          const remoteFeatureCount = Array.isArray(remote.feature_overview) ? remote.feature_overview.length : 0;
+          console.info(
+            `[Exhibition] Retrieved ${remote.cards.length} card(s) and ${remoteFeatureCount} feature overview configuration(s) from trinity_db.exhibition_catalogue for ${contextLabel}`,
+          );
           loadedCards = extractCards(remote.cards);
           featureOverviewConfigs = extractFeatureOverviewEntries(remote.feature_overview);
           loadedCards = applyFeatureOverviewSelections(loadedCards, featureOverviewConfigs);
+        } else {
+          console.info(
+            `[Exhibition] No exhibition catalogue entry found for ${contextLabel} in trinity_db.exhibition_catalogue`,
+          );
         }
       } catch (error) {
-        console.warn('Failed to fetch exhibition configuration', error);
+        console.warn(
+          `[Exhibition] Failed to fetch exhibition catalogue for ${contextLabel} from trinity_db.exhibition_catalogue`,
+          error,
+        );
       }
+    } else {
+      console.info(
+        '[Exhibition] Skipping exhibition catalogue fetch because no active project context was resolved',
+      );
     }
 
     const cardsWithDefaults = loadedCards.map(withPresentationDefaults);
     const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
     const catalogueCards = deriveCatalogueCards(cardsWithDefaults, featureOverviewConfigs);
 
+    console.info(
+      `[Exhibition] Exhibition catalogue ready with ${cardsWithDefaults.length} total card(s), ${exhibitedCards.length} exhibited card(s), and ${catalogueCards.length} catalogue card(s)` +
+        (resolvedContext ? ` for ${contextLabel}` : ' without a remote context'),
+    );
+
     set({
       cards: cardsWithDefaults,
       exhibitedCards,
       catalogueCards,
       featureOverviewConfigs,
-      lastLoadedContext: context ?? null,
+      lastLoadedContext: resolvedContext,
     });
   },
 

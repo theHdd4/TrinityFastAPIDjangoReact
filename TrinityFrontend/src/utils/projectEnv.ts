@@ -4,10 +4,13 @@ export interface ProjectContext {
   project_name: string;
 }
 
-const FALLBACK_CONTEXT: ProjectContext = {
-  client_name: '',
-  app_name: '',
-  project_name: '',
+const normaliseValue = (value: unknown): string => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  const trimmed = value.trim();
+  return trimmed;
 };
 
 export function getActiveProjectContext(): ProjectContext | null {
@@ -22,9 +25,9 @@ export function getActiveProjectContext(): ProjectContext | null {
 
   try {
     const env = JSON.parse(raw);
-    const client = env.CLIENT_NAME || env.client_name || '';
-    const app = env.APP_NAME || env.app_name || '';
-    const project = env.PROJECT_NAME || env.project_name || '';
+    const client = normaliseValue(env.CLIENT_NAME ?? env.client_name);
+    const app = normaliseValue(env.APP_NAME ?? env.app_name);
+    const project = normaliseValue(env.PROJECT_NAME ?? env.project_name);
 
     if (!client && !app && !project) {
       return null;
@@ -37,6 +40,6 @@ export function getActiveProjectContext(): ProjectContext | null {
     };
   } catch (error) {
     console.warn('Failed to parse project environment from localStorage', error);
-    return { ...FALLBACK_CONTEXT };
+    return null;
   }
 }
