@@ -1791,7 +1791,7 @@ async def get_columns(
                 if obj.object_name.endswith('.arrow'):
                     logger.debug(f"Checking file: {obj.object_name}")
                     # Check if this file matches our scope and combination
-                    if f"Scope_{scope}_" in obj.object_name and combination in obj.object_name:
+                    if f"Scope_{scope}" in obj.object_name and combination in obj.object_name:
                         target_file_key = obj.object_name
                         logger.info(f"Found exact match: {target_file_key}")
                 break
