@@ -1785,7 +1785,7 @@ async def get_columns(
             
             # Look for files that match the pattern: Scope_{scope}_{combination}_*.arrow
             target_file_key = None
-            logger.info(f"Searching for files with Scope_{scope}_ and combination: {combination}")
+            logger.info(f"Searching for files with Scope_{scope}_and combination: {combination}")
             
             for obj in all_files:
                 if obj.object_name.endswith('.arrow'):
