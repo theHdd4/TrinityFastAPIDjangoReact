@@ -46,7 +46,7 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
       return card.moleculeTitle.trim();
     }
 
-    const availableAtoms = card.catalogueAtoms ?? card.atoms;
+    const availableAtoms = Array.isArray(card.catalogueAtoms) ? card.catalogueAtoms : [];
     const fromMetadata = availableAtoms.find(atom => {
       const candidate = atom?.metadata?.sourceAtomTitle;
       return typeof candidate === 'string' && candidate.trim().length > 0;
@@ -94,7 +94,7 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
       <ScrollArea className="flex-1">
         <div className="p-2">
           {cards.map(card => {
-            const availableAtoms = card.catalogueAtoms ?? card.atoms;
+            const availableAtoms = Array.isArray(card.catalogueAtoms) ? card.catalogueAtoms : [];
             const catalogueTitle = getCatalogueTitle(card);
             const slideIndex = resolveSlideIndex(card.id);
             const isLinkedToSlide = typeof slideIndex === 'number';
