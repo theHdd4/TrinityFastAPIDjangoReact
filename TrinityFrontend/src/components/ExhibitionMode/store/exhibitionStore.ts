@@ -70,7 +70,6 @@ export interface LayoutCard {
   moleculeId?: string;
   moleculeTitle?: string;
   presentationSettings?: PresentationSettings;
-  exhibitionControlEnabled?: boolean;
 }
 
 interface ExhibitionStore {
@@ -80,7 +79,6 @@ interface ExhibitionStore {
   featureOverviewConfigs: ExhibitionFeatureOverviewPayload[];
   lastLoadedContext: ProjectContext | null;
   loadSavedConfiguration: (context?: ProjectContext | null) => Promise<void>;
-  toggleCardExhibition: (cardId: string) => void;
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => void;
   addBlankSlide: (afterSlideIndex?: number) => LayoutCard | null;
   setCards: (cards: LayoutCard[] | unknown) => void;
@@ -339,7 +337,6 @@ const deriveCatalogueCards = (
       isExhibited: false,
       moleculeId: config.atomId,
       moleculeTitle: sourceTitle,
-      exhibitionControlEnabled: true,
     });
 
     catalogueMap.set(entry.id, entry);
@@ -374,7 +371,7 @@ const withPresentationDefaults = (card: LayoutCard): LayoutCard => {
     ...card,
     atoms: slideAtoms,
     catalogueAtoms,
-    exhibitionControlEnabled: card.exhibitionControlEnabled ?? true,
+    isExhibited: card.isExhibited !== false,
     presentationSettings: mergedSettings,
   };
 };
@@ -423,7 +420,7 @@ const normalizeCard = (card: any): LayoutCard | null => {
     id: String(identifier),
     atoms,
     catalogueAtoms,
-    isExhibited: Boolean(card.isExhibited),
+    isExhibited: card.isExhibited !== false,
     moleculeId: card.moleculeId ? String(card.moleculeId) : undefined,
     moleculeTitle: typeof card.moleculeTitle === 'string' ? card.moleculeTitle : undefined,
     presentationSettings: card.presentationSettings && typeof card.presentationSettings === 'object'
@@ -433,9 +430,6 @@ const normalizeCard = (card: any): LayoutCard | null => {
           cardLayout: ensureCardLayout((card.presentationSettings as any).cardLayout),
         }
       : undefined,
-    exhibitionControlEnabled: 'exhibitionControlEnabled' in card
-      ? Boolean(card.exhibitionControlEnabled)
-      : true,
   };
 
   return withPresentationDefaults(normalized);
@@ -625,25 +619,6 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     });
   },
 
-  toggleCardExhibition: (cardId: string) => {
-    set((state) => {
-      const updatedCards = state.cards.map(card =>
-        card.id === cardId
-          ? !card.exhibitionControlEnabled
-            ? card
-            : withPresentationDefaults({ ...card, isExhibited: !card.isExhibited })
-          : card
-      );
-
-      const exhibitedCards = updatedCards.filter(card => card.isExhibited);
-      return {
-        cards: updatedCards,
-        exhibitedCards,
-        catalogueCards: deriveCatalogueCards(updatedCards, state.featureOverviewConfigs),
-      };
-    });
-  },
-
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => {
     set((state) => {
       let updatedCards = state.cards.map(card => {
@@ -655,10 +630,6 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
           ...card,
           ...updatedCard,
         };
-
-        if (updatedCard.exhibitionControlEnabled === false) {
-          nextCard.isExhibited = false;
-        }
 
         if (updatedCard.atoms) {
           nextCard.atoms = updatedCard.atoms;
@@ -710,7 +681,6 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         catalogueAtoms: [],
         isExhibited: true,
         moleculeTitle: 'Untitled Slide',
-        exhibitionControlEnabled: true,
       });
 
       createdCard = newCard;
@@ -746,7 +716,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
     const cardsWithDefaults = safeCards.map(card => {
       const slideAtoms = Array.isArray(card.atoms) ? card.atoms : [];
-      const isExhibited = Boolean(card.isExhibited);
+      const isExhibited = card.isExhibited !== false;
 
       if (!isExhibited || slideAtoms.length === 0) {
         return withPresentationDefaults(card);
@@ -758,7 +728,6 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         ...card,
         atoms: [],
         catalogueAtoms,
-        exhibitionControlEnabled: card.exhibitionControlEnabled ?? true,
       });
     });
 

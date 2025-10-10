@@ -35,7 +35,6 @@ async def test_exhibition_storage_roundtrip() -> None:
                         {"id": "atom-1", "atomId": "feature-overview", "title": "Overview", "category": "Feature"}
                     ],
                     "isExhibited": True,
-                    "exhibitionControlEnabled": True,
                 }
             ],
             "feature_overview": [
