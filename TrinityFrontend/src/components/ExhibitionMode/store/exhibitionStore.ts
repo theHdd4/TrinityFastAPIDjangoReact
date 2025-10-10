@@ -2,8 +2,8 @@
 import { create } from 'zustand';
 import {
   fetchExhibitionConfiguration,
-  ExhibitionFeatureOverviewPayload,
-  ExhibitionSkuPayload,
+  ExhibitionAtomPayload,
+  ExhibitionComponentPayload,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 
@@ -76,7 +76,7 @@ interface ExhibitionStore {
   cards: LayoutCard[];
   exhibitedCards: LayoutCard[];
   catalogueCards: LayoutCard[];
-  featureOverviewConfigs: ExhibitionFeatureOverviewPayload[];
+  catalogueEntries: ExhibitionAtomPayload[];
   lastLoadedContext: ProjectContext | null;
   loadSavedConfiguration: (context?: ProjectContext | null) => Promise<void>;
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => void;
@@ -139,396 +139,67 @@ const normaliseProjectContext = (context?: ProjectContext | null): ProjectContex
   };
 };
 
-const normaliseSku = (
-  sku: unknown,
-  index: number,
-  fallbackPrefix: string,
-  sourceAtomTitle: string,
-): ExhibitionSkuPayload | null => {
-  if (!isRecord(sku)) {
-    return null;
-  }
-
-  const rawId = sku.id;
-  const rawTitle = sku.title;
-  const id = typeof rawId === 'string' && rawId.trim().length > 0 ? rawId.trim() : `${fallbackPrefix}-${index}`;
-  const title = typeof rawTitle === 'string' && rawTitle.trim().length > 0 ? rawTitle.trim() : `SKU ${index + 1}`;
-
-  const details = isRecord(sku.details) ? { ...sku.details } : undefined;
-  if (details) {
-    const rawSourceTitle = details.sourceAtomTitle;
-    if (typeof rawSourceTitle !== 'string' || rawSourceTitle.trim().length === 0) {
-      details.sourceAtomTitle = sourceAtomTitle;
-    }
-  }
-
-  return {
-    id,
-    title,
-    details,
-  };
-};
-
-const normaliseFeatureOverviewEntry = (
-  entry: unknown,
-): ExhibitionFeatureOverviewPayload | null => {
-  if (!isRecord(entry)) {
-    return null;
-  }
-
-  const atomId = typeof entry.atomId === 'string' && entry.atomId.trim().length > 0 ? entry.atomId.trim() : '';
-  if (!atomId) {
-    return null;
-  }
-
-  const fallbackCardId = atomId;
-  const rawCardId = entry.cardId;
-  const cardId = typeof rawCardId === 'string' && rawCardId.trim().length > 0 ? rawCardId.trim() : fallbackCardId;
-
-  const componentsRecord = isRecord(entry.components) ? entry.components : {};
-  const components = {
-    skuStatistics: Boolean(componentsRecord.skuStatistics),
-    trendAnalysis: Boolean(componentsRecord.trendAnalysis),
-  };
-
-  const deriveSourceTitle = (): string => {
-    if (!Array.isArray(entry.skus)) {
-      return atomId;
-    }
-
-    for (const sku of entry.skus) {
-      if (isRecord(sku.details) && typeof sku.details.sourceAtomTitle === 'string' && sku.details.sourceAtomTitle.trim()) {
-        return sku.details.sourceAtomTitle.trim();
-      }
-    }
-
-    return atomId;
-  };
-
-  const sourceAtomTitle = deriveSourceTitle();
-
-  const skus = Array.isArray(entry.skus)
-    ? (entry.skus
-        .map((sku, index) => normaliseSku(sku, index, `${cardId}-sku`, sourceAtomTitle))
-        .filter(Boolean) as ExhibitionSkuPayload[])
-    : [];
-
-  const chartSettings = isRecord(entry.chartSettings)
-    ? (entry.chartSettings as ExhibitionFeatureOverviewPayload['chartSettings'])
-    : undefined;
-  const skuStatisticsSettings = isRecord(entry.skuStatisticsSettings)
-    ? (entry.skuStatisticsSettings as ExhibitionFeatureOverviewPayload['skuStatisticsSettings'])
-    : undefined;
-
-  return {
-    atomId,
-    cardId,
-    components,
-    skus,
-    chartSettings,
-    skuStatisticsSettings,
-  };
-};
-
-const extractFeatureOverviewEntries = (raw: unknown): ExhibitionFeatureOverviewPayload[] => {
-  if (!Array.isArray(raw)) {
+const computeCatalogueCards = (cards: LayoutCard[]): LayoutCard[] => {
+  if (!Array.isArray(cards) || cards.length === 0) {
     return [];
   }
 
-  return raw.map(normaliseFeatureOverviewEntry).filter((entry): entry is ExhibitionFeatureOverviewPayload => entry !== null);
-};
-
-const humaniseIdentifier = (value: string): string => {
-  return value
-    .split(/[-_]/g)
-    .filter(Boolean)
-    .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(' ');
-};
-
-const deriveSourceTitleFromConfig = (config: ExhibitionFeatureOverviewPayload): string => {
-  const fromSku = config.skus
-    .map(sku => sku.details?.sourceAtomTitle)
-    .find(title => typeof title === 'string' && title.trim().length > 0);
-
-  if (fromSku) {
-    return fromSku.trim();
-  }
-
-  return humaniseIdentifier(config.atomId) || 'Exhibited Atom';
-};
-
-const createCatalogueAtomsFromConfig = (
-  config: ExhibitionFeatureOverviewPayload,
-  sourceAtomTitle: string,
-): DroppedAtom[] => {
-  return config.skus.map((sku, index) => {
-    const metadata = sku.details ? { ...sku.details, sourceAtomTitle } : { sourceAtomTitle };
-
-    return {
-      id: sku.id || `${config.cardId}-sku-${index}`,
-      atomId: SKU_ATOM_ID,
-      title: sku.title || `SKU ${index + 1}`,
-      category: 'Feature Overview',
-      color: 'bg-amber-500',
-      metadata,
-    };
-  });
-};
-
-interface CatalogueOptions {
-  onFallbackCatalogueAtoms?: (card: LayoutCard, fallbackAtoms: DroppedAtom[]) => void;
-}
-
-const deriveCatalogueCards = (
-  cards: LayoutCard[],
-  featureOverview: ExhibitionFeatureOverviewPayload[],
-  options?: CatalogueOptions,
-): LayoutCard[] => {
-  const onFallback = options?.onFallbackCatalogueAtoms;
-  const catalogueMap = new Map<string, LayoutCard>();
-
-  cards.forEach(card => {
-    const explicitCatalogueAtoms = Array.isArray(card.catalogueAtoms) ? [...card.catalogueAtoms] : [];
-
-    let catalogueAtoms = explicitCatalogueAtoms;
-
-    if (catalogueAtoms.length === 0) {
-      const fallbackAtoms = Array.isArray(card.atoms) ? [...card.atoms] : [];
-
-      if (fallbackAtoms.length > 0) {
-        catalogueAtoms = mergeCatalogueAtoms(explicitCatalogueAtoms, fallbackAtoms);
-        onFallback?.(card, fallbackAtoms);
-      }
-    }
-
-    const entry: LayoutCard = {
-      ...card,
-      catalogueAtoms,
-    };
-
-    catalogueMap.set(card.id, entry);
-  });
-
-  featureOverview.forEach(config => {
-    const targetId = config.cardId;
-    const sourceTitle = deriveSourceTitleFromConfig(config);
-    const skuAtoms = createCatalogueAtomsFromConfig(config, sourceTitle);
-
-    if (catalogueMap.has(targetId)) {
-      const existing = catalogueMap.get(targetId)!;
-      catalogueMap.set(targetId, {
-        ...existing,
-        catalogueAtoms: mergeCatalogueAtoms(existing.catalogueAtoms, skuAtoms),
-        moleculeId: existing.moleculeId || config.atomId,
-        moleculeTitle:
-          existing.moleculeTitle && existing.moleculeTitle.trim().length > 0
-            ? existing.moleculeTitle
-            : sourceTitle,
-      });
-      return;
-    }
-
-    const fallbackId = `${config.cardId || config.atomId}-catalogue`;
-    const entry = withPresentationDefaults({
-      id: fallbackId,
-      atoms: [],
-      catalogueAtoms: skuAtoms,
-      isExhibited: false,
-      moleculeId: config.atomId,
-      moleculeTitle: sourceTitle,
+  return cards
+    .map(withPresentationDefaults)
+    .filter(card => {
+      const catalogueCount = card.catalogueAtoms?.length ?? card.atoms.length ?? 0;
+      return catalogueCount > 0;
     });
-
-    catalogueMap.set(entry.id, entry);
-  });
-
-  return Array.from(catalogueMap.values()).filter(card => (card.catalogueAtoms?.length ?? 0) > 0);
 };
 
-export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
-  cardColor: 'default',
-  cardWidth: 'L',
-  contentAlignment: 'top',
-  fullBleed: false,
-  cardLayout: DEFAULT_CARD_LAYOUT,
-  accentImage: null,
-  accentImageName: null,
-  slideshowDuration: 8,
-  slideshowTransition: 'fade',
-};
-
-const withPresentationDefaults = (card: LayoutCard): LayoutCard => {
-  const slideAtoms = Array.isArray(card.atoms) ? card.atoms : [];
-  const catalogueAtoms = Array.isArray(card.catalogueAtoms) ? [...card.catalogueAtoms] : [];
-  const mergedSettings = {
-    ...DEFAULT_PRESENTATION_SETTINGS,
-    ...card.presentationSettings,
-  };
-
-  mergedSettings.cardLayout = ensureCardLayout(mergedSettings.cardLayout);
-
-  return {
-    ...card,
-    atoms: slideAtoms,
-    catalogueAtoms,
-    isExhibited: card.isExhibited !== false,
-    presentationSettings: mergedSettings,
-  };
-};
-
-const normalizeAtom = (atom: any): DroppedAtom | null => {
-  if (!atom) {
+const normaliseCatalogueComponent = (component: ExhibitionComponentPayload, atomName: string): DroppedAtom | null => {
+  const normalised = normalizeAtom(component);
+  if (!normalised) {
     return null;
   }
 
-  const id = atom.id ?? atom.atomId;
-  if (!id) {
-    return null;
+  if (!normalised.metadata || typeof normalised.metadata !== 'object') {
+    normalised.metadata = {};
   }
 
-  return {
-    id: String(id),
-    atomId: String(atom.atomId ?? atom.id ?? ''),
-    title: typeof atom.title === 'string' && atom.title.trim().length > 0 ? atom.title : 'Untitled Atom',
-    category:
-      typeof atom.category === 'string' && atom.category.trim().length > 0
-        ? atom.category
-        : 'General',
-    color: typeof atom.color === 'string' && atom.color.trim().length > 0 ? atom.color : FALLBACK_COLOR,
-    metadata: typeof atom.metadata === 'object' && atom.metadata !== null ? atom.metadata : undefined,
-  };
+  if (
+    typeof normalised.metadata.sourceAtomTitle !== 'string' ||
+    normalised.metadata.sourceAtomTitle.trim().length === 0
+  ) {
+    normalised.metadata.sourceAtomTitle = atomName;
+  }
+
+  return normalised;
 };
 
-const normalizeCard = (card: any): LayoutCard | null => {
-  if (!card) {
+const buildCardFromEntry = (entry: ExhibitionAtomPayload, index: number): LayoutCard | null => {
+  if (!entry || typeof entry !== 'object') {
     return null;
   }
 
-  const identifier = card.id ?? card.moleculeId ?? card.moleculeTitle;
-  if (!identifier) {
-    return null;
-  }
+  const rawId = typeof entry.id === 'string' && entry.id.trim().length > 0 ? entry.id.trim() : '';
+  const identifier = rawId || `catalogue-entry-${index + 1}`;
 
-  const atoms = Array.isArray(card.atoms)
-    ? (card.atoms.map(normalizeAtom).filter(Boolean) as DroppedAtom[])
+  const rawName = typeof entry.atom_name === 'string' && entry.atom_name.trim().length > 0 ? entry.atom_name.trim() : '';
+  const atomName = rawName || identifier;
+
+  const components = Array.isArray(entry.exhibited_components)
+    ? (entry.exhibited_components
+        .map(component => normaliseCatalogueComponent(component, atomName))
+        .filter((component): component is DroppedAtom => component !== null) as DroppedAtom[])
     : [];
-  const catalogueAtoms = Array.isArray(card.catalogueAtoms)
-    ? (card.catalogueAtoms.map(normalizeAtom).filter(Boolean) as DroppedAtom[])
-    : undefined;
 
-  const normalized: LayoutCard = {
-    id: String(identifier),
-    atoms,
-    catalogueAtoms,
-    isExhibited: card.isExhibited !== false,
-    moleculeId: card.moleculeId ? String(card.moleculeId) : undefined,
-    moleculeTitle: typeof card.moleculeTitle === 'string' ? card.moleculeTitle : undefined,
-    presentationSettings: card.presentationSettings && typeof card.presentationSettings === 'object'
-      ? {
-          ...DEFAULT_PRESENTATION_SETTINGS,
-          ...card.presentationSettings,
-          cardLayout: ensureCardLayout((card.presentationSettings as any).cardLayout),
-        }
-      : undefined,
-  };
-
-  return withPresentationDefaults(normalized);
-};
-
-const extractCards = (raw: unknown): LayoutCard[] => {
-  if (Array.isArray(raw)) {
-    return raw.map(normalizeCard).filter(Boolean) as LayoutCard[];
+  if (components.length === 0) {
+    return null;
   }
 
-  if (raw && typeof raw === 'object' && Array.isArray((raw as any).cards)) {
-    return ((raw as any).cards as unknown[]).map(normalizeCard).filter(Boolean) as LayoutCard[];
-  }
-
-  return [];
-};
-
-const SKU_ATOM_ID = 'feature-overview-sku';
-
-const applyFeatureOverviewSelections = (
-  cards: LayoutCard[],
-  selections?: ExhibitionFeatureOverviewPayload[]
-): LayoutCard[] => {
-  if (!Array.isArray(selections) || selections.length === 0) {
-    return cards;
-  }
-
-  const lookup = new Map<string, ExhibitionFeatureOverviewPayload>();
-  selections.forEach(entry => {
-    if (entry.cardId) {
-      lookup.set(entry.cardId, entry);
-    }
-  });
-
-  if (lookup.size === 0) {
-    return cards;
-  }
-
-  return cards.map(card => {
-    const config = lookup.get(card.id);
-    if (!config) {
-      return card;
-    }
-
-    const baseAtoms = card.atoms.filter(atom => atom.atomId !== SKU_ATOM_ID);
-    const baseCatalogue = (card.catalogueAtoms ?? []).filter(atom => atom.atomId !== SKU_ATOM_ID);
-
-    const deriveSourceTitle = (): string => {
-      if (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0) {
-        return card.moleculeTitle.trim();
-      }
-
-      const fromSku = Array.isArray(config.skus)
-        ? config.skus
-            .map(entry => entry.details?.sourceAtomTitle)
-            .find(title => typeof title === 'string' && title.trim().length > 0)
-        : undefined;
-
-      if (typeof fromSku === 'string' && fromSku.trim().length > 0) {
-        return fromSku.trim();
-      }
-
-      return config.atomId
-        .split(/[-_]/g)
-        .filter(Boolean)
-        .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
-        .join(' ') || 'Exhibited Atom';
-    };
-
-    const sourceAtomTitle = deriveSourceTitle();
-
-    const skuAtoms = Array.isArray(config.skus)
-      ? config.skus.map((sku, index) => {
-          const rawDetails = sku.details && typeof sku.details === 'object' ? sku.details : undefined;
-          const metadata = {
-            ...(rawDetails ?? {}),
-            sourceAtomTitle:
-              rawDetails && typeof rawDetails.sourceAtomTitle === 'string' && rawDetails.sourceAtomTitle.trim().length > 0
-                ? rawDetails.sourceAtomTitle
-                : sourceAtomTitle,
-          };
-
-          return {
-            id: `${config.atomId}-sku-${sku.id ?? index}`,
-            atomId: SKU_ATOM_ID,
-            title: sku.title || `SKU ${sku.id ?? index + 1}`,
-            category: 'Feature Overview',
-            color: 'bg-amber-500',
-            metadata,
-          };
-        })
-      : [];
-
-    return withPresentationDefaults({
-      ...card,
-      atoms: baseAtoms,
-      catalogueAtoms: mergeCatalogueAtoms(baseCatalogue, skuAtoms),
-      moleculeTitle: card.moleculeTitle && card.moleculeTitle.trim().length > 0 ? card.moleculeTitle : sourceAtomTitle,
-    });
+  return withPresentationDefaults({
+    id: identifier,
+    atoms: components,
+    catalogueAtoms: components,
+    isExhibited: true,
+    moleculeId: atomName,
+    moleculeTitle: atomName,
   });
 };
 
@@ -536,12 +207,12 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   cards: [],
   exhibitedCards: [],
   catalogueCards: [],
-  featureOverviewConfigs: [],
+  catalogueEntries: [],
   lastLoadedContext: null,
 
   loadSavedConfiguration: async (explicitContext?: ProjectContext | null) => {
     let loadedCards: LayoutCard[] = [];
-    let featureOverviewConfigs: ExhibitionFeatureOverviewPayload[] = [];
+    let catalogueEntries: ExhibitionAtomPayload[] = [];
     const resolvedContext = normaliseProjectContext(explicitContext ?? getActiveProjectContext());
     const contextLabel = resolvedContext
       ? `${resolvedContext.client_name}/${resolvedContext.app_name}/${resolvedContext.project_name}`
@@ -553,23 +224,32 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       );
       try {
         const remote = await fetchExhibitionConfiguration(resolvedContext);
-        const remoteCards = remote && Array.isArray(remote.cards) ? remote.cards : [];
-        const remoteFeatureOverview = remote && Array.isArray(remote.feature_overview) ? remote.feature_overview : [];
+        const remoteAtoms = remote && Array.isArray(remote.atoms) ? remote.atoms : [];
+        catalogueEntries = remoteAtoms;
 
-        if (remoteCards.length === 0 && remoteFeatureOverview.length === 0) {
+        if (remoteAtoms.length === 0) {
           console.info(
             `[Exhibition] No exhibition catalogue entry found for ${contextLabel} in trinity_db.exhibition_catalogue`,
           );
         } else {
           console.info(
-            `[Exhibition] Retrieved ${remoteCards.length} card(s) and ${remoteFeatureOverview.length} feature overview configuration(s) from trinity_db.exhibition_catalogue for ${contextLabel}`,
+            `[Exhibition] Retrieved ${remoteAtoms.length} catalogue entr${remoteAtoms.length === 1 ? 'y' : 'ies'} from trinity_db.exhibition_catalogue for ${contextLabel}`,
           );
-          loadedCards = extractCards(remoteCards);
-          featureOverviewConfigs = extractFeatureOverviewEntries(remoteFeatureOverview);
-          console.info(
-            `[Exhibition] Normalised ${featureOverviewConfigs.length} feature overview configuration(s) for ${contextLabel}`,
-          );
-          loadedCards = applyFeatureOverviewSelections(loadedCards, featureOverviewConfigs);
+          loadedCards = remoteAtoms
+            .map((entry, index) => {
+              const card = buildCardFromEntry(entry, index);
+              if (!card) {
+                const entryId =
+                  entry && typeof entry.id === 'string' && entry.id.trim().length > 0
+                    ? entry.id.trim()
+                    : `entry-${index + 1}`;
+                console.info(
+                  `[Exhibition] Skipped catalogue entry ${entryId} because it has no exhibited components`,
+                );
+              }
+              return card;
+            })
+            .filter((card): card is LayoutCard => card !== null);
         }
       } catch (error) {
         console.warn(
@@ -585,13 +265,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
     const cardsWithDefaults = loadedCards.map(withPresentationDefaults);
     const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
-    const catalogueCards = deriveCatalogueCards(cardsWithDefaults, featureOverviewConfigs, {
-      onFallbackCatalogueAtoms: (card, fallbackAtoms) => {
-        console.info(
-          `[Exhibition] Card ${card.id} had no saved catalogue components; using ${fallbackAtoms.length} fallback atom(s) from slide content`,
-        );
-      },
-    });
+    const catalogueCards = computeCatalogueCards(cardsWithDefaults);
 
     console.info(
       `[Exhibition] Exhibition catalogue ready with ${cardsWithDefaults.length} total card(s), ${exhibitedCards.length} exhibited card(s), and ${catalogueCards.length} catalogue card(s)` +
@@ -600,7 +274,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
     if (catalogueCards.length > 0) {
       catalogueCards.forEach(card => {
-        const availableCount = card.catalogueAtoms?.length ?? 0;
+        const availableCount = card.catalogueAtoms?.length ?? card.atoms.length ?? 0;
         console.info(
           `[Exhibition] Catalogue entry ${card.id} resolved with ${availableCount} exhibited component(s)` +
             (card.moleculeTitle ? ` (${card.moleculeTitle})` : ''),
@@ -614,13 +288,13 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       cards: cardsWithDefaults,
       exhibitedCards,
       catalogueCards,
-      featureOverviewConfigs,
+      catalogueEntries,
       lastLoadedContext: resolvedContext,
     });
   },
 
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => {
-    set((state) => {
+    set(state => {
       let updatedCards = state.cards.map(card => {
         if (card.id !== cardId) {
           return card;
@@ -665,7 +339,8 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       return {
         cards: updatedCards,
         exhibitedCards,
-        catalogueCards: deriveCatalogueCards(updatedCards, state.featureOverviewConfigs),
+        catalogueCards: computeCatalogueCards(updatedCards),
+        catalogueEntries: state.catalogueEntries,
       };
     });
   },
@@ -704,7 +379,8 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       return {
         cards,
         exhibitedCards,
-        catalogueCards: deriveCatalogueCards(cards, state.featureOverviewConfigs),
+        catalogueCards: computeCatalogueCards(cards),
+        catalogueEntries: state.catalogueEntries,
       };
     });
 
@@ -735,7 +411,8 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     set(state => ({
       cards: cardsWithDefaults,
       exhibitedCards,
-      catalogueCards: deriveCatalogueCards(cardsWithDefaults, state.featureOverviewConfigs),
+      catalogueCards: computeCatalogueCards(cardsWithDefaults),
+      catalogueEntries: state.catalogueEntries,
     }));
   },
   reset: () => {
@@ -743,7 +420,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       cards: [],
       exhibitedCards: [],
       catalogueCards: [],
-      featureOverviewConfigs: [],
+      catalogueEntries: [],
       lastLoadedContext: null,
     });
   },

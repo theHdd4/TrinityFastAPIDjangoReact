@@ -8,8 +8,9 @@ import { getActiveProjectContext } from '@/utils/projectEnv';
 import {
   fetchExhibitionConfiguration,
   saveExhibitionConfiguration,
+  type ExhibitionAtomPayload,
+  type ExhibitionComponentPayload,
   type ExhibitionConfigurationPayload,
-  type ExhibitionFeatureOverviewPayload,
 } from '@/lib/exhibition';
 import type { FeatureOverviewExhibitionSelection } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -202,14 +203,20 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
         );
       }
 
-      const existingCards = Array.isArray(existingConfig?.cards) ? existingConfig.cards : [];
-      const existingFeatureOverview = Array.isArray(existingConfig?.feature_overview)
-        ? existingConfig.feature_overview
-        : [];
+      const existingAtoms = Array.isArray(existingConfig?.atoms) ? existingConfig.atoms : [];
+      const retainedAtoms = existingAtoms.filter((entry): entry is ExhibitionAtomPayload => {
+        if (!entry || typeof entry !== 'object') {
+          return false;
+        }
 
-      const filteredFeatureOverview = existingFeatureOverview.filter(
-        entry => entry?.atomId !== atomId,
-      );
+        const identifier = typeof entry.id === 'string' && entry.id.trim().length > 0 ? entry.id.trim() : '';
+        const atomName = typeof entry.atom_name === 'string' && entry.atom_name.trim().length > 0 ? entry.atom_name.trim() : '';
+        if (!identifier || !atomName) {
+          return false;
+        }
+
+        return identifier !== cardIdentifier;
+      });
 
       const processedSelections = selections.map((selection, index) => {
         const dimensionSummary = selection.dimensions
@@ -260,14 +267,17 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
         };
       });
 
-      const chartSettings = processedSelections[0]?.chartState;
       const stagedRows = processedSelections
         .map(item => item.selection.skuRow)
         .filter((row): row is Record<string, any> => row != null && typeof row === 'object');
 
-      const skuStatisticsSettings = {
+      const skuStatisticsSettings: {
+        visibility: Record<string, boolean>;
+        tableRows?: Record<string, any>[];
+        tableColumns?: string[];
+      } = {
         visibility: { ...visibility },
-      } as ExhibitionFeatureOverviewPayload['skuStatisticsSettings'];
+      };
 
       if (stagedRows.length > 0) {
         skuStatisticsSettings.tableRows = stagedRows;
@@ -276,49 +286,49 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
         );
       }
 
+      const exhibitedComponents: ExhibitionComponentPayload[] = processedSelections.map(
+        ({
+          id,
+          title,
+          chartState: normalisedChartState,
+          featureContext,
+          statisticalDetails,
+          selection: baseSelection,
+          sourceAtomTitle: originatingAtomTitle,
+        }) => ({
+          id,
+          atomId,
+          title,
+          category: 'Feature Overview',
+          color: 'bg-amber-500',
+          metadata: {
+            metric: baseSelection.metric,
+            combination: baseSelection.combination,
+            dimensions: baseSelection.dimensions,
+            rowId: baseSelection.rowId,
+            label: baseSelection.label,
+            chartState: normalisedChartState,
+            featureContext,
+            statisticalDetails,
+            skuRow: baseSelection.skuRow,
+            capturedAt: baseSelection.capturedAt,
+            sourceAtomTitle: originatingAtomTitle,
+            skuStatisticsSettings,
+          },
+        }),
+      );
+
+      const newEntry: ExhibitionAtomPayload = {
+        id: cardIdentifier,
+        atom_name: resolvedAtomTitle,
+        exhibited_components: exhibitedComponents,
+      };
+
       const payload: ExhibitionConfigurationPayload = {
         client_name: context.client_name,
         app_name: context.app_name,
         project_name: context.project_name,
-        cards: existingCards,
-        feature_overview: [
-          ...filteredFeatureOverview,
-          {
-            atomId,
-            cardId: cardIdentifier,
-            components: {
-              skuStatistics: true,
-              trendAnalysis: true,
-            },
-            skus: processedSelections.map(({
-              id,
-              title,
-              chartState: normalisedChartState,
-              featureContext,
-              statisticalDetails,
-              selection: baseSelection,
-              sourceAtomTitle: originatingAtomTitle,
-            }) => ({
-              id,
-              title,
-              details: {
-                metric: baseSelection.metric,
-                combination: baseSelection.combination,
-                dimensions: baseSelection.dimensions,
-                rowId: baseSelection.rowId,
-                label: baseSelection.label,
-                chartState: normalisedChartState,
-                featureContext,
-                statisticalDetails,
-                skuRow: baseSelection.skuRow,
-                capturedAt: baseSelection.capturedAt,
-                sourceAtomTitle: originatingAtomTitle,
-              },
-            })),
-            chartSettings,
-            skuStatisticsSettings,
-          },
-        ],
+        atoms: [...retainedAtoms, newEntry],
       };
 
       await saveExhibitionConfiguration(payload);

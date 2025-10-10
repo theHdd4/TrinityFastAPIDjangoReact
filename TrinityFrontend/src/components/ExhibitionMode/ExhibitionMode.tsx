@@ -21,7 +21,11 @@ import { ExportDialog } from './components/ExportDialog';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { saveExhibitionConfiguration } from '@/lib/exhibition';
+import {
+  saveExhibitionConfiguration,
+  type ExhibitionAtomPayload,
+  type ExhibitionComponentPayload,
+} from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
@@ -596,6 +600,51 @@ const ExhibitionMode = () => {
     }
   }, []);
 
+  const mapAtomToPayload = useCallback((atom: DroppedAtom): ExhibitionComponentPayload => {
+    return {
+      id: atom.id,
+      atomId: atom.atomId,
+      title: atom.title,
+      category: atom.category,
+      color: atom.color,
+      metadata: atom.metadata ?? undefined,
+    };
+  }, []);
+
+  const mapCardToAtomEntry = useCallback(
+    (card: LayoutCard): ExhibitionAtomPayload | null => {
+      const componentsSource = Array.isArray(card.catalogueAtoms) && card.catalogueAtoms.length > 0
+        ? card.catalogueAtoms
+        : card.atoms;
+
+      const exhibitedComponents = Array.isArray(componentsSource)
+        ? componentsSource
+            .map(mapAtomToPayload)
+            .filter(component => typeof component.id === 'string' && component.id.trim().length > 0)
+        : [];
+
+      if (exhibitedComponents.length === 0) {
+        return null;
+      }
+
+      const resolvedName =
+        (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0
+          ? card.moleculeTitle.trim()
+          : undefined) ||
+        (typeof card.moleculeId === 'string' && card.moleculeId.trim().length > 0
+          ? card.moleculeId.trim()
+          : undefined) ||
+        card.id;
+
+      return {
+        id: card.id,
+        atom_name: resolvedName,
+        exhibited_components: exhibitedComponents,
+      };
+    },
+    [mapAtomToPayload],
+  );
+
   const handleSave = useCallback(async () => {
     if (!canEdit) {
       toast({
@@ -624,11 +673,15 @@ const ExhibitionMode = () => {
 
     try {
       const cardsToPersist = JSON.parse(JSON.stringify(cards)) as LayoutCard[];
+      const atomsToPersist = cardsToPersist
+        .map(mapCardToAtomEntry)
+        .filter((entry): entry is ExhibitionAtomPayload => entry !== null);
+
       await saveExhibitionConfiguration({
         client_name: context.client_name,
         app_name: context.app_name,
         project_name: context.project_name,
-        cards: cardsToPersist,
+        atoms: atomsToPersist,
       });
       persistCardsLocally(cardsToPersist);
       toast({ title: 'Exhibition saved', description: 'Your exhibition updates have been saved.' });
@@ -643,7 +696,7 @@ const ExhibitionMode = () => {
     } finally {
       setIsSaving(false);
     }
-  }, [canEdit, cards, isSaving, persistCardsLocally, toast]);
+  }, [canEdit, cards, isSaving, mapCardToAtomEntry, persistCardsLocally, toast]);
 
   const handleShare = useCallback(async () => {
     if (typeof window === 'undefined' || typeof navigator === 'undefined') {
