@@ -559,21 +559,23 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       );
       try {
         const remote = await fetchExhibitionConfiguration(resolvedContext);
-        if (remote && Array.isArray(remote.cards)) {
-          const remoteFeatureCount = Array.isArray(remote.feature_overview) ? remote.feature_overview.length : 0;
+        const remoteCards = remote && Array.isArray(remote.cards) ? remote.cards : [];
+        const remoteFeatureOverview = remote && Array.isArray(remote.feature_overview) ? remote.feature_overview : [];
+
+        if (remoteCards.length === 0 && remoteFeatureOverview.length === 0) {
           console.info(
-            `[Exhibition] Retrieved ${remote.cards.length} card(s) and ${remoteFeatureCount} feature overview configuration(s) from trinity_db.exhibition_catalogue for ${contextLabel}`,
+            `[Exhibition] No exhibition catalogue entry found for ${contextLabel} in trinity_db.exhibition_catalogue`,
           );
-          loadedCards = extractCards(remote.cards);
-          featureOverviewConfigs = extractFeatureOverviewEntries(remote.feature_overview);
+        } else {
+          console.info(
+            `[Exhibition] Retrieved ${remoteCards.length} card(s) and ${remoteFeatureOverview.length} feature overview configuration(s) from trinity_db.exhibition_catalogue for ${contextLabel}`,
+          );
+          loadedCards = extractCards(remoteCards);
+          featureOverviewConfigs = extractFeatureOverviewEntries(remoteFeatureOverview);
           console.info(
             `[Exhibition] Normalised ${featureOverviewConfigs.length} feature overview configuration(s) for ${contextLabel}`,
           );
           loadedCards = applyFeatureOverviewSelections(loadedCards, featureOverviewConfigs);
-        } else {
-          console.info(
-            `[Exhibition] No exhibition catalogue entry found for ${contextLabel} in trinity_db.exhibition_catalogue`,
-          );
         }
       } catch (error) {
         console.warn(
