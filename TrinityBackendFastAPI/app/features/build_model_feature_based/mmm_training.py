@@ -179,7 +179,7 @@ class MMMTransformationEngine:
         else:
             # Scenario 2: Different parameter combinations for each media variable
             # Generate all possible combinations across variables
-            # logger.info("Media variables have different parameter combinations")
+            logger.info("Media variables have different parameter combinations")
             
             # Get all parameter combinations for each media variable
             var_combinations = {}
@@ -691,8 +691,6 @@ class MMMModelTrainer:
                 # logger.info(f"✓ Combination match found: '{combination_name}' -> '{matched_combination_name}'")
             else:
                 logger.warning(f"⚠ No combination match found for '{combination_name}'")
-                logger.warning(f"Available combinations: {list(combination_cprp_values.keys())}")
-                logger.warning(f"Will use global CPRP values instead")
         
         # ===== NEW: Get average price value (handles both column and manual entry) =====
         avg_price_column = 1.0  # Default to 1
@@ -732,8 +730,7 @@ class MMMModelTrainer:
                     avg_price_column = float(price_series.rolling(window=average_months, min_periods=1).mean().mean())
                     # logger.info(f"Price column '{price_column}' with {average_months}-month rolling average: {avg_price_column}")
                 else:
-                    avg_price_column = float(price_series.mean())
-                    # logger.info(f"Price column '{price_column}' average value: {avg_price_column}")
+                    avg_price_column = float(price_series.mean()))
             else:
                 logger.warning(f"Price column '{price_column}' not found in dataframe columns: {list(full_original_df.columns)}")
                 logger.warning(f"Using default avg_price_column = {avg_price_column}")
