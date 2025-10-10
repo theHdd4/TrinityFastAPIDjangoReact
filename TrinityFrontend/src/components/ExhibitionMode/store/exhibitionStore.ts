@@ -278,16 +278,35 @@ const createCatalogueAtomsFromConfig = (
   });
 };
 
+interface CatalogueOptions {
+  onFallbackCatalogueAtoms?: (card: LayoutCard, fallbackAtoms: DroppedAtom[]) => void;
+}
+
 const deriveCatalogueCards = (
   cards: LayoutCard[],
   featureOverview: ExhibitionFeatureOverviewPayload[],
+  options?: CatalogueOptions,
 ): LayoutCard[] => {
+  const onFallback = options?.onFallbackCatalogueAtoms;
   const catalogueMap = new Map<string, LayoutCard>();
 
   cards.forEach(card => {
+    const explicitCatalogueAtoms = Array.isArray(card.catalogueAtoms) ? [...card.catalogueAtoms] : [];
+
+    let catalogueAtoms = explicitCatalogueAtoms;
+
+    if (catalogueAtoms.length === 0) {
+      const fallbackAtoms = Array.isArray(card.atoms) ? [...card.atoms] : [];
+
+      if (fallbackAtoms.length > 0) {
+        catalogueAtoms = mergeCatalogueAtoms(explicitCatalogueAtoms, fallbackAtoms);
+        onFallback?.(card, fallbackAtoms);
+      }
+    }
+
     const entry: LayoutCard = {
       ...card,
-      catalogueAtoms: Array.isArray(card.catalogueAtoms) ? [...card.catalogueAtoms] : [],
+      catalogueAtoms,
     };
 
     catalogueMap.set(card.id, entry);
@@ -547,6 +566,9 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
           );
           loadedCards = extractCards(remote.cards);
           featureOverviewConfigs = extractFeatureOverviewEntries(remote.feature_overview);
+          console.info(
+            `[Exhibition] Normalised ${featureOverviewConfigs.length} feature overview configuration(s) for ${contextLabel}`,
+          );
           loadedCards = applyFeatureOverviewSelections(loadedCards, featureOverviewConfigs);
         } else {
           console.info(
@@ -567,12 +589,30 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
     const cardsWithDefaults = loadedCards.map(withPresentationDefaults);
     const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
-    const catalogueCards = deriveCatalogueCards(cardsWithDefaults, featureOverviewConfigs);
+    const catalogueCards = deriveCatalogueCards(cardsWithDefaults, featureOverviewConfigs, {
+      onFallbackCatalogueAtoms: (card, fallbackAtoms) => {
+        console.info(
+          `[Exhibition] Card ${card.id} had no saved catalogue components; using ${fallbackAtoms.length} fallback atom(s) from slide content`,
+        );
+      },
+    });
 
     console.info(
       `[Exhibition] Exhibition catalogue ready with ${cardsWithDefaults.length} total card(s), ${exhibitedCards.length} exhibited card(s), and ${catalogueCards.length} catalogue card(s)` +
         (resolvedContext ? ` for ${contextLabel}` : ' without a remote context'),
     );
+
+    if (catalogueCards.length > 0) {
+      catalogueCards.forEach(card => {
+        const availableCount = card.catalogueAtoms?.length ?? 0;
+        console.info(
+          `[Exhibition] Catalogue entry ${card.id} resolved with ${availableCount} exhibited component(s)` +
+            (card.moleculeTitle ? ` (${card.moleculeTitle})` : ''),
+        );
+      });
+    } else {
+      console.info('[Exhibition] Exhibition catalogue has no components to display after processing remote data');
+    }
 
     set({
       cards: cardsWithDefaults,
