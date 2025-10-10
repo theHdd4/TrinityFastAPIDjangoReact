@@ -1,10 +1,46 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, X, Bot, User, Sparkles, RotateCcw, Clock, Settings, Paperclip, Mic, Plus, Trash2, MessageCircle } from 'lucide-react';
+import { Send, X, Bot, User, Sparkles, RotateCcw, Clock, Settings, Paperclip, Mic, Plus, Trash2, MessageCircle, Minimize2, Maximize2 } from 'lucide-react';
 import { TRINITY_AI_API } from '@/lib/api';
+
+// Add CSS for fade-in animation and slow pulse
+const fadeInStyle = `
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .animate-fade-in {
+    animation: fade-in 0.3s ease-out;
+  }
+  @keyframes slow-pulse {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+  .animate-slow-pulse {
+    animation: slow-pulse 2s ease-in-out infinite;
+  }
+`;
+
+// Inject the CSS if not already present
+if (typeof document !== 'undefined' && !document.querySelector('#trinity-ai-animations')) {
+  const style = document.createElement('style');
+  style.id = 'trinity-ai-animations';
+  style.textContent = fadeInStyle;
+  document.head.appendChild(style);
+}
 
 interface Message {
   id: string;
@@ -275,7 +311,7 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ isCollapsed, onTo
   }
 
   return (
-    <div className="h-full bg-white border-l border-gray-200 flex flex-col relative" style={{ width: `${panelWidth}px` }}>
+    <Card className="h-full bg-white backdrop-blur-xl shadow-[0_20px_70px_rgba(0,0,0,0.3)] border-2 border-gray-200 overflow-hidden flex flex-col relative ring-1 ring-gray-100" style={{ width: `${panelWidth}px` }}>
       {/* Resize Handle */}
       <div
         ref={resizeRef}
@@ -285,35 +321,35 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ isCollapsed, onTo
       />
       {/* Chat History Sidebar */}
       {showChatHistory && (
-        <div className="absolute left-0 top-0 w-64 h-full bg-white border-r border-gray-200 z-50 flex flex-col shadow-xl">
-          <div className="p-4 border-b border-gray-200 bg-[#F5F5F5]">
+        <div className="absolute left-0 top-0 w-64 h-full bg-white backdrop-blur-xl border-r-2 border-gray-200 z-50 flex flex-col shadow-xl">
+          <div className="p-4 border-b-2 border-gray-200 bg-gradient-to-r from-gray-50 to-white">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-black font-inter">Chat History</h3>
+              <h3 className="text-sm font-semibold text-gray-800 font-inter">Chat History</h3>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowChatHistory(false)}
-                className="h-6 w-6 p-0 hover:bg-black/10 text-black"
+                className="h-6 w-6 p-0 hover:bg-gray-100 text-gray-800 rounded-xl"
               >
                 <X className="w-4 h-4" />
               </Button>
             </div>
           </div>
-          <ScrollArea className="flex-1 p-2 bg-white">
+          <ScrollArea className="flex-1 p-2 bg-gray-50/50">
             <div className="space-y-2">
               {chats.map((chat) => (
                 <div
                   key={chat.id}
                   onClick={() => switchToChat(chat.id)}
-                  className={`p-3 rounded-lg cursor-pointer transition-all duration-200 ${
+                  className={`p-3 rounded-xl cursor-pointer transition-all duration-200 ${
                     chat.id === currentChatId
-                      ? 'bg-[#F5F5F5] text-black shadow-md border border-gray-300'
-                      : 'bg-gray-50 hover:bg-[#F5F5F5] hover:text-black'
+                      ? 'bg-[#41C185]/10 text-[#41C185] shadow-lg border-2 border-[#41C185]/20'
+                      : 'bg-white hover:bg-gray-50 hover:text-gray-800 hover:border-2 hover:border-gray-200'
                   }`}
                 >
                   <div className="text-sm font-medium truncate font-inter">{chat.title}</div>
-                  <div className={`text-xs mt-1 ${
-                    chat.id === currentChatId ? 'text-black/70' : 'text-gray-600'
+                  <div className={`text-xs mt-1 font-inter ${
+                    chat.id === currentChatId ? 'text-[#41C185]/70' : 'text-gray-600'
                   }`}>
                     {chat.messages.length - 1} messages
                   </div>
@@ -324,196 +360,187 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ isCollapsed, onTo
         </div>
       )}
       {/* Header */}
-      <div className={`p-4 border-b border-gray-200 bg-[#F5F5F5] text-black relative overflow-hidden ${showChatHistory ? 'z-40' : 'z-10'}`}>
-        {/* Elegant background pattern */}
-        <div className="absolute inset-0 opacity-5">
-          <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-black via-transparent to-black"></div>
+      <div className={`flex items-center justify-between p-5 border-b-2 border-gray-200 cursor-grab active:cursor-grabbing bg-gradient-to-r from-gray-50 to-white backdrop-blur-sm relative overflow-hidden group ${showChatHistory ? 'z-40' : 'z-10'}`}>
+        {/* Animated background effect */}
+        <div className="absolute inset-0 bg-gradient-to-r from-gray-50/0 via-gray-100/50 to-gray-50/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
+        
+        <div className="flex items-center space-x-4 relative z-10">
+          <div className="relative">
+            <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shadow-lg shadow-gray-200/30 border-2 border-gray-200/20 transition-all duration-300 group-hover:scale-105 group-hover:shadow-xl group-hover:shadow-gray-200/40">
+              <Sparkles className="w-6 h-6 text-purple-500 animate-slow-pulse" />
+            </div>
+            {/* Online indicator */}
+            <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-[#50C878] rounded-full border-2 border-white shadow-lg">
+              <div className="absolute inset-0 bg-[#50C878] rounded-full animate-ping opacity-75" />
+            </div>
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-gray-800 tracking-tight font-inter">Trinity AI</h3>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-[#50C878] rounded-full animate-pulse" />
+              <p className="text-xs text-gray-600 font-medium font-inter">Active • Ready to help</p>
+            </div>
+          </div>
         </div>
-        <div className="relative z-10 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-[#333333] to-[#1a1a1a] rounded-full flex items-center justify-center shadow-lg relative overflow-hidden">
-              {/* Background pattern */}
-              <div className="absolute inset-0 bg-gradient-to-br from-[#FFBD59]/20 to-transparent rounded-full"></div>
-              {/* Trinity Icon - Three overlapping circles */}
-              <div className="relative w-5 h-5 z-10">
-                <div className="absolute top-1 left-1 w-2 h-2 bg-white rounded-full opacity-80"></div>
-                <div className="absolute top-1 right-1 w-2 h-2 bg-white rounded-full opacity-80"></div>
-                <div className="absolute bottom-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-white rounded-full opacity-80"></div>
-                {/* Center connecting element */}
-                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-1 h-1 bg-[#FFBD59] rounded-full"></div>
-              </div>
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold font-inter text-black">Trinity AI</h3>
-              <p className="text-sm text-black font-inter font-medium">Intelligent Assistant</p>
-            </div>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={deleteCurrentChat}
-              className="h-8 w-8 p-0 hover:bg-black/10 text-black transition-colors"
-              title="Delete Chat"
-            >
-              <Trash2 className="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={startNewChat}
-              className="h-8 w-8 p-0 hover:bg-black/10 text-black transition-colors"
-              title="New Chat"
-            >
-              <Plus className="w-4 h-4" />
-            </Button>
-          </div>
+        <div className="flex items-center space-x-1 relative z-10">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 w-9 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl"
+            onClick={deleteCurrentChat}
+            title="Delete Chat"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 w-9 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl"
+            onClick={startNewChat}
+            title="New Chat"
+          >
+            <Plus className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 w-9 p-0 hover:bg-red-100 hover:text-red-500 transition-all duration-200 rounded-xl"
+            onClick={onToggle}
+            title="Close Panel"
+          >
+            <X className="w-4 h-4" />
+          </Button>
         </div>
       </div>
 
       {/* Chat Messages */}
-      <ScrollArea className="flex-1 p-4">
-        <div className="space-y-4">
+      <ScrollArea className="h-[480px] bg-white">
+        <div ref={messagesEndRef} className="p-6 space-y-6">
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex items-start space-x-3 ${
-                message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''
+              className={`flex items-start gap-3 animate-fade-in ${
+                message.sender === 'user' ? 'flex-row-reverse' : ''
               }`}
             >
-               <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg ${
-                 message.sender === 'ai' 
-                   ? 'bg-[#41C185]' 
-                   : 'bg-[#458EE2]'
-               }`}>
-                 {message.sender === 'ai' ? (
-                   <Bot className="w-4 h-4 text-white" />
-                 ) : (
-                   <User className="w-4 h-4 text-white" />
-                 )}
-               </div>
-         <div className="flex-1">
-           <Card className={`p-3 max-w-[280px] shadow-lg ${
-             message.sender === 'user'
-               ? 'bg-[#458EE2] text-white border border-[#458EE2]/30'
-               : 'bg-[#41C185] text-white border border-[#41C185]/20'
-           }`}>
-             <div
-               className="text-sm leading-relaxed prose prose-sm max-w-none font-inter"
-               dangerouslySetInnerHTML={{
-                 __html: message.content.replace(/\n/g, '<br>')
-               }}
-             />
-             <p className={`text-xs mt-2 font-inter ${
-               message.sender === 'user' ? 'text-blue-100' : 'text-green-100'
-             }`}>
-               {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-             </p>
-           </Card>
-         </div>
+              {/* Avatar */}
+              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg transition-all duration-300 hover:scale-110 ${
+                message.sender === 'ai' 
+                  ? 'bg-[#50C878] border-2 border-[#50C878]/30 shadow-[#50C878]/20' 
+                  : 'bg-[#458EE2] border-2 border-[#458EE2]/30 shadow-[#458EE2]/20'
+              }`}>
+                {message.sender === 'ai' ? (
+                  <Bot className="w-5 h-5 text-white" />
+                ) : (
+                  <User className="w-5 h-5 text-white" />
+                )}
+              </div>
+
+              {/* Message Bubble */}
+              <div className={`flex-1 max-w-[300px] group ${
+                message.sender === 'user' ? 'flex flex-col items-end' : ''
+              }`}>
+                <div className={`rounded-3xl px-5 py-3.5 shadow-lg border-2 transition-all duration-300 hover:shadow-xl hover:scale-[1.02] ${
+                  message.sender === 'ai'
+                    ? 'bg-[#50C878] text-white border-[#50C878]/30 rounded-tl-md backdrop-blur-sm'
+                    : 'bg-[#458EE2] text-white border-[#458EE2]/30 rounded-tr-md backdrop-blur-sm'
+                }`}>
+                  <div
+                    className="text-sm leading-relaxed font-medium font-inter"
+                    dangerouslySetInnerHTML={{
+                      __html: message.content.replace(/\n/g, '<br>')
+                    }}
+                  />
+                </div>
+                <p className="text-xs text-gray-600 mt-2 px-2 font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200 font-inter">
+                  {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              </div>
             </div>
           ))}
+
+          {/* Typing Indicator */}
           {isLoading && (
-            <div className="flex items-start space-x-3">
-              <div className="w-8 h-8 rounded-full bg-[#41C185] flex items-center justify-center shadow-lg">
-                <Bot className="w-4 h-4 text-white" />
+            <div className="flex items-start gap-3 animate-fade-in">
+              <div className="w-10 h-10 rounded-2xl bg-[#50C878] border-2 border-[#50C878]/30 flex items-center justify-center shadow-lg shadow-[#50C878]/20">
+                <Bot className="w-5 h-5 text-white" />
               </div>
-              <Card className="p-3 bg-[#41C185] border border-[#41C185]/20 shadow-lg">
-                <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-white rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-white rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                  <div className="w-2 h-2 bg-white rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+              <div className="bg-[#50C878] text-white rounded-3xl rounded-tl-md px-5 py-3.5 shadow-lg border-2 border-[#50C878]/30 backdrop-blur-sm">
+                <div className="flex space-x-1.5">
+                  <div className="w-2.5 h-2.5 bg-white/70 rounded-full animate-bounce shadow-sm" />
+                  <div className="w-2.5 h-2.5 bg-white/70 rounded-full animate-bounce shadow-sm" style={{ animationDelay: '0.1s' }} />
+                  <div className="w-2.5 h-2.5 bg-white/70 rounded-full animate-bounce shadow-sm" style={{ animationDelay: '0.2s' }} />
                 </div>
-              </Card>
+              </div>
             </div>
           )}
-          <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
 
-      {/* Action Icons */}
-      <div className="p-4 border-t border-gray-200 bg-[#F5F5F5]">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center space-x-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowChatHistory(!showChatHistory)}
-              className="h-8 w-8 p-0 hover:bg-black/10 text-black transition-colors"
-              title="Chat History"
-            >
-              <RotateCcw className="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0 hover:bg-black/10 text-black transition-colors"
-              title="Settings"
-            >
-              <Settings className="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0 hover:bg-black/10 text-black transition-colors"
-              title="Attach"
-            >
-              <Paperclip className="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0 hover:bg-black/10 text-black transition-colors"
-              title="Voice Input"
-            >
-              <Mic className="w-4 h-4" />
-            </Button>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={startNewChat}
-              className="h-8 w-8 p-0 hover:bg-black/10 text-black transition-colors"
-              title="New Chat"
-            >
-              <Plus className="w-4 h-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0 hover:bg-black/10 text-black transition-colors"
-              title="Help"
-            >
-              <MessageCircle className="w-4 h-4" />
-            </Button>
-          </div>
+      {/* Input Area */}
+      <div className="border-t-2 border-gray-200 bg-gradient-to-b from-white to-gray-50 p-5 backdrop-blur-sm">
+        <div className="flex items-center gap-2 mb-4">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="h-10 w-10 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl hover:scale-110 shadow-sm hover:shadow-md"
+            onClick={() => setShowChatHistory(!showChatHistory)}
+            title="Chat History"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </Button>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="h-10 w-10 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl hover:scale-110 shadow-sm hover:shadow-md"
+            title="Attach"
+          >
+            <Paperclip className="w-4 h-4" />
+          </Button>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="h-10 w-10 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl hover:scale-110 shadow-sm hover:shadow-md"
+            title="Voice Input"
+          >
+            <Mic className="w-4 h-4" />
+          </Button>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="h-10 w-10 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl hover:scale-110 shadow-sm hover:shadow-md"
+            title="Settings"
+          >
+            <Settings className="w-4 h-4" />
+          </Button>
         </div>
-
-        {/* Input Area */}
-        <div className="flex space-x-2">
-          <Textarea
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Ask anything..."
-            className="flex-1 min-h-[40px] resize-none bg-white border-gray-300 focus:border-black focus:ring-black font-inter text-black placeholder-gray-500 shadow-sm"
-            disabled={isLoading}
-          />
+        
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1">
+            <Input
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Type your message..."
+              className="h-12 bg-white backdrop-blur-sm border-2 border-gray-200 hover:border-gray-300 focus:border-[#41C185] focus-visible:ring-2 focus-visible:ring-[#41C185]/20 rounded-2xl px-4 text-sm font-medium transition-all duration-200 shadow-sm placeholder:text-gray-500/60 font-inter"
+              disabled={isLoading}
+            />
+          </div>
           <Button
             onClick={handleSendMessage}
             disabled={!inputValue.trim() || isLoading}
-            className="bg-[#F5F5F5] hover:bg-gray-400 text-black h-[40px] px-4 font-inter font-semibold shadow-lg transition-all duration-200 border border-gray-300"
+            className="h-12 w-12 bg-[#FEEB99] hover:bg-[#FFBD59] text-gray-800 shadow-lg shadow-[#FFBD59]/30 hover:shadow-xl hover:shadow-[#FFBD59]/40 transition-all duration-300 hover:scale-110 rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+            size="icon"
           >
             {isLoading ? (
-              <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+              <div className="w-5 h-5 border-2 border-gray-800/30 border-t-gray-800 rounded-full animate-spin" />
             ) : (
-              <Send className="w-4 h-4" />
+              <Send className="w-5 h-5" />
             )}
           </Button>
         </div>
       </div>
-    </div>
+    </Card>
   );
 };
 
