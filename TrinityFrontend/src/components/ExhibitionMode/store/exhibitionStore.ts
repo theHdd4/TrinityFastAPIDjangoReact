@@ -15,6 +15,10 @@ export type CardLayout = 'none' | 'top' | 'bottom' | 'right' | 'left' | 'full';
 const DEFAULT_CARD_LAYOUT: CardLayout = 'right';
 
 const CARD_LAYOUTS: readonly CardLayout[] = ['none', 'top', 'bottom', 'right', 'left', 'full'] as const;
+const CARD_COLORS: readonly CardColor[] = ['default', 'blue', 'purple', 'green', 'orange'] as const;
+const CARD_WIDTHS: readonly CardWidth[] = ['M', 'L'] as const;
+const CONTENT_ALIGNMENTS: readonly ContentAlignment[] = ['top', 'center', 'bottom'] as const;
+const SLIDESHOW_TRANSITIONS: readonly SlideshowTransition[] = ['fade', 'slide', 'zoom'] as const;
 
 const LEGACY_CARD_LAYOUTS: Record<string, CardLayout> = {
   blank: 'none',
@@ -40,6 +44,18 @@ const ensureCardLayout = (layout: unknown): CardLayout => {
 };
 
 export type SlideshowTransition = 'fade' | 'slide' | 'zoom';
+
+export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
+  cardColor: 'purple',
+  cardWidth: 'M',
+  contentAlignment: 'center',
+  fullBleed: false,
+  cardLayout: DEFAULT_CARD_LAYOUT,
+  accentImage: null,
+  accentImageName: null,
+  slideshowDuration: 8,
+  slideshowTransition: 'fade',
+};
 
 export interface PresentationSettings {
   cardColor: CardColor;
@@ -87,6 +103,73 @@ interface ExhibitionStore {
 
 const FALLBACK_COLOR = 'bg-gray-400';
 
+const isRecord = (value: unknown): value is Record<string, any> => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === 'string' && value.trim().length > 0;
+
+const isValidCardColor = (value: unknown): value is CardColor =>
+  typeof value === 'string' && (CARD_COLORS as readonly string[]).includes(value);
+
+const isValidCardWidth = (value: unknown): value is CardWidth =>
+  typeof value === 'string' && (CARD_WIDTHS as readonly string[]).includes(value);
+
+const isValidContentAlignment = (value: unknown): value is ContentAlignment =>
+  typeof value === 'string' && (CONTENT_ALIGNMENTS as readonly string[]).includes(value);
+
+const isValidSlideshowTransition = (value: unknown): value is SlideshowTransition =>
+  typeof value === 'string' && (SLIDESHOW_TRANSITIONS as readonly string[]).includes(value);
+
+const ensurePresentationSettings = (
+  settings: PresentationSettings | Partial<PresentationSettings> | null | undefined,
+): PresentationSettings => {
+  const candidate = isRecord(settings) ? settings : {};
+
+  const cardColor = isValidCardColor(candidate.cardColor)
+    ? candidate.cardColor
+    : DEFAULT_PRESENTATION_SETTINGS.cardColor;
+
+  const cardWidth = isValidCardWidth(candidate.cardWidth)
+    ? candidate.cardWidth
+    : DEFAULT_PRESENTATION_SETTINGS.cardWidth;
+
+  const contentAlignment = isValidContentAlignment(candidate.contentAlignment)
+    ? candidate.contentAlignment
+    : DEFAULT_PRESENTATION_SETTINGS.contentAlignment;
+
+  const fullBleed = typeof candidate.fullBleed === 'boolean'
+    ? candidate.fullBleed
+    : DEFAULT_PRESENTATION_SETTINGS.fullBleed;
+
+  const cardLayout = ensureCardLayout(candidate.cardLayout);
+
+  const accentImage = isNonEmptyString(candidate.accentImage) ? candidate.accentImage : null;
+  const accentImageName = isNonEmptyString(candidate.accentImageName) ? candidate.accentImageName : null;
+
+  const slideshowDuration =
+    typeof candidate.slideshowDuration === 'number' && Number.isFinite(candidate.slideshowDuration)
+      ? Math.max(1, candidate.slideshowDuration)
+      : DEFAULT_PRESENTATION_SETTINGS.slideshowDuration;
+
+  const slideshowTransition = isValidSlideshowTransition(candidate.slideshowTransition)
+    ? candidate.slideshowTransition
+    : DEFAULT_PRESENTATION_SETTINGS.slideshowTransition;
+
+  return {
+    cardColor,
+    cardWidth,
+    contentAlignment,
+    fullBleed,
+    cardLayout,
+    accentImage,
+    accentImageName,
+    slideshowDuration,
+    slideshowTransition,
+  };
+};
+
 const dedupeAtoms = (atoms: DroppedAtom[]): DroppedAtom[] => {
   const seen = new Set<string>();
   const result: DroppedAtom[] = [];
@@ -115,8 +198,121 @@ const mergeCatalogueAtoms = (
   return dedupeAtoms([...start, ...extra]);
 };
 
-const isRecord = (value: unknown): value is Record<string, any> => {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+const normalizeAtom = (component: unknown): DroppedAtom | null => {
+  if (!component || typeof component !== 'object') {
+    return null;
+  }
+
+  const candidate = component as Partial<DroppedAtom & ExhibitionComponentPayload>;
+
+  const resolvedId = isNonEmptyString(candidate.id) ? candidate.id.trim() : undefined;
+  const resolvedAtomId = isNonEmptyString(candidate.atomId)
+    ? candidate.atomId.trim()
+    : isNonEmptyString(candidate.id)
+      ? candidate.id.trim()
+      : undefined;
+
+  const title = isNonEmptyString(candidate.title)
+    ? candidate.title.trim()
+    : 'Untitled Component';
+
+  const category = isNonEmptyString(candidate.category)
+    ? candidate.category.trim()
+    : 'General';
+
+  const color = isNonEmptyString(candidate.color)
+    ? candidate.color.trim()
+    : FALLBACK_COLOR;
+
+  const metadata = isRecord(candidate.metadata) ? { ...candidate.metadata } : undefined;
+
+  const id = resolvedId ?? resolvedAtomId ?? `atom-${Math.random().toString(36).slice(2, 10)}`;
+  const atomId = resolvedAtomId ?? id;
+
+  return {
+    id,
+    atomId,
+    title,
+    category,
+    color,
+    metadata,
+  };
+};
+
+const normaliseAtomList = (atoms: unknown): DroppedAtom[] => {
+  if (!Array.isArray(atoms)) {
+    return [];
+  }
+
+  return dedupeAtoms(
+    atoms
+      .map(atom => normalizeAtom(atom))
+      .filter((atom): atom is DroppedAtom => atom !== null),
+  );
+};
+
+const contextsMatch = (a: ProjectContext | null, b: ProjectContext | null): boolean => {
+  if (!a && !b) {
+    return true;
+  }
+
+  if (!a || !b) {
+    return false;
+  }
+
+  return (
+    a.client_name === b.client_name &&
+    a.app_name === b.app_name &&
+    a.project_name === b.project_name
+  );
+};
+
+const withPresentationDefaults = (card: Partial<LayoutCard>): LayoutCard => {
+  const atoms = normaliseAtomList(card.atoms);
+  const catalogueAtoms = mergeCatalogueAtoms(normaliseAtomList(card.catalogueAtoms), atoms);
+
+  const id = isNonEmptyString(card.id)
+    ? card.id.trim()
+    : `exhibition-slide-${Math.random().toString(36).slice(2, 10)}`;
+
+  const moleculeId = isNonEmptyString(card.moleculeId) ? card.moleculeId.trim() : undefined;
+  const moleculeTitle = isNonEmptyString(card.moleculeTitle) ? card.moleculeTitle.trim() : undefined;
+
+  return {
+    id,
+    atoms,
+    catalogueAtoms,
+    isExhibited: typeof card.isExhibited === 'boolean' ? card.isExhibited : false,
+    moleculeId,
+    moleculeTitle,
+    presentationSettings: ensurePresentationSettings(card.presentationSettings),
+  };
+};
+
+const extractCards = (cards: LayoutCard[] | unknown): LayoutCard[] => {
+  if (!Array.isArray(cards)) {
+    return [];
+  }
+
+  return cards
+    .map((card, index) => {
+      if (!card || typeof card !== 'object') {
+        return null;
+      }
+
+      const partial = card as Partial<LayoutCard>;
+      const baseId = isNonEmptyString(partial.id)
+        ? partial.id.trim()
+        : isNonEmptyString(partial.moleculeId)
+          ? `exhibition-slide-${partial.moleculeId.trim()}`
+          : `exhibition-slide-${index + 1}`;
+
+      return withPresentationDefaults({
+        ...partial,
+        id: baseId,
+      });
+    })
+    .filter((card): card is LayoutCard => card !== null);
 };
 
 const normaliseProjectContext = (context?: ProjectContext | null): ProjectContext | null => {
