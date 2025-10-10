@@ -6,6 +6,7 @@ import Header from '@/components/Header';
 import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
 import { REGISTRY_API } from '@/lib/api';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
+import { getActiveUseCases } from '@/config/useCases';
 
 interface BackendApp {
   id: number;
@@ -129,48 +130,8 @@ const Apps = () => {
     navigate(`/projects?app=${appId}`);
   };
 
-  const apps = [
-    {
-      id: 'marketing-mix',
-      title: 'Marketing Mix Modeling',
-      description:
-        'Optimize marketing spend allocation across different channels and measure incremental impact',
-      icon: Target,
-      color: 'from-blue-500 to-purple-600',
-      bgGradient: 'from-blue-50 to-purple-50',
-      molecules: ['Data Pre-Process', 'Explore'],
-    },
-    {
-      id: 'forecasting',
-      title: 'Forecasting Analysis',
-      description:
-        'Predict future trends and patterns with advanced time series analysis and modeling',
-      icon: BarChart3,
-      color: 'from-green-500 to-teal-600',
-      bgGradient: 'from-green-50 to-teal-50',
-      molecules: ['Explore', 'Build'],
-    },
-    {
-      id: 'promo-effectiveness',
-      title: 'Promo Effectiveness',
-      description:
-        'Measure and analyze promotional campaign performance and ROI across touchpoints',
-      icon: Zap,
-      color: 'from-orange-500 to-red-600',
-      bgGradient: 'from-orange-50 to-red-50',
-      molecules: ['Data Pre-Process', 'Build'],
-    },
-    {
-      id: 'blank',
-      title: 'Create Blank App',
-      description:
-        'Start from scratch with a clean canvas and build your custom analysis workflow',
-      icon: Plus,
-      color: 'from-gray-500 to-gray-700',
-      bgGradient: 'from-gray-50 to-gray-100',
-      molecules: [],
-    },
-  ];
+  // Get apps from centralized use case configuration
+  const apps = getActiveUseCases();
 
   const animationStyle = (offset: number) => ({
     animationDelay: `${(introBaseDelay + offset).toFixed(1)}s`,

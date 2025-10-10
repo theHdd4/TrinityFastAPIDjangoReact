@@ -12,6 +12,7 @@ urlpatterns = [
     path("api/registry/", include("apps.registry.urls")),
     path("api/subscriptions/", include("apps.subscriptions.urls")),
     path("api/workflows/", include("apps.workflows.urls")),
+    path("api/use-cases/", include("apps.use_cases.urls")),
     path("api/atoms/", include("apps.atoms.urls")),
     path("api/atom-configs/", include("apps.atom_configs.urls")),
     path("api/config-store/", include("apps.config_store.urls")),

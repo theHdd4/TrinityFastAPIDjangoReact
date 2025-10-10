@@ -10,6 +10,7 @@ import { REGISTRY_API } from '@/lib/api';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 import { clearProjectState, saveCurrentProject } from '@/utils/projectStorage';
 import { startProjectTransition, cleanupProjectTransition } from '@/utils/projectTransition';
+import { getUseCaseById } from '@/config/useCases';
 import {
   Plus,
   FolderOpen,
@@ -88,53 +89,29 @@ const Projects = () => {
   const appId = currentApp.id;
 
   const getAppDetails = () => {
-    switch (selectedApp) {
-      case 'marketing-mix':
-        return {
-          title: 'Marketing Mix Modeling',
-          description: 'Optimize marketing spend allocation across different channels',
-          icon: Target,
-          color: 'from-blue-500 to-purple-600',
-          lightBg: 'from-blue-50/50 to-purple-50/50',
-          accent: 'blue'
-        };
-      case 'forecasting':
-        return {
-          title: 'Forecasting Analysis',
-          description: 'Predict future trends and patterns with advanced modeling',
-          icon: BarChart3,
-          color: 'from-green-500 to-teal-600',
-          lightBg: 'from-green-50/50 to-teal-50/50',
-          accent: 'green'
-        };
-      case 'promo-effectiveness':
-        return {
-          title: 'Promo Effectiveness',
-          description: 'Measure promotional campaign performance and ROI',
-          icon: Zap,
-          color: 'from-orange-500 to-red-600',
-          lightBg: 'from-orange-50/50 to-red-50/50',
-          accent: 'orange'
-        };
-      case 'blank':
-        return {
-          title: 'Blank App',
-          description: 'Custom analysis workflow from scratch',
-          icon: Plus,
-          color: 'from-gray-500 to-gray-700',
-          lightBg: 'from-gray-50/50 to-gray-100/50',
-          accent: 'gray'
-        };
-      default:
-        return {
-          title: 'Projects',
-          description: 'Manage your analytics projects',
-          icon: FolderOpen,
-          color: 'from-blue-500 to-purple-600',
-          lightBg: 'from-blue-50/50 to-purple-50/50',
-          accent: 'blue'
-        };
+    // Import the use case configuration
+    const useCase = getUseCaseById(selectedApp);
+    
+    if (useCase) {
+      return {
+        title: useCase.title,
+        description: useCase.description,
+        icon: useCase.icon,
+        color: useCase.color,
+        lightBg: useCase.bgGradient.replace('from-', 'from-').replace('to-', 'to-') + '/50',
+        accent: useCase.color.split('-')[1] // Extract color from gradient
+      };
     }
+    
+    // Default fallback
+    return {
+      title: 'Projects',
+      description: 'Manage your analytics projects',
+      icon: FolderOpen,
+      color: 'from-blue-500 to-purple-600',
+      lightBg: 'from-blue-50/50 to-purple-50/50',
+      accent: 'blue'
+    };
   };
 
   const appDetails = getAppDetails();

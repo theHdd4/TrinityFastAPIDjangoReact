@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Trash2, ArrowUp, ArrowDown } from 'lucide-react';
+import { Trash2, ArrowUp, ArrowDown, Move } from 'lucide-react';
 import { Handle, NodeProps, Position } from 'reactflow';
 
 export interface MoleculeNodeData {
@@ -18,11 +18,20 @@ export interface MoleculeNodeData {
   onAtomReorder: (moleculeId: string, newOrder: string[]) => void;
   onRemove: (moleculeId: string) => void;
   onClick: (moleculeId: string) => void;
+  width?: number;
+  height?: number;
+  onResize?: (nodeId: string, width: number, height: number) => void;
 }
 
 
 const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const [nodeSize, setNodeSize] = useState({ 
+    width: data.width || 256, 
+    height: data.height || 300 
+  });
+  const nodeRef = useRef<HTMLDivElement>(null);
 
   const atomsToShow = isExpanded ? data.atomOrder : data.atomOrder.slice(0, 3);
   const hasMoreAtoms = data.atomOrder.length > 3;
@@ -61,14 +70,55 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
     data.onAtomReorder(id, newOrder);
   };
 
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(true);
+  };
+
+  const handleResize = (e: MouseEvent) => {
+    if (!isResizing || !nodeRef.current) return;
+    
+    const rect = nodeRef.current.getBoundingClientRect();
+    const newWidth = Math.max(200, Math.min(500, e.clientX - rect.left));
+    const newHeight = Math.max(200, Math.min(600, e.clientY - rect.top));
+    
+    setNodeSize({ width: newWidth, height: newHeight });
+  };
+
+  const handleResizeEnd = () => {
+    if (isResizing && data.onResize) {
+      data.onResize(id, nodeSize.width, nodeSize.height);
+    }
+    setIsResizing(false);
+  };
+
+  useEffect(() => {
+    if (isResizing) {
+      document.addEventListener('mousemove', handleResize);
+      document.addEventListener('mouseup', handleResizeEnd);
+      return () => {
+        document.removeEventListener('mousemove', handleResize);
+        document.removeEventListener('mouseup', handleResizeEnd);
+      };
+    }
+  }, [isResizing, nodeSize]);
+
   return (
     <div className="relative">
       <Handle type="target" position={Position.Left} className="w-3 h-3 !bg-gray-500" />
       <Handle type="source" position={Position.Right} className="w-3 h-3 !bg-gray-500" />
       <Card
-        className={`relative w-64 p-4 select-none ${getTypeColor(data.type)} border-2 ${
-          isExpanded ? 'min-h-96' : ''
+        ref={nodeRef}
+        className={`relative p-4 select-none ${getTypeColor(data.type)} border-2 transition-all duration-200 ${
+          isResizing ? 'shadow-lg' : ''
         }`}
+        style={{
+          width: `${nodeSize.width}px`,
+          height: `${nodeSize.height}px`,
+          minHeight: '200px',
+          minWidth: '200px'
+        }}
         onClick={e => {
           e.stopPropagation();
           data.onClick(id);
@@ -160,6 +210,21 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                 Show less
               </button>
             )}
+          </div>
+        </div>
+        
+        {/* Resize Handle */}
+        <div
+          className={`absolute bottom-0 right-0 w-4 h-4 cursor-se-resize bg-gray-300 hover:bg-gray-400 transition-colors ${
+            isResizing ? 'bg-blue-500' : ''
+          }`}
+          onMouseDown={handleResizeStart}
+          style={{
+            clipPath: 'polygon(100% 0%, 0% 100%, 100% 100%)'
+          }}
+        >
+          <div className="absolute bottom-0 right-0 w-full h-full flex items-end justify-end p-1">
+            <div className="w-2 h-2 bg-gray-500 rounded-sm"></div>
           </div>
         </div>
       </Card>

@@ -3,13 +3,14 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Play, Save, Share2 } from 'lucide-react';
+import { Play, Save, Share2, Download, Upload } from 'lucide-react';
 import Header from '@/components/Header';
 import WorkflowCanvas from './components/WorkflowCanvas';
 import MoleculeList from '@/components/MoleculeList/MoleculeList';
 import { useToast } from '@/hooks/use-toast';
 import { REGISTRY_API } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { workflowService } from '@/services/workflowService';
 
 interface SelectedAtom {
   atomName: string;
@@ -21,6 +22,8 @@ interface SelectedAtom {
 const WorkflowMode = () => {
   const [selectedMoleculeId, setSelectedMoleculeId] = useState<string>();
   const [canvasMolecules, setCanvasMolecules] = useState<any[]>([]);
+  const [savedWorkflows, setSavedWorkflows] = useState<any[]>([]);
+  const [currentProject, setCurrentProject] = useState<any>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
   const { hasPermission } = useAuth();
@@ -45,6 +48,29 @@ const WorkflowMode = () => {
     }
   }, []);
 
+  // Load current project and saved workflows
+  useEffect(() => {
+    const loadProjectAndWorkflows = async () => {
+      const current = localStorage.getItem('current-project');
+      if (current) {
+        try {
+          const project = JSON.parse(current);
+          setCurrentProject(project);
+          
+          // Load saved workflows for this project
+          const result = await workflowService.loadWorkflows(project.id);
+          if (result.success && result.workflows) {
+            setSavedWorkflows(result.workflows);
+          }
+        } catch (error) {
+          console.error('Failed to load project or workflows:', error);
+        }
+      }
+    };
+
+    loadProjectAndWorkflows();
+  }, []);
+
   const handleMoleculeSelect = (moleculeId: string) => {
     if (!canEdit) return;
     setSelectedMoleculeId(moleculeId);
@@ -54,6 +80,9 @@ const WorkflowMode = () => {
     (molecules: any[]) => {
       if (!canEdit) return;
       setCanvasMolecules(molecules);
+
+      // Still save to localStorage for immediate access
+      localStorage.setItem('workflow-canvas-molecules', safeStringify(molecules));
 
       const current = localStorage.getItem('current-project');
       if (current) {
@@ -73,12 +102,101 @@ const WorkflowMode = () => {
     [canEdit]
   );
 
+  const saveWorkflowToDatabase = async () => {
+    if (!currentProject || canvasMolecules.length === 0) {
+      toast({
+        title: 'No workflow to save',
+        description: 'Please create a workflow on the canvas before saving.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    // Auto-generate workflow name from context
+    const envStr = localStorage.getItem('env');
+    let workflowName = 'Untitled Workflow';
+    try {
+      if (envStr) {
+        const env = JSON.parse(envStr);
+        const appName = env.APP_NAME || 'Unknown App';
+        const projectName = env.PROJECT_NAME || 'Unknown Project';
+        workflowName = `${appName} - ${projectName}`;
+      }
+    } catch (error) {
+      console.warn('Failed to parse environment for workflow naming:', error);
+    }
+
+    // Add timestamp to make it unique
+    const timestamp = new Date().toLocaleString();
+    workflowName = `${workflowName} - ${timestamp}`;
+
+    const slug = workflowName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+    try {
+      const result = await workflowService.saveWorkflow({
+        project_id: currentProject.id, // Automatically extracted from localStorage
+        name: workflowName,
+        slug: slug,
+        // workflow_id and context will be auto-generated from localStorage
+        canvas_data: {
+          molecules: canvasMolecules,
+          metadata: {
+            saved_at: new Date().toISOString(),
+            molecule_count: canvasMolecules.length,
+            use_case: workflowName // Use the auto-generated workflow name
+          }
+        }
+      });
+
+      if (result.success) {
+        toast({
+          title: 'Workflow saved successfully!',
+          description: `Workflow has been auto-saved with context: ${workflowName}`
+        });
+        
+        // Refresh saved workflows list
+        const loadResult = await workflowService.loadWorkflows(currentProject.id);
+        if (loadResult.success && loadResult.workflows) {
+          setSavedWorkflows(loadResult.workflows);
+        }
+      } else {
+        toast({
+          title: 'Failed to save workflow',
+          description: result.message || 'Unknown error occurred',
+          variant: 'destructive'
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Error saving workflow',
+        description: 'An unexpected error occurred while saving.',
+        variant: 'destructive'
+      });
+    }
+  };
+
   const renderWorkflow = async () => {
     if (!canEdit) return;
     console.log('Rendering workflow with molecules:', canvasMolecules);
 
-    // Ensure every molecule is part of a flow (has an incoming or outgoing connection)
-    const unconnected = canvasMolecules.filter((molecule) => {
+    // Check if we have at least one molecule with selected atoms
+    const moleculesWithSelectedAtoms = canvasMolecules.filter((molecule) => {
+      const hasSelectedAtoms = molecule.selectedAtoms && 
+        Object.values(molecule.selectedAtoms).some(selected => selected === true);
+      return hasSelectedAtoms;
+    });
+
+    if (moleculesWithSelectedAtoms.length === 0) {
+      toast({
+        title: 'No atoms selected',
+        description: 'Select at least one atom from the molecules before rendering the workflow.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    // Check for completely isolated molecules (not connected to anything)
+    const isolatedMolecules = canvasMolecules.filter((molecule) => {
       const hasOutgoing = molecule.connections && molecule.connections.length > 0;
       const hasIncoming = canvasMolecules.some((m) =>
         m.connections?.some((c: { target: string }) => c.target === molecule.id)
@@ -86,10 +204,17 @@ const WorkflowMode = () => {
       return !hasOutgoing && !hasIncoming;
     });
 
-    if (unconnected.length > 0) {
+    // Allow isolated molecules if they have selected atoms (they can be standalone)
+    const problematicIsolated = isolatedMolecules.filter((molecule) => {
+      const hasSelectedAtoms = molecule.selectedAtoms && 
+        Object.values(molecule.selectedAtoms).some(selected => selected === true);
+      return !hasSelectedAtoms;
+    });
+
+    if (problematicIsolated.length > 0) {
       toast({
-        title: 'Incomplete workflow',
-        description: 'Connect all molecules before rendering the workflow.',
+        title: 'Unconnected molecules',
+        description: 'Either connect all molecules or ensure they have selected atoms.',
         variant: 'destructive'
       });
       return;
@@ -119,7 +244,16 @@ const WorkflowMode = () => {
       });
     }
 
-    if (orderedIds.length !== canvasMolecules.length) {
+    // Handle isolated molecules (no connections) - they can be processed independently
+    const connectedMoleculeIds = new Set(orderedIds);
+    const isolatedMoleculeIds = canvasMolecules
+      .filter(m => !connectedMoleculeIds.has(m.id))
+      .map(m => m.id);
+    
+    // Combine ordered connected molecules with isolated molecules
+    const finalOrderedIds = [...orderedIds, ...isolatedMoleculeIds];
+    
+    if (connectedMoleculeIds.size !== orderedIds.length) {
       toast({
         title: 'Invalid workflow',
         description: 'Workflow contains cycles. Please fix connections.',
@@ -133,7 +267,7 @@ const WorkflowMode = () => {
       idToMolecule[m.id] = m;
     });
 
-    const orderedMolecules = orderedIds.map(id => idToMolecule[id]);
+    const orderedMolecules = finalOrderedIds.map(id => idToMolecule[id]);
 
     const selectedAtoms: SelectedAtom[] = [];
     orderedMolecules.forEach(molecule => {
@@ -210,10 +344,22 @@ const WorkflowMode = () => {
               className={`font-light border-gray-300 ${
                 canEdit ? 'hover:border-gray-400' : 'opacity-50 cursor-not-allowed'
               }`}
+              onClick={canEdit ? saveWorkflowToDatabase : undefined}
               disabled={!canEdit}
             >
               <Save className="w-4 h-4 mr-2" />
-              Save
+              Save Workflow
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className={`font-light border-gray-300 ${
+                canEdit ? 'hover:border-gray-400' : 'opacity-50 cursor-not-allowed'
+              }`}
+              disabled={!canEdit}
+            >
+              <Upload className="w-4 h-4 mr-2" />
+              Load Workflow
             </Button>
             <Button
               variant="outline"
@@ -241,6 +387,11 @@ const WorkflowMode = () => {
       </div>
 
       <div className="flex-1 flex">
+        {/* Molecule List */}
+        <div className={`w-80 bg-white border-r border-gray-200 ${canEdit ? '' : 'cursor-not-allowed'}`}>
+          <MoleculeList canEdit={canEdit} />
+        </div>
+
         {/* Workflow Canvas */}
         <div className={`flex-1 p-8 ${canEdit ? '' : 'cursor-not-allowed'}`}>
           <WorkflowCanvas
@@ -249,14 +400,10 @@ const WorkflowMode = () => {
             canEdit={canEdit}
           />
         </div>
-
-        {/* Molecule List */}
-        <div className={`w-80 bg-white border-l border-gray-200 ${canEdit ? '' : 'cursor-not-allowed'}`}>
-          <MoleculeList canEdit={canEdit} />
-        </div>
       </div>
     </div>
   );
 };
 
 export default WorkflowMode;
+

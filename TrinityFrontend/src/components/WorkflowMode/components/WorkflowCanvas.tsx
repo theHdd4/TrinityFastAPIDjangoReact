@@ -80,6 +80,23 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
     );
   }, []);
 
+  const onNodeResize = useCallback((id: string, width: number, height: number) => {
+    setNodes(ns =>
+      ns.map(node => 
+        node.id === id 
+          ? { 
+              ...node, 
+              data: { 
+                ...node.data, 
+                width, 
+                height 
+              } 
+            } 
+          : node
+      )
+    );
+  }, []);
+
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
@@ -117,12 +134,13 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           onAtomToggle,
           onAtomReorder,
           onRemove: removeNode,
-          onClick: onMoleculeSelect
+          onClick: onMoleculeSelect,
+          onResize: onNodeResize
         }
       };
       setNodes(ns => ns.concat(newNode));
     },
-    [reactFlowInstance, onMoleculeSelect, onAtomToggle, onAtomReorder, removeNode]
+    [reactFlowInstance, onMoleculeSelect, onAtomToggle, onAtomReorder, removeNode, onNodeResize]
   );
 
   const onDragOver = (event: React.DragEvent) => {
@@ -152,7 +170,10 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
             onAtomToggle,
             onAtomReorder,
             onRemove: removeNode,
-            onClick: onMoleculeSelect
+            onClick: onMoleculeSelect,
+            onResize: onNodeResize,
+            width: m.width,
+            height: m.height
           }
         }));
 
@@ -213,7 +234,9 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
       position: n.position,
       connections: edges.filter(e => e.source === n.id).map(e => ({ target: e.target })),
       selectedAtoms: n.data.selectedAtoms,
-      atomOrder: n.data.atomOrder
+      atomOrder: n.data.atomOrder,
+      width: n.data.width,
+      height: n.data.height
     }));
     onCanvasMoleculesUpdate(molecules);
     localStorage.setItem(STORAGE_KEY, safeStringify(molecules));
@@ -237,6 +260,10 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           elementsSelectable={canEdit}
           fitView
           proOptions={{ hideAttribution: true }}
+          zoomOnScroll={false}
+          zoomOnPinch={false}
+          panOnDrag={true}
+          panOnScroll={false}
         >
           <Background gap={20} color="rgba(0,0,0,0.05)" />
           <Controls />

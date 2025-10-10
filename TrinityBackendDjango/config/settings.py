@@ -122,6 +122,7 @@ TENANT_APPS = [
     "apps.registry",
     "apps.subscriptions",
     "apps.workflows",
+    "apps.use_cases",             # Use case management
     "apps.atom_configs",
     "apps.config_store",
     "apps.permissions",
