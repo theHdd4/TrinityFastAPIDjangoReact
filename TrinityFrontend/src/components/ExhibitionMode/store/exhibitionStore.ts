@@ -315,6 +315,15 @@ const extractCards = (cards: LayoutCard[] | unknown): LayoutCard[] => {
     .filter((card): card is LayoutCard => card !== null);
 };
 
+const createBlankSlide = (): LayoutCard =>
+  withPresentationDefaults({
+    id: `exhibition-slide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    atoms: [],
+    catalogueAtoms: [],
+    isExhibited: true,
+    moleculeTitle: 'Untitled Slide',
+  });
+
 const normaliseProjectContext = (context?: ProjectContext | null): ProjectContext | null => {
   if (!context) {
     return null;
@@ -494,10 +503,11 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         : shouldResetSlides
           ? []
           : state.cards.map(withPresentationDefaults);
-      const nextExhibitedCards = baseCards.filter(card => card.isExhibited);
+      const ensuredCards = baseCards.length > 0 ? baseCards : [createBlankSlide()];
+      const nextExhibitedCards = ensuredCards.filter(card => card.isExhibited);
       const nextCatalogueCards = hasRemoteCards
         ? computeCatalogueCards(remoteCards)
-        : computeCatalogueCards(baseCards);
+        : computeCatalogueCards(ensuredCards);
 
       console.info(
         `[Exhibition] Exhibition catalogue ready with ${nextCatalogueCards.length} catalogue card(s)` +
@@ -524,13 +534,17 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         );
       }
 
+      if (baseCards.length === 0) {
+        console.info('[Exhibition] Inserted a blank slide to initialise exhibition mode');
+      }
+
       console.info(
-        `[Exhibition] Exhibition slides ready with ${baseCards.length} slide card(s) and ${nextExhibitedCards.length} active slide(s)` +
+        `[Exhibition] Exhibition slides ready with ${ensuredCards.length} slide card(s) and ${nextExhibitedCards.length} active slide(s)` +
           (resolvedContext ? ` for ${contextLabel}` : ''),
       );
 
       return {
-        cards: baseCards,
+        cards: ensuredCards,
         exhibitedCards: nextExhibitedCards,
         catalogueCards: nextCatalogueCards,
         catalogueEntries,
@@ -595,14 +609,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     let createdCard: LayoutCard | null = null;
 
     set(state => {
-      const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const newCard = withPresentationDefaults({
-        id: `exhibition-slide-${uniqueSuffix}`,
-        atoms: [],
-        catalogueAtoms: [],
-        isExhibited: true,
-        moleculeTitle: 'Untitled Slide',
-      });
+      const newCard = createBlankSlide();
 
       createdCard = newCard;
 
