@@ -87,83 +87,6 @@ interface ExhibitionStore {
 
 const FALLBACK_COLOR = 'bg-gray-400';
 
-export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
-  cardColor: 'default',
-  cardWidth: 'L',
-  contentAlignment: 'top',
-  fullBleed: false,
-  cardLayout: DEFAULT_CARD_LAYOUT,
-  accentImage: null,
-  accentImageName: null,
-  slideshowDuration: 8,
-  slideshowTransition: 'fade',
-};
-
-const ensureMetadataObject = (value: unknown): Record<string, any> | undefined => {
-  if (!value || typeof value !== 'object') {
-    return undefined;
-  }
-
-  if (Array.isArray(value)) {
-    return undefined;
-  }
-
-  return { ...(value as Record<string, any>) };
-};
-
-const normalizeAtom = (atom: unknown): DroppedAtom | null => {
-  if (!isRecord(atom)) {
-    return null;
-  }
-
-  const rawId = atom.id ?? atom.atomId ?? atom.atom_id;
-  if (rawId === undefined || rawId === null) {
-    return null;
-  }
-
-  const identifier = String(rawId);
-  const atomId = atom.atomId ?? atom.atom_id ?? identifier;
-  const rawTitle = atom.title;
-  const rawCategory = atom.category;
-  const rawColor = atom.color;
-
-  const title = typeof rawTitle === 'string' && rawTitle.trim().length > 0 ? rawTitle.trim() : 'Untitled Atom';
-  const category =
-    typeof rawCategory === 'string' && rawCategory.trim().length > 0 ? rawCategory.trim() : 'General';
-  const color = typeof rawColor === 'string' && rawColor.trim().length > 0 ? rawColor.trim() : FALLBACK_COLOR;
-
-  const metadata = ensureMetadataObject(atom.metadata);
-
-  return {
-    id: identifier,
-    atomId: String(atomId ?? identifier),
-    title,
-    category,
-    color,
-    metadata,
-  };
-};
-
-const withPresentationDefaults = (card: LayoutCard): LayoutCard => {
-  const slideAtoms = Array.isArray(card.atoms) ? card.atoms : [];
-  const catalogueAtoms = Array.isArray(card.catalogueAtoms) ? [...card.catalogueAtoms] : [];
-
-  const mergedSettings: PresentationSettings = {
-    ...DEFAULT_PRESENTATION_SETTINGS,
-    ...(card.presentationSettings ?? {}),
-  };
-
-  mergedSettings.cardLayout = ensureCardLayout(mergedSettings.cardLayout);
-
-  return {
-    ...card,
-    atoms: slideAtoms,
-    catalogueAtoms,
-    isExhibited: card.isExhibited !== false,
-    presentationSettings: mergedSettings,
-  };
-};
-
 const dedupeAtoms = (atoms: DroppedAtom[]): DroppedAtom[] => {
   const seen = new Set<string>();
   const result: DroppedAtom[] = [];
@@ -216,20 +139,17 @@ const normaliseProjectContext = (context?: ProjectContext | null): ProjectContex
   };
 };
 
-const contextsMatch = (a?: ProjectContext | null, b?: ProjectContext | null): boolean => {
-  if (!a && !b) {
-    return true;
+const computeCatalogueCards = (cards: LayoutCard[]): LayoutCard[] => {
+  if (!Array.isArray(cards) || cards.length === 0) {
+    return [];
   }
 
-  if (!a || !b) {
-    return false;
-  }
-
-  return (
-    a.client_name === b.client_name &&
-    a.app_name === b.app_name &&
-    a.project_name === b.project_name
-  );
+  return cards
+    .map(withPresentationDefaults)
+    .filter(card => {
+      const catalogueCount = card.catalogueAtoms?.length ?? card.atoms.length ?? 0;
+      return catalogueCount > 0;
+    });
 };
 
 const normaliseCatalogueComponent = (component: ExhibitionComponentPayload, atomName: string): DroppedAtom | null => {
@@ -304,74 +224,6 @@ const buildCardFromEntry = (entry: ExhibitionAtomPayload, index: number): Layout
     moleculeId: atomName,
     moleculeTitle: atomName,
   });
-};
-
-const normalizeCard = (card: unknown): LayoutCard | null => {
-  if (!isRecord(card)) {
-    return null;
-  }
-
-  const rawId = card.id ?? card.moleculeId ?? card.moleculeTitle;
-  if (rawId === undefined || rawId === null) {
-    return null;
-  }
-
-  const identifier = String(rawId);
-
-  const rawAtoms = Array.isArray(card.atoms) ? card.atoms : [];
-  const atoms = rawAtoms
-    .map(normalizeAtom)
-    .filter((atom): atom is DroppedAtom => atom !== null);
-
-  const rawCatalogueAtoms = Array.isArray(card.catalogueAtoms) ? card.catalogueAtoms : [];
-  const catalogueAtoms = rawCatalogueAtoms
-    .map(normalizeAtom)
-    .filter((atom): atom is DroppedAtom => atom !== null);
-
-  const presentationSettings = isRecord(card.presentationSettings)
-    ? {
-        ...DEFAULT_PRESENTATION_SETTINGS,
-        ...(card.presentationSettings as Record<string, unknown>),
-        cardLayout: ensureCardLayout((card.presentationSettings as Record<string, unknown>).cardLayout),
-      }
-    : undefined;
-
-  const moleculeId = card.moleculeId ?? card.atom_name;
-
-  return withPresentationDefaults({
-    id: identifier,
-    atoms,
-    catalogueAtoms,
-    isExhibited: card.isExhibited !== false,
-    moleculeId: typeof moleculeId === 'string' ? moleculeId : undefined,
-    moleculeTitle: typeof card.moleculeTitle === 'string' ? card.moleculeTitle : undefined,
-    presentationSettings,
-  });
-};
-
-const extractCards = (raw: unknown): LayoutCard[] => {
-  if (Array.isArray(raw)) {
-    return raw.map(normalizeCard).filter((card): card is LayoutCard => card !== null);
-  }
-
-  if (isRecord(raw) && Array.isArray(raw.cards)) {
-    return raw.cards.map(normalizeCard).filter((card): card is LayoutCard => card !== null);
-  }
-
-  return [];
-};
-
-const computeCatalogueCards = (cards: LayoutCard[]): LayoutCard[] => {
-  if (!Array.isArray(cards) || cards.length === 0) {
-    return [];
-  }
-
-  return cards
-    .map(withPresentationDefaults)
-    .filter(card => {
-      const catalogueCount = card.catalogueAtoms?.length ?? 0;
-      return catalogueCount > 0;
-    });
 };
 
 export const useExhibitionStore = create<ExhibitionStore>(set => ({
