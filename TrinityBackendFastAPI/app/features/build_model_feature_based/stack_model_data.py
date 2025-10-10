@@ -1025,7 +1025,7 @@ class StackModelDataProcessor:
                 return transformed_df, metadata
             
             # Apply standardization to x_variables and y_variable
-            variables_to_standardize = x_variables + [y_variable]
+            variables_to_standardize = x_variables
             scalers = {}
             
             for var in variables_to_standardize:
@@ -1033,16 +1033,16 @@ class StackModelDataProcessor:
                     if standardization_type == 'standard':
                         # StandardScaler (mean=0, std=1)
                         scaler = StandardScaler()
-                        transformed_df[f'standard_{var}'] = scaler.fit_transform(transformed_df[[var]])
+                        transformed_df[f'{var}'] = scaler.fit_transform(transformed_df[[var]])
                         scalers[var] = scaler
-                        logger.info(f"Applied standard scaling to {var}")
+                        # logger.info(f"Applied standard scaling to {var}")
                         
                     elif standardization_type == 'minmax':
                         # MinMaxScaler (0-1 range)
                         scaler = MinMaxScaler()
-                        transformed_df[f'minmax_{var}'] = scaler.fit_transform(transformed_df[[var]])
+                        transformed_df[f'{var}'] = scaler.fit_transform(transformed_df[[var]])
                         scalers[var] = scaler
-                        logger.info(f"Applied minmax scaling to {var}")
+                        # logger.info(f"Applied minmax scaling to {var}")
             
             metadata = {
                 'standardization_type': standardization_type,
@@ -1052,7 +1052,7 @@ class StackModelDataProcessor:
                 'transformed_columns': list(transformed_df.columns)
             }
             
-            logger.info(f"Standardization completed. Original columns: {len(df.columns)}, Transformed columns: {len(transformed_df.columns)}")
+            # logger.info(f"Standardization completed. Original columns: {len(df.columns)}, Transformed columns: {len(transformed_df.columns)}")
             return transformed_df, metadata
             
         except Exception as e:
@@ -1080,9 +1080,7 @@ class StackModelDataProcessor:
         """Process all split clustered data for stack MMM training."""
         try:
             # Debug: Log constraint parameters received
-            logger.info(f"🔍 DEBUG: process_split_clustered_data received constraints:")
-            logger.info(f"  - negative_constraints: {negative_constraints}")
-            logger.info(f"  - positive_constraints: {positive_constraints}")
+
             
             # Validate input parameters
             if not split_clustered_data:
@@ -1093,10 +1091,7 @@ class StackModelDataProcessor:
             
             if not y_variable_lower:
                 raise Exception("❌ No y_variable provided")
-            
-            logger.info(f"Processing {len(split_clustered_data)} split clusters for stack modeling")
-            logger.info(f"X variables: {x_variables_lower}")
-            logger.info(f"Y variable: {y_variable_lower}")
+
             
             results = {}
             training_progress = get_training_progress()
@@ -1196,15 +1191,8 @@ class StackModelDataProcessor:
             
             if successful_clusters == 0:
                 raise Exception(f"❌ All {len(split_clustered_data)} clusters failed processing. Check logs for details.")
-            
-            # Debug logging for results
-            logger.info(f"🔍 DEBUG: Returning results with {len(results)} entries")
+  
             for split_key, result in results.items():
-                logger.info(f"   📊 {split_key}:")
-                logger.info(f"      - Keys: {list(result.keys())}")
-                logger.info(f"      - Has error: {'error' in result}")
-                logger.info(f"      - Model results count: {len(result.get('model_results', []))}")
-                logger.info(f"      - Total records: {result.get('total_records', 0)}")
                 if 'error' in result:
                     logger.info(f"      - Error: {result['error']}")
             
@@ -1234,10 +1222,7 @@ class StackModelDataProcessor:
     ) -> List[Dict[str, Any]]:
         """Process a single parameter combination for stack MMM training."""
         try:
-            logger.info(f"Starting _process_combination_for_stack with {len(cluster_df)} records")
-            logger.info(f"Cluster columns: {list(cluster_df.columns)}")
-            logger.info(f"X variables: {x_variables_lower}")
-            logger.info(f"Y variable: {y_variable_lower}")
+
             
             # Step 1: Split by unique combinations and apply transformations
             transformed_combinations = []
@@ -1277,8 +1262,7 @@ class StackModelDataProcessor:
             
             # Step 2: Merge transformed combinations
             merged_df = pd.concat(transformed_combinations, ignore_index=True)
-            logger.info(f"Merged {len(transformed_combinations)} combinations into {len(merged_df)} records")
-            logger.info(f"Merged dataframe columns: {list(merged_df.columns)}")
+
             
             # Step 3: Create encoded combination features (always needed for stack modeling)
             if not apply_interaction_terms:
@@ -1293,11 +1277,6 @@ class StackModelDataProcessor:
                 )
 
             # Debug: Log constraint parameters being passed to model training
-            logger.info(f"🔍 DEBUG: Passing constraints to _train_models_for_combination_stack:")
-            logger.info(f"  - negative_constraints: {negative_constraints}")
-            logger.info(f"  - positive_constraints: {positive_constraints}")
-            
-            logger.info(f"About to train models for combination with {len(merged_df)} records")
             model_results = await self._train_models_for_combination_stack(
                 merged_df, combo_config, models_to_run, custom_configs,
                 x_variables_lower, y_variable_lower, test_size,
@@ -1310,9 +1289,6 @@ class StackModelDataProcessor:
             logger.info(f"Model training completed: {len(model_results)} models trained")
             
             # Debug logging for model results
-            logger.info(f"🔍 DEBUG: Model results from _train_models_for_combination_stack")
-            logger.info(f"   - Type: {type(model_results)}")
-            logger.info(f"   - Length: {len(model_results) if model_results else 0}")
             if model_results:
                 for i, model_result in enumerate(model_results):
                     logger.info(f"   - Model {i+1}: {model_result.get('model_name', 'Unknown')} with keys {list(model_result.keys())}")
@@ -1347,15 +1323,7 @@ class StackModelDataProcessor:
         ) -> List[Dict[str, Any]]:
             """Train models for a specific parameter combination in stack MMM."""
             try:
-                # Debug: Log constraint parameters received
-                logger.info(f"🔍 DEBUG: _train_models_for_combination_stack received constraints:")
-                logger.info(f"  - negative_constraints: {negative_constraints}")
-                logger.info(f"  - positive_constraints: {positive_constraints}")
-                
-                logger.info(f"Starting _train_models_for_combination_stack with {len(df)} records")
-                logger.info(f"Dataframe columns: {list(df.columns)}")
-                logger.info(f"X variables: {x_variables_lower}")
-                logger.info(f"Y variable: {y_variable_lower}")
+
                 
                 import numpy as np
                 from .models import get_models, safe_mape
@@ -1394,14 +1362,14 @@ class StackModelDataProcessor:
                 # Sort to ensure consistent order
                 feature_columns.sort()
                 
-                # Log feature information for debugging
-                logger.info(f"   - Total features for modeling: {len(feature_columns)}")
-                logger.info(f"   - Main x_variables: {x_variables_lower}")
+                # # Log feature information for debugging
+                # logger.info(f"   - Total features for modeling: {len(feature_columns)}")
+                # logger.info(f"   - Main x_variables: {x_variables_lower}")
                 encoded_features = [col for col in feature_columns if col.startswith('encoded_combination_')]
                 interaction_features = [col for col in feature_columns if any(col.endswith(f'_x_{var}') for var in x_variables_lower)]
-                logger.info(f"   - Encoded combination features: {encoded_features}")
-                logger.info(f"   - Interaction features: {interaction_features}")
-                logger.info(f"   - All features: {feature_columns}")
+                # logger.info(f"   - Encoded combination features: {encoded_features}")
+                # logger.info(f"   - Interaction features: {interaction_features}")
+                # logger.info(f"   - All features: {feature_columns}")
                 
                 # Clean data - remove rows with missing values for ALL features
                 all_columns = feature_columns + [y_variable_lower]
@@ -1456,7 +1424,7 @@ class StackModelDataProcessor:
                     )
                 
                 # Convert boolean columns to numeric (encoded combination variables)
-                logger.info("Converting boolean columns to numeric for validation")
+                # logger.info("Converting boolean columns to numeric for validation")
                 # Note: feature_columns does not include 'combination' column, so it's automatically excluded
                 X_train_df = pd.DataFrame(X_train, columns=feature_columns)
                 X_test_df = pd.DataFrame(X_test, columns=feature_columns)
@@ -1473,16 +1441,13 @@ class StackModelDataProcessor:
                 X_test = X_test_df.values.astype(np.float64)
                 y_train = y_train.astype(np.float64)
                 y_test = y_test.astype(np.float64)
-                
-                # Validate split data
-                logger.info(f"X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
-                logger.info(f"X_train dtype: {X_train.dtype}, y_train dtype: {y_train.dtype}")
+
                 
                 # Add constraints to custom_configs for constrained models
                 if negative_constraints or positive_constraints:
-                    logger.info(f"🔍 DEBUG: Adding constraints to custom_configs:")
-                    logger.info(f"  - negative_constraints: {negative_constraints}")
-                    logger.info(f"  - positive_constraints: {positive_constraints}")
+                    # logger.info(f"🔍 DEBUG: Adding constraints to custom_configs:")
+                    # logger.info(f"  - negative_constraints: {negative_constraints}")
+                    # logger.info(f"  - positive_constraints: {positive_constraints}")
                     
                     # Convert constraints to the format expected by the models
                     variable_constraints = []
@@ -1537,7 +1502,7 @@ class StackModelDataProcessor:
                                 # Use LassoCV for automatic alpha tuning with reasonable alpha range
                                 from sklearn.linear_model import LassoCV
                                 alphas = np.logspace(-3, 2, 50)  # 0.0001 to 10 (reasonable range for Lasso)
-                                logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values)")
+                                # logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values)")
                                 models_dict[model_name] = LassoCV(alphas=alphas, cv=5, random_state=42)
                                 
                             elif model_name == "ElasticNet Regression" and tuning_mode == 'auto':
@@ -1545,7 +1510,7 @@ class StackModelDataProcessor:
                                 from sklearn.linear_model import ElasticNetCV
                                 alphas = np.logspace(-3, 2, 50)  # 0.0001 to 10 (reasonable range for ElasticNet)
                                 l1_ratios = np.linspace(0.1, 0.9, 9)  # Default l1_ratio range
-                                logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values), l1_ratio range: {l1_ratios[0]:.2f} to {l1_ratios[-1]:.2f} ({len(l1_ratios)} values)")
+                                # logger.info(f"🔧 {model_name} - Auto tuning with alpha range: {alphas[0]:.6f} to {alphas[-1]:.6f} ({len(alphas)} values), l1_ratio range: {l1_ratios[0]:.2f} to {l1_ratios[-1]:.2f} ({len(l1_ratios)} values)")
                                 models_dict[model_name] = ElasticNetCV(
                                     alphas=alphas, l1_ratio=l1_ratios, cv=5, random_state=42
                                 )
@@ -1558,11 +1523,11 @@ class StackModelDataProcessor:
                                 if has_interaction_terms:
                                     # Stack modeling: use StackConstrainedRidge for interaction terms
                                     from .models import StackConstrainedRidge
-                                    logger.info(f"🔍 Using StackConstrainedRidge for stack modeling with interaction terms")
+                                    # logger.info(f"🔍 Using StackConstrainedRidge for stack modeling with interaction terms")
                                 else:
                                     # Individual modeling: use CustomConstrainedRidge for base features only
                                     from .models import CustomConstrainedRidge
-                                    logger.info(f"🔍 Using CustomConstrainedRidge for individual modeling with base features only")
+                                    # logger.info(f"🔍 Using CustomConstrainedRidge for individual modeling with base features only")
                                 
                                 # Extract constraints from parameters object - handle both old and new formats
                                 variable_constraints = parameters.get('variable_constraints', [])
@@ -1583,10 +1548,6 @@ class StackModelDataProcessor:
                                     positive_constraints = parameters.get('positive_constraints', [])
                                 
                                 # Debug logging for constraints
-                                logger.info(f"🔍 Constrained Model - Parameters: {parameters}")
-                                logger.info(f"🔍 Constrained Model - Variable constraints: {variable_constraints}")
-                                logger.info(f"🔍 Constrained Model - Negative constraints: {negative_constraints}")
-                                logger.info(f"🔍 Constrained Model - Positive constraints: {positive_constraints}")
                                 
                                 if has_interaction_terms:
                                     models_dict[model_name] = StackConstrainedRidge(
@@ -1681,7 +1642,7 @@ class StackModelDataProcessor:
                             cluster_display = cluster_info if cluster_info else "Unknown"
                             progress_dict[run_id]["current_step"] = f"Training {model_name} on cluster: {cluster_display}"
                             progress_dict[run_id]["status"] = f"Stack Modeling: {model_name} ({model_idx + 1}/{len(models_dict)})"
-                            logger.info(f"📊 Progress: Training {model_name} on cluster: {cluster_display} ({model_idx + 1}/{len(models_dict)})")
+                            # logger.info(f"📊 Progress: Training {model_name} on cluster: {cluster_display} ({model_idx + 1}/{len(models_dict)})")
                         else:
                             logger.warning(f"❌ Run ID {run_id} not found in progress tracking")
                     

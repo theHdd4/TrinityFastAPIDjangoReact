@@ -512,7 +512,7 @@ def calculate_volume_series(
     # Calculate volume for each point: Volume = Intercept + (Variable × Beta)
     volume_series = []
     for i, transformed_value in enumerate(transformed_scaled_series):
-        volume = intercept + (transformed_value * variable_beta)
+        volume = intercept + (transformed_value * variable_beta) + constant
         volume_series.append(volume)
 
     

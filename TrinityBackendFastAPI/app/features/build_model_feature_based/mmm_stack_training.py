@@ -1506,7 +1506,7 @@ class MMMStackModelDataProcessor:
                             }
                     
                     individual_metrics[combination] = combination_metrics
-                    logger.info(f"✅ Successfully calculated metrics for {combination}: {len(combination_metrics)} parameter combinations")
+                    # logger.info(f"✅ Successfully calculated metrics for {combination}: {len(combination_metrics)} parameter combinations")
                     
                     # Update progress - mark combination as completed
                     if run_id:
@@ -1527,7 +1527,7 @@ class MMMStackModelDataProcessor:
                     logger.error(f"Traceback: {traceback.format_exc()}")
                     continue
             
-            logger.info(f"🎉 Completed individual metrics calculation. Total combinations with metrics: {len(individual_metrics)}")
+            # logger.info(f"🎉 Completed individual metrics calculation. Total combinations with metrics: {len(individual_metrics)}")
             return individual_metrics
             
         except Exception as e:
@@ -1590,7 +1590,7 @@ class MMMStackModelDataProcessor:
             all_objects = list(minio_client.list_objects(bucket_name, recursive=True))
             
             scope_pattern = f"Scope_{scope_number}"
-            logger.info(f"🔍 Searching for files with scope pattern: '{scope_pattern}' and combination: '{combination}' in bucket: '{bucket_name}'")
+            # logger.info(f"🔍 Searching for files with scope pattern: '{scope_pattern}' and combination: '{combination}' in bucket: '{bucket_name}'")
             
             for obj in all_objects:
                 obj_name = obj.object_name
@@ -1604,7 +1604,7 @@ class MMMStackModelDataProcessor:
                     logger.info(f"✅ Found matching file: {obj_name}")
             
             if not matching_objects:
-                logger.warning(f"❌ No files found for scope '{scope_pattern}' and combination '{combination}'")
+                # logger.warning(f"❌ No files found for scope '{scope_pattern}' and combination '{combination}'")
                 return None
             
             # Use the first matching file
@@ -1637,7 +1637,7 @@ class MMMStackModelDataProcessor:
             return df
             
         except Exception as e:
-            logger.error(f"❌ Error fetching combination file for scope '{scope_number}' and combination '{combination}': {e}")
+            # logger.error(f"❌ Error fetching combination file for scope '{scope_number}' and combination '{combination}': {e}")
             return None
     
     def _predict_with_betas(self, X: np.ndarray, coefficients: Dict[str, float], x_variables: List[str], intercept: float = 0.0) -> np.ndarray:
@@ -1688,7 +1688,7 @@ class MMMStackModelDataProcessor:
                 config = await get_column_classifier_config_from_mongo(client_name, app_name, project_name)
                 
                 if config:
-                    logger.info(f"✅ Retrieved column classifier config for {client_name}/{app_name}/{project_name}")
+                    # logger.info(f"✅ Retrieved column classifier config for {client_name}/{app_name}/{project_name}")
                     return config
                 else:
                     logger.warning(f"No column classifier config found for {client_name}/{app_name}/{project_name}")
@@ -1747,7 +1747,7 @@ class MMMStackModelDataProcessor:
             if invalid_identifiers:
                 raise ValueError(f"Invalid pooling identifiers: {invalid_identifiers}. Available identifiers: {all_identifiers}")
             
-            logger.info(f"Preparing stack model data for scope {scope_number} with {len(combinations)} combinations")
+            # logger.info(f"Preparing stack model data for scope {scope_number} with {len(combinations)} combinations")
             
             # Create data pooler instance
             data_pooler = MMMStackDataPooler(minio_client, bucket_name)
@@ -1766,7 +1766,7 @@ class MMMStackModelDataProcessor:
             if not pooled_data:
                 raise ValueError("No pooled data created")
             
-            logger.info(f"Created {len(pooled_data)} pools")
+            # logger.info(f"Created {len(pooled_data)} pools")
             
             # Step 2: Apply clustering to pooled data
             # Use user-specified clustering columns or default to all variables
@@ -1853,7 +1853,7 @@ class MMMStackModelDataProcessor:
                 'split_clustered_data': split_clustered_data  # Return the actual split clustered data
             }
             
-            logger.info(f"Successfully prepared stack model data: {len(split_clustered_data)} split clusters ready for modeling")
+            # logger.info(f"Successfully prepared stack model data: {len(split_clustered_data)} split clusters ready for modeling")
             return result
             
         except Exception as e:
@@ -1894,7 +1894,7 @@ class MMMStackModelDataProcessor:
            - Calculate metrics (MAPE, R², AIC, BIC, elasticities, contributions) for each combination
         """
         try:
-            logger.info(f"Starting MMM stack model training on {len(split_clustered_data)} split clusters")
+            # logger.info(f"Starting MMM stack model training on {len(split_clustered_data)} split clusters")
             
             # Step 1: Train stack models on pooled data to get betas
             stack_model_results = await self._train_stack_models_for_betas(
@@ -1903,31 +1903,25 @@ class MMMStackModelDataProcessor:
                 numerical_columns_for_interaction, test_size, price_column,
                 run_id, training_progress
             )
-            
-            # Step 2: Calculate individual combination metrics using stack betas
-            logger.info(f"📊 Checking parameters for individual combination metrics:")
-            logger.info(f"   scope_number: {scope_number} (type: {type(scope_number)})")
-            logger.info(f"   combinations: {combinations} (length: {len(combinations) if combinations else 0})")
-            logger.info(f"   minio_client: {minio_client is not None}")
-            logger.info(f"   bucket_name: {bucket_name}")
+
             
             if scope_number and combinations and minio_client and bucket_name:
-                logger.info(f"🔍 Calling _calculate_individual_combination_metrics with:")
-                logger.info(f"   Scope: {scope_number}")
-                logger.info(f"   Combinations: {combinations}")
-                logger.info(f"   X variables: {x_variables}")
-                logger.info(f"   Y variable: {y_variable}")
-                logger.info(f"   Stack model results count: {len(stack_model_results)}")
+                # logger.info(f"🔍 Calling _calculate_individual_combination_metrics with:")
+                # logger.info(f"   Scope: {scope_number}")
+                # logger.info(f"   Combinations: {combinations}")
+                # logger.info(f"   X variables: {x_variables}")
+                # logger.info(f"   Y variable: {y_variable}")
+                # logger.info(f"   Stack model results count: {len(stack_model_results)}")
                 
-                # Log sample of stack model results
-                if stack_model_results:
-                    sample_result = stack_model_results[0]
-                    logger.info(f"   Sample stack result keys: {list(sample_result.keys())}")
-                    logger.info(f"   Sample model name: {sample_result.get('model_name', 'unknown')}")
-                    logger.info(f"   Sample cluster combinations: {sample_result.get('cluster_combinations', [])}")
-                    logger.info(f"   Has combination betas: {'combination_betas' in sample_result}")
-                    if 'combination_betas' in sample_result:
-                        logger.info(f"   Sample combination betas: {sample_result['combination_betas']}")
+                # # Log sample of stack model results
+                # if stack_model_results:
+                #     sample_result = stack_model_results[0]
+                #     logger.info(f"   Sample stack result keys: {list(sample_result.keys())}")
+                #     logger.info(f"   Sample model name: {sample_result.get('model_name', 'unknown')}")
+                #     logger.info(f"   Sample cluster combinations: {sample_result.get('cluster_combinations', [])}")
+                #     logger.info(f"   Has combination betas: {'combination_betas' in sample_result}")
+                #     if 'combination_betas' in sample_result:
+                #         # logger.info(f"   Sample combination betas: {sample_result['combination_betas']}")
                 
                 individual_metrics = await self._calculate_individual_combination_metrics(
                     scope_number=scope_number,
@@ -1958,7 +1952,7 @@ class MMMStackModelDataProcessor:
                 'models_tested': models_to_run
             }
             
-            logger.info(f"Completed MMM stack model training with individual combination metrics")
+            # logger.info(f"Completed MMM stack model training with individual combination metrics")
             return final_results
             
         except Exception as e:
@@ -1988,10 +1982,7 @@ class MMMStackModelDataProcessor:
     ) -> List[Dict[str, Any]]:
         """Process a single parameter combination for stack MMM training."""
         try:
-            logger.info(f"Starting _process_combination_for_stack with {len(cluster_df)} records")
-            logger.info(f"Cluster columns: {list(cluster_df.columns)}")
-            logger.info(f"X variables: {x_variables_lower}")
-            logger.info(f"Y variable: {y_variable_lower}")
+
             
             # Step 1: Split by unique combinations and apply transformations
             transformed_combinations = []
@@ -2000,7 +1991,6 @@ class MMMStackModelDataProcessor:
             # Get unique combinations in this cluster
             if 'combination' in cluster_df.columns:
                 unique_combinations = cluster_df['combination'].unique()
-                logger.info(f"Found {len(unique_combinations)} unique combinations")
             else:
                 # If no combination column, treat entire cluster as one combination
                 unique_combinations = ['default_combination']
@@ -2015,7 +2005,6 @@ class MMMStackModelDataProcessor:
                 if len(combo_data) == 0:
                     continue
                 
-                logger.info(f"Transforming combination '{combination}' with {len(combo_data)} records")
                 
                 # Apply MMM transformations
                 transformed_combo, metadata, updated_combo_config = transformation_engine.apply_variable_transformations(
@@ -2031,8 +2020,7 @@ class MMMStackModelDataProcessor:
             
             # Step 2: Merge transformed combinations
             merged_df = pd.concat(transformed_combinations, ignore_index=True)
-            logger.info(f"Merged {len(transformed_combinations)} combinations into {len(merged_df)} records")
-            logger.info(f"Merged dataframe columns: {list(merged_df.columns)}")
+
             
             # Step 3: Create encoded combination features (always needed for stack modeling)
             if not apply_interaction_terms:
@@ -2056,7 +2044,7 @@ class MMMStackModelDataProcessor:
                 run_id, training_progress, cluster_info
             )
             
-            logger.info(f"Model training completed: {len(model_results)} models trained")
+            # logger.info(f"Model training completed: {len(model_results)} models trained")
             return model_results
             
         except Exception as e:
@@ -2083,7 +2071,7 @@ class MMMStackModelDataProcessor:
             # Check if we have enough combinations
             combination_unique_values = len(unique_combinations)
             if combination_unique_values <= 1:
-                logger.info(f"Only {combination_unique_values} unique combination(s), skipping encoded combination features")
+                # logger.info(f"Only {combination_unique_values} unique combination(s), skipping encoded combination features")
                 return enhanced_df
             
             # One-hot encode the combination column
@@ -2093,7 +2081,7 @@ class MMMStackModelDataProcessor:
             for dummy_col in combination_dummies.columns:
                 enhanced_df[dummy_col] = combination_dummies[dummy_col]
             
-            logger.info(f"Created {len(combination_dummies.columns)} encoded combination features: {list(combination_dummies.columns)}")
+            # logger.info(f"Created {len(combination_dummies.columns)} encoded combination features: {list(combination_dummies.columns)}")
             return enhanced_df
             
         except Exception as e:
@@ -2165,10 +2153,6 @@ class MMMStackModelDataProcessor:
     ) -> List[Dict[str, Any]]:
         """Train models for a specific parameter combination in stack MMM."""
         try:
-            logger.info(f"Starting _train_models_for_combination_stack with {len(df)} records")
-            logger.info(f"Dataframe columns: {list(df.columns)}")
-            logger.info(f"X variables: {x_variables_lower}")
-            logger.info(f"Y variable: {y_variable_lower}")
             
             import numpy as np
             from .models import get_models, safe_mape
@@ -2207,14 +2191,8 @@ class MMMStackModelDataProcessor:
             # Sort to ensure consistent order
             feature_columns.sort()
             
-            # Log feature information for debugging
-            logger.info(f"   - Total features for modeling: {len(feature_columns)}")
-            logger.info(f"   - Main x_variables: {x_variables_lower}")
-            encoded_features = [col for col in feature_columns if col.startswith('encoded_combination_')]
             interaction_features = [col for col in feature_columns if any(col.endswith(f'_x_{var}') for var in x_variables_lower)]
-            logger.info(f"   - Encoded combination features: {encoded_features}")
-            logger.info(f"   - Interaction features: {interaction_features}")
-            logger.info(f"   - All features: {feature_columns}")
+
             
             # Clean data - remove rows with missing values for ALL features
             all_columns = feature_columns + [y_variable_lower]
@@ -2268,8 +2246,7 @@ class MMMStackModelDataProcessor:
                     X, y, test_size=test_size, random_state=42, shuffle=True
                 )
             
-            # Convert boolean columns to numeric (encoded combination variables)
-            logger.info("Converting boolean columns to numeric for validation")
+
             # Note: feature_columns does not include 'combination' column, so it's automatically excluded
             X_train_df = pd.DataFrame(X_train, columns=feature_columns)
             X_test_df = pd.DataFrame(X_test, columns=feature_columns)
@@ -2367,11 +2344,7 @@ class MMMStackModelDataProcessor:
                                 negative_constraints = parameters.get('negative_constraints', [])
                                 positive_constraints = parameters.get('positive_constraints', [])
                             
-                            # Debug logging for constraints
-                            logger.info(f"🔍 Constrained Model - Parameters: {parameters}")
-                            logger.info(f"🔍 Constrained Model - Variable constraints: {variable_constraints}")
-                            logger.info(f"🔍 Constrained Model - Negative constraints: {negative_constraints}")
-                            logger.info(f"🔍 Constrained Model - Positive constraints: {positive_constraints}")
+
                             
                             if has_interaction_terms:
                                 models_dict[model_name] = StackConstrainedRidge(
@@ -2399,11 +2372,11 @@ class MMMStackModelDataProcessor:
                             if has_interaction_terms:
                                 # Stack modeling: use StackConstrainedLinearRegression for interaction terms
                                 from .models import StackConstrainedLinearRegression
-                                logger.info(f"🔍 Using StackConstrainedLinearRegression for stack modeling with interaction terms")
+                                # logger.info(f"🔍 Using StackConstrainedLinearRegression for stack modeling with interaction terms")
                             else:
                                 # Individual modeling: use ConstrainedLinearRegression for base features only
                                 from .models import ConstrainedLinearRegression
-                                logger.info(f"🔍 Using ConstrainedLinearRegression for individual modeling with base features only")
+                                # logger.info(f"🔍 Using ConstrainedLinearRegression for individual modeling with base features only")
                             
                             # Extract constraints from parameters object - handle both old and new formats
                             variable_constraints = parameters.get('variable_constraints', [])
@@ -2424,10 +2397,6 @@ class MMMStackModelDataProcessor:
                                 positive_constraints = parameters.get('positive_constraints', [])
                             
                             # Debug logging for constraints
-                            logger.info(f"🔍 Constrained Linear Model - Parameters: {parameters}")
-                            logger.info(f"🔍 Constrained Linear Model - Variable constraints: {variable_constraints}")
-                            logger.info(f"🔍 Constrained Linear Model - Negative constraints: {negative_constraints}")
-                            logger.info(f"🔍 Constrained Linear Model - Positive constraints: {positive_constraints}")
                             
                             if has_interaction_terms:
                                 models_dict[model_name] = StackConstrainedLinearRegression(
