@@ -77,7 +77,7 @@ def apply_transformation_steps(series: List[float], transformation_steps: List[D
             carryover = step.get('carryover', 0.0)
             current_series = [1 / (1 + np.exp(-growth_rate * (x - midpoint)))  for x in current_series]
         
-            logger.info(f"current series after logistic transformation: {current_series}")
+            # logger.info(f"current series after logistic transformation: {current_series}")
         
         elif step_type == 'minmax':
             # MinMax scaling: (x - scaler_min) / scaler_scale
@@ -87,8 +87,8 @@ def apply_transformation_steps(series: List[float], transformation_steps: List[D
                 current_series = [0.0] * len(current_series)
             else:
                 current_series = [(x - scaler_min) / scaler_scale for x in current_series]
-            logger.info(f"🔍 Current series after MinMax scaling: {current_series}")
-            logger.info(f"🔍 Scaler min: {scaler_min}, scaler scale: {scaler_scale}")
+            # logger.info(f"🔍 Current series after MinMax scaling: {current_series}")
+            # logger.info(f"🔍 Scaler min: {scaler_min}, scaler scale: {scaler_scale}")
         
  
     
@@ -181,7 +181,7 @@ async def get_transformation_metadata_from_mongodb(db, client_name: str, app_nam
     try:
         # Get the build configuration from MongoDB (same as actual vs predicted endpoint)
         document_id = f"{client_name}/{app_name}/{project_name}"
-        logger.info(f"🔍 Querying MongoDB for document_id: {document_id}")
+        # logger.info(f"🔍 Querying MongoDB for document_id: {document_id}")
         build_config = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
         
         if not build_config:
@@ -241,7 +241,7 @@ async def get_model_coefficients_from_mongodb(db, client_name: str, app_name: st
     try:
         # Get the build configuration from MongoDB (same as actual vs predicted endpoint)
         document_id = f"{client_name}/{app_name}/{project_name}"
-        logger.info(f"🔍 Querying MongoDB for document_id: {document_id}")
+        # logger.info(f"🔍 Querying MongoDB for document_id: {document_id}")
         build_config = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
         
         if not build_config:
@@ -327,7 +327,7 @@ def calculate_transformed_means(df: pd.DataFrame, transformation_metadata: Dict[
                 modified_step['scaler_mean'] = data_mean
                 modified_step['scaler_scale'] = data_std if data_std != 0 else 1.0
                 modified_steps.append(modified_step)
-                logger.info(f"🔍 Overriding standardization for {variable}: mean={data_mean:.4f}, scale={data_std:.4f}")
+                # logger.info(f"🔍 Overriding standardization for {variable}: mean={data_mean:.4f}, scale={data_std:.4f}")
             else:
                 modified_steps.append(step)
         
@@ -342,7 +342,7 @@ def calculate_transformed_means(df: pd.DataFrame, transformation_metadata: Dict[
         
         # Calculate mean of transformed series
         transformed_means[variable] = np.mean(transformed_series)
-        logger.info(f"🔍 Transformed mean for {variable}: {transformed_means[variable]}")
+        # logger.info(f"🔍 Transformed mean for {variable}: {transformed_means[variable]}")
     
     return transformed_means, modified_transformation_metadata
 
@@ -370,7 +370,7 @@ def transform_12month_and_save_parameters(df_12month: pd.DataFrame, transformati
         if not original_series:
             continue
         
-        logger.info(f"🔍 Transforming 12-month data for {variable}...")
+        # logger.info(f"🔍 Transforming 12-month data for {variable}...")
         
         # Apply transformations step by step and save parameters
         transformation_steps = metadata.get('transformation_steps', [])
@@ -379,7 +379,7 @@ def transform_12month_and_save_parameters(df_12month: pd.DataFrame, transformati
         
         for step in transformation_steps:
             step_type = step.get('step', '')
-            logger.info(f"🔍 Applying {step_type} transformation to {variable}...")
+            # logger.info(f"🔍 Applying {step_type} transformation to {variable}...")
             
             if step_type == 'adstock':
                 # Use original decay_rate, apply transformation
@@ -398,7 +398,7 @@ def transform_12month_and_save_parameters(df_12month: pd.DataFrame, transformati
                     'step': 'adstock',
                     'decay_rate': decay_rate
                 })
-                logger.info(f"🔍 Adstock applied - decay_rate: {decay_rate}")
+                # logger.info(f"🔍 Adstock applied - decay_rate: {decay_rate}")
                 
             elif step_type == 'logistic':
                 # Use original parameters, apply transformation
@@ -415,7 +415,7 @@ def transform_12month_and_save_parameters(df_12month: pd.DataFrame, transformati
                     'midpoint': midpoint,
                     'carryover': carryover
                 })
-                logger.info(f"🔍 Logistic applied - growth_rate: {growth_rate}, midpoint: {midpoint}")
+                # logger.info(f"🔍 Logistic applied - growth_rate: {growth_rate}, midpoint: {midpoint}")
                 
             elif step_type == 'standardization':
                 # Calculate fresh parameters from current series
@@ -433,7 +433,7 @@ def transform_12month_and_save_parameters(df_12month: pd.DataFrame, transformati
                     'scaler_mean': data_mean,
                     'scaler_scale': data_std if data_std != 0 else 1.0
                 })
-                logger.info(f"🔍 Standardization applied - fresh mean: {data_mean:.4f}, fresh std: {data_std:.4f}")
+                # logger.info(f"🔍 Standardization applied - fresh mean: {data_mean:.4f}, fresh std: {data_std:.4f}")
                 
             elif step_type == 'minmax':
                 # Calculate fresh parameters from current series
@@ -453,7 +453,7 @@ def transform_12month_and_save_parameters(df_12month: pd.DataFrame, transformati
                     'scaler_max': data_max,
                     'scaler_scale': data_scale if data_scale != 0 else 1.0
                 })
-                logger.info(f"🔍 MinMax applied - fresh min: {data_min:.4f}, fresh max: {data_max:.4f}")
+                # logger.info(f"🔍 MinMax applied - fresh min: {data_min:.4f}, fresh max: {data_max:.4f}")
         
         # Calculate transformed mean
         transformed_means[variable] = np.mean(current_series)
@@ -464,7 +464,7 @@ def transform_12month_and_save_parameters(df_12month: pd.DataFrame, transformati
             'transformation_steps': saved_steps
         }
         
-        logger.info(f"✅ Saved transformation metadata for {variable} with {len(saved_steps)} steps")
+        # logger.info(f"✅ Saved transformation metadata for {variable} with {len(saved_steps)} steps")
     
     return transformed_means, saved_transformation_metadata
 
@@ -506,7 +506,7 @@ def calculate_volume_series(
             break
     
     if variable_beta is None:
-        logger.warning(f"⚠️ No beta found for variable {variable_name}")
+        # logger.warning(f"⚠️ No beta found for variable {variable_name}")
         return [intercept] * len(transformed_scaled_series)
     
     # Calculate volume for each point: Volume = Intercept + (Variable × Beta)
@@ -548,7 +548,7 @@ async def get_s_curve_endpoint(
     
     try:
         # Get transformation metadata from MongoDB
-        logger.info(f"🔍 Getting transformation metadata from MongoDB...")
+        # logger.info(f"🔍 Getting transformation metadata from MongoDB...")
         transformation_metadata = await get_transformation_metadata_from_mongodb(
             db, client_name, app_name, project_name, combination_name, model_name
         )
@@ -635,8 +635,6 @@ async def get_s_curve_endpoint(
             model_coefficients, build_config = await get_model_coefficients_from_mongodb(
                 db, client_name, app_name, project_name, combination_name, model_name
             )
-            logger.info(f"🔍 Model coefficients: {model_coefficients}")
-            logger.info(f"✅ Model coefficients retrieved: {len(model_coefficients) if model_coefficients else 0} coefficients")
         
         
         # Get ROI configuration from the already fetched build_config
@@ -673,7 +671,7 @@ async def get_s_curve_endpoint(
             for combo_info in combination_file_keys:
                 if combo_info.get("combination") == combination_name:
                     source_file_key = combo_info.get("file_key")
-                    logger.info(f"✅ Found source file key for combination '{combination_name}': {source_file_key}")
+                    # logger.info(f"✅ Found source file key for combination '{combination_name}': {source_file_key}")
                     break
             
             if not source_file_key:
@@ -727,7 +725,7 @@ async def get_s_curve_endpoint(
                     "error": f"Unsupported file type: {source_file_key}",
                     "s_curves": {}
                 }
-            logger.info(f"✅ File read successfully, shape: {df.shape}, columns: {list(df.columns)}")
+
         except Exception as e:
             logger.error(f"Error reading source file: {str(e)}")
             return {
@@ -766,9 +764,9 @@ async def get_s_curve_endpoint(
         
  
         # Transform 12-month data and save parameters for S-curve use
-        logger.info(f"🔍 Transforming 12-month data and saving parameters...")
+        # logger.info(f"🔍 Transforming 12-month data and saving parameters...")
         transformed_means, saved_transformation_metadata = transform_12month_and_save_parameters(df_last_12_months, transformation_metadata)
-        logger.info(f"✅ Transformed means calculated for {len(transformed_means)} variables")
+        # logger.info(f"✅ Transformed means calculated for {len(transformed_means)} variables")
 
         
         # Extract model coefficients
@@ -776,7 +774,7 @@ async def get_s_curve_endpoint(
         betas = model_coefficients.get('betas', {})
         
         # Generate S-curves for each ROI variable
-        logger.info(f"🔍 Generating S-curves for {len(roi_variables)} ROI variables...")
+        # logger.info(f"🔍 Generating S-curves for {len(roi_variables)} ROI variables...")
         s_curves = {}
         
         for variable in roi_variables:
@@ -840,7 +838,7 @@ async def get_s_curve_endpoint(
             }
            
                 
-        logger.info(f"✅ S-curve generation completed successfully for {len(s_curves)} variables")
+        # logger.info(f"✅ S-curve generation completed successfully for {len(s_curves)} variables")
         return {
             "success": True,
             "combination_name": combination_name,

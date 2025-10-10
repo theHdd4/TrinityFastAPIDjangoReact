@@ -139,7 +139,7 @@ class MMMTransformationEngine:
         if all_same_params:
             # Scenario 1: All media variables have the same parameter combinations
             # Generate CROSS-PRODUCT combinations for all variables
-            logger.info("All media variables have the same parameter combinations - generating cross-product")
+            # logger.info("All media variables have the same parameter combinations - generating cross-product")
             
             # Generate parameter combinations for one variable
             # Note: logistic_carryover is not used in the transformation, so we use single value
@@ -173,13 +173,13 @@ class MMMTransformationEngine:
                 
                 combinations.append(new_config)
             
-            logger.info(f"Generated {len(combinations)} cross-product parameter combinations for {len(media_vars)} media variables")
-            logger.info(f"Each variable can have different parameter values in each combination")
+            # logger.info(f"Generated {len(combinations)} cross-product parameter combinations for {len(media_vars)} media variables")
+            # logger.info(f"Each variable can have different parameter values in each combination")
             
         else:
             # Scenario 2: Different parameter combinations for each media variable
             # Generate all possible combinations across variables
-            logger.info("Media variables have different parameter combinations")
+            # logger.info("Media variables have different parameter combinations")
             
             # Get all parameter combinations for each media variable
             var_combinations = {}
@@ -214,7 +214,7 @@ class MMMTransformationEngine:
             var_combination_counts = {var: len(combs) for var, combs in var_combinations.items()}
             total_combinations = len(combinations)
             
-            logger.info(f"Generated {total_combinations} parameter combinations:")
+            # logger.info(f"Generated {total_combinations} parameter combinations:")
             for var_name, count in var_combination_counts.items():
                 logger.info(f"  {var_name}: {count} combinations")
         
@@ -582,15 +582,7 @@ class MMMModelTrainer:
         self.transformation_engine = MMMTransformationEngine()
     
     def _filter_last_12_months(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Filter dataframe to include only the last 12 data points.
-        
-        Args:
-            df: DataFrame to filter
-            
-        Returns:
-            DataFrame with last 12 rows
-        """
+
         try:
             # Simply return the last 12 rows without any date sorting
             # This ensures consistent results every time
@@ -690,13 +682,13 @@ class MMMModelTrainer:
                         if (combination_name.lower() in config_combination.lower() or 
                             config_combination.lower() in combination_name.lower()):
                             matched_combination_name = config_combination
-                            logger.info(f"Partial match found: '{combination_name}' -> '{matched_combination_name}'")
+                            # logger.info(f"Partial match found: '{combination_name}' -> '{matched_combination_name}'")
                             break
         
         # Log combination matching results
         if per_combination_cprp:
             if matched_combination_name:
-                logger.info(f"✓ Combination match found: '{combination_name}' -> '{matched_combination_name}'")
+                # logger.info(f"✓ Combination match found: '{combination_name}' -> '{matched_combination_name}'")
             else:
                 logger.warning(f"⚠ No combination match found for '{combination_name}'")
                 logger.warning(f"Available combinations: {list(combination_cprp_values.keys())}")
@@ -716,18 +708,18 @@ class MMMModelTrainer:
                 combination_manual_prices = roi_config.get('combinationManualPriceValues', {})
                 if matched_combination_name and matched_combination_name in combination_manual_prices:
                     avg_price_column = float(combination_manual_prices[matched_combination_name])
-                    logger.info(f"Using manual price for combination '{matched_combination_name}': {avg_price_column}")
+                    # logger.info(f"Using manual price for combination '{matched_combination_name}': {avg_price_column}")
                 elif combination_name in combination_manual_prices:
                     avg_price_column = float(combination_manual_prices[combination_name])
-                    logger.info(f"Using manual price for combination '{combination_name}': {avg_price_column}")
+                    # logger.info(f"Using manual price for combination '{combination_name}': {avg_price_column}")
                 else:
                     # Fallback to global manual price
                     avg_price_column = float(roi_config.get('manualPriceValue', 1.0))
-                    logger.warning(f"No manual price found for combination '{combination_name}', using global: {avg_price_column}")
+                    # logger.warning(f"No manual price found for combination '{combination_name}', using global: {avg_price_column}")
             else:
                 # Use global manual price
                 avg_price_column = float(roi_config.get('manualPriceValue', 1.0))
-                logger.info(f"Using global manual price: {avg_price_column}")
+                # logger.info(f"Using global manual price: {avg_price_column}")
         else:
             # Use price column from data
             if price_column and price_column.lower() in full_original_df.columns:
@@ -738,10 +730,10 @@ class MMMModelTrainer:
                 if average_months and average_months > 0:
                     # Calculate rolling average and then take mean
                     avg_price_column = float(price_series.rolling(window=average_months, min_periods=1).mean().mean())
-                    logger.info(f"Price column '{price_column}' with {average_months}-month rolling average: {avg_price_column}")
+                    # logger.info(f"Price column '{price_column}' with {average_months}-month rolling average: {avg_price_column}")
                 else:
                     avg_price_column = float(price_series.mean())
-                    logger.info(f"Price column '{price_column}' average value: {avg_price_column}")
+                    # logger.info(f"Price column '{price_column}' average value: {avg_price_column}")
             else:
                 logger.warning(f"Price column '{price_column}' not found in dataframe columns: {list(full_original_df.columns)}")
                 logger.warning(f"Using default avg_price_column = {avg_price_column}")
@@ -750,13 +742,13 @@ class MMMModelTrainer:
         features_to_calculate = features_config
         
         if not features_to_calculate:
-            logger.warning(f"⚠️ No features to calculate ROI for in combination '{combination_name}'")
-            logger.warning(f"   roi_variables: {roi_variables}")
-            logger.warning(f"   global_cost_per_unit: {global_cost_per_unit}")
-            logger.warning(f"   features from config: {roi_config.get('features', {})}")
+            # logger.warning(f"⚠️ No features to calculate ROI for in combination '{combination_name}'")
+            # logger.warning(f"   roi_variables: {roi_variables}")
+            # logger.warning(f"   global_cost_per_unit: {global_cost_per_unit}")
+            # logger.warning(f"   features from config: {roi_config.get('features', {})}")
             return roi_results
         
-        logger.info(f"📊 Calculating ROI for {len(features_to_calculate)} features: {list(features_to_calculate.keys())}")
+        # logger.info(f"📊 Calculating ROI for {len(features_to_calculate)} features: {list(features_to_calculate.keys())}")
         
         # Calculate ROI for each selected feature
         for feature_name, feature_config in features_to_calculate.items():
@@ -773,18 +765,18 @@ class MMMModelTrainer:
                     # Get combination-specific cost per unit
                     if matched_combination_name and matched_combination_name in combination_cost_per_unit_values:
                         cprp_value = combination_cost_per_unit_values[matched_combination_name].get(feature_name, 0)
-                        logger.info(f"Using per-combination cost per unit for '{feature_name}' in '{matched_combination_name}': {cprp_value}")
+                        # logger.info(f"Using per-combination cost per unit for '{feature_name}' in '{matched_combination_name}': {cprp_value}")
                     elif combination_name in combination_cost_per_unit_values:
                         cprp_value = combination_cost_per_unit_values[combination_name].get(feature_name, 0)
-                        logger.info(f"Using per-combination cost per unit for '{feature_name}' in '{combination_name}': {cprp_value}")
+                        # logger.info(f"Using per-combination cost per unit for '{feature_name}' in '{combination_name}': {cprp_value}")
                     else:
                         # Fallback to global cost per unit
                         cprp_value = global_cost_per_unit.get(feature_name, 0)
-                        logger.warning(f"No per-combination cost found for '{combination_name}', using global: {cprp_value}")
+                        # logger.warning(f"No per-combination cost found for '{combination_name}', using global: {cprp_value}")
                 else:
                     # Use global cost per unit
                     cprp_value = global_cost_per_unit.get(feature_name, 0)
-                    logger.info(f"Using global cost per unit for '{feature_name}': {cprp_value}")
+                    # logger.info(f"Using global cost per unit for '{feature_name}': {cprp_value}")
             else:
                 # Use CPRP values (original logic)
                 if feature_config.get('type') != 'CPRP':
@@ -795,7 +787,7 @@ class MMMModelTrainer:
                     # Use matched combination name to get CPRP values
                     combination_values = combination_cprp_values[matched_combination_name]
                     cprp_value = combination_values.get(feature_name, 0)
-                    logger.info(f"Using per-combination CPRP for '{feature_name}' in '{matched_combination_name}': {cprp_value}")
+                    # logger.info(f"Using per-combination CPRP for '{feature_name}' in '{matched_combination_name}': {cprp_value}")
                 else:
                     cprp_value = feature_config.get('value', 0)
                     if per_combination_cprp:
@@ -812,13 +804,13 @@ class MMMModelTrainer:
             # Get coefficient for this feature
             beta_key = f"Beta_{feature_lower}"
             beta = unstandardized_coefficients.get(beta_key, 0)
-            logger.info(f"   Processing ROI for {feature_name}: beta={beta}, cprp_value={cprp_value}")
+            
             
             # Calculate sigma_j(beta * transformed(xij)) - sum of beta * transformed values
             if feature_lower in transformed_df.columns:
                 transformed_values = transformed_df[feature_lower].values
                 beta_transformed_sum = np.sum(beta * transformed_values)
-                logger.info(f"   {feature_name}: beta_transformed_sum = {beta_transformed_sum} (from {len(transformed_values)} values)")
+                # logger.info(f"   {feature_name}: beta_transformed_sum = {beta_transformed_sum} (from {len(transformed_values)} values)")
             else:
                 logger.warning(f"   Feature {feature_lower} not found in transformed_df columns: {list(transformed_df.columns)}")
                 beta_transformed_sum = 0
@@ -826,14 +818,14 @@ class MMMModelTrainer:
             if feature_lower in X_original.columns:
                 original_values = X_original[feature_lower].values
                 cprp_original_sum = np.sum(cprp_value * original_values)
-                logger.info(f"   {feature_name}: cprp_original_sum = {cprp_original_sum} (cprp={cprp_value} * sum of {len(original_values)} values)")
+                # logger.info(f"   {feature_name}: cprp_original_sum = {cprp_original_sum} (cprp={cprp_value} * sum of {len(original_values)} values)")
             else:
                 cprp_original_sum = 0
             
             # Calculate ROI using the formula
             if cprp_original_sum != 0:
                 roi = (beta_transformed_sum / cprp_original_sum) * avg_price_column
-                logger.info(f"   {feature_name}: ROI = ({beta_transformed_sum} / {cprp_original_sum}) * {avg_price_column} = {roi}")
+                # logger.info(f"   {feature_name}: ROI = ({beta_transformed_sum} / {cprp_original_sum}) * {avg_price_column} = {roi}")
             else:
                 roi = 0
             
@@ -911,7 +903,7 @@ class MMMModelTrainer:
         parameter_combinations = self.transformation_engine.generate_parameter_combinations(
             variable_configs, df=df
         )
-        logger.info(f"Generated {len(parameter_combinations)} combinations")
+        # logger.info(f"Generated {len(parameter_combinations)} combinations")
         
         # Log default parameters being used for media variables
         media_vars = [var for var, config in variable_configs.items() if config.get("type") == "media"]
@@ -1168,8 +1160,8 @@ class MMMModelTrainer:
                     # For "none" or "media" transformations, intercept remains as-is
                     
 
-                    logger.info(f"Unstandardized coefficients: {unstandardized_coefficients}")
-                    logger.info(f"standardized coefficients: {coefficients}")
+                    # logger.info(f"Unstandardized coefficients: {unstandardized_coefficients}")
+                    # logger.info(f"standardized coefficients: {coefficients}")
                     # Calculate AIC and BIC
                     n_samples = len(y_train)
                     n_params = len(x_variables_lower) + 1  # +1 for intercept
@@ -1292,18 +1284,18 @@ class MMMModelTrainer:
                         
                         logger.info(f"ROI calculation completed for {model_name} in combination {combination_name}: {len(roi_results)} features processed")
                         
-                        # Log ROI results for verification
-                        if roi_results:
-                            logger.info("=" * 80)
-                            logger.info(f"🎯 ROI RESULTS FOR {model_name} - {combination_name}")
-                            logger.info("=" * 80)
-                            for feature_name, roi_data in roi_results.items():
-                                logger.info(f"📊 {feature_name}:")
-                                logger.info(f"   🎯 FINAL ROI: {roi_data['roi']:.6f}")
-                                logger.info("-" * 40)
-                            logger.info("=" * 80)
-                        else:
-                            logger.warning(f"⚠️ No ROI results generated for {model_name} in {combination_name}")
+                        # # Log ROI results for verification
+                        # if roi_results:
+                        #     logger.info("=" * 80)
+                        #     logger.info(f"🎯 ROI RESULTS FOR {model_name} - {combination_name}")
+                        #     logger.info("=" * 80)
+                        #     for feature_name, roi_data in roi_results.items():
+                        #         logger.info(f"📊 {feature_name}:")
+                        #         logger.info(f"   🎯 FINAL ROI: {roi_data['roi']:.6f}")
+                        #         logger.info("-" * 40)
+                        #     logger.info("=" * 80)
+                        # else:
+                        #     logger.warning(f"⚠️ No ROI results generated for {model_name} in {combination_name}")
                             
                     elif roi_config:
                         logger.warning("ROI config provided but combination_name is missing. Skipping ROI calculation.")
@@ -1334,11 +1326,11 @@ class MMMModelTrainer:
                     }
                     
                     # Debug: Log final coefficients being returned
-                    logger.info(f"Final coefficients for {model_name}: {coefficients}")
-                    logger.info(f"Final unstandardized coefficients for {model_name}: {unstandardized_coefficients}")
+                    # logger.info(f"Final coefficients for {model_name}: {coefficients}")
+                    # logger.info(f"Final unstandardized coefficients for {model_name}: {unstandardized_coefficients}")
                     
                     model_results.append(model_result)
-                    logger.info(f"Completed training {model_name} (combo {combo_idx + 1}): MAPE={mape_test:.4f}, R²={r2_test:.4f}")
+                    # logger.info(f"Completed training {model_name} (combo {combo_idx + 1}): MAPE={mape_test:.4f}, R²={r2_test:.4f}")
                     
                 except Exception as e:
                     logger.error(f"Error training model {model_name} (combo {combo_idx + 1}): {e}")
