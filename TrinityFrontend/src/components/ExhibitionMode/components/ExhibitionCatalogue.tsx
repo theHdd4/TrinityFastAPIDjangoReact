@@ -4,10 +4,13 @@ import { ChevronLeft, ChevronRight, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DroppedAtom, LayoutCard } from '../store/exhibitionStore';
 
+type SlideIndexLookup = ReadonlyMap<string, number> | Record<string, number>;
+
 interface ExhibitionCatalogueProps {
   cards: LayoutCard[];
   currentSlide: number;
-  onSlideSelect: (index: number) => void;
+  onSlideSelect?: (index: number) => void;
+  slideIndexByCardId?: SlideIndexLookup;
   onDragStart?: (atom: DroppedAtom, cardId: string, origin: 'catalogue' | 'slide') => void;
   onDragEnd?: () => void;
   enableDragging?: boolean;
@@ -18,18 +21,49 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
   cards,
   currentSlide,
   onSlideSelect,
+  slideIndexByCardId,
   onDragStart,
   onDragEnd,
   enableDragging = true,
   onCollapse,
 }) => {
-  const getSlideTitle = (card: LayoutCard, index: number) => {
-    if (card.moleculeTitle) {
-      return card.atoms.length > 0
-        ? `${card.moleculeTitle} - ${card.atoms[0].title}`
-        : card.moleculeTitle;
+  const resolveSlideIndex = (cardId: string): number | undefined => {
+    if (!slideIndexByCardId) {
+      return undefined;
     }
-    return card.atoms.length > 0 ? card.atoms[0].title : `Slide ${index + 1}`;
+
+    if (slideIndexByCardId instanceof Map) {
+      const mapped = slideIndexByCardId.get(cardId);
+      return typeof mapped === 'number' ? mapped : undefined;
+    }
+
+    const mapped = slideIndexByCardId[cardId];
+    return typeof mapped === 'number' ? mapped : undefined;
+  };
+
+  const getCatalogueTitle = (card: LayoutCard): string => {
+    if (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0) {
+      return card.moleculeTitle.trim();
+    }
+
+    const availableAtoms = card.catalogueAtoms ?? card.atoms;
+    const fromMetadata = availableAtoms.find(atom => {
+      const candidate = atom?.metadata?.sourceAtomTitle;
+      return typeof candidate === 'string' && candidate.trim().length > 0;
+    });
+
+    if (fromMetadata?.metadata?.sourceAtomTitle) {
+      return fromMetadata.metadata.sourceAtomTitle.trim();
+    }
+
+    if (availableAtoms.length > 0) {
+      const fallbackTitle = availableAtoms.find(atom => typeof atom.title === 'string' && atom.title.trim().length > 0);
+      if (fallbackTitle?.title) {
+        return fallbackTitle.title.trim();
+      }
+    }
+
+    return 'Exhibited Atom';
   };
 
   return (
@@ -59,35 +93,47 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
 
       <ScrollArea className="flex-1">
         <div className="p-2">
-          {cards.map((card, index) => {
+          {cards.map(card => {
             const availableAtoms = card.catalogueAtoms ?? card.atoms;
+            const catalogueTitle = getCatalogueTitle(card);
+            const slideIndex = resolveSlideIndex(card.id);
+            const isLinkedToSlide = typeof slideIndex === 'number';
+            const isActive = isLinkedToSlide && slideIndex === currentSlide;
 
             return (
               <div key={card.id} className="mb-2">
                 <button
                   type="button"
-                  onClick={() => onSlideSelect(index)}
+                  onClick={() => {
+                    if (!onSlideSelect || !isLinkedToSlide) {
+                      return;
+                    }
+                    onSlideSelect(slideIndex);
+                  }}
+                  disabled={!isLinkedToSlide || !onSlideSelect}
                   className={cn(
                     'w-full text-left px-3 py-2 rounded-lg transition-all group hover:bg-muted/50',
-                    currentSlide === index && 'bg-primary/10 border border-primary/30'
+                    isActive && 'bg-primary/10 border border-primary/30',
+                    (!isLinkedToSlide || !onSlideSelect) && 'opacity-70 cursor-default hover:bg-transparent'
                   )}
+                  title={`Select ${catalogueTitle}`}
                 >
                   <div className="flex items-center gap-2 mb-1">
                     <ChevronRight
                       className={cn(
                         'h-4 w-4 transition-transform',
-                        currentSlide === index && 'rotate-90'
+                        isActive && 'rotate-90'
                       )}
                     />
-                    <span className="text-sm font-medium truncate">
-                      {index + 1}. {getSlideTitle(card, index)}
-                    </span>
+                    <span className="text-sm font-semibold truncate">{catalogueTitle}</span>
                   </div>
                 </button>
 
-                {currentSlide === index && availableAtoms.length > 0 && (
-                  <div className="ml-6 mt-2 space-y-1">
-                    {availableAtoms.map(atom => (
+                <div className="ml-6 mt-2 space-y-1">
+                  {availableAtoms.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground">No components exhibited yet.</p>
+                  ) : (
+                    availableAtoms.map(atom => (
                       <div
                         key={atom.id}
                         draggable={enableDragging && Boolean(onDragStart)}
@@ -110,16 +156,23 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
                         )}
                       >
                         <div className={`w-2 h-2 ${atom.color} rounded-full flex-shrink-0`} />
-                        <span className="text-xs truncate">{atom.title}</span>
+                        <div className="flex flex-col text-left">
+                          <span className="text-xs font-medium text-foreground truncate">{atom.title}</span>
+                          {atom.metadata?.sourceAtomTitle && (
+                            <span className="text-[10px] text-muted-foreground truncate">
+                              {atom.metadata.sourceAtomTitle}
+                            </span>
+                          )}
+                        </div>
                         {enableDragging && onDragStart && (
                           <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
                             <span className="text-[10px] text-muted-foreground">Drag</span>
                           </div>
                         )}
                       </div>
-                    ))}
-                  </div>
-                )}
+                    ))
+                  )}
+                </div>
               </div>
             );
           })}
