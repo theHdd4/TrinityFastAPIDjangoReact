@@ -6,6 +6,24 @@ export interface ExhibitionSkuPayload {
   details?: Record<string, any>;
 }
 
+export interface ExhibitionFeatureOverviewTrendSettingsPayload {
+  chartType: string;
+  theme: string;
+  colorPalette?: string[];
+  showGrid: boolean;
+  showLegend: boolean;
+  showDataLabels: boolean;
+  showAxisLabels: boolean;
+  xAxisField?: string;
+  yAxisField?: string;
+}
+
+export interface ExhibitionFeatureOverviewSkuStatisticsSettingsPayload {
+  visibility: Record<string, boolean>;
+  tableRows?: Record<string, any>[];
+  tableColumns?: string[];
+}
+
 export interface ExhibitionFeatureOverviewPayload {
   atomId: string;
   cardId: string;
@@ -14,6 +32,8 @@ export interface ExhibitionFeatureOverviewPayload {
     trendAnalysis: boolean;
   };
   skus: ExhibitionSkuPayload[];
+  chartSettings?: ExhibitionFeatureOverviewTrendSettingsPayload;
+  skuStatisticsSettings?: ExhibitionFeatureOverviewSkuStatisticsSettingsPayload;
 }
 
 export interface ExhibitionConfigurationPayload {

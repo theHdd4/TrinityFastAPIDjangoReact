@@ -111,8 +111,11 @@ export interface FeatureOverviewExhibitionSelectionChartState {
   theme: string;
   showDataLabels: boolean;
   showAxisLabels: boolean;
+  showGrid: boolean;
+  showLegend: boolean;
   xAxisField: string;
   yAxisField: string;
+  colorPalette?: string[];
 }
 
 export interface FeatureOverviewExhibitionSelectionContext {

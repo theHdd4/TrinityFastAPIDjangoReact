@@ -540,10 +540,12 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   // Chart type and theme state for chart type changes
   const [chartType, setChartType] = useState<string>('line_chart');
   const [chartTheme, setChartTheme] = useState<string>('default');
-  
+
   // Chart display options state
   const [showDataLabels, setShowDataLabels] = useState<boolean>(false);
   const [showAxisLabels, setShowAxisLabels] = useState<boolean>(true);
+  const [showGrid, setShowGrid] = useState<boolean>(true);
+  const [showLegend, setShowLegend] = useState<boolean>(true);
 
   // State for managing expanded views
   const [showStatsSummary, setShowStatsSummary] = useState<boolean>(false);
@@ -890,6 +892,14 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     setShowAxisLabels(show);
   };
 
+  const handleGridToggle = (show: boolean) => {
+    setShowGrid(show);
+  };
+
+  const handleLegendToggle = (show: boolean) => {
+    setShowLegend(show);
+  };
+
   // Handle metric graph expansion
   const handleMetricView = (metric: string) => {
     setActiveMetric(metric);
@@ -1117,6 +1127,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
             theme: chartTheme,
             showDataLabels,
             showAxisLabels,
+            showGrid,
+            showLegend,
             xAxisField,
             yAxisField: metric,
           },
@@ -1510,6 +1522,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       .forEach((d) => {
         combo[d] = row[d.toLowerCase()];
       });
+      
      if (!Array.isArray(settings.yAxes) || settings.yAxes.length === 0) {
        toast({
          title:
@@ -1534,13 +1547,17 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           combination: JSON.stringify(combo),
           x_column: settings.xAxis || "date",
         });
+        
         const res = await fetch(
           `${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}`,
         );
+        
         if (!res.ok) {
           throw new Error("Failed to fetch statistics");
         }
-        result[y] = await res.json();
+        
+        const responseData = await res.json();
+        result[y] = responseData;
       }
       setStatDataMap(result);
       setActiveMetric(settings.yAxes[0]);
@@ -2079,14 +2096,18 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                                                 title=""
                                                                 xAxisLabel={settings.xAxis || "Date"}
                                                                 yAxisLabel={m || "Value"}
-                                                                showDataLabels={showDataLabels}
-                                                                showAxisLabels={showAxisLabels}
-                                                                theme={chartTheme}
-                                                                onChartTypeChange={handleChartTypeChange}
-                                                                onThemeChange={handleChartThemeChange}
-                                                                onDataLabelsToggle={handleDataLabelsToggle}
-                                                                onAxisLabelsToggle={handleAxisLabelsToggle}
-                                                              />
+                                                              showDataLabels={showDataLabels}
+                                                              showAxisLabels={showAxisLabels}
+                                                              showGrid={showGrid}
+                                                              showLegend={showLegend}
+                                                              theme={chartTheme}
+                                                              onChartTypeChange={handleChartTypeChange}
+                                                              onThemeChange={handleChartThemeChange}
+                                                              onDataLabelsToggle={handleDataLabelsToggle}
+                                                              onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                              onGridToggle={handleGridToggle}
+                                                              onLegendToggle={handleLegendToggle}
+                                                            />
                                                             </div>
                                                           </div>
                                                         </DialogContent>
@@ -2115,11 +2136,15 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                                           yAxisLabel={m || "Value"}
                                                           showDataLabels={showDataLabels}
                                                           showAxisLabels={showAxisLabels}
+                                                          showGrid={showGrid}
+                                                          showLegend={showLegend}
                                                           theme={chartTheme}
                                                           onChartTypeChange={handleChartTypeChange}
                                                           onThemeChange={handleChartThemeChange}
                                                           onDataLabelsToggle={handleDataLabelsToggle}
                                                           onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                          onGridToggle={handleGridToggle}
+                                                          onLegendToggle={handleLegendToggle}
                                                         />
                                                       </div>
                                                     </div>

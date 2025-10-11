@@ -115,3 +115,29 @@ export function describeColumn(dfId: string, column: string) {
     column,
   });
 }
+
+export function transformColumnCase(dfId: string, column: string, caseType: 'lower' | 'upper' | 'camel' | 'pascal' | 'lower_camel' | 'snake' | 'screaming_snake' | 'kebab' | 'train' | 'flat') {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/transform_column_case`, {
+    df_id: dfId,
+    column,
+    case_type: caseType,
+  });
+}
+
+export function findAndReplace(dfId: string, findText: string, replaceText: string, replaceAll: boolean = false, caseSensitive: boolean = false) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/find_and_replace`, {
+    df_id: dfId,
+    find_text: findText,
+    replace_text: replaceText,
+    replace_all: replaceAll,
+    case_sensitive: caseSensitive,
+  });
+}
+
+export function countMatches(dfId: string, findText: string, caseSensitive: boolean = false) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/count_matches`, {
+    df_id: dfId,
+    find_text: findText,
+    case_sensitive: caseSensitive,
+  });
+}

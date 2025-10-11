@@ -464,17 +464,59 @@ def _lowercase_columns(df: pl.DataFrame) -> pl.DataFrame:
 
 def _parse_datetime_column(frame: pl.DataFrame, column: str) -> pl.DataFrame:
     """Ensure the provided column is represented as a Polars Datetime column."""
-
+    
     dtype = frame.schema.get(column)
+    
     if dtype in (pl.Date, pl.Datetime):
         return frame.with_columns(pl.col(column).cast(pl.Datetime).alias(column))
 
-    return frame.with_columns(
-        pl.col(column)
-        .cast(pl.Utf8, strict=False)
-        .str.strptime(pl.Datetime, strict=False, exact=False)
-        .alias(column)
-    )
+    # Try multiple date formats in order of likelihood
+    date_formats = [
+        ("%d-%m-%Y", "DD-MM-YYYY"),
+        ("%Y-%m-%d", "YYYY-MM-DD"), 
+        ("%m/%d/%Y", "MM/DD/YYYY"),
+        ("%d/%m/%Y", "DD/MM/YYYY"),
+        ("%Y/%m/%d", "YYYY/MM/DD"),
+        ("%d-%m-%y", "DD-MM-YY"),
+        ("%y-%m-%d", "YY-MM-DD"),
+        ("%m-%d-%Y", "MM-DD-YYYY"),
+        ("%d.%m.%Y", "DD.MM.YYYY"),
+        ("%Y.%m.%d", "YYYY.MM.DD"),
+    ]
+    
+    for date_format, format_name in date_formats:
+        try:
+            result = frame.with_columns(
+                pl.col(column)
+                .cast(pl.Utf8, strict=False)
+                .str.strptime(pl.Datetime, format=date_format, strict=False)
+                .alias(column)
+            )
+            
+            # Check if parsing was successful (no nulls introduced)
+            null_count_after = result.select(column).null_count().item()
+            original_null_count = frame.select(column).null_count().item()
+            
+            if null_count_after <= original_null_count:
+                return result
+            else:
+                continue
+                
+        except Exception:
+            continue
+    
+    # Final fallback: try automatic parsing
+    try:
+        result = frame.with_columns(
+            pl.col(column)
+            .cast(pl.Utf8, strict=False)
+            .str.strptime(pl.Datetime, strict=False, exact=False)
+            .alias(column)
+        )
+        return result
+        
+    except Exception:
+        return frame
 
 
 def _prepare_timeseries(
@@ -527,14 +569,11 @@ async def sku_stats(
     if '%' in object_name:
         # URL-encoded, decode it
         decoded_object_name = unquote(object_name)
-        print(f"🔧 URL-decoded object_name: {object_name} -> {decoded_object_name}")
     else:
         # Not URL-encoded, use as-is
         decoded_object_name = object_name
-        print(f"🔧 Using object_name as-is: {object_name}")
     
     object_name = decoded_object_name
-    print(f"➡️ sku_stats request: {object_name}")
     parts = object_name.split("/", 3)
     client = parts[0] if len(parts) > 0 else ""
     app = parts[1] if len(parts) > 1 else ""
@@ -576,9 +615,26 @@ async def sku_stats(
 
         filter_exprs = []
         for raw_key, raw_value in combo.items():
-            col = raw_key.lower()
-            if col not in frame.columns:
+            # Find matching column (case-insensitive)
+            col = None
+            raw_key_lower = raw_key.lower()
+            
+            # First try exact match, then case-insensitive match
+            if raw_key in frame.columns:
+                col = raw_key
+            elif raw_key_lower in frame.columns:
+                col = raw_key_lower
+            else:
+                # Try case-insensitive search through all columns
+                for frame_col in frame.columns:
+                    if frame_col.lower() == raw_key_lower:
+                        col = frame_col
+                        break
+            
+            if col is None:
+                # Column not found, skip this filter
                 continue
+                
             frame = frame.with_columns(
                 pl.col(col).cast(pl.Utf8, strict=False).alias(col)
             )
@@ -588,7 +644,7 @@ async def sku_stats(
             else:
                 value = "" if raw_value is None else str(raw_value)
                 filter_exprs.append(pl.col(col) == value)
-
+        
         if filter_exprs:
             condition = reduce(lambda acc, expr: acc & expr, filter_exprs[1:], filter_exprs[0])
             frame = frame.filter(condition)
