@@ -1483,6 +1483,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       .forEach((d) => {
         combo[d] = row[d.toLowerCase()];
       });
+      
      if (!Array.isArray(settings.yAxes) || settings.yAxes.length === 0) {
        toast({
          title:
@@ -1507,13 +1508,17 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           combination: JSON.stringify(combo),
           x_column: settings.xAxis || "date",
         });
+        
         const res = await fetch(
           `${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}`,
         );
+        
         if (!res.ok) {
           throw new Error("Failed to fetch statistics");
         }
-        result[y] = await res.json();
+        
+        const responseData = await res.json();
+        result[y] = responseData;
       }
       setStatDataMap(result);
       setActiveMetric(settings.yAxes[0]);
