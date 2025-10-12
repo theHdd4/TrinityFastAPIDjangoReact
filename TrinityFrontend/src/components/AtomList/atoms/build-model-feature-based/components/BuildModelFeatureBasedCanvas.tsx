@@ -332,14 +332,57 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         }
       };
     } else {
-      // General models payload (existing logic)
+      // Construct variable_configs from transformations for General modeling (per-variable)
+      const variableConfigs: { [key: string]: any } = {};
+      
+      // Create a mapping of variables to their transformations
+      finalData.xVariables?.forEach((xVar, xVarIndex) => {
+        const transformation = finalData.transformations?.[xVarIndex] || 'none';
+        
+        if (Array.isArray(xVar)) {
+          // Handle array variables (multiple selections in one row)
+          xVar.forEach((variable) => {
+            if (variable) {
+              variableConfigs[variable] = getTransformationConfig(transformation);
+            }
+          });
+        } else if (xVar) {
+          // Handle single variable
+          variableConfigs[xVar] = getTransformationConfig(transformation);
+        }
+      });
+      
+      // Helper function to get transformation config
+      function getTransformationConfig(transformation: string) {
+        if (transformation === 'media') {
+          return {
+            type: 'media'
+            // Parameters are hardcoded in backend as requested
+          };
+        } else if (transformation === 'standardize') {
+          return {
+            type: 'standard'
+          };
+        } else if (transformation === 'normalize') {
+          return {
+            type: 'minmax'
+          };
+        } else {
+          return {
+            type: 'none'
+          };
+        }
+      }
+      
+      // General models payload with per-variable transformations
       requestPayload = {
         run_id: tempRunId, // Send the run_id for progress tracking
         scope_number: finalData.selectedScope, // Send the scope number directly
         combinations: finalData.selectedCombinations, // Send the combination strings directly
         x_variables: allXVariables.map((variable) => variable.toLowerCase()),
         y_variable: finalData.yVariable?.toLowerCase(),
-        standardization: standardization,
+        variable_configs: variableConfigs, // Per-variable transformations
+        standardization: standardization, // Keep for backward compatibility
         custom_model_configs: null, // Can be enhanced later
         // Individual modeling fields
         individual_modeling: finalData.individualModeling ?? false,
@@ -2130,8 +2173,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                           </div>
                         )}
                         
-                        {/* ROI Table */}
-                        {combination.model_results && combination.model_results.length > 0 && (
+                        {/* ROI Table - Only show for MMM models */}
+                        {finalData?.modelType === 'mmm' && combination.model_results && combination.model_results.length > 0 && (
                           <div className="bg-gray-50 rounded-lg p-4">
                             <h5 className="font-semibold text-lg text-gray-700 mb-4 flex items-center gap-2">
                               <DollarSign className="w-5 h-5 text-green-600" />

@@ -47,8 +47,12 @@ async def save_build_config(
             # Merge build_data with existing data
             for key, value in build_data.items():
                 if key in merged_document:
-                    # If key exists and both are lists, extend the list
-                    if isinstance(merged_document[key], list) and isinstance(value, list):
+                    # Special handling for combination_file_keys - replace instead of extend
+                    if key == "combination_file_keys" and isinstance(merged_document[key], list) and isinstance(value, list):
+                        merged_document[key] = value  # Replace the entire list
+                        logger.info(f"🔄 Replaced combination_file_keys with {len(value)} entries")
+                    # If key exists and both are lists, extend the list (for other list fields)
+                    elif isinstance(merged_document[key], list) and isinstance(value, list):
                         merged_document[key].extend(value)
                     # If key exists and both are dicts, merge the dicts
                     elif isinstance(merged_document[key], dict) and isinstance(value, dict):

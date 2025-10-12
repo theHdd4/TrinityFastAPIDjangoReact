@@ -30,8 +30,9 @@ class StackModelTrainer:
         pool_by_identifiers: List[str],
         x_variables: List[str],
         y_variable: str,
-        minio_client,
-        bucket_name: str,
+        variable_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        minio_client = None,
+        bucket_name: str = None,
         # Clustering parameters
         apply_clustering: bool = False,
         numerical_columns_for_clustering: List[str] = None,
@@ -92,11 +93,19 @@ class StackModelTrainer:
             logger.info(f"  - negative_constraints: {negative_constraints}")
             logger.info(f"  - positive_constraints: {positive_constraints}")
             
+            # Convert variable_configs keys to lowercase for consistency
+            variable_configs_lower = {}
+            if variable_configs:
+                for var, config in variable_configs.items():
+                    variable_configs_lower[var.lower()] = config
+                logger.info(f"🔧 Variable configs for stack modeling: {variable_configs_lower}")
+            
             # Use the processor to train models on stacked data
             training_results = await self.processor.process_split_clustered_data(
                 split_clustered_data=split_clustered_data,
                 x_variables_lower=x_variables_lower,
                 y_variable_lower=y_variable_lower,
+                variable_configs=variable_configs_lower,  # Pass per-variable transformations
                 standardization=standardization,  
                 k_folds=k_folds,
                 models_to_run=models_to_run,
@@ -151,8 +160,7 @@ class StackModelTrainer:
                     simplified_model_results = []
                     for model_result in result.get('model_results', []):
                         # Debug: Log the model result structure
-                        logger.info(f"🔍 DEBUG: Model result keys: {list(model_result.keys())}")
-                        logger.info(f"🔍 DEBUG: Model result: {model_result}")
+                 
                         
                         # Check for missing required fields
                         missing_fields = []
@@ -263,70 +271,50 @@ class StackModelTrainer:
             coefficients = model_result['coefficients']
             intercept = model_result['intercept']
             
-            logger.info(f"Calculating combination betas for model: {model_name}")
-            logger.info(f"Available coefficients: {list(coefficients.keys())}")
-            logger.info(f"Requested combinations: {combinations}")
+            # logger.info(f"Calculating combination betas for model: {model_name}")
+            # logger.info(f"Available coefficients: {list(coefficients.keys())}")
+            # logger.info(f"Requested combinations: {combinations}")
             
             # Extract combinations that are actually present in this model's coefficients
+            # Key patterns:
+            # - Beta_encoded_combination_CombName (base combination coefficient)
+            # - Beta_encoded_combination_CombName_x_variable (interaction term)
             available_combinations = []
             for key in coefficients.keys():
-                # Try different patterns for encoded combinations
-                if key.startswith('Beta_encoded_combination_') and not key.endswith('_x_price') and not key.endswith('_x_d1'):
-                    combination_name = key.replace('Beta_encoded_combination_', '')
-                    # Remove any interaction suffixes
-                    if '_x_' in combination_name:
-                        combination_name = combination_name.split('_x_')[0]
-                    logger.info(f"Found encoded combination: '{combination_name}' from key '{key}'")
-                    if combination_name in combinations:
+                if key.startswith('Beta_encoded_combination_'):
+                    # Remove prefix to get the combination part
+                    combination_part = key.replace('Beta_encoded_combination_', '')
+                    
+                    # Check if this is an interaction term (contains _x_)
+                    if '_x_' in combination_part:
+                        # Extract combination name before the _x_ (interaction variable part)
+                        combination_name = combination_part.split('_x_')[0]
+                    else:
+                        # This is a base combination coefficient (no interaction)
+                        combination_name = combination_part
+                    
+                    # Add to available combinations if it matches our requested combinations
+                    if combination_name in combinations and combination_name not in available_combinations:
                         available_combinations.append(combination_name)
-                        logger.info(f"Added combination '{combination_name}' to available_combinations")
-                elif key.startswith('encoded_combination_') and not key.endswith('_x_price') and not key.endswith('_x_d1'):
-                    combination_name = key.replace('encoded_combination_', '')
-                    # Remove any interaction suffixes
-                    if '_x_' in combination_name:
-                        combination_name = combination_name.split('_x_')[0]
-                    logger.info(f"Found encoded combination (no Beta prefix): '{combination_name}' from key '{key}'")
-                    if combination_name in combinations:
-                        available_combinations.append(combination_name)
-                        logger.info(f"Added combination '{combination_name}' to available_combinations")
+                        logger.info(f"Found combination: '{combination_name}' from key '{key}'")
             
-            logger.info(f"Available combinations for calculation: {available_combinations}")
+            # logger.info(f"Available combinations for calculation: {available_combinations}")
             
-            # Debug: Log all coefficient keys to understand the structure
-            logger.info(f"🔍 DEBUG: All coefficient keys in model {model_name}:")
-            for key in sorted(coefficients.keys()):
-                logger.info(f"   {key}: {coefficients[key]}")
+  
             
-            # If no combinations found, try to extract from all coefficient keys
-            if not available_combinations:
-                logger.warning("No combinations found using standard method, trying alternative extraction")
-                for key in coefficients.keys():
-                    if key.startswith('Beta_encoded_combination_') and not key.endswith('_x_price') and not key.endswith('_x_d1'):
-                        combination_name = key.replace('Beta_encoded_combination_', '')
-                        # Remove any interaction suffixes
-                        if '_x_' in combination_name:
-                            combination_name = combination_name.split('_x_')[0]
-                        if combination_name in combinations and combination_name not in available_combinations:
-                            available_combinations.append(combination_name)
-                            logger.info(f"Found combination via alternative method: '{combination_name}'")
-            
-            logger.info(f"Final available combinations: {available_combinations}")
+            # logger.info(f"Final available combinations: {available_combinations}")
             
             # Calculate final betas only for combinations that are available in this model
             for combination in available_combinations:
                 logger.info(f"Calculating final betas for combination: {combination}")
                 combination_key = f"{model_name}_{combination}"
                 final_betas = {}
-                # Calculate final intercept - try different key patterns
+                # Calculate final intercept
                 combination_intercept_key = f"Beta_encoded_combination_{combination}"
                 combination_intercept_beta = coefficients.get(combination_intercept_key, 0.0)
-                if combination_intercept_beta == 0.0:
-                    # Try without Beta prefix
-                    combination_intercept_key = f"encoded_combination_{combination}"
-                    combination_intercept_beta = coefficients.get(combination_intercept_key, 0.0)
                 final_betas['intercept'] = intercept + combination_intercept_beta
-                logger.info(f"Combination intercept key: {combination_intercept_key}")
-                logger.info(f"Combination intercept: {combination_intercept_beta}, Final intercept: {final_betas['intercept']}")
+                # logger.info(f"Combination intercept key: {combination_intercept_key}")
+                # logger.info(f"Combination intercept: {combination_intercept_beta}, Final intercept: {final_betas['intercept']}")
                 
                 # Calculate final betas for x_variables (main model variables)
                 for x_var in x_variables:
@@ -336,8 +324,8 @@ class StackModelTrainer:
                     # Common beta for this x_variable (use original variable name)
                     beta_key = f"Beta_{model_var_name}"
                     common_beta = coefficients.get(beta_key, 0.0)
-                    logger.info(f"Common beta for {x_var} (Beta_{model_var_name}): {common_beta}")
-                    logger.info(f"🔍 DEBUG: Looking for coefficient key '{beta_key}', found: {beta_key in coefficients}")
+                    # logger.info(f"Common beta for {x_var} (Beta_{model_var_name}): {common_beta}")
+                    # logger.info(f"🔍 DEBUG: Looking for coefficient key '{beta_key}', found: {beta_key in coefficients}")
                     if beta_key not in coefficients:
                         logger.warning(f"❌ Coefficient key '{beta_key}' not found in coefficients!")
                         logger.info(f"Available keys containing '{model_var_name}': {[k for k in coefficients.keys() if model_var_name in k]}")
@@ -345,19 +333,15 @@ class StackModelTrainer:
                     # Individual beta for this combination and x_variable (only if interaction terms are enabled)
                     if apply_interaction_terms:
                         interaction_key = f"encoded_combination_{combination}_x_{x_var}"
-                        # Try different key patterns
                         individual_beta = coefficients.get(f"Beta_{interaction_key}", 0.0)
-                        if individual_beta == 0.0:
-                            # Try without Beta prefix
-                            individual_beta = coefficients.get(interaction_key, 0.0)
-                        logger.info(f"Individual beta for {x_var} (interaction_key: {interaction_key}): {individual_beta}")
+                        # logger.info(f"Individual beta for {x_var} (Beta_{interaction_key}): {individual_beta}")
                     else:
                         individual_beta = 0.0
-                        logger.info(f"Individual beta for {x_var} (interaction terms disabled): {individual_beta}")
+                        # logger.info(f"Individual beta for {x_var} (interaction terms disabled): {individual_beta}")
                     
                     final_beta = common_beta + individual_beta
                     final_betas[x_var] = final_beta
-                    logger.info(f"Final beta for {x_var}: {final_beta}")
+                    # logger.info(f"Final beta for {x_var}: {final_beta}")
                     
                 
                 # Calculate final betas for numerical_columns_for_interaction (interaction variables) ONLY if interaction terms are enabled
@@ -381,7 +365,7 @@ class StackModelTrainer:
                 combination_betas[combination_key] = final_betas
                 logger.info(f"Stored final betas for {combination_key}: {final_betas}")
         
-        logger.info(f"Final combination_betas result: {combination_betas}")
+        # logger.info(f"Final combination_betas result: {combination_betas}")
         
         # Restructure the result to use combination names as keys instead of model_combination keys
         restructured_betas = {}
@@ -392,7 +376,7 @@ class StackModelTrainer:
                 restructured_betas[combination_name] = betas
                 logger.info(f"Restructured key '{key}' -> '{combination_name}': {betas}")
         
-        logger.info(f"Restructured combination_betas: {restructured_betas}")
+        # logger.info(f"Restructured combination_betas: {restructured_betas}")
         return restructured_betas
     
     async def calculate_individual_combination_metrics(
@@ -402,8 +386,9 @@ class StackModelTrainer:
         pool_by_identifiers: List[str],
         x_variables: List[str],
         y_variable: str,
-        minio_client,
-        bucket_name: str,
+        variable_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        minio_client = None,
+        bucket_name: str = None,
         # Clustering parameters
         apply_clustering: bool = False,
         numerical_columns_for_clustering: List[str] = None,
@@ -433,9 +418,14 @@ class StackModelTrainer:
         5. Use stack modeling MAPE as train MAPE, individual combination MAPE as test MAPE
         """
         # Debug: Log constraint parameters
-        logger.info(f"🔍 DEBUG: Constraint parameters received:")
-        logger.info(f"  - negative_constraints: {negative_constraints}")
-        logger.info(f"  - positive_constraints: {positive_constraints}")
+
+        
+        # Convert variable_configs keys to lowercase for consistency
+        variable_configs_lower = {}
+        if variable_configs:
+            for var, config in variable_configs.items():
+                variable_configs_lower[var.lower()] = config
+            logger.info(f"🔧 Variable configs: {variable_configs_lower}")
         
         try:
             # Step 1: Train stack models to get betas
@@ -446,6 +436,7 @@ class StackModelTrainer:
                 pool_by_identifiers=pool_by_identifiers,
                 x_variables=x_variables,
                 y_variable=y_variable,
+                variable_configs=variable_configs,  # Pass per-variable transformations
                 minio_client=minio_client,
                 bucket_name=bucket_name,
                 apply_clustering=apply_clustering,
@@ -517,7 +508,8 @@ class StackModelTrainer:
                 minio_client=minio_client,
                 bucket_name=bucket_name,
                 stack_model_results=training_result.stack_model_results,
-                standardization=standardization
+                standardization=standardization,
+                variable_configs=variable_configs_lower  # Pass variable configs for destandardization
                 )
             except Exception as e:
                 raise
@@ -555,7 +547,8 @@ class StackModelTrainer:
         minio_client,
         bucket_name: str,
         stack_model_results: List[Dict[str, Any]],
-        standardization: str = 'none'
+        standardization: str = 'none',
+        variable_configs: Optional[Dict[str, Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Calculate metrics for individual combinations using stack modeling betas.
@@ -624,20 +617,11 @@ class StackModelTrainer:
                 if missing_columns:
                     continue
                 
-                # Apply the same transformation that was used during training
-                # This ensures we use transformed data with transformed coefficients
+                # Use original data without any global standardization
+                # Per-variable transformations were already applied during training
                 X_original = df[x_variables].values
                 y_original = df[y_variable].values
-                
-                # Apply standardization if it was used during training
-                # CRITICAL: We need to use the SAME transformation that was used during training
-                if standardization != 'none':
-                    # Use transformed data with transformed betas (no destandardization needed)
-                    X = self._standardize_X_only(X_original, standardization)
-                    y_actual = y_original  # Keep y in original scale for meaningful metrics
-                else:
-                    X = X_original
-                    y_actual = y_original
+                y_actual = y_original  # Keep y in original scale for meaningful metrics
                 
                 combination_metrics = {}
                 
@@ -647,6 +631,7 @@ class StackModelTrainer:
                     
                     betas = betas_by_combination[combination][model_name]
                     
+                    # Collect variable statistics for fallback destandardization
                     variable_means = {}
                     variable_stds = {}
                     variable_mins = {}
@@ -657,45 +642,33 @@ class StackModelTrainer:
                         variable_mins[x_var] = df[x_var].min()
                         variable_maxs[x_var] = df[x_var].max()
                     
-                    
                     # Debug: Log beta values
-                    logger.info(f"🔍 DEBUG: Beta values for {combination} - {model_name}")
-                    logger.info(f"   Original betas: {betas}")
+
+                    destandardized_betas = self._destandardize_betas(
+                        betas=betas,
+                        x_variables=x_variables,
+                        variable_configs=variable_configs,
+                        transformation_metadata=None,  # Not available from training
+                        variable_means=variable_means,
+                        variable_stds=variable_stds,
+                        variable_mins=variable_mins,
+                        variable_maxs=variable_maxs,
+                        X_original_df=df[x_variables]
+                    )
                     
-                    # Calculate destandardized betas for predictions and elasticity calculations
-                    # CRITICAL: Use destandardized betas with original data for proper scale matching
-                    destandardized_betas = betas.copy()  # Start with original betas
-                    if standardization != 'none':
-                        destandardized_betas = self._destandardize_betas(
-                            betas=betas,
-                            x_variables=x_variables,
-                            standardization=standardization,
-                            variable_means=variable_means,
-                            variable_stds=variable_stds,
-                            variable_mins=variable_mins,
-                            variable_maxs=variable_maxs
-                        )
-                        logger.info(f"   Destandardized betas: {destandardized_betas}")
-                    else:
-                        logger.info(f"   No standardization, using original betas")
+                    logger.info(f"✅ Using destandardized betas for predictions")
                     
-                    # CRITICAL FIX: Use original data with destandardized betas for proper scale matching
-                    # This ensures y_pred is in the same scale as y_actual
+                    # Use original data with destandardized betas for predictions
                     y_pred = self._predict_with_betas(X_original, destandardized_betas, x_variables)
                     
-                    # Debug: Log data ranges to identify issues
-                    logger.info(f"🔍 DEBUG: Data ranges for {combination} - {model_name}")
-                    logger.info(f"   y_actual range: {y_actual.min():.2f} to {y_actual.max():.2f}")
-                    logger.info(f"   y_pred range: {y_pred.min():.2f} to {y_pred.max():.2f}")
-                    logger.info(f"   y_actual mean: {y_actual.mean():.2f}, std: {y_actual.std():.2f}")
-                    logger.info(f"   y_pred mean: {y_pred.mean():.2f}, std: {y_pred.std():.2f}")
+
                     
                     # Calculate individual combination metrics using same safe_mape as individual models
                     from .models import safe_mape
                     individual_mape = safe_mape(y_actual, y_pred)
                     individual_r2 = self._calculate_r2(y_actual, y_pred)
                     
-                    logger.info(f"   Calculated MAPE: {individual_mape:.4f}, R²: {individual_r2:.4f}")
+
                     
                     # Calculate AIC and BIC for individual combination
                     # Use original scale data for meaningful AIC/BIC values
@@ -766,7 +739,7 @@ class StackModelTrainer:
                          'variable_stds': variable_stds,  # Variable standard deviations from individual combination data
                          'y_mean': y_mean,  # Y variable mean from individual combination data
                          'y_std': y_std,  # Y variable standard deviation from individual combination data
-                         'betas': betas,  # Destandardized betas (original scale)
+                         'betas': destandardized_betas,  # Destandardized betas (original scale)
                          'standardized_betas': stack_metrics.get('standardized_coefficients', {}),  # Standardized betas from stack modeling
                          # Auto-tuning results from stack modeling
                          'best_alpha': stack_metrics.get('best_alpha', None),
@@ -822,23 +795,31 @@ class StackModelTrainer:
         self,
         betas: Dict[str, Any],
         x_variables: List[str],
-        standardization: str,
-        variable_means: Dict[str, float],
-        variable_stds: Dict[str, float],
+        variable_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        transformation_metadata: Optional[Dict[str, Any]] = None,
+        variable_means: Dict[str, float] = None,
+        variable_stds: Dict[str, float] = None,
         variable_mins: Dict[str, float] = None,
-        variable_maxs: Dict[str, float] = None
+        variable_maxs: Dict[str, float] = None,
+        X_original_df: Optional[pd.DataFrame] = None
     ) -> Dict[str, Any]:
         """
-        Destandardize betas from scaled variables back to original scale.
+        Destandardize betas from transformed variables back to original scale using per-variable statistics.
+        
+        Priority:
+        1. Direct statistics from data (variable_means, variable_stds, variable_mins, variable_maxs)
+        2. Fallback to transformation_metadata if direct statistics not available
         
         Args:
-            betas: Dictionary containing intercept and coefficients from scaled model
+            betas: Dictionary containing intercept and coefficients from transformed model
             x_variables: List of original x_variables
-            standardization: Type of standardization applied ('standard' or 'minmax')
-            variable_means: Mean values of original variables
-            variable_stds: Standard deviation values of original variables (for standard scaler)
-            variable_mins: Minimum values of original variables (for minmax scaler)
-            variable_maxs: Maximum values of original variables (for minmax scaler)
+            variable_configs: Per-variable transformation configurations (type: standard/minmax/media/none)
+            transformation_metadata: Metadata from MMMTransformationEngine (fallback source)
+            variable_means: Mean values calculated from actual data (PRIMARY source)
+            variable_stds: Standard deviation values from actual data (PRIMARY source)
+            variable_mins: Minimum values from actual data (PRIMARY source)
+            variable_maxs: Maximum values from actual data (PRIMARY source)
+            X_original_df: Original dataframe for calculating statistics
             
         Returns:
             Dictionary with destandardized intercept and coefficients
@@ -847,70 +828,91 @@ class StackModelTrainer:
             destandardized_betas = betas.copy()
             coefficients = betas.get('coefficients', {}).copy()
             intercept = betas.get('intercept', 0.0)
+            intercept_adjustment = 0.0
             
-            if standardization == 'standard':
-                # For StandardScaler: X_scaled = (X - mean) / std
-                # To destandardize: X = X_scaled * std + mean
-                # For coefficients: β_original = β_scaled / std
-                # For intercept: β0_original = β0_scaled - sum(β_scaled * mean / std)
+            # Per-variable destandardization based on transformation_metadata
+            for x_var in x_variables:
+                if x_var not in coefficients:
+                    continue
                 
-                intercept_adjustment = 0.0
+                coef_value = coefficients[x_var]
+                unstandardized_coef = coef_value
                 
-                for x_var in x_variables:
-                    if x_var in coefficients and x_var in variable_stds:
+                # Get variable config
+                var_config = variable_configs.get(x_var, {}) if variable_configs else {}
+                var_type = var_config.get("type", "none")
+                
+                # Get transformation metadata for this variable
+                transform_meta = transformation_metadata.get(x_var, {}) if transformation_metadata else {}
+                
+                logger.info(f"🔧 Destandardizing {x_var}: type={var_type}, coef={coef_value}")
+                
+                if var_type == "media":
+                    # For media variables with complex transformations (adstock, logistic, etc.)
+                    # The coefficients are already in the right scale for the transformed features
+                    # We keep them as-is because they represent the relationship in transformed space
+                    unstandardized_coef = coef_value
+                    logger.info(f"   Media variable: keeping coefficient as-is = {unstandardized_coef}")
+                    
+                elif var_type == "standard":
+                    # Back-transform from standardization
+                    # Priority 1: Use direct statistics from actual data
+                    if variable_stds and x_var in variable_stds:
                         std_val = variable_stds[x_var]
-                        mean_val = variable_means.get(x_var, 0)
-                        
+                        mean_val = variable_means.get(x_var, 0) if variable_means else 0
                         if std_val != 0:
-                            # Store original scaled coefficient for intercept calculation
-                            scaled_coefficient = coefficients[x_var]
-                            
-                            # Destandardize coefficient
-                            coefficients[x_var] = scaled_coefficient / std_val
-                            
-                            # Calculate intercept adjustment using ORIGINAL scaled coefficient
-                            intercept_adjustment += scaled_coefficient * mean_val / std_val
-                
-                # Destandardize intercept
-                destandardized_betas['intercept'] = intercept - intercept_adjustment
-                
-            elif standardization == 'minmax':
-                
-                if variable_mins is None or variable_maxs is None:
-                    logger.warning("MinMax destandardization requires variable_mins and variable_maxs")
-                    return betas
-                
-                intercept_adjustment = 0.0
-                
-                for x_var in x_variables:
-                    if x_var in coefficients and x_var in variable_mins and x_var in variable_maxs:
+                            unstandardized_coef = coef_value / std_val
+                            intercept_adjustment += unstandardized_coef * mean_val
+                            logger.info(f"   Standard: destandardized coef = {unstandardized_coef} (using data stats: mean={mean_val:.4f}, std={std_val:.4f})")
+                    # Priority 2: Fallback to transformation metadata
+                    elif transform_meta and "original_std" in transform_meta:
+                        original_std = transform_meta["original_std"]
+                        original_mean = transform_meta.get("original_mean", 0)
+                        if original_std != 0:
+                            unstandardized_coef = coef_value / original_std
+                            intercept_adjustment += unstandardized_coef * original_mean
+                            logger.info(f"   Standard (metadata): destandardized coef = {unstandardized_coef}, mean={original_mean}, std={original_std}")
+                    
+                elif var_type == "minmax":
+                    # Back-transform from minmax
+                    # Priority 1: Use direct statistics from actual data
+                    if variable_mins and variable_maxs and x_var in variable_mins and x_var in variable_maxs:
                         min_val = variable_mins[x_var]
                         max_val = variable_maxs[x_var]
                         range_val = max_val - min_val
-                        
                         if range_val != 0:
-                            # Store original scaled coefficient
-                            scaled_coefficient = coefficients[x_var]
-                            
-                            # Destandardize coefficient
-                            coefficients[x_var] = scaled_coefficient / range_val
-                            
-                            # Calculate intercept adjustment
-                            intercept_adjustment += scaled_coefficient * min_val / range_val
+                            unstandardized_coef = coef_value / range_val
+                            intercept_adjustment += unstandardized_coef * min_val
+                            logger.info(f"   MinMax: destandardized coef = {unstandardized_coef} (using data stats: min={min_val:.4f}, max={max_val:.4f}, range={range_val:.4f})")
+                    # Priority 2: Fallback to transformation metadata
+                    elif transform_meta and "original_min" in transform_meta and "original_max" in transform_meta:
+                        original_min = transform_meta["original_min"]
+                        original_max = transform_meta["original_max"]
+                        original_range = original_max - original_min
+                        if original_range != 0:
+                            unstandardized_coef = coef_value / original_range
+                            intercept_adjustment += unstandardized_coef * original_min
+                            logger.info(f"   MinMax (metadata): destandardized coef = {unstandardized_coef}, range={original_range}")
+                    
+                else:  # "none" or unknown
+                    # No transformation applied, keep coefficient as-is
+                    unstandardized_coef = coef_value
+                    logger.info(f"   No transformation: keeping coefficient as-is = {unstandardized_coef}")
                 
-                # Destandardize intercept
-                destandardized_betas['intercept'] = intercept - intercept_adjustment
-                
-            else:
-                # No standardization applied, return original betas
-                return betas
+                coefficients[x_var] = unstandardized_coef
             
+            # Destandardize intercept
+            destandardized_betas['intercept'] = intercept - intercept_adjustment
             destandardized_betas['coefficients'] = coefficients
+            
+            logger.info(f"✅ Destandardized betas: intercept={destandardized_betas['intercept']}, coefficients={coefficients}")
             
             return destandardized_betas
             
         except Exception as e:
-            logger.error(f"Error in destandardization: {e}")
+            logger.error(f"❌ Error in per-variable destandardization: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             # Return original betas if destandardization fails
             return betas
     
