@@ -286,7 +286,7 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
         );
       }
 
-      const exhibitedComponents: ExhibitionComponentPayload[] = processedSelections.map(
+      const exhibitedComponents: ExhibitionComponentPayload[] = processedSelections.flatMap(
         ({
           id,
           title,
@@ -295,13 +295,8 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
           statisticalDetails,
           selection: baseSelection,
           sourceAtomTitle: originatingAtomTitle,
-        }) => ({
-          id,
-          atomId,
-          title,
-          category: 'Feature Overview',
-          color: 'bg-amber-500',
-          metadata: {
+        }) => {
+          const baseMetadata = {
             metric: baseSelection.metric,
             combination: baseSelection.combination,
             dimensions: baseSelection.dimensions,
@@ -313,9 +308,40 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
             skuRow: baseSelection.skuRow,
             capturedAt: baseSelection.capturedAt,
             sourceAtomTitle: originatingAtomTitle,
-            skuStatisticsSettings,
-          },
-        }),
+            skuStatisticsSettings: {
+              visibility: { ...skuStatisticsSettings.visibility },
+              tableRows: skuStatisticsSettings.tableRows?.map(row => ({ ...row })),
+              tableColumns: skuStatisticsSettings.tableColumns
+                ? [...skuStatisticsSettings.tableColumns]
+                : undefined,
+            },
+          };
+
+          return [
+            {
+              id: `${id}-summary`,
+              atomId,
+              title: `${title} · Statistical Summary`,
+              category: 'Feature Overview',
+              color: 'bg-amber-500',
+              metadata: {
+                ...baseMetadata,
+                viewType: 'statistical_summary' as const,
+              },
+            },
+            {
+              id: `${id}-trend`,
+              atomId,
+              title: `${title} · Trend Analysis`,
+              category: 'Feature Overview',
+              color: 'bg-amber-500',
+              metadata: {
+                ...baseMetadata,
+                viewType: 'trend_analysis' as const,
+              },
+            },
+          ];
+        },
       );
 
       const newEntry: ExhibitionAtomPayload = {
