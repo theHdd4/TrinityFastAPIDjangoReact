@@ -81,7 +81,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
   return (
     <div
       className={cn(
-        'bg-background border border-border rounded-lg shadow-lg p-1 flex items-center gap-1 z-50',
+        'bg-background border border-border rounded-lg shadow-lg p-1 flex items-center gap-1 z-[1000]',
         !isContext && 'absolute -top-12 left-0',
       )}
     >
