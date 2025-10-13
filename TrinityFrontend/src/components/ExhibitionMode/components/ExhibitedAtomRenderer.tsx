@@ -435,26 +435,24 @@ const renderChartPreview = (spec: ChartPreviewSpec, variant: 'full' | 'compact')
   const yAxisLabel = spec.yAxisLabel ?? (primarySeriesKey ? humanize(primarySeriesKey) : undefined);
 
   return (
-    <div className="rounded-2xl border border-border bg-background/80 p-4 shadow-sm">
-      <RechartsChartRenderer
-        type={resolvedType}
-        data={spec.data}
-        xField={spec.xKey}
-        yField={primarySeriesKey}
-        yFields={spec.series.length > 1 ? spec.series.map(serie => serie.key) : undefined}
-        height={height}
-        title={spec.title}
-        xAxisLabel={xAxisLabel}
-        yAxisLabel={yAxisLabel}
-        legendField={spec.legendField}
-        colors={spec.colorPalette && spec.colorPalette.length > 0 ? spec.colorPalette : undefined}
-        showLegend={showLegend}
-        showAxisLabels={showAxisLabels}
-        showGrid={showGrid}
-        showDataLabels={spec.showDataLabels}
-        theme={spec.theme}
-      />
-    </div>
+    <RechartsChartRenderer
+      type={resolvedType}
+      data={spec.data}
+      xField={spec.xKey}
+      yField={primarySeriesKey}
+      yFields={spec.series.length > 1 ? spec.series.map(serie => serie.key) : undefined}
+      height={height}
+      title={spec.title}
+      xAxisLabel={xAxisLabel}
+      yAxisLabel={yAxisLabel}
+      legendField={spec.legendField}
+      colors={spec.colorPalette && spec.colorPalette.length > 0 ? spec.colorPalette : undefined}
+      showLegend={showLegend}
+      showAxisLabels={showAxisLabels}
+      showGrid={showGrid}
+      showDataLabels={spec.showDataLabels}
+      theme={spec.theme}
+    />
   );
 };
 
@@ -488,8 +486,9 @@ const DefaultExhibitedAtom: React.FC<ExhibitedAtomRendererProps> = ({ atom, vari
   const complexEntries = Object.entries(metadata).filter(([, value]) =>
     value != null && typeof value === 'object',
   );
+  const hasComplexMetadata = complexEntries.length > 0;
 
-  if (simpleEntries.length === 0 && complexEntries.length === 0) {
+  if (simpleEntries.length === 0 && !hasComplexMetadata) {
     return (
       <p className="text-sm text-muted-foreground">
         This component is ready for exhibition. Configure it in Laboratory mode to capture a visual preview.
@@ -517,16 +516,11 @@ const DefaultExhibitedAtom: React.FC<ExhibitedAtomRendererProps> = ({ atom, vari
         </dl>
       )}
 
-      {complexEntries.map(([key, value]) => (
-        <div key={key} className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {humanize(key)}
-          </p>
-          <pre className="max-h-48 overflow-auto rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
-            {JSON.stringify(value, null, 2)}
-          </pre>
-        </div>
-      ))}
+      {hasComplexMetadata && (
+        <p className="rounded-lg bg-muted/30 p-3 text-xs text-muted-foreground">
+          Additional configuration from Laboratory mode is required to capture the latest visual preview.
+        </p>
+      )}
     </div>
   );
 };
