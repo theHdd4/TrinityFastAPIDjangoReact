@@ -593,19 +593,41 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         console.log('Saving to MinIO prefix', data.prefix);
       }
       const newStatus: Record<string, string> = {};
-      const duplicates: string[] = [];
-      data.minio_uploads.forEach((r: any, idx: number) => {
+      const fileResults = Array.isArray(data.minio_uploads)
+        ? data.minio_uploads
+        : [];
+      if (fileResults.length === 0) {
+        toast({ title: 'Dataframes Saved Successfully' });
+      }
+      fileResults.forEach((r: any, idx: number) => {
         const name = uploadedFiles[idx]?.name || r.file_key;
+        if (!name) {
+          return;
+        }
         const obj = r.minio_upload?.object_name;
         if (obj) {
           const env = data.environment || {};
           const loc = `/${env.CLIENT_NAME}/${env.APP_NAME}/${env.PROJECT_NAME}`;
           console.log(`File ${name} saved as ${obj} in ${loc}`);
         }
-        if (r.already_saved && name) {
-          newStatus[name] = 'File is already saved';
-          duplicates.push(name);
+
+        let statusMessage = 'Saved successfully';
+        let variant: 'destructive' | undefined;
+        if (r.error) {
+          statusMessage = `Not saved: ${r.error}`;
+          variant = 'destructive';
+        } else if (r.already_saved) {
+          statusMessage = 'File already saved';
+          variant = 'destructive';
         }
+
+        newStatus[name] = statusMessage;
+
+        toast({
+          title: name,
+          description: statusMessage,
+          variant,
+        });
       });
       setSaveStatus(prev => ({ ...prev, ...newStatus }));
       // Clear temp paths so saved files persist in project state
@@ -622,14 +644,6 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         },
         fileMappings: fileAssignments,
       });
-      if (duplicates.length > 0) {
-        toast({
-          title: 'Same file already present in the project',
-          variant: 'destructive',
-        });
-      } else {
-        toast({ title: 'Dataframes Saved Successfully' });
-      }
       addNavigationItem(user?.id, {
         atom: 'data-upload-validate',
         files: uploadedFiles.map(f => f.name),
