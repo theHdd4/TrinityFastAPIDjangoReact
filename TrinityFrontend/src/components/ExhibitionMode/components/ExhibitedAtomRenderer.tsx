@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import TableTemplate from '@/templates/tables/table';
 import type { DroppedAtom } from '../store/exhibitionStore';
-import FeatureOverviewSlideVisualization from './FeatureOverviewSlideVisualization';
+import FeatureOverview from './FeatureOverview';
 
 interface ExhibitedAtomRendererProps {
   atom: DroppedAtom;
@@ -943,7 +943,7 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
   }
 
   if (atom.atomId === 'feature-overview') {
-    return <FeatureOverviewSlideVisualization metadata={atom.metadata} variant={variant} />;
+    return <FeatureOverview metadata={atom.metadata} variant={variant} />;
   }
 
   const previewImage = typeof metadata?.['previewImage'] === 'string' ? (metadata['previewImage'] as string) : undefined;
