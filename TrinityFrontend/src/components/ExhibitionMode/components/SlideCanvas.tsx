@@ -35,6 +35,8 @@ import {
   DEFAULT_PRESENTATION_SETTINGS,
 } from '../store/exhibitionStore';
 import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
+import { ExhibitionTextBox } from './operationsPalette/textBox/TextBox';
+import type { SlideTextBox, TextBoxPosition } from './operationsPalette/textBox/types';
 
 interface SlideCanvasProps {
   card: LayoutCard;
@@ -55,6 +57,11 @@ interface SlideCanvasProps {
   isActive?: boolean;
   onTitleChange?: (title: string, cardId: string) => void;
   presenterName?: string | null;
+  textBoxes?: SlideTextBox[];
+  onTextBoxChange?: (boxId: string, updates: Partial<SlideTextBox>) => void;
+  onTextBoxTextChange?: (boxId: string, text: string) => void;
+  onTextBoxPositionChange?: (boxId: string, position: TextBoxPosition) => void;
+  onTextBoxRemove?: (boxId: string) => void;
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -71,6 +78,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   isActive = false,
   onTitleChange,
   presenterName,
+  textBoxes = [],
+  onTextBoxChange,
+  onTextBoxTextChange,
+  onTextBoxPositionChange,
+  onTextBoxRemove,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -95,6 +107,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   );
 
   const cardWidthClass = settings.cardWidth === 'M' ? 'max-w-4xl' : 'max-w-6xl';
+  const hasTextBoxes = textBoxes.length > 0;
 
   useEffect(() => {
     setSettings({
@@ -140,6 +153,14 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       document.removeEventListener('touchstart', handlePointerDown);
     };
   }, [showFormatPanel]);
+
+  useEffect(() => {
+    if (card.atoms.length > 0 || textBoxes.length > 0) {
+      setHasInteracted(true);
+    } else {
+      setHasInteracted(false);
+    }
+  }, [card.id, card.atoms.length, textBoxes.length]);
 
   const updateSettings = (partial: Partial<PresentationSettings>) => {
     setSettings(prev => {
@@ -265,17 +286,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
   }, [card.lastEditedAt]);
 
-  const [hasInteracted, setHasInteracted] = useState(() => card.atoms.length > 0);
-
-  useEffect(() => {
-    setHasInteracted(card.atoms.length > 0);
-  }, [card.id]);
-
-  useEffect(() => {
-    if (card.atoms.length > 0) {
-      setHasInteracted(true);
-    }
-  }, [card.atoms.length]);
+  const [hasInteracted, setHasInteracted] = useState(() => card.atoms.length > 0 || textBoxes.length > 0);
 
   const handleTitleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!canEdit) {
@@ -639,8 +650,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                       aria-readonly={!canEdit}
                     />
 
-                    <div className="relative flex-1 min-h-[260px]">
-                      {!hasInteracted && card.atoms.length === 0 ? (
+                  <div className="relative flex-1 min-h-[260px]">
+                      {!hasInteracted && card.atoms.length === 0 && !hasTextBoxes ? (
                         <div className="flex h-full w-full items-center justify-center rounded-2xl border-2 border-dashed border-border bg-muted/20 px-6 text-center text-sm text-muted-foreground">
                           Add components from the catalogue to build your presentation slide.
                         </div>
@@ -678,11 +689,25 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                             </div>
                           ))}
                         </div>
+                      ) : hasTextBoxes ? (
+                        <div className="h-full w-full" />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center rounded-2xl border-2 border-dashed border-border bg-muted/10 px-6 text-center text-sm text-muted-foreground">
                           Click to start building this slide.
                         </div>
                       )}
+                      {textBoxes.map(textBox => (
+                        <ExhibitionTextBox
+                          key={textBox.id}
+                          data={textBox}
+                          isEditable={canEdit}
+                          onChange={(id, updates) => onTextBoxChange?.(id, updates)}
+                          onTextChange={(id, updatedText) => onTextBoxTextChange?.(id, updatedText)}
+                          onPositionChange={(id, nextPosition) => onTextBoxPositionChange?.(id, nextPosition)}
+                          onDelete={id => onTextBoxRemove?.(id)}
+                          onInteract={handleCanvasInteraction}
+                        />
+                      ))}
                     </div>
                   </div>
                 </div>
