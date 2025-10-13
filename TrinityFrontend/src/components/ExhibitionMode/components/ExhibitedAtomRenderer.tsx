@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import TableTemplate from '@/templates/tables/table';
 import type { DroppedAtom } from '../store/exhibitionStore';
-import FeatureOverview from './FeatureOverview';
+import FeatureOverview from './atoms/FeatureOverview';
 
 interface ExhibitedAtomRendererProps {
   atom: DroppedAtom;
