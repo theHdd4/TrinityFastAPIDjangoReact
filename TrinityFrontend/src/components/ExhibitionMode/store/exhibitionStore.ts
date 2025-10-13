@@ -109,6 +109,65 @@ const isRecord = (value: unknown): value is Record<string, any> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
 
+const parseMetadataRecord = (value: unknown): Record<string, any> | undefined => {
+  if (isRecord(value)) {
+    return { ...value };
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (isRecord(parsed)) {
+          return { ...parsed };
+        }
+      } catch (error) {
+        console.warn('[Exhibition] Unable to parse feature overview metadata payload', error);
+      }
+    }
+  }
+
+  return undefined;
+};
+
+const looksLikeFeatureOverviewMetadata = (metadata: Record<string, any> | undefined): boolean => {
+  if (!metadata) {
+    return false;
+  }
+
+  const viewType = metadata.viewType ?? metadata.view_type;
+  if (typeof viewType === 'string') {
+    const normalised = viewType.toLowerCase();
+    if (normalised === 'statistical_summary' || normalised === 'statistical-summary') {
+      return true;
+    }
+    if (normalised === 'trend_analysis' || normalised === 'trend-analysis') {
+      return true;
+    }
+  }
+
+  const hasMetric =
+    typeof metadata.metric === 'string' || typeof metadata.dependent_variable === 'string';
+  const hasDimensions = Array.isArray(metadata.dimensions) || Array.isArray(metadata.dimension_combinations);
+  const hasStatistics =
+    metadata.statisticalDetails != null ||
+    metadata.statistical_details != null ||
+    metadata.summary != null ||
+    metadata.statistical_summary != null;
+  const hasChartConfig =
+    metadata.chartState != null ||
+    metadata.chart_state != null ||
+    metadata.chartRendererProps != null ||
+    metadata.chart_renderer_props != null ||
+    metadata.chartRendererConfig != null ||
+    metadata.chart_renderer_config != null ||
+    metadata.chartConfig != null ||
+    metadata.chart_config != null;
+
+  return Boolean(hasMetric && (hasDimensions || hasStatistics || hasChartConfig));
+};
+
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
 
@@ -235,10 +294,20 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     ? candidate.color.trim()
     : FALLBACK_COLOR;
 
-  const metadata = isRecord(candidate.metadata) ? { ...candidate.metadata } : undefined;
+  const metadata = parseMetadataRecord(candidate.metadata);
 
   const id = resolvedId ?? resolvedAtomId ?? `atom-${Math.random().toString(36).slice(2, 10)}`;
-  const atomId = resolvedAtomId ?? id;
+  let atomId = resolvedAtomId ?? id;
+
+  if (
+    looksLikeFeatureOverviewMetadata(metadata) &&
+    (!resolvedAtomId ||
+      atomId === id ||
+      atomId.toLowerCase().includes('feature-overview') ||
+      category.toLowerCase().includes('feature overview'))
+  ) {
+    atomId = 'feature-overview';
+  }
 
   return {
     id,
