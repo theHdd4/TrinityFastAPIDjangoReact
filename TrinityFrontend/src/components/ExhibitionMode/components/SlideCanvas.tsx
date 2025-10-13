@@ -26,7 +26,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import TextBoxDisplay from '@/components/AtomList/atoms/text-box/TextBoxDisplay';
 import {
   CardLayout,
   CardColor,
@@ -35,6 +34,7 @@ import {
   PresentationSettings,
   DEFAULT_PRESENTATION_SETTINGS,
 } from '../store/exhibitionStore';
+import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
 
 interface SlideCanvasProps {
   card: LayoutCard;
@@ -661,13 +661,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                                 {atom.category}
                               </div>
                               <div className="text-base leading-relaxed text-muted-foreground space-y-4">
-                                {atom.atomId === 'text-box' ? (
-                                  <div className="rounded-2xl border border-border bg-muted/30 p-4">
-                                    <TextBoxDisplay textId={atom.id} />
-                                  </div>
-                                ) : (
-                                  <p>Component visualization and analysis results</p>
-                                )}
+                                <ExhibitedAtomRenderer atom={atom} />
                               </div>
 
                               {canEdit && (
@@ -719,13 +713,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                               {atom.category}
                             </div>
                             <div className="text-sm text-muted-foreground space-y-3">
-                              {atom.atomId === 'text-box' ? (
-                                <div className="p-3 bg-muted/40 rounded-lg border border-border">
-                                  <TextBoxDisplay textId={atom.id} />
-                                </div>
-                              ) : (
-                                <p>Component visualization and analysis results</p>
-                              )}
+                              <ExhibitedAtomRenderer atom={atom} variant="compact" />
                             </div>
 
                             {canEdit && (
