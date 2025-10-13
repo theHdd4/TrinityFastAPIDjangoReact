@@ -597,6 +597,78 @@ const prepareChartData = (
   return [];
 };
 
+const findMatchingKey = (row: Record<string, unknown>, candidate?: string) => {
+  if (!candidate) {
+    return undefined;
+  }
+
+  const lower = candidate.toLowerCase();
+  return Object.keys(row).find(key => key.toLowerCase() === lower);
+};
+
+const ensureRenderableChartConfig = (
+  config: ChartRendererConfig | null,
+): ChartRendererConfig | null => {
+  if (!config) {
+    return null;
+  }
+
+  const data = Array.isArray(config.data) ? config.data : [];
+  if (data.length === 0) {
+    return null;
+  }
+
+  const firstRow = (data.find(entry => entry && typeof entry === 'object') as Record<string, unknown>) ?? {};
+  const sanitizedConfig: ChartRendererConfig = { ...config };
+
+  if (sanitizedConfig.xField) {
+    const resolvedX = findMatchingKey(firstRow, sanitizedConfig.xField);
+    if (resolvedX) {
+      sanitizedConfig.xField = resolvedX;
+    }
+  }
+
+  if (sanitizedConfig.legendField) {
+    const resolvedLegend = findMatchingKey(firstRow, sanitizedConfig.legendField);
+    if (!resolvedLegend) {
+      delete sanitizedConfig.legendField;
+      sanitizedConfig.showLegend = false;
+    } else {
+      sanitizedConfig.legendField = resolvedLegend;
+    }
+  }
+
+  const numericKeys = Object.entries(firstRow)
+    .filter(([, value]) => typeof value === 'number' && Number.isFinite(value))
+    .map(([key]) => key);
+
+  if (numericKeys.length === 0) {
+    return sanitizedConfig;
+  }
+
+  const resolvedY = sanitizedConfig.yField
+    ? findMatchingKey(firstRow, sanitizedConfig.yField) ?? null
+    : null;
+
+  if (!resolvedY) {
+    const fallbackY = numericKeys.find(
+      key => key !== sanitizedConfig.xField && key !== sanitizedConfig.legendField,
+    );
+
+    if (fallbackY) {
+      sanitizedConfig.yField = fallbackY;
+      if (!sanitizedConfig.yAxisLabel) {
+        sanitizedConfig.yAxisLabel = humanize(fallbackY);
+      }
+    }
+
+    return sanitizedConfig;
+  }
+
+  sanitizedConfig.yField = resolvedY;
+  return sanitizedConfig;
+};
+
 const parseDirectChartRendererConfig = (
   metadata: FeatureOverviewMetadata,
   variant: 'full' | 'compact',
@@ -739,9 +811,11 @@ export const deriveChartConfig = (
   metadata: FeatureOverviewMetadata,
   variant: 'full' | 'compact',
 ): ChartRendererConfig | null =>
-  parseDirectChartRendererConfig(metadata, variant) ??
-  createChartRendererConfig(metadata, variant) ??
-  buildDefaultTrendChartConfig(variant);
+  ensureRenderableChartConfig(
+    parseDirectChartRendererConfig(metadata, variant) ??
+      createChartRendererConfig(metadata, variant) ??
+      buildDefaultTrendChartConfig(variant),
+  );
 
 export const extractSummaryEntries = (
   stats: FeatureOverviewStatistics | undefined,
