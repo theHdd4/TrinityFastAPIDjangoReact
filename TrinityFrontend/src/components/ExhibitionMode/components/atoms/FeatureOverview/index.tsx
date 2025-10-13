@@ -1,22 +1,19 @@
 import React, { useMemo } from 'react';
 import StatisticalSummary from './StatisticalSummary';
 import TrendAnalysis from './TrendAnalysis';
-import { parseFeatureOverviewMetadata } from './shared';
+import { DEFAULT_FEATURE_OVERVIEW_TREND_METADATA, parseFeatureOverviewMetadata } from './shared';
 import { FeatureOverviewComponentProps, FeatureOverviewProps } from './types';
 
 const FeatureOverview: React.FC<FeatureOverviewProps> = ({ metadata, variant = 'full' }) => {
   const parsedMetadata = useMemo(() => parseFeatureOverviewMetadata(metadata), [metadata]);
-
-  if (!parsedMetadata) {
-    return <p className="text-sm text-muted-foreground">No exhibition data available for this component yet.</p>;
-  }
+  const resolvedMetadata = parsedMetadata ?? DEFAULT_FEATURE_OVERVIEW_TREND_METADATA;
 
   const componentProps: FeatureOverviewComponentProps = {
-    metadata: parsedMetadata,
+    metadata: resolvedMetadata,
     variant,
   };
 
-  switch (parsedMetadata.viewType) {
+  switch (resolvedMetadata.viewType) {
     case 'trend_analysis':
       return <TrendAnalysis {...componentProps} />;
     case 'statistical_summary':

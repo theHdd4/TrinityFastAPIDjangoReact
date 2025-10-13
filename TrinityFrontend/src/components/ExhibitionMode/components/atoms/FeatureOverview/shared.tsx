@@ -12,6 +12,60 @@ import {
   FeatureOverviewViewType,
 } from './types';
 
+const DEFAULT_TREND_ANALYSIS_DATA: Array<{
+  date: string;
+  salesvalue: number;
+  series: string;
+}> = [
+  { date: '2022-04-01', salesvalue: 98542.13, series: 'SalesValue' },
+  { date: '2022-05-01', salesvalue: 102384.91, series: 'SalesValue' },
+  { date: '2022-06-01', salesvalue: 87651.72, series: 'SalesValue' },
+  { date: '2022-07-01', salesvalue: 113245.68, series: 'SalesValue' },
+  { date: '2022-08-01', salesvalue: 127584.22, series: 'SalesValue' },
+  { date: '2022-09-01', salesvalue: 91845.3, series: 'SalesValue' },
+  { date: '2022-10-01', salesvalue: 108742.41, series: 'SalesValue' },
+  { date: '2022-11-01', salesvalue: 121854.77, series: 'SalesValue' },
+  { date: '2022-12-01', salesvalue: 74628.4, series: 'SalesValue' },
+  { date: '2023-01-01', salesvalue: 96521.89, series: 'SalesValue' },
+  { date: '2023-02-01', salesvalue: 118742.11, series: 'SalesValue' },
+  { date: '2023-03-01', salesvalue: 83215.04, series: 'SalesValue' },
+  { date: '2023-04-01', salesvalue: 121852.66, series: 'SalesValue' },
+];
+
+const cloneDefaultTrendAnalysisData = () =>
+  DEFAULT_TREND_ANALYSIS_DATA.map(point => ({ ...point }));
+
+export const DEFAULT_FEATURE_OVERVIEW_TREND_METADATA: FeatureOverviewMetadata = {
+  metric: 'SalesValue',
+  label: 'SalesValue trend analysis',
+  chartState: {
+    chartType: 'line_chart',
+    xAxisField: 'date',
+    yAxisField: 'salesvalue',
+    legendField: 'series',
+    showLegend: true,
+    showAxisLabels: true,
+    showGrid: true,
+    colorPalette: ['#6366F1'],
+    xAxisLabel: 'Date',
+    yAxisLabel: 'SalesValue',
+  },
+  featureContext: {
+    dataSource: 'Sample feature overview dataset',
+    xAxis: 'Date',
+    availableMetrics: ['SalesValue'],
+  },
+  statisticalDetails: {
+    timeseries: cloneDefaultTrendAnalysisData().map(entry => ({
+      date: entry.date,
+      salesvalue: entry.salesvalue,
+      series: entry.series,
+      value: entry.salesvalue,
+    })),
+  },
+  viewType: 'trend_analysis',
+};
+
 export const ensureArray = <T,>(value: unknown): T[] => {
   if (!value) return [];
   if (Array.isArray(value)) return value as T[];
@@ -413,6 +467,30 @@ export interface ChartRendererConfig {
   sortOrder?: 'asc' | 'desc' | null;
 }
 
+const DEFAULT_TREND_CHART_HEIGHT = {
+  full: 300,
+  compact: 220,
+} as const;
+
+export const buildDefaultTrendChartConfig = (variant: 'full' | 'compact'): ChartRendererConfig => ({
+  type: 'line_chart',
+  data: cloneDefaultTrendAnalysisData(),
+  height: DEFAULT_TREND_CHART_HEIGHT[variant],
+  xField: 'date',
+  yField: 'salesvalue',
+  legendField: 'series',
+  colors: ['#6366F1'],
+  theme: 'default',
+  title: 'SalesValue trend analysis',
+  xAxisLabel: 'Date',
+  yAxisLabel: 'SalesValue',
+  showLegend: true,
+  showAxisLabels: true,
+  showDataLabels: false,
+  showGrid: true,
+  sortOrder: null,
+});
+
 const toRendererType = (value: unknown): ChartRendererType | null => {
   if (typeof value !== 'string') {
     return null;
@@ -546,7 +624,7 @@ const parseDirectChartRendererConfig = (
     return null;
   }
 
-  const height = variant === 'compact' ? 220 : 300;
+  const height = DEFAULT_TREND_CHART_HEIGHT[variant];
 
   const config: ChartRendererConfig = {
     type,
@@ -633,7 +711,7 @@ const createChartRendererConfig = (
     return null;
   }
 
-  const height = variant === 'compact' ? 220 : 300;
+  const height = DEFAULT_TREND_CHART_HEIGHT[variant];
 
   return {
     type,
@@ -661,7 +739,9 @@ export const deriveChartConfig = (
   metadata: FeatureOverviewMetadata,
   variant: 'full' | 'compact',
 ): ChartRendererConfig | null =>
-  parseDirectChartRendererConfig(metadata, variant) ?? createChartRendererConfig(metadata, variant);
+  parseDirectChartRendererConfig(metadata, variant) ??
+  createChartRendererConfig(metadata, variant) ??
+  buildDefaultTrendChartConfig(variant);
 
 export const extractSummaryEntries = (
   stats: FeatureOverviewStatistics | undefined,
