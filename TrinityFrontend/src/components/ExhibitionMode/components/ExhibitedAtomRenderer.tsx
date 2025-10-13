@@ -50,7 +50,7 @@ interface ChartStateMetadata {
   legendField?: string;
 }
 
-type ChartRendererType = 'bar_chart' | 'line_chart' | 'area_chart' | 'pie_chart';
+type ChartRendererType = 'bar_chart' | 'line_chart' | 'area_chart' | 'pie_chart' | 'scatter_chart';
 
 interface ChartRendererConfig {
   type: ChartRendererType;
@@ -59,6 +59,7 @@ interface ChartRendererConfig {
   xField?: string;
   yField?: string;
   yFields?: string[];
+  yAxisLabels?: string[];
   legendField?: string;
   colors?: string[];
   theme?: string;
@@ -69,6 +70,52 @@ interface ChartRendererConfig {
   showAxisLabels?: boolean;
   showDataLabels?: boolean;
   showGrid?: boolean;
+  sortOrder?: 'asc' | 'desc' | null;
+}
+
+interface ChartTemplateConfigLike extends Record<string, unknown> {
+  chart_type?: string;
+  chartType?: string;
+  type?: string;
+  data?: unknown;
+  filtered_data?: unknown;
+  filteredData?: unknown;
+  traces?: unknown;
+  title?: unknown;
+  x_axis?: unknown;
+  xAxis?: unknown;
+  y_axis?: unknown;
+  yAxis?: unknown;
+  legend?: unknown;
+  legendConfig?: unknown;
+  tooltip?: unknown;
+  theme?: unknown;
+  showLegend?: unknown;
+  showAxisLabels?: unknown;
+  showDataLabels?: unknown;
+  showGrid?: unknown;
+  legendField?: unknown;
+  legend_field?: unknown;
+  colors?: unknown;
+  palette?: unknown;
+  sortOrder?: unknown;
+  sort_order?: unknown;
+}
+
+interface ChartTemplateTraceLike extends Record<string, unknown> {
+  dataKey?: unknown;
+  x_column?: unknown;
+  xColumn?: unknown;
+  xField?: unknown;
+  x_field?: unknown;
+  y_column?: unknown;
+  yColumn?: unknown;
+  yField?: unknown;
+  y_field?: unknown;
+  name?: unknown;
+  label?: unknown;
+  color?: unknown;
+  style?: unknown;
 }
 
 const ensureArray = <T,>(value: unknown): T[] => {
@@ -79,6 +126,8 @@ const ensureArray = <T,>(value: unknown): T[] => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const asRecord = (value: unknown): Record<string, unknown> | undefined => (isRecord(value) ? value : undefined);
 
 const humanize = (value: string): string => {
   return value
@@ -356,6 +405,277 @@ const getMetadataString = (metadata: AtomMetadata, keys: string[]): string | und
   return undefined;
 };
 
+const normaliseChartType = (rawType: unknown): ChartRendererType | undefined => {
+  if (typeof rawType !== 'string') {
+    return undefined;
+  }
+
+  const type = rawType.toLowerCase();
+
+  if (type.includes('scatter')) {
+    return 'scatter_chart';
+  }
+  if (type.includes('pie')) {
+    return 'pie_chart';
+  }
+  if (type.includes('area')) {
+    return 'area_chart';
+  }
+  if (type.includes('line')) {
+    return 'line_chart';
+  }
+  if (type.includes('bar')) {
+    return 'bar_chart';
+  }
+
+  return undefined;
+};
+
+const extractTraceFields = (trace: ChartTemplateTraceLike): {
+  xField?: string;
+  yField?: string;
+  label?: string;
+  color?: string;
+} => {
+  const style = asRecord(trace.style);
+
+  return {
+    xField:
+      asString(
+        trace.x_column ??
+          trace.xColumn ??
+          trace.xField ??
+          trace.x_field ??
+          trace.dataKey ??
+          trace['xAxis'],
+      ) ?? undefined,
+    yField:
+      asString(trace.dataKey ?? trace.y_column ?? trace.yColumn ?? trace.yField ?? trace.y_field) ??
+      undefined,
+    label: asString(trace.name ?? trace.label) ?? undefined,
+    color: asString(trace.color ?? style?.stroke ?? style?.fill ?? style?.color) ?? undefined,
+  };
+};
+
+const extractLegendField = (metadata: AtomMetadata, chartConfig: ChartTemplateConfigLike | undefined) => {
+  const metadataLegend = getMetadataString(metadata, ['legendField', 'legend_field']);
+  if (metadataLegend) {
+    return metadataLegend;
+  }
+
+  if (!chartConfig) {
+    return undefined;
+  }
+
+  const legendFromConfig =
+    asString(chartConfig.legendField) ??
+    asString((chartConfig as Record<string, unknown>)['legend_field']);
+
+  if (legendFromConfig) {
+    return legendFromConfig;
+  }
+
+  const legendSettings = asRecord(chartConfig.legend ?? chartConfig.legendConfig);
+  if (legendSettings) {
+    const legendKey = asString(legendSettings['dataKey'] ?? legendSettings['legendField']);
+    if (legendKey) {
+      return legendKey;
+    }
+  }
+
+  return undefined;
+};
+
+const extractDirectChartRendererConfig = (
+  metadata: AtomMetadata,
+  variant: 'full' | 'compact',
+): ChartRendererConfig | null => {
+  if (!metadata) {
+    return null;
+  }
+
+  const configCandidate =
+    metadata['chartRendererProps'] ??
+    metadata['chart_renderer_props'] ??
+    metadata['chartConfig'] ??
+    metadata['chart_config'];
+
+  const chartConfig = asRecord(configCandidate) as ChartTemplateConfigLike | undefined;
+  if (!chartConfig) {
+    return null;
+  }
+
+  const chartType = normaliseChartType(
+    chartConfig.chart_type ?? chartConfig.chartType ?? chartConfig.type,
+  );
+
+  if (!chartType) {
+    return null;
+  }
+
+  const rawData =
+    chartConfig.data ??
+    chartConfig.filtered_data ??
+    chartConfig.filteredData ??
+    metadata['chartData'] ??
+    metadata['data'];
+
+  const data = Array.isArray(rawData)
+    ? (rawData.filter(isRecord) as Array<Record<string, unknown>>)
+    : [];
+
+  if (data.length === 0) {
+    return null;
+  }
+
+  const traces = ensureArray<ChartTemplateTraceLike>(chartConfig.traces).filter(isRecord) as ChartTemplateTraceLike[];
+  const normalisedTraces = traces.map(trace => extractTraceFields(trace));
+
+  const xAxisConfig = asRecord(chartConfig.x_axis ?? chartConfig.xAxis);
+  const yAxisConfig = asRecord(chartConfig.y_axis ?? chartConfig.yAxis);
+
+  const xFieldCandidate =
+    asString(chartConfig['xField']) ??
+    asString(xAxisConfig?.['dataKey']) ??
+    normalisedTraces.find(trace => trace.xField)?.xField ??
+    getMetadataString(metadata, ['xAxisField', 'x_axis_field', 'xAxis', 'x_axis']);
+
+  const yFieldsFromTraces = normalisedTraces
+    .map(trace => trace.yField)
+    .filter((field): field is string => Boolean(field));
+
+  const yFieldCandidate =
+    asString(chartConfig['yField']) ??
+    yFieldsFromTraces[0] ??
+    asString(yAxisConfig?.['dataKey']) ??
+    getMetadataString(metadata, ['yAxisField', 'y_axis_field', 'yAxis', 'y_axis']);
+
+  if (!xFieldCandidate || !yFieldCandidate) {
+    return null;
+  }
+
+  const legendField = extractLegendField(metadata, chartConfig);
+
+  const height = variant === 'compact' ? 240 : 360;
+
+  const config: ChartRendererConfig = {
+    type: chartType,
+    data,
+    height,
+    xField: xFieldCandidate,
+    yField: yFieldCandidate,
+  };
+
+  const uniqueYFields = [...new Set(yFieldsFromTraces.filter(Boolean))];
+  if (uniqueYFields.length > 1) {
+    config.yFields = uniqueYFields;
+  }
+
+  const yAxisLabels = normalisedTraces
+    .map(trace => trace.label)
+    .filter((label): label is string => Boolean(label));
+  if (yAxisLabels.length > 0) {
+    config.yAxisLabels = yAxisLabels;
+  }
+
+  const colorPalette =
+    asStringArray(chartConfig.colors) ??
+    asStringArray(chartConfig.palette) ??
+    normalisedTraces.map(trace => trace.color).filter((color): color is string => Boolean(color));
+  if (colorPalette && colorPalette.length > 0) {
+    config.colors = colorPalette;
+  }
+
+  const legendSettings = asRecord(chartConfig.legend ?? chartConfig.legendConfig);
+  const tooltipSettings = asRecord(chartConfig.tooltip);
+
+  config.theme = asString(chartConfig.theme ?? metadata?.['theme']);
+  config.title =
+    asString(chartConfig.title) ?? getMetadataString(metadata, ['chartTitle', 'chart_title', 'title']);
+  config.legendField = legendField;
+  config.xAxisLabel =
+    asString(xAxisConfig?.['label']) ??
+    getMetadataString(metadata, ['xAxisLabel', 'x_axis_label']) ??
+    (config.xField ? humanize(config.xField) : undefined);
+  config.yAxisLabel =
+    asString(yAxisConfig?.['label']) ??
+    getMetadataString(metadata, ['yAxisLabel', 'y_axis_label']) ??
+    (config.yField ? humanize(config.yField) : undefined);
+
+  const showLegend =
+    asBoolean(chartConfig.showLegend) ??
+    (legendSettings && asBoolean(legendSettings['show']));
+  if (showLegend !== undefined) {
+    config.showLegend = showLegend;
+  }
+
+  const showAxisLabels = asBoolean(chartConfig.showAxisLabels);
+  if (showAxisLabels !== undefined) {
+    config.showAxisLabels = showAxisLabels;
+  }
+
+  const showDataLabels = asBoolean(chartConfig.showDataLabels);
+  if (showDataLabels !== undefined) {
+    config.showDataLabels = showDataLabels;
+  }
+
+  const showGrid = asBoolean(chartConfig.showGrid);
+  if (showGrid !== undefined) {
+    config.showGrid = showGrid;
+  }
+
+  const sortOrder = asString(chartConfig.sortOrder ?? chartConfig.sort_order);
+  if (sortOrder && (sortOrder === 'asc' || sortOrder === 'desc')) {
+    config.sortOrder = sortOrder;
+  }
+
+  if (tooltipSettings && !config.title) {
+    const tooltipTitle = asString(tooltipSettings['label']);
+    if (tooltipTitle) {
+      config.title = tooltipTitle;
+    }
+  }
+
+  const chartState = extractChartState(metadata);
+  if (chartState) {
+    if (chartState.theme && !config.theme) {
+      config.theme = chartState.theme;
+    }
+    if (chartState.title && !config.title) {
+      config.title = chartState.title;
+    }
+    if (chartState.xAxisLabel && !config.xAxisLabel) {
+      config.xAxisLabel = chartState.xAxisLabel;
+    }
+    if (chartState.yAxisLabel && !config.yAxisLabel) {
+      config.yAxisLabel = chartState.yAxisLabel;
+    }
+    if (chartState.showLegend !== undefined) {
+      config.showLegend = chartState.showLegend;
+    }
+    if (chartState.showAxisLabels !== undefined) {
+      config.showAxisLabels = chartState.showAxisLabels;
+    }
+    if (chartState.showDataLabels !== undefined) {
+      config.showDataLabels = chartState.showDataLabels;
+    }
+    if (chartState.showGrid !== undefined) {
+      config.showGrid = chartState.showGrid;
+    }
+    if (chartState.legendField && !config.legendField) {
+      config.legendField = chartState.legendField;
+    }
+    if (chartState.xAxisField && !config.xField) {
+      config.xField = chartState.xAxisField;
+    }
+    if (chartState.yAxisField && !config.yField) {
+      config.yField = chartState.yAxisField;
+    }
+  }
+
+  return config;
+};
+
 const extractChartState = (metadata: AtomMetadata): ChartStateMetadata | undefined => {
   if (!metadata) {
     return undefined;
@@ -604,11 +924,14 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
     [atom.metadata],
   );
   const tableData = useMemo(() => extractTableData(metadata), [metadata]);
+  const directChartConfig = useMemo(() => extractDirectChartRendererConfig(metadata, variant), [metadata, variant]);
   const chartSpec = useMemo(() => extractChartSpec(metadata), [metadata]);
-  const chartConfig = useMemo(
-    () => (chartSpec ? createChartRendererConfig(chartSpec, metadata, variant) : null),
-    [chartSpec, metadata, variant],
-  );
+  const chartConfig = useMemo(() => {
+    if (directChartConfig) {
+      return directChartConfig;
+    }
+    return chartSpec ? createChartRendererConfig(chartSpec, metadata, variant) : null;
+  }, [directChartConfig, chartSpec, metadata, variant]);
   const htmlPreview = useMemo(() => renderHtmlPreview(metadata), [metadata]);
 
   if (atom.atomId === 'text-box') {
