@@ -8,6 +8,7 @@ import {
   type DroppedAtom,
   type PresentationSettings,
   type LayoutCard,
+  type ExhibitionTextBox,
   type SlideshowTransition,
 } from './store/exhibitionStore';
 import { ExhibitionCatalogue } from './components/ExhibitionCatalogue';
@@ -106,6 +107,19 @@ const ExhibitionMode = () => {
   const [isSlideshowActive, setIsSlideshowActive] = useState(false);
   const [slideshowTransform, setSlideshowTransform] = useState('translateX(0px) scale(1)');
   const [slideshowOpacity, setSlideshowOpacity] = useState(1);
+  const [pendingFocusTextBoxId, setPendingFocusTextBoxId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!pendingFocusTextBoxId) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setPendingFocusTextBoxId(null);
+    }, 5000);
+
+    return () => window.clearTimeout(timeout);
+  }, [pendingFocusTextBoxId]);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const verticalSlideRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -846,6 +860,99 @@ const ExhibitionMode = () => {
     [cards, currentSlide, exhibitedCards, toast, updateCard]
   );
 
+  const generateTextBoxId = useCallback(
+    () => `exhibition-text-box-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    []
+  );
+
+  const handleAddTextBox = useCallback(() => {
+    if (!canEdit) {
+      toast({
+        title: 'Insufficient permissions',
+        description: 'You need edit access to add text boxes.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const activeCard = exhibitedCards[currentSlide];
+    if (!activeCard) {
+      toast({
+        title: 'No slide selected',
+        description: 'Create or select a slide before adding a text box.',
+      });
+      return;
+    }
+
+    const latestCard = cards.find(card => card.id === activeCard.id);
+    const existingTextBoxes = latestCard?.textBoxes ?? activeCard.textBoxes ?? [];
+
+    const newTextBox: ExhibitionTextBox = {
+      id: generateTextBoxId(),
+      html: '',
+      fontFamily: 'Inter',
+      fontSize: 20,
+      textColor: '#111827',
+      alignment: 'left',
+    };
+
+    updateCard(activeCard.id, { textBoxes: [...existingTextBoxes, newTextBox] });
+    setPendingFocusTextBoxId(newTextBox.id);
+
+    toast({
+      title: 'Text box added',
+      description: 'A new text box has been placed on this slide.',
+    });
+  }, [canEdit, cards, currentSlide, exhibitedCards, generateTextBoxId, toast, updateCard]);
+
+  const handleUpdateTextBox = useCallback(
+    (cardId: string, textBoxId: string, updates: Partial<ExhibitionTextBox>) => {
+      const targetCard = cards.find(card => card.id === cardId);
+      if (!targetCard) {
+        return;
+      }
+
+      const textBoxes = targetCard.textBoxes ?? [];
+      const next = textBoxes.map(textBox =>
+        textBox.id === textBoxId ? { ...textBox, ...updates } : textBox
+      );
+
+      updateCard(cardId, { textBoxes: next });
+    },
+    [cards, updateCard]
+  );
+
+  const handleRemoveTextBox = useCallback(
+    (cardId: string, textBoxId: string) => {
+      const targetCard = cards.find(card => card.id === cardId);
+      if (!targetCard) {
+        return;
+      }
+
+      const textBoxes = targetCard.textBoxes ?? [];
+      if (!textBoxes.some(box => box.id === textBoxId)) {
+        return;
+      }
+
+      const next = textBoxes.filter(box => box.id !== textBoxId);
+      updateCard(cardId, { textBoxes: next });
+      toast({
+        title: 'Text box removed',
+        description: 'The text box has been deleted from this slide.',
+      });
+    },
+    [cards, toast, updateCard]
+  );
+
+  const handleTextBoxFocusAcknowledged = useCallback(
+    (textBoxId: string) => {
+      if (pendingFocusTextBoxId === textBoxId) {
+        setPendingFocusTextBoxId(null);
+      }
+    },
+    [pendingFocusTextBoxId]
+  );
+
   const handleNotesChange = (slideIndex: number, value: string) => {
     setNotes(prev => {
       const next = { ...prev };
@@ -1114,6 +1221,10 @@ const ExhibitionMode = () => {
                   isActive
                   onTitleChange={handleTitleChange}
                   presenterName={presenterDisplayName}
+                  onTextBoxChange={handleUpdateTextBox}
+                  onTextBoxRemove={handleRemoveTextBox}
+                  focusTextBoxId={pendingFocusTextBoxId}
+                  onTextBoxFocusAcknowledged={handleTextBoxFocusAcknowledged}
                 />
               ) : (
                 emptyCanvas
@@ -1142,6 +1253,10 @@ const ExhibitionMode = () => {
                     isActive={currentSlide === index}
                     onTitleChange={handleTitleChange}
                     presenterName={presenterDisplayName}
+                    onTextBoxChange={handleUpdateTextBox}
+                    onTextBoxRemove={handleRemoveTextBox}
+                    focusTextBoxId={pendingFocusTextBoxId}
+                    onTextBoxFocusAcknowledged={handleTextBoxFocusAcknowledged}
                   />
                 </div>
               ))}
@@ -1165,6 +1280,7 @@ const ExhibitionMode = () => {
             onFullscreen={toggleFullscreen}
             onExport={() => setIsExportOpen(true)}
             onGridView={() => setShowGridView(true)}
+            onAddTextBox={handleAddTextBox}
           />
         )}
       </div>

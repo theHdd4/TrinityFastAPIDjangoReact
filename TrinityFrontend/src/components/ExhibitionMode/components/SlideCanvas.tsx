@@ -33,8 +33,10 @@ import {
   DroppedAtom,
   PresentationSettings,
   DEFAULT_PRESENTATION_SETTINGS,
+  ExhibitionTextBox,
 } from '../store/exhibitionStore';
 import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
+import SlideTextBox from './SlideTextBox';
 
 interface SlideCanvasProps {
   card: LayoutCard;
@@ -55,6 +57,14 @@ interface SlideCanvasProps {
   isActive?: boolean;
   onTitleChange?: (title: string, cardId: string) => void;
   presenterName?: string | null;
+  onTextBoxChange?: (
+    cardId: string,
+    textBoxId: string,
+    updates: Partial<ExhibitionTextBox>,
+  ) => void;
+  onTextBoxRemove?: (cardId: string, textBoxId: string) => void;
+  focusTextBoxId?: string | null;
+  onTextBoxFocusAcknowledged?: (textBoxId: string) => void;
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -71,6 +81,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   isActive = false,
   onTitleChange,
   presenterName,
+  onTextBoxChange,
+  onTextBoxRemove,
+  focusTextBoxId,
+  onTextBoxFocusAcknowledged,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -265,17 +279,19 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
   }, [card.lastEditedAt]);
 
-  const [hasInteracted, setHasInteracted] = useState(() => card.atoms.length > 0);
+  const [hasInteracted, setHasInteracted] = useState(
+    () => card.atoms.length > 0 || (card.textBoxes?.length ?? 0) > 0,
+  );
 
   useEffect(() => {
-    setHasInteracted(card.atoms.length > 0);
-  }, [card.id]);
+    setHasInteracted(card.atoms.length > 0 || (card.textBoxes?.length ?? 0) > 0);
+  }, [card.id, card.atoms.length, card.textBoxes?.length]);
 
   useEffect(() => {
-    if (card.atoms.length > 0) {
+    if (card.atoms.length > 0 || (card.textBoxes?.length ?? 0) > 0) {
       setHasInteracted(true);
     }
-  }, [card.atoms.length]);
+  }, [card.atoms.length, card.textBoxes?.length]);
 
   const handleTitleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!canEdit) {
@@ -318,6 +334,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const handleCanvasInteraction = () => {
     setHasInteracted(true);
   };
+
+  const hasTextBoxes = (card.textBoxes?.length ?? 0) > 0;
+  const hasAtoms = card.atoms.length > 0;
+  const hasContent = hasTextBoxes || hasAtoms;
 
   const accentLayout = useMemo(() => {
     switch (settings.cardLayout) {
@@ -640,12 +660,34 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                     />
 
                     <div className="relative flex-1 min-h-[260px]">
-                      {!hasInteracted && card.atoms.length === 0 ? (
+                      {!hasInteracted && !hasContent ? (
                         <div className="flex h-full w-full items-center justify-center rounded-2xl border-2 border-dashed border-border bg-muted/20 px-6 text-center text-sm text-muted-foreground">
-                          Add components from the catalogue to build your presentation slide.
+                          Add components from the catalogue or create text boxes to build your presentation slide.
                         </div>
-                      ) : card.atoms.length > 0 ? (
+                      ) : hasContent ? (
                         <div className="flex h-full w-full flex-col gap-4">
+                          {card.textBoxes?.map(textBox => (
+                            <SlideTextBox
+                              key={textBox.id}
+                              textBox={textBox}
+                              canEdit={canEdit}
+                              onChange={updates =>
+                                onTextBoxChange?.(card.id, textBox.id, updates)
+                              }
+                              onRemove={
+                                canEdit && onTextBoxRemove
+                                  ? () => onTextBoxRemove(card.id, textBox.id)
+                                  : undefined
+                              }
+                              autoFocus={focusTextBoxId === textBox.id}
+                              onFocusAcknowledged={() => {
+                                if (focusTextBoxId === textBox.id) {
+                                  onTextBoxFocusAcknowledged?.(textBox.id);
+                                }
+                              }}
+                              onInteract={() => setHasInteracted(true)}
+                            />
+                          ))}
                           {card.atoms.map(atom => (
                             <div
                               key={atom.id}

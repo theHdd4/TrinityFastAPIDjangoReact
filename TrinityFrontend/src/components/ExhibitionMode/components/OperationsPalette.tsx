@@ -21,33 +21,36 @@ interface OperationsPaletteProps {
   onFullscreen: () => void;
   onExport?: () => void;
   onGridView?: () => void;
+  onAddTextBox?: () => void;
 }
 
 interface PaletteItem {
   icon: LucideIcon;
   label: string;
   colorClass?: string;
+  onClick?: () => void;
 }
-
-const operations: PaletteItem[] = [
-  { icon: Sparkles, label: 'AI Assistant', colorClass: 'text-purple-500' },
-  { icon: Type, label: 'Text' },
-  { icon: Image, label: 'Images' },
-  { icon: Table, label: 'Tables' },
-  { icon: BarChart3, label: 'Charts' },
-];
-
-const tools: PaletteItem[] = [
-  { icon: FileText, label: 'Templates' },
-  { icon: Palette, label: 'Themes' },
-  { icon: Settings, label: 'Settings' },
-];
 
 export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
   onFullscreen,
   onExport,
   onGridView,
+  onAddTextBox,
 }) => {
+  const operations: PaletteItem[] = [
+    { icon: Sparkles, label: 'AI Assistant', colorClass: 'text-purple-500' },
+    { icon: Type, label: 'Text', onClick: onAddTextBox },
+    { icon: Image, label: 'Images' },
+    { icon: Table, label: 'Tables' },
+    { icon: BarChart3, label: 'Charts' },
+  ];
+
+  const tools: PaletteItem[] = [
+    { icon: FileText, label: 'Templates' },
+    { icon: Palette, label: 'Themes' },
+    { icon: Settings, label: 'Settings' },
+  ];
+
   return (
     <div className="w-12 h-full bg-background border-l border-border flex flex-col items-center py-4 gap-4">
       <div className="flex flex-col items-center gap-3 w-full">
@@ -66,6 +69,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
               )}
               title={op.label}
               type="button"
+              onClick={op.onClick}
             >
               <op.icon
                 className={cn('h-4 w-4', op.colorClass ?? 'text-black dark:text-white')}

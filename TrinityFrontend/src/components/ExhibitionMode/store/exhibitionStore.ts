@@ -78,6 +78,15 @@ export interface DroppedAtom {
   metadata?: Record<string, any>;
 }
 
+export interface ExhibitionTextBox {
+  id: string;
+  html: string;
+  fontFamily: string;
+  fontSize: number;
+  textColor: string;
+  alignment: 'left' | 'center' | 'right' | 'justify';
+}
+
 export interface LayoutCard {
   id: string;
   atoms: DroppedAtom[];
@@ -88,6 +97,7 @@ export interface LayoutCard {
   title?: string;
   lastEditedAt?: string;
   presentationSettings?: PresentationSettings;
+  textBoxes?: ExhibitionTextBox[];
 }
 
 interface ExhibitionStore {
@@ -104,6 +114,14 @@ interface ExhibitionStore {
 }
 
 const FALLBACK_COLOR = 'bg-gray-400';
+
+const generateTextBoxId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `exhibition-text-box-${crypto.randomUUID()}`;
+  }
+
+  return `exhibition-text-box-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+};
 
 const isRecord = (value: unknown): value is Record<string, any> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -302,6 +320,40 @@ const withPresentationDefaults = (card: Partial<LayoutCard>): LayoutCard => {
     ? new Date(card.lastEditedAt).toISOString()
     : nowIso;
 
+  const textBoxes: ExhibitionTextBox[] = Array.isArray(card.textBoxes)
+    ? card.textBoxes
+        .map(textBox => {
+          if (!textBox || typeof textBox !== 'object') {
+            return null;
+          }
+
+          const base = textBox as Partial<ExhibitionTextBox>;
+          const id = isNonEmptyString(base.id) ? base.id : generateTextBoxId();
+          const html = typeof base.html === 'string' ? base.html : '';
+          const fontFamily = typeof base.fontFamily === 'string' && base.fontFamily.trim().length > 0
+            ? base.fontFamily
+            : 'Inter';
+          const fontSize = typeof base.fontSize === 'number' && Number.isFinite(base.fontSize) ? base.fontSize : 16;
+          const textColor = typeof base.textColor === 'string' && base.textColor.trim().length > 0
+            ? base.textColor
+            : '#111827';
+          const alignment: ExhibitionTextBox['alignment'] =
+            base.alignment === 'center' || base.alignment === 'right' || base.alignment === 'justify'
+              ? base.alignment
+              : 'left';
+
+          return {
+            id,
+            html,
+            fontFamily,
+            fontSize,
+            textColor,
+            alignment,
+          } satisfies ExhibitionTextBox;
+        })
+        .filter((textBox): textBox is ExhibitionTextBox => textBox !== null)
+    : [];
+
   return {
     id,
     atoms,
@@ -312,6 +364,7 @@ const withPresentationDefaults = (card: Partial<LayoutCard>): LayoutCard => {
     title: resolvedTitle,
     lastEditedAt: resolvedLastEditedAt,
     presentationSettings: ensurePresentationSettings(card.presentationSettings),
+    textBoxes,
   };
 };
 
@@ -348,6 +401,7 @@ const createBlankSlide = (): LayoutCard =>
     catalogueAtoms: [],
     isExhibited: true,
     moleculeTitle: 'Untitled Slide',
+    textBoxes: [],
   });
 
 const normaliseProjectContext = (context?: ProjectContext | null): ProjectContext | null => {
