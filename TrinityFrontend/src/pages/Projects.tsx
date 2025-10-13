@@ -240,7 +240,8 @@ const Projects = () => {
 
   const createNewProject = async () => {
     if (!appId) return;
-    const projectName = `New ${appDetails.title} Project`;
+    const projectName =
+      selectedApp === 'blank' ? 'New Custom Project' : `New ${appDetails.title} Project`;
     const slug = `${projectName.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
     try {
       const res = await fetch(`${REGISTRY_API}/projects/`, {
