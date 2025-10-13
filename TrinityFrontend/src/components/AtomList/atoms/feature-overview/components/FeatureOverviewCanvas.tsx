@@ -607,6 +607,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const [skuSortColumn, setSkuSortColumn] = useState<string>('');
   const [skuSortDirection, setSkuSortDirection] = useState<'asc' | 'desc'>('asc');
   const [skuColumnFilters, setSkuColumnFilters] = useState<Record<string, string[]>>({});
+  const [hideSingleValueColumns, setHideSingleValueColumns] = useState<boolean>(true);
 
   useEffect(() => {
     if (Array.isArray(settings.yAxes) && settings.yAxes.length > 0) {
@@ -984,7 +985,33 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const dimensionCols = Object.values(dimensionMap)
     .filter(Array.isArray)
     .flat();
-  const colSpan = dimensionCols.length + 2; // SR NO. + View Stat
+  
+  // Calculate unique counts for each dimension column in SKU table
+  const skuColumnUniqueCount = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    if (!Array.isArray(skuRows) || skuRows.length === 0) {
+      return counts;
+    }
+    
+    dimensionCols.forEach((col) => {
+      const uniqueValues = new Set(
+        skuRows.map(row => String(row[col.toLowerCase()] || ''))
+      );
+      counts[col] = uniqueValues.size;
+    });
+    
+    return counts;
+  }, [skuRows, dimensionCols]);
+  
+  // Filter dimension columns based on toggle setting
+  const filteredDimensionCols = React.useMemo(() => {
+    if (!hideSingleValueColumns) {
+      return dimensionCols;
+    }
+    return dimensionCols.filter(col => (skuColumnUniqueCount[col] || 0) > 1);
+  }, [dimensionCols, hideSingleValueColumns, skuColumnUniqueCount]);
+  
+  const colSpan = filteredDimensionCols.length + 2; // SR NO. + View Stat
 
   // SKU Table filtering and sorting logic
   const displayedSkuRows = React.useMemo(() => {
@@ -1495,6 +1522,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       .forEach((d) => {
         combo[d] = row[d.toLowerCase()];
       });
+      
      if (!Array.isArray(settings.yAxes) || settings.yAxes.length === 0) {
        toast({
          title:
@@ -1519,13 +1547,17 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           combination: JSON.stringify(combo),
           x_column: settings.xAxis || "date",
         });
+        
         const res = await fetch(
           `${FEATURE_OVERVIEW_API}/sku_stats?${params.toString()}`,
         );
+        
         if (!res.ok) {
           throw new Error("Failed to fetch statistics");
         }
-        result[y] = await res.json();
+        
+        const responseData = await res.json();
+        result[y] = responseData;
       }
       setStatDataMap(result);
       setActiveMetric(settings.yAxes[0]);
@@ -1887,7 +1919,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                       </ContextMenuSub>
                     </ContextMenuContent>
                   </ContextMenu>,
-                  ...dimensionCols.map(col => (
+                  "View Stat",
+                  ...filteredDimensionCols.map(col => (
                     <ContextMenu key={col}>
                       <ContextMenuTrigger asChild>
                         <div className="flex items-center gap-1 cursor-pointer">
@@ -1930,29 +1963,39 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                         )}
                       </ContextMenuContent>
                     </ContextMenu>
-                  )),
-                  "View Stat"
+                  ))
                 ]}
                 bodyClassName="max-h-[600px] overflow-y-auto"
                 borderColor="border-green-500"
                 customHeader={{
-                  title: "SKU Table"
+                  title: "SKU Table",
+                  controls: (
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                        Hide Single Value Columns
+                      </label>
+                      <Switch
+                        checked={hideSingleValueColumns}
+                        onCheckedChange={setHideSingleValueColumns}
+                      />
+                    </div>
+                  )
                 }}
               >
                 {displayedSkuRows.map((row) => (
                   <React.Fragment key={row.id}>
                     <tr className="table-row">
                       <td className="table-cell">{row.id}</td>
-                      {dimensionCols.map((d) => (
-                        <td key={d} className="table-cell">
-                          {row[d.toLowerCase()]}
-                        </td>
-                      ))}
                       <td className="table-cell">
                         <Button size="sm" onClick={() => viewStats(row)}>
                           View Stat
                         </Button>
                       </td>
+                      {filteredDimensionCols.map((d) => (
+                        <td key={d} className="table-cell">
+                          {row[d.toLowerCase()]}
+                        </td>
+                      ))}
                     </tr>
                     {activeRow === row.id && showStatsSummary && (
                       <tr className="table-row">

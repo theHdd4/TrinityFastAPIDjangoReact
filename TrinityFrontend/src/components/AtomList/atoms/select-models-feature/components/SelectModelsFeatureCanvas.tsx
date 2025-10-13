@@ -65,6 +65,12 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
   const [combinationStatusMinimized, setCombinationStatusMinimized] = useState(() => {
     return data.combinationStatusMinimized || false;
   });
+  
+  // State for application type
+  const [applicationType, setApplicationType] = useState<string>(() => {
+    return data.applicationType || 'general';
+  });
+  const [isLoadingApplicationType, setIsLoadingApplicationType] = useState(false);
   // Refs to track previous values for auto-update
   const prevSelectedVariable = useRef<any>(null);
   const prevSelectedMethod = useRef<string | null>(null);
@@ -299,6 +305,13 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       fetchSCurveData(data.selectedCombinationId, data.selectedModel);
     }
   }, [data.selectedCombinationId, data.selectedModel]);
+
+  // Fetch application type when component mounts
+  useEffect(() => {
+    if (atomId) {
+      fetchApplicationType();
+    }
+  }, [atomId]);
 
   // Fetch all data when Ensemble is selected as default
   useEffect(() => {
@@ -1965,6 +1978,50 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     } catch (error) {
       console.error('Error fetching S-curve data:', error);
       handleDataChange({ sCurveData: null });
+    }
+  };
+
+  // Function to fetch application type
+  const fetchApplicationType = async () => {
+    try {
+      setIsLoadingApplicationType(true);
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+
+      const baseUrl = `${SELECT_API}/application-type`;
+      
+      const params = new URLSearchParams({
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
+      });
+
+      const response = await fetch(`${baseUrl}?${params}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to fetch application type');
+      }
+      
+      const result = await response.json();
+      
+      if (result && result.application_type) {
+        setApplicationType(result.application_type);
+        handleDataChange({ applicationType: result.application_type });
+        console.log('🔍 Application type received:', result.application_type);
+      }
+      
+    } catch (error) {
+      console.error('Error fetching application type:', error);
+      setApplicationType('general');
+      handleDataChange({ applicationType: 'general' });
+    } finally {
+      setIsLoadingApplicationType(false);
     }
   };
 
@@ -3772,7 +3829,8 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
           </div>
 
-          {/* S-Curve Analysis - Full Width */}
+          {/* S-Curve Analysis - Full Width - Only for MMM applications */}
+          {applicationType === 'mmm' && (
           <div className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 mb-6">
             {data.sCurveData && data.sCurveData.success ? (
               <div className="grid grid-cols-2 gap-6">
@@ -3811,6 +3869,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
               </div>
             )}
           </div>
+          )}
 
           {/* Save Results */}
           <div className="pt-4 border-t border-orange-200/50">

@@ -416,6 +416,7 @@ async def train_models_direct(request: dict):
         combinations = request.get('combinations', []) 
         x_variables = request.get('x_variables', [])
         y_variable = request.get('y_variable')
+        variable_configs = request.get('variable_configs', {})
         standardization = request.get('standardization', 'none')
         k_folds = request.get('k_folds', 5)
         models_to_run = request.get('models_to_run')
@@ -451,10 +452,6 @@ async def train_models_direct(request: dict):
         negative_constraints = request.get('negative_constraints', [])
         positive_constraints = request.get('positive_constraints', [])
         
-        # Debug: Log constraint parameters
-        logger.info(f"🔍 DEBUG: Received constraint parameters:")
-        logger.info(f"  - negative_constraints: {negative_constraints}")
-        logger.info(f"  - positive_constraints: {positive_constraints}")
         
         if not scope_number or not combinations or not x_variables or not y_variable:
             raise HTTPException(
@@ -615,6 +612,13 @@ async def train_models_direct(request: dict):
                         all_variables = x_variables_lower + [y_variable_lower]
                         missing_vars = [var for var in all_variables if var not in available_columns]
                         
+                        # Convert variable_configs keys to lowercase for consistency
+                        variable_configs_lower = {}
+                        for var, config in variable_configs.items():
+                            variable_configs_lower[var.lower()] = config
+                        
+                        logger.info(f"🔧 Variable configs: {variable_configs_lower}")
+                        
                         if missing_vars:
                             logger.warning(f"Variables not found in {target_file_key}: {missing_vars}")
                             continue
@@ -640,6 +644,7 @@ async def train_models_direct(request: dict):
                             file_key=target_file_key,
                             x_variables=x_variables_lower,  # Use lowercase variables
                             y_variable=y_variable_lower,    # Use lowercase variable
+                            variable_configs=variable_configs_lower,  # Pass per-variable transformations
                             price_column=None,  # Can be enhanced later
                             standardization=standardization,
                             models_to_run=individual_models_to_run,  # Use individual models
@@ -819,12 +824,18 @@ async def train_models_direct(request: dict):
                 x_variables_lower_stack = [var.lower() for var in x_variables]
                 y_variable_lower_stack = y_variable.lower()
                 
+                # Convert variable_configs keys to lowercase for stack modeling
+                variable_configs_lower_stack = {}
+                for var, config in variable_configs.items():
+                    variable_configs_lower_stack[var.lower()] = config
+                
                 individual_metrics = await stack_trainer.calculate_individual_combination_metrics(
                     scope_number=scope_number,
                     combinations=combinations,
                     pool_by_identifiers=pool_by_identifiers,
                     x_variables=x_variables_lower_stack,
                     y_variable=y_variable_lower_stack,
+                    variable_configs=variable_configs_lower_stack,  # Pass per-variable transformations
                     minio_client=minio_client,
                     bucket_name=bucket_name,
                     apply_clustering=apply_clustering,
@@ -842,8 +853,7 @@ async def train_models_direct(request: dict):
                     positive_constraints=positive_constraints
                 )
                 
-                logger.info(f"📊 Stack modeling call completed. Status: {individual_metrics.get('status', 'unknown')}")
-                logger.info(f"Individual metrics keys: {list(individual_metrics.keys())}")
+
                 
                 # Update progress for stack modeling completion
                 if stack_models_count > 0:
@@ -864,6 +874,15 @@ async def train_models_direct(request: dict):
                             if 'error' in model_metrics:
                                 continue
                             
+
+                            
+                            # Extract betas safely with defaults
+                            betas_dict = model_metrics.get('betas', {})
+                            coefficients_dict = betas_dict.get('coefficients', {}) if isinstance(betas_dict, dict) else {}
+                            intercept_value = betas_dict.get('intercept', 0.0) if isinstance(betas_dict, dict) else 0.0
+                            
+                          
+                            
                             # Create model result in the same format as individual models
                             stack_model_result = {
                                 "model_name": f"stack_{model_name}",  # Add stack prefix
@@ -875,9 +894,9 @@ async def train_models_direct(request: dict):
                                 "mape_test_std": 0.0,   # Not available in stack modeling
                                 "r2_train_std": 0.0,    # Not available in stack modeling
                                 "r2_test_std": 0.0,     # Not available in stack modeling
-                                "coefficients": {f"Beta_{var}": coef for var, coef in model_metrics.get('betas', {}).get('coefficients', {}).items()},
+                                "coefficients": {f"Beta_{var}": coef for var, coef in coefficients_dict.items()},
                                 "standardized_coefficients": {f"Beta_{var}": coef for var, coef in model_metrics.get('standardized_betas', {}).items()},
-                                "intercept": model_metrics.get('betas', {}).get('intercept', 0.0),
+                                "intercept": intercept_value,
                                 "n_parameters": len(x_variables) + 1,  # +1 for intercept
                                 "aic": model_metrics.get('aic', 0.0),
                                 "bic": model_metrics.get('bic', 0.0),
@@ -921,7 +940,7 @@ async def train_models_direct(request: dict):
                             if existing_combination:
                                 # Merge stack models into existing combination's model_results
                                 existing_combination['model_results'].extend(stack_model_results)
-                                logger.info(f"Merged {len(stack_model_results)} stack models into existing combination {combination}")
+                                # logger.info(f"Merged {len(stack_model_results)} stack models into existing combination {combination}")
                                 # Note: Don't increment completed_combinations here as it was already counted for individual models
                             else:
                                 # If no existing combination found, create a new entry (fallback)
@@ -1279,7 +1298,7 @@ async def train_models_direct(request: dict):
                 # Clustering configuration
                 "apply_clustering": apply_clustering,
                 "numerical_columns_for_clustering": numerical_columns_for_clustering,
-                "n_clusters": n_clusters,
+                "n_clusters": n_clusters if n_clusters is not None else 3,
                 
                 # Interaction terms configuration
                 "apply_interaction_terms": apply_interaction_terms,
@@ -1301,7 +1320,8 @@ async def train_models_direct(request: dict):
                 "client_name": client_name,
                 "app_name": app_name,
                 "project_name": project_name,
-                "training_type": "stack_modeling" if stack_modeling else "individual_modeling"
+                "training_type": "stack_modeling" if stack_modeling else "individual_modeling",
+                "application_type": "general"
             }
             
             # Save to MongoDB
@@ -1750,132 +1770,146 @@ async def get_columns(
     combination: str = Form(...)
 ):
     """
-    Get numerical columns from a specific scope and combination file.
+    Get numerical columns from the parent file of a scope.
+    Reads the original source file (file_key at root level) instead of filtered combination files.
     
-    - **scope**: Scope number (e.g., "1", "2", "3")
-    - **combination**: Combination name (e.g., "Channel_Convenience_Variant_Flavoured_Brand_HEINZ_Flavoured_PPG_Small_Single")
+    - **scope**: Scope ID (e.g., "2")
+    - **combination**: Combination name (not used, kept for backward compatibility)
     """
     try:
+        logger.info(f"🔍 Fetching columns from parent file for scope_id: {scope}")
+        
         if minio_client is None:
             raise HTTPException(status_code=503, detail="MinIO not available")
         
-        # Get the standard prefix using get_object_prefix from scope_selector
-        # Since we can't import it directly, we'll construct the path manually
-        # The scope selector saves files to: {prefix}filtered-data/{scope_id}/Scope_{scope_number}_{combination}_{timestamp}.arrow
+        # Step 1: Get the object prefix
+        prefix = await get_object_prefix(scope)
+        logger.info(f"📁 Retrieved prefix: {prefix}")
         
-        # We need to find the actual scope files in MinIO
-        # The scope selector saves files to the 'trinity' bucket, not 'dataformodel'
-        # Let's search for files that match the pattern
-        try:
-            # List objects in the 'trinity' bucket to find matching files
-            # We need to use the same bucket that the scope selector uses
-            trinity_bucket = "trinity"  # This should match the scope selector's bucket
-            
-            # List objects in the trinity bucket to find matching files
-            objects = minio_client.list_objects(
-                trinity_bucket,
-                recursive=True
+        if not prefix:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Could not find prefix for scope_id: {scope}"
             )
-            
-            # Log all available files for debugging
-            all_files = list(objects)
-            logger.info(f"Found {len(all_files)} files in {trinity_bucket} bucket")
-            arrow_files = [obj.object_name for obj in all_files if obj.object_name.endswith('.arrow')]
-            logger.info(f"Found {len(arrow_files)} Arrow files: {arrow_files[:10]}...")  # Show first 10
-            
-            # Look for files that match the pattern: Scope_{scope}_{combination}_*.arrow
-            target_file_key = None
-            logger.info(f"Searching for files with Scope_{scope}_ and combination: {combination}")
-            
-            for obj in all_files:
-                if obj.object_name.endswith('.arrow'):
-                    logger.debug(f"Checking file: {obj.object_name}")
-                    # Check if this file matches our scope and combination
-                    if f"Scope_{scope}_" in obj.object_name and combination in obj.object_name:
-                        target_file_key = obj.object_name
-                        logger.info(f"Found exact match: {target_file_key}")
-                break
         
-            if not target_file_key:
-                # If no exact match, try to find any file with the scope number
-                logger.info(f"No exact match found, looking for any file with Scope_{scope}_")
-                for obj in all_files:
-                    if obj.object_name.endswith('.arrow') and f"Scope_{scope}_" in obj.object_name:
-                        target_file_key = obj.object_name
-                        logger.info(f"Found scope match: {target_file_key}")
-                        break
-            
-            if not target_file_key:
-                raise HTTPException(
-                    status_code=404, 
-                    detail=f"No files found for Scope {scope} with combination {combination}"
-                )
-            
-            logger.info(f"Found file: {target_file_key}")
-            
-            # Read the file from MinIO
-            response = minio_client.get_object(trinity_bucket, target_file_key)
+        # Step 2: Extract client, app, project from prefix
+        prefix_parts = prefix.strip('/').split('/')
+        
+        if len(prefix_parts) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid prefix format: {prefix}"
+            )
+        
+        client_name = prefix_parts[0]
+        app_name = prefix_parts[1]
+        project_name = prefix_parts[2] if len(prefix_parts) > 2 else "default_project"
+        
+        logger.info(f"🔍 Extracted: client={client_name}, app={app_name}, project={project_name}")
+        
+        # Step 3: Get scope configuration from MongoDB
+        logger.info(f"📋 Fetching scope configuration from MongoDB")
+        scope_config = await get_scope_config_from_mongo(client_name, app_name, project_name)
+        
+        if not scope_config:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Scope configuration not found in MongoDB for {client_name}/{app_name}/{project_name}"
+            )
+        
+        # Step 4: Get the parent file_key from the root of the scope document
+        parent_file_key = scope_config.get("file_key")
+        
+        if not parent_file_key:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Parent file_key not found in scope configuration"
+            )
+        
+        logger.info(f"📄 Parent file key: {parent_file_key}")
+        
+        # Step 5: Read the parent file from MinIO
+        trinity_bucket = "trinity"
+        logger.info(f"📖 Reading parent file from MinIO: {parent_file_key}")
+        
+        try:
+            response = minio_client.get_object(trinity_bucket, parent_file_key)
             file_data = response.read()
             response.close()
             response.release_conn()
-            
-            # Read Arrow file to get columns
-            import io
-            import pyarrow as pa
-            import pyarrow.ipc as ipc
-            
+        except Exception as minio_error:
+            logger.error(f"❌ Failed to read parent file from MinIO: {minio_error}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Parent file not found in MinIO: {parent_file_key}"
+            )
+        
+        # Step 6: Parse the file to get columns
+        import io
+        import pyarrow as pa
+        import pyarrow.ipc as ipc
+        
+        try:
+            # Try reading as Arrow file first
+            reader = ipc.RecordBatchFileReader(pa.BufferReader(file_data))
+            table = reader.read_all()
+            df = table.to_pandas()
+            logger.info(f"📊 Read {len(df)} rows and {len(df.columns)} columns from Arrow file")
+        except Exception as arrow_error:
+            logger.warning(f"Failed to read as Arrow, trying CSV: {arrow_error}")
+            # Fallback to CSV if Arrow fails
             try:
-                # Read Arrow file
-                reader = ipc.RecordBatchFileReader(pa.BufferReader(file_data))
-                table = reader.read_all()
-                df = table.to_pandas()
-            except Exception as arrow_error:
-                logger.warning(f"Failed to read as Arrow, trying CSV: {arrow_error}")
-                # Fallback to CSV if Arrow fails
-                df = pd.read_csv(io.BytesIO(file_data), nrows=0)
-            
-            columns = df.columns.tolist()
-            
-            # Get data types for each column
-            df_sample = df.head(100) if len(df) > 0 else df
-            column_info = []
-            
-            for col in columns:
-                col_type = str(df_sample[col].dtype)
-                is_numerical = (
-                    'int' in col_type or 
-                    'float' in col_type or 
-                    'number' in col_type or
-                    pd.api.types.is_numeric_dtype(df_sample[col])
+                df = pd.read_csv(io.BytesIO(file_data))
+                logger.info(f"📊 Read {len(df)} rows and {len(df.columns)} columns from CSV file")
+            except Exception as csv_error:
+                logger.error(f"❌ Failed to read as CSV: {csv_error}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not parse file as Arrow or CSV: {parent_file_key}"
                 )
-                
-                column_info.append({
-                    "name": col,
-                    "type": col_type,
-                    "is_numerical": is_numerical
-                })
+        
+        columns = df.columns.tolist()
+        
+        # Step 7: Analyze columns and filter numerical ones
+        df_sample = df.head(100) if len(df) > 100 else df
+        column_info = []
+        
+        for col in columns:
+            col_type = str(df_sample[col].dtype)
+            is_numerical = (
+                'int' in col_type or 
+                'float' in col_type or 
+                'number' in col_type or
+                pd.api.types.is_numeric_dtype(df_sample[col])
+            )
             
-            # Filter for numerical columns only
-            numerical_columns = [col["name"] for col in column_info if col["is_numerical"]]
-            
-            return {
-                "scope": scope,
-                "combination": combination,
-                "file_key": target_file_key,
-                "total_columns": len(columns),
-                "numerical_columns": numerical_columns,
-                "all_columns": column_info
-            }
-            
-        except Exception as e:
-            logger.error(f"Error reading file {target_file_key}: {e}")
-            raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
-            
+            column_info.append({
+                "name": col,
+                "type": col_type,
+                "is_numerical": is_numerical
+            })
+        
+        # Filter for numerical columns only
+        numerical_columns = [col["name"] for col in column_info if col["is_numerical"]]
+        logger.info(f"✅ Found {len(numerical_columns)} numerical columns out of {len(columns)} total")
+        
+        # Step 8: Return numerical columns with parent file info
+        return {
+            "scope": scope,
+            "file_key": parent_file_key,
+            "source": "parent_file",
+            "total_columns": len(columns),
+            "numerical_columns": numerical_columns,
+            "all_columns": column_info
+        }
+        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in get_columns: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Error in get_columns: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @router.post("/get_file_path", tags=["File Path"])
 async def get_file_path(
@@ -2884,10 +2918,10 @@ async def train_mmm_models(request: dict):
         # MMM Stack modeling integration (similar to general models)
         if stack_modeling:
             logger.info(f"🔍 Starting MMM stack modeling with {len(combinations)} combinations")
-            logger.info(f"🔍 Stack models to run: {stack_models_to_run}")
-            logger.info(f"🔍 Pool by identifiers: {pool_by_identifiers}")
-            logger.info(f"🔍 Apply clustering: {apply_clustering}")
-            logger.info(f"🔍 Numerical columns for clustering: {numerical_columns_for_clustering}")
+            # logger.info(f"🔍 Stack models to run: {stack_models_to_run}")
+            # logger.info(f"🔍 Pool by identifiers: {pool_by_identifiers}")
+            # logger.info(f"🔍 Apply clustering: {apply_clustering}")
+            # logger.info(f"🔍 Numerical columns for clustering: {numerical_columns_for_clustering}")
             
             try:
                 # Import MMM stack trainer
@@ -2899,7 +2933,7 @@ async def train_mmm_models(request: dict):
                 
                 # Step 1: Prepare stack model data (get split clustered data)
                 training_progress[run_id]["current_step"] = f"Reading and pooling data by {pool_by_identifiers}"
-                logger.info(f"🔍 Step 1: Preparing stack model data...")
+                # logger.info(f"🔍 Step 1: Preparing stack model data...")
                 stack_data_result = await mmm_stack_trainer.prepare_stack_model_data(
                     scope_number=scope_number,
                     combinations=combinations,
@@ -2959,8 +2993,8 @@ async def train_mmm_models(request: dict):
                     
                     # Process individual combination metrics (dictionary format)
                     for combination, model_results_dict in stack_combination_results.items():
-                        logger.info(f"🔍 Processing stack results for combination: {combination}")
-                        logger.info(f"🔍 Model results dict keys: {list(model_results_dict.keys())}")
+                        # logger.info(f"🔍 Processing stack results for combination: {combination}")
+                        # logger.info(f"🔍 Model results dict keys: {list(model_results_dict.keys())}")
                         
                         # Convert stack model results to match individual model format
                         stack_model_results_formatted = []
@@ -3049,7 +3083,7 @@ async def train_mmm_models(request: dict):
                                         bucket_name = scope_settings.minio_bucket
                                         object_prefix = await get_object_prefix()
                                         source_file_key = f"{bucket_name}/{object_prefix}data/{combination}.arrow"
-                                        logger.info(f"🔍 Constructed source file key for stack model: {source_file_key}")
+                                        # logger.info(f"🔍 Constructed source file key for stack model: {source_file_key}")
                                     except Exception as e:
                                         logger.warning(f"⚠️ Could not construct source file key for {combination}: {e}")
                                         source_file_key = combination  # Fallback to combination name
@@ -3188,16 +3222,16 @@ async def train_mmm_models(request: dict):
                         original_combination_results.append(original_combo_result)
                     
                     # Calculate ensemble results for each combination
-                    logger.info("🔄 Starting ensemble calculation for MMM model results")
+                    # logger.info("🔄 Starting ensemble calculation for MMM model results")
                     ensemble_results = ensemble_calculator.calculate_ensemble_results(valid_combination_results)
                     
                     # Create ensemble summary
                     ensemble_summary = ensemble_calculator.create_ensemble_summary(ensemble_results)
-                    logger.info(f"📊 Ensemble calculation completed: {ensemble_summary}")
+                    # logger.info(f"📊 Ensemble calculation completed: {ensemble_summary}")
                     
                     # Create validation summary to ensure proper combination and model tracking
                     validation_summary = ensemble_calculator.create_validation_summary(ensemble_results)
-                    logger.info(f"🔍 Ensemble validation summary: {validation_summary['overall_stats']}")
+                    # logger.info(f"🔍 Ensemble validation summary: {validation_summary['overall_stats']}")
                     
                     # Log any validation issues
                     if validation_summary['overall_stats']['validation_failed'] > 0:
@@ -3209,13 +3243,13 @@ async def train_mmm_models(request: dict):
                     # Debug: Log ensemble results keys and combination results keys
                     logger.info(f"🔍 Ensemble results keys: {list(ensemble_results.keys())}")
                     combination_names = [combo.get('combination_id') for combo in combination_results]
-                    logger.info(f"🔍 Combination results keys: {combination_names}")
+                    # logger.info(f"🔍 Combination results keys: {combination_names}")
                     
                     # Update combination_results with ensemble results
                     # Replace individual model results with ensemble results for each combination
                     for i, combo_result in enumerate(combination_results):
                         combination_name = combo_result.get('combination_id', f'combination_{i}')
-                        logger.info(f"🔍 Processing combination: '{combination_name}'")
+                        # logger.info(f"🔍 Processing combination: '{combination_name}'")
                         
                         if combination_name in ensemble_results:
                             # Replace model_results with ensemble results
@@ -3413,7 +3447,7 @@ async def train_mmm_models(request: dict):
                                     logger.info(f"🔍 Using fallback variable_averages from {combo_key}")
                                     break
                 
-                logger.info(f"🔍 Final variable_averages: {variable_averages}")
+
                 
                 # Get column values for this combination from source file
                 column_values = {}
@@ -3502,20 +3536,17 @@ async def train_mmm_models(request: dict):
                     roi_results = model_result.get('roi_results', {})
                     for feature_name, roi_data in roi_results.items():
                         summary_row[f"{feature_name}_roi"] = roi_data.get('roi', 0)
-                        summary_row[f"{feature_name}_cprp_value"] = roi_data.get('cprp_value', 0)
+                        # Do not save CPRP to MinIO
                     
                     # Add parameter_combination column for MMM modeling
                     # Convert combo_config to JSON string for storage in Arrow file
                     import json
                     combo_config = model_result.get('variable_configs', {})  # Use 'variable_configs' instead of 'combo_config'
                     
-                    # Debug logging
-                    logger.info(f"🔍 Model result keys: {list(model_result.keys())}")
-                    logger.info(f"🔍 variable_configs found: {combo_config}")
+\
                     
                     if combo_config:
                         summary_row['parameter_combination'] = json.dumps(combo_config, default=str)
-                        logger.info(f"✅ Added parameter_combination: {summary_row['parameter_combination'][:100]}...")
                     else:
                         summary_row['parameter_combination'] = ""
                         logger.warning(f"⚠️ No variable_configs found in model_result")
@@ -3619,7 +3650,7 @@ async def train_mmm_models(request: dict):
                         roi_results = model_result.get('roi_results', {})
                         for feature_name, roi_data in roi_results.items():
                             summary_row[f"{feature_name}_roi"] = roi_data.get('roi', 0)
-                            summary_row[f"{feature_name}_cprp_value"] = roi_data.get('cprp_value', 0)
+                            # Do not save CPRP to MinIO
                         
                         # Add parameter_combination column
                         import json
@@ -3630,18 +3661,16 @@ async def train_mmm_models(request: dict):
                             summary_row['parameter_combination'] = ""
                         
                         individual_summary_data.append(summary_row)
-            
-            logger.info(f"📊 Total ensemble summary_data rows prepared: {len(ensemble_summary_data)}")
-            logger.info(f"📊 Total individual summary_data rows prepared: {len(individual_summary_data)}")
+
             
             # Save ensemble results to MinIO
             if ensemble_summary_data:
-                logger.info(f"📊 Preparing to save {len(ensemble_summary_data)} MMM ensemble results to MinIO")
+                # logger.info(f"📊 Preparing to save {len(ensemble_summary_data)} MMM ensemble results to MinIO")
                 await _save_results_to_minio(ensemble_summary_data, ensemble_results_file_key, minio_client, bucket_name)
             
             # Save individual parameter results to MinIO
             if individual_summary_data:
-                logger.info(f"📊 Preparing to save {len(individual_summary_data)} MMM individual parameter results to MinIO")
+                # logger.info(f"📊 Preparing to save {len(individual_summary_data)} MMM individual parameter results to MinIO")
                 await _save_results_to_minio(individual_summary_data, individual_results_file_key, minio_client, bucket_name)
                     
         except Exception as e:
@@ -3777,7 +3806,7 @@ async def train_mmm_models(request: dict):
                 # Clustering configuration
                 "apply_clustering": apply_clustering if apply_clustering is not None else False,
                 "numerical_columns_for_clustering": numerical_columns_for_clustering or [],
-                "n_clusters": n_clusters if n_clusters is not None else None,
+                "n_clusters": n_clusters if n_clusters is not None else 3,
                 
                 # Interaction terms configuration
                 "apply_interaction_terms": apply_interaction_terms if apply_interaction_terms is not None else False,
@@ -3800,6 +3829,7 @@ async def train_mmm_models(request: dict):
                 "client_name": client_name,
                 "app_name": app_name,
                 "project_name": project_name,
+                 "application_type": "mmm"
             }
             
             # Debug: Check build_config_data for None values before saving to MongoDB
@@ -3815,6 +3845,96 @@ async def train_mmm_models(request: dict):
             else:
                 logger.info("✅ No None values found in build_config_data")
             
+            # Check for existing build configuration and override ensemble/individual results file keys
+            try:
+                from .database import mongo_client
+                if mongo_client is None:
+                    raise Exception("MongoDB client not available")
+                db = mongo_client["trinity_db"]
+                document_id = f"{client_name}/{app_name}/{project_name}"
+                
+                existing_config = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
+                
+                if existing_config:
+                    logger.info(f"🔄 Found existing build configuration for {document_id}, updating ensemble/individual results file keys")
+                    
+                    # Update existing combination_file_keys to override ONLY ensemble and individual results
+                    existing_combination_file_keys = existing_config.get("combination_file_keys", [])
+                    
+                    # Create updated list by replacing specific result types
+                    updated_combination_file_keys = []
+                    
+                    # Process existing entries and replace only the specific result types
+                    ensemble_updated = False
+                    individual_updated = False
+                    
+                    for entry in existing_combination_file_keys:
+                        result_type = entry.get("result_type")
+                        
+                        if result_type == "ensemble":
+                            # Skip old ensemble entry - will be replaced with new one
+                            if 'ensemble_results_file_key' in locals():
+                                ensemble_updated = True
+                                logger.info(f"🔄 Replacing old ensemble file key: {entry.get('file_key')}")
+                                logger.info(f"✅ With new ensemble_results_file_key: {ensemble_results_file_key}")
+                            else:
+                                # Keep existing if no new one available
+                                updated_combination_file_keys.append(entry)
+                                
+                        elif result_type == "individual_parameters":
+                            # Skip old individual parameters entry - will be replaced with new one
+                            if 'individual_results_file_key' in locals():
+                                individual_updated = True
+                                logger.info(f"🔄 Replacing old individual parameters file key: {entry.get('file_key')}")
+                                logger.info(f"✅ With new individual_results_file_key: {individual_results_file_key}")
+                            else:
+                                # Keep existing if no new one available
+                                updated_combination_file_keys.append(entry)
+                        else:
+                            # Keep all other entries unchanged (source_data, etc.)
+                            updated_combination_file_keys.append(entry)
+                    
+                    # Always add new ensemble and individual results entries (replacing old ones)
+                    if 'ensemble_results_file_key' in locals():
+                        updated_combination_file_keys.append({
+                            "combination": "ensemble_results",
+                            "file_key": ensemble_results_file_key,
+                            "result_type": "ensemble"
+                        })
+                        if ensemble_updated:
+                            logger.info(f"✅ Replaced with new ensemble_results_file_key: {ensemble_results_file_key}")
+                        else:
+                            logger.info(f"✅ Added new ensemble_results_file_key: {ensemble_results_file_key}")
+                    
+                    if 'individual_results_file_key' in locals():
+                        updated_combination_file_keys.append({
+                            "combination": "individual_parameter_results", 
+                            "file_key": individual_results_file_key,
+                            "result_type": "individual_parameters"
+                        })
+                        if individual_updated:
+                            logger.info(f"✅ Replaced with new individual_results_file_key: {individual_results_file_key}")
+                        else:
+                            logger.info(f"✅ Added new individual_results_file_key: {individual_results_file_key}")
+                    
+                    # Update the build_config_data with the updated combination_file_keys
+                    build_config_data["combination_file_keys"] = updated_combination_file_keys
+                    
+                    # Also update the model_coefficients if they exist in the existing config
+                    existing_model_coefficients = existing_config.get("model_coefficients", {})
+                    # Merge new model_coefficients with existing ones (new ones take precedence)
+                    merged_model_coefficients = {**existing_model_coefficients, **build_config_data.get("model_coefficients", {})}
+                    build_config_data["model_coefficients"] = merged_model_coefficients
+                    
+                    logger.info(f"🔄 Updated existing configuration with new file keys and merged model coefficients")
+                else:
+                    logger.info(f"📝 No existing build configuration found for {document_id}, creating new one")
+                    
+            except Exception as override_error:
+                logger.warning(f"⚠️ Error during override logic: {str(override_error)}, proceeding with normal save")
+                import traceback
+                logger.warning(f"   Override error traceback: {traceback.format_exc()}")
+
             # Save to MongoDB with detailed error handling
             try:
                 mongo_result = await save_build_config(
@@ -3827,7 +3947,8 @@ async def train_mmm_models(request: dict):
                 )
                 
                 if mongo_result["status"] == "success":
-                    logger.info(f"📦 MMM Build configuration saved to MongoDB: {mongo_result['mongo_id']}")
+                    # logger.info(f"📦 MMM Build configuration saved to MongoDB: {mongo_result['mongo_id']}")
+                    pass
                 else:
                     logger.error(f"❌ Failed to save MMM build configuration to MongoDB: {mongo_result['error']}")
             except Exception as mongo_error:

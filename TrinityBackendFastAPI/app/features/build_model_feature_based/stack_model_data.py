@@ -589,39 +589,6 @@ class MMMStackDataPooler:
                 
                 # Create unique key: pool_key_cluster_id
                 unique_key = f"{pool_key}_{int(cluster_id)}"
-                
-                # Save to MinIO if client is provided
-                if minio_client and bucket_name:
-                    try:
-                        # Generate timestamp for file naming
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        
-                        # Create filename
-                        filename = f"split_cluster_{unique_key}_{timestamp}.csv"
-                        
-                        # Create file path (you may want to adjust this path structure)
-                        file_key = f"stack_modeling/split_clusters/{filename}"
-                        
-                        # Convert DataFrame to CSV
-                        csv_buffer = BytesIO()
-                        cluster_df.to_csv(csv_buffer, index=False)
-                        csv_buffer.seek(0)
-                        
-                        # Save to MinIO
-                        minio_client.put_object(
-                            bucket_name,
-                            file_key,
-                            csv_buffer,
-                            length=csv_buffer.getbuffer().nbytes,
-                            content_type='text/csv'
-                        )
-                        
-                        saved_files[unique_key] = file_key
-                        
-                    except Exception as e:
-                        logger.error(f"Failed to save split cluster {unique_key} to MinIO: {e}")
-                        saved_files[unique_key] = None
-                
                 # Remove cluster_id column as it's no longer needed
                 if 'cluster_id' in cluster_df.columns:
                     cluster_df = cluster_df.drop('cluster_id', axis=1)
@@ -856,7 +823,6 @@ class StackModelDataProcessor:
             if invalid_identifiers:
                 raise ValueError(f"Invalid pooling identifiers: {invalid_identifiers}. Available identifiers: {all_identifiers}")
             
-            logger.info(f"Preparing stack model data for scope {scope_number} with {len(combinations)} combinations")
             
             # Create data pooler instance
             data_pooler = MMMStackDataPooler(minio_client, bucket_name)
@@ -884,13 +850,11 @@ class StackModelDataProcessor:
             else:
                 numerical_columns = [var.lower() for var in clustering_columns]
             
-            logger.info(f"Using columns for clustering: {numerical_columns}")
             clustered_pools = data_pooler.apply_clustering_to_pools(pooled_data, numerical_columns, n_clusters)
             
             if not clustered_pools:
                 raise ValueError("Clustering failed - no clustered pools created")
             
-            logger.info(f"Clustered pools: {clustered_pools}")
             
             split_clustered_data = data_pooler.split_clustered_data_by_clusters(clustered_pools)
             
@@ -965,7 +929,6 @@ class StackModelDataProcessor:
                 'split_clustered_data': split_clustered_data  # Return the actual split clustered data
             }
             
-            logger.info(f"Successfully prepared stack model data: {len(split_clustered_data)} split clusters ready for modeling")
             return result
             
         except Exception as e:
@@ -978,93 +941,14 @@ class StackModelDataProcessor:
             }
     
 
-    def _apply_standardization(
-        self,
-        df: pd.DataFrame,
-        x_variables: List[str],
-        y_variable: str,
-        combo_config: Dict[str, Dict[str, Any]]
-    ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
-        """
-        Apply standardization to the DataFrame based on combo_config.
-        
-        Args:
-            df: Input DataFrame
-            x_variables: List of x variable names
-            y_variable: Target variable name
-            combo_config: Configuration for each variable
-            
-        Returns:
-            Tuple of (transformed_df, metadata)
-        """
-        try:
-            transformed_df = df.copy()
-            metadata = {}
-            
-            # Get standardization type from combo_config (default to 'none')
-            standardization_type = 'none'
-            if combo_config:
-                # Check if any variable has standardization specified
-                for var_name, var_config in combo_config.items():
-                    if 'standardization' in var_config:
-                        standardization_type = var_config['standardization']
-                        break
-                    elif 'type' in var_config and var_config['type'] in ['standard', 'minmax']:
-                        standardization_type = var_config['type']
-                        break
-            
-            logger.info(f"Applying standardization: {standardization_type}")
-            
-            if standardization_type == 'none':
-                # No standardization - return original data
-                metadata = {
-                    'standardization_type': 'none',
-                    'applied_to': [],
-                    'scalers': {}
-                }
-                return transformed_df, metadata
-            
-            # Apply standardization to x_variables and y_variable
-            variables_to_standardize = x_variables
-            scalers = {}
-            
-            for var in variables_to_standardize:
-                if var in transformed_df.columns:
-                    if standardization_type == 'standard':
-                        # StandardScaler (mean=0, std=1)
-                        scaler = StandardScaler()
-                        transformed_df[f'{var}'] = scaler.fit_transform(transformed_df[[var]])
-                        scalers[var] = scaler
-                        # logger.info(f"Applied standard scaling to {var}")
-                        
-                    elif standardization_type == 'minmax':
-                        # MinMaxScaler (0-1 range)
-                        scaler = MinMaxScaler()
-                        transformed_df[f'{var}'] = scaler.fit_transform(transformed_df[[var]])
-                        scalers[var] = scaler
-                        # logger.info(f"Applied minmax scaling to {var}")
-            
-            metadata = {
-                'standardization_type': standardization_type,
-                'applied_to': variables_to_standardize,
-                'scalers': scalers,
-                'original_columns': list(df.columns),
-                'transformed_columns': list(transformed_df.columns)
-            }
-            
-            # logger.info(f"Standardization completed. Original columns: {len(df.columns)}, Transformed columns: {len(transformed_df.columns)}")
-            return transformed_df, metadata
-            
-        except Exception as e:
-            logger.error(f"Error applying standardization: {e}")
-            # Return original data with error metadata
-            return df, {'error': str(e), 'standardization_type': 'none'}
+   
 
     async def process_split_clustered_data(
         self,
         split_clustered_data: Dict[str, pd.DataFrame],
         x_variables_lower: List[str],
         y_variable_lower: str,
+        variable_configs: Optional[Dict[str, Dict[str, Any]]] = None,
         standardization: str = 'none',
         k_folds: int = 5,
         models_to_run: Optional[List[str]] = None,
@@ -1099,7 +983,7 @@ class StackModelDataProcessor:
             failed_clusters = 0
             
             for split_key, cluster_df in split_clustered_data.items():
-                logger.info(f"Processing split cluster: {split_key}")
+                # logger.info(f"Processing split cluster: {split_key}")
                 
                 # Validate cluster data
                 if cluster_df is None or cluster_df.empty:
@@ -1140,6 +1024,7 @@ class StackModelDataProcessor:
                     cluster_results = await self._process_combination_for_stack(
                         cluster_df=cluster_df,
                         combo_config=combo_config,
+                        variable_configs=variable_configs,  # Pass per-variable transformations
                         models_to_run=models_to_run or [],
                         custom_configs=custom_configs or {},
                         x_variables_lower=x_variables_lower,
@@ -1184,10 +1069,10 @@ class StackModelDataProcessor:
                     failed_clusters += 1
             
             # Summary logging
-            logger.info(f"📊 Processing Summary:")
-            logger.info(f"   ✅ Successful clusters: {successful_clusters}")
-            logger.info(f"   ❌ Failed clusters: {failed_clusters}")
-            logger.info(f"   📈 Total clusters: {len(split_clustered_data)}")
+            # logger.info(f"📊 Processing Summary:")
+            # logger.info(f"   ✅ Successful clusters: {successful_clusters}")
+            # logger.info(f"   ❌ Failed clusters: {failed_clusters}")
+            # logger.info(f"   📈 Total clusters: {len(split_clustered_data)}")
             
             if successful_clusters == 0:
                 raise Exception(f"❌ All {len(split_clustered_data)} clusters failed processing. Check logs for details.")
@@ -1206,14 +1091,15 @@ class StackModelDataProcessor:
         self,
         cluster_df: pd.DataFrame,
         combo_config: Dict[str, Dict[str, Any]],
-        models_to_run: List[str],
-        custom_configs: Optional[Dict[str, Any]],
-        x_variables_lower: List[str],
-        y_variable_lower: str,
-        test_size: float,
-        price_column: Optional[str],
-        apply_interaction_terms: bool,
-        numerical_columns_for_interaction: List[str],
+        variable_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        models_to_run: List[str] = None,
+        custom_configs: Optional[Dict[str, Any]] = None,
+        x_variables_lower: List[str] = None,
+        y_variable_lower: str = None,
+        test_size: float = 0.2,
+        price_column: Optional[str] = None,
+        apply_interaction_terms: bool = True,
+        numerical_columns_for_interaction: List[str] = None,
         run_id: str = None,
         training_progress: Dict = None,
         cluster_info: str = None,
@@ -1231,7 +1117,7 @@ class StackModelDataProcessor:
             # Get unique combinations in this cluster
             if 'combination' in cluster_df.columns:
                 unique_combinations = cluster_df['combination'].unique()
-                logger.info(f"Found {len(unique_combinations)} unique combinations")
+                # logger.info(f"Found {len(unique_combinations)} unique combinations")
             else:
                 # If no combination column, treat entire cluster as one combination
                 unique_combinations = ['default_combination']
@@ -1248,13 +1134,31 @@ class StackModelDataProcessor:
                 
                 logger.info(f"Transforming combination '{combination}' with {len(combo_data)} records")
                 
-                # Apply standardization (not MMM transformations)
-                transformed_combo, metadata = self._apply_standardization(
-                    combo_data, x_variables_lower, y_variable_lower, combo_config
-                )
+                # Apply per-variable transformations if provided (adstock, logistic, etc.)
+                transformation_metadata_dict = {}
+                if variable_configs and len(variable_configs) > 0:
+                    # logger.info(f"🔧 Applying per-variable transformations for stack modeling")
+                    
+                    # Import transformation engine
+                    from .mmm_training import MMMTransformationEngine
+                    transformation_engine = MMMTransformationEngine()
+                    
+                    # Apply transformations
+                    try:
+                        transformed_combo, transformation_metadata_dict, updated_variable_configs = transformation_engine.apply_variable_transformations(
+                            combo_data, variable_configs
+                        )
+                        # logger.info(f"✅ Applied per-variable transformations successfully")
+                        combo_data = transformed_combo  # Use transformed data
+                    except Exception as transform_error:
+                        logger.error(f"❌ Error applying transformations: {transform_error}")
+                        logger.warning("⚠️ Proceeding without per-variable transformations")
+                else:
+                    logger.info("ℹ️ No variable_configs provided for stack modeling, skipping per-variable transformations")
                 
-                transformed_combinations.append(transformed_combo)
-                combination_metadata[combination] = metadata
+                # Store transformed data and metadata
+                transformed_combinations.append(combo_data)
+                combination_metadata[combination] = transformation_metadata_dict
             
             if not transformed_combinations:
                 logger.warning("No valid transformed combinations")
@@ -1266,12 +1170,12 @@ class StackModelDataProcessor:
             
             # Step 3: Create encoded combination features (always needed for stack modeling)
             if not apply_interaction_terms:
-                logger.info("Creating encoded combination features")
+                # logger.info("Creating encoded combination features")
                 merged_df = self._create_encoded_combination_features(merged_df)
             
             # Step 4: Create interaction terms if requested
             if apply_interaction_terms and numerical_columns_for_interaction:
-                logger.info("Creating interaction terms")
+                # logger.info("Creating interaction terms")
                 merged_df = self._create_interaction_terms_for_stack(
                     merged_df, numerical_columns_for_interaction
                 )
@@ -1409,7 +1313,7 @@ class StackModelDataProcessor:
                 
                 # Train/test split - use combination-aware split if combination column exists
                 if 'combination' in df_clean.columns:
-                    logger.info("Using combination-aware train/test split")
+                    # logger.info("Using combination-aware train/test split")
                     train_indices, test_indices = self._create_combination_aware_train_test_split(
                         df_clean, test_size=test_size, random_state=42
                     )
@@ -1473,7 +1377,7 @@ class StackModelDataProcessor:
                 
                 # Get models
                 all_models = get_models()
-                logger.info(f"Available models: {list(all_models.keys())}")
+                # logger.info(f"Available models: {list(all_models.keys())}")
                 
                 # Filter models if specified
                 if models_to_run:
@@ -1575,11 +1479,11 @@ class StackModelDataProcessor:
                                 if has_interaction_terms:
                                     # Stack modeling: use StackConstrainedLinearRegression for interaction terms
                                     from .models import StackConstrainedLinearRegression
-                                    logger.info(f"🔍 Using StackConstrainedLinearRegression for stack modeling with interaction terms")
+                                    # logger.info(f"🔍 Using StackConstrainedLinearRegression for stack modeling with interaction terms")
                                 else:
                                     # Individual modeling: use ConstrainedLinearRegression for base features only
                                     from .models import ConstrainedLinearRegression
-                                    logger.info(f"🔍 Using ConstrainedLinearRegression for individual modeling with base features only")
+                                    # logger.info(f"🔍 Using ConstrainedLinearRegression for individual modeling with base features only")
                                 
                                 # Extract constraints from parameters object - handle both old and new formats
                                 variable_constraints = parameters.get('variable_constraints', [])
@@ -1786,7 +1690,7 @@ class StackModelDataProcessor:
             
             # Get unique combinations
             unique_combinations = df['combination'].unique()
-            logger.info(f"Creating combination-aware split for {len(unique_combinations)} combinations")
+            # logger.info(f"Creating combination-aware split for {len(unique_combinations)} combinations")
             
             # Split combinations into train/test
             from sklearn.model_selection import train_test_split
@@ -1802,9 +1706,6 @@ class StackModelDataProcessor:
             
             train_indices = df[train_mask].index.values
             test_indices = df[test_mask].index.values
-            
-            logger.info(f"Train: {len(train_indices)} samples from {len(train_combinations)} combinations")
-            logger.info(f"Test: {len(test_indices)} samples from {len(test_combinations)} combinations")
             
             return train_indices, test_indices
             
@@ -1881,7 +1782,7 @@ class StackModelDataProcessor:
             
             # Get unique combinations
             unique_combinations = df['combination'].unique()
-            logger.info(f"Found {len(unique_combinations)} unique combinations: {unique_combinations}")
+
             
             # Check if we have enough combinations
             combination_unique_values = len(unique_combinations)
@@ -1896,7 +1797,7 @@ class StackModelDataProcessor:
             for dummy_col in combination_dummies.columns:
                 enhanced_df[dummy_col] = combination_dummies[dummy_col]
             
-            logger.info(f"Created {len(combination_dummies.columns)} encoded combination features: {list(combination_dummies.columns)}")
+            # logger.info(f"Created {len(combination_dummies.columns)} encoded combination features: {list(combination_dummies.columns)}")
             return enhanced_df
             
         except Exception as e:

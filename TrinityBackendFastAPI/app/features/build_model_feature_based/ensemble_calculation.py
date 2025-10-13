@@ -69,7 +69,7 @@ class EnsembleCalculator:
         Returns:
             Dict containing ensemble results for each combination and model type
         """
-        logger.info("Starting ensemble calculation for MMM model results")
+
         
         ensemble_results = {}
         
@@ -88,7 +88,7 @@ class EnsembleCalculator:
                 
             model_results = combo_result.get('model_results', [])
             
-            logger.info(f"Processing combination: {combination_id} with {len(model_results)} models")
+            # logger.info(f"Processing combination: {combination_id} with {len(model_results)} models")
             
             if not model_results:
                 logger.warning(f"No model results found for combination: {combination_id}")
@@ -112,7 +112,7 @@ class EnsembleCalculator:
             combination_ensemble = self._calculate_combination_ensemble(validated_model_results, combination_id)
             ensemble_results[combination_id] = combination_ensemble
             
-        logger.info(f"Completed ensemble calculation for {len(ensemble_results)} combinations")
+        # logger.info(f"Completed ensemble calculation for {len(ensemble_results)} combinations")
         return ensemble_results
     
     def _calculate_combination_ensemble(self, model_results: List[Dict[str, Any]], combination_id: str) -> Dict[str, Any]:
@@ -138,20 +138,20 @@ class EnsembleCalculator:
             model_name = model_result.get('model_name', 'unknown')
             model_key = model_result.get('_model_key', 'unknown_key')
             
-            logger.info(f"Adding model {model_name} with key {model_key} to ensemble for combination {combination_id}")
+            # logger.info(f"Adding model {model_name} with key {model_key} to ensemble for combination {combination_id}")
             models_by_type[model_name].append(model_result)
         
-        logger.info(f"Grouped models by type for combination {combination_id}: {list(models_by_type.keys())}")
+        # logger.info(f"Grouped models by type for combination {combination_id}: {list(models_by_type.keys())}")
         
         ensemble_by_type = {}
         
         # Calculate ensemble for each model type
         for model_type, type_models in models_by_type.items():
-            logger.info(f"Calculating ensemble for {model_type} in combination {combination_id} with {len(type_models)} parameter combinations")
+            # logger.info(f"Calculating ensemble for {model_type} in combination {combination_id} with {len(type_models)} parameter combinations")
             
             # Log all model keys for this type
             model_keys = [model.get('_model_key') for model in type_models]
-            logger.info(f"Model keys for {model_type}: {model_keys}")
+            # logger.info(f"Model keys for {model_type}: {model_keys}")
             
             ensemble_result = self._calculate_model_type_ensemble(model_type, type_models, combination_id)
             ensemble_by_type[model_type] = ensemble_result
@@ -170,7 +170,7 @@ class EnsembleCalculator:
         Returns:
             Dict containing weighted ensemble result
         """
-        logger.info(f"🔍 _calculate_model_type_ensemble called for {model_type} in {combination_id} with {len(model_results)} results")
+        # logger.info(f"🔍 _calculate_model_type_ensemble called for {model_type} in {combination_id} with {len(model_results)} results")
         
         if not model_results:
             logger.warning(f"No model results provided for {model_type} in combination {combination_id}")
@@ -182,10 +182,10 @@ class EnsembleCalculator:
                 logger.error(f"Model {model_result.get('_model_key')} from wrong combination in {model_type} ensemble!")
                 return {}
         
-        logger.info(f"✅ All models validated for {model_type} in {combination_id}")
+        # logger.info(f"✅ All models validated for {model_type} in {combination_id}")
             
         # Extract MAPE test values for weighting
-        logger.info(f"🔍 Extracting MAPE test values for {model_type}")
+        # logger.info(f"🔍 Extracting MAPE test values for {model_type}")
         mape_test_values = []
         for i, model_result in enumerate(model_results):
             mape_test = model_result.get('mape_test', float('inf'))
@@ -201,10 +201,10 @@ class EnsembleCalculator:
             
         # Find best MAPE for this model type
         best_mape = min(mape_test_values)
-        logger.info(f"Best MAPE for {model_type}: {best_mape}")
+        # logger.info(f"Best MAPE for {model_type}: {best_mape}")
         
         # Calculate weights using exponential weighting formula
-        logger.info(f"🔍 Calculating weights for {model_type}")
+        # logger.info(f"🔍 Calculating weights for {model_type}")
         weights = []
         valid_results = []
         
@@ -219,9 +219,9 @@ class EnsembleCalculator:
                 valid_results.append(model_result)
             else:
                 logger.warning(f"⚠️ Model {i}: mape_test is inf, skipping")
-        
-        logger.info(f"🔍 Calculated {len(weights)} weights: {weights}")
-        logger.info(f"🔍 Valid results count: {len(valid_results)}")
+        # 
+        # logger.info(f"🔍 Calculated {len(weights)} weights: {weights}")
+        # logger.info(f"🔍 Valid results count: {len(valid_results)}")
         
         # Normalize weights
         total_weight = sum(weights)
@@ -230,7 +230,7 @@ class EnsembleCalculator:
         else:
             normalized_weights = [1.0 / len(weights)] * len(weights)
             
-        logger.info(f"Calculated {len(normalized_weights)} weights for {model_type}: {normalized_weights}")
+        # logger.info(f"Calculated {len(normalized_weights)} weights for {model_type}: {normalized_weights}")
         
         # Calculate weighted ensemble metrics
         logger.info(f"🔍 Starting weighted metrics calculation for {model_type} with {len(valid_results)} results")
@@ -276,7 +276,7 @@ class EnsembleCalculator:
         Returns:
             Dict containing weighted ensemble metrics
         """
-        logger.info(f"🔍 _calculate_weighted_metrics called with {len(model_results)} results and {len(weights)} weights")
+        # logger.info(f"🔍 _calculate_weighted_metrics called with {len(model_results)} results and {len(weights)} weights")
         
         if not model_results or not weights:
             logger.warning("⚠️ Empty model_results or weights, returning empty dict")
@@ -284,16 +284,16 @@ class EnsembleCalculator:
             
         # Initialize weighted metrics
         weighted_metrics = {}
-        logger.info("🔍 Initialized weighted_metrics dict")
+        # logger.info("🔍 Initialized weighted_metrics dict")
         
         # Performance metrics (most should be weighted averages)
         performance_metrics = ['mape_train', 'mape_test', 'r2_train', 'r2_test', 'aic', 'bic']
-        logger.info(f"🔍 Processing {len(performance_metrics)} performance metrics: {performance_metrics}")
+        # logger.info(f"🔍 Processing {len(performance_metrics)} performance metrics: {performance_metrics}")
         
         for metric in performance_metrics:
-            logger.info(f"🔍 Processing metric: {metric}")
+            # logger.info(f"🔍 Processing metric: {metric}")
             values = [result.get(metric, 0) for result in model_results]
-            logger.info(f"🔍 Extracted values for {metric}: {values}")
+            # logger.info(f"🔍 Extracted values for {metric}: {values}")
             try:
                 weighted_metrics[metric] = self._weighted_average(values, weights)
                 logger.info(f"✅ Calculated weighted average for {metric}: {weighted_metrics[metric]}")
@@ -444,14 +444,14 @@ class EnsembleCalculator:
         # Check for None values that could cause multiplication errors
         none_values = [i for i, v in enumerate(values) if v is None]
         if none_values:
-            logger.error(f"❌ Found None values at indices {none_values} in values: {values}")
+            # logger.error(f"❌ Found None values at indices {none_values} in values: {values}")
             # Replace None values with 0
             values = [0.0 if v is None else v for v in values]
-            logger.info(f"🔧 Replaced None values with 0: {values}")
+            # logger.info(f"🔧 Replaced None values with 0: {values}")
         
         try:
             result = sum(v * w for v, w in zip(values, weights))
-            logger.info(f"✅ Calculated weighted average: {result}")
+            # logger.info(f"✅ Calculated weighted average: {result}")
             return result
         except Exception as e:
             logger.error(f"❌ Error in weighted average calculation: {str(e)}")
@@ -477,9 +477,7 @@ class EnsembleCalculator:
                 values.append(standardized_coefficients.get(key, 0))
             weighted_coefficients[key] = self._weighted_average(values, weights)
         
-        logger.info(f"Weighted coefficients: {weighted_coefficients}")
-        logger.info(f"Weights: {weights}")
-        logger.info(f"values: {values}")
+  
         
         return weighted_coefficients
     
@@ -700,7 +698,7 @@ class EnsembleCalculator:
             metadata = result.get('transformation_metadata', {})
             if metadata:
                 all_transformation_metadata.append(metadata)
-                logger.info(f"🔍 Model {i}: Found transformation metadata for {len(metadata)} variables")
+                # logger.info(f"🔍 Model {i}: Found transformation metadata for {len(metadata)} variables")
             else:
                 logger.warning(f"⚠️ Model {i}: No transformation metadata found")
         
@@ -713,7 +711,7 @@ class EnsembleCalculator:
         for metadata in all_transformation_metadata:
             all_variables.update(metadata.keys())
         
-        logger.info(f"🔍 Found {len(all_variables)} unique variables: {list(all_variables)}")
+        # logger.info(f"🔍 Found {len(all_variables)} unique variables: {list(all_variables)}")
         
         weighted_metadata = {}
         
@@ -792,7 +790,7 @@ class EnsembleCalculator:
         # Handle transformation_steps (weighted average of each step)
         weighted_metadata['transformation_steps'] = self._calculate_weighted_transformation_steps(var_metadata_list, normalized_weights)
         
-        logger.info(f"✅ Calculated weighted metadata for {var_name}")
+        # logger.info(f"✅ Calculated weighted metadata for {var_name}")
         return weighted_metadata
     
     def _calculate_weighted_transformation_steps(self, var_metadata_list: List[Dict[str, Any]], weights: List[float]) -> List[Dict[str, Any]]:
@@ -806,7 +804,7 @@ class EnsembleCalculator:
         Returns:
             List of weighted transformation steps
         """
-        logger.info(f"🔍 Calculating weighted transformation steps")
+        # logger.info(f"🔍 Calculating weighted transformation steps")
         
         # Collect all transformation steps from all models
         all_steps = []

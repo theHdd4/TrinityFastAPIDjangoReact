@@ -62,14 +62,7 @@ try:
     trinity_db_db = mongo_client["trinity_db"]
     createandtransform_configs_collection = trinity_db_db["createandtransform_configs"]
 
-    logger.info("✅ MongoDB connected - collections ready:")
-    logger.info("    • Scope_selection.Scopes")
-    logger.info("    • Builddatabase.simple")  # Assuming these are your settings
-    logger.info("    • Marketing.marketing_metadata")
-    logger.info("    • Marketing.marketing_models")
-    logger.info("    • trinity_db.createandtransform_configs")
 
-    logger.info(f"    • {settings.database_name}.{settings.collection_name}")
     
 except Exception as e:
     logger.error(f"❌ MongoDB connection failed: {e}")
@@ -431,10 +424,11 @@ async def train_models_for_combination_enhanced(
     file_key: str,
     x_variables: List[str],
     y_variable: str,
-    price_column: Optional[str],
-    standardization: str,
-    models_to_run: Optional[List[str]],
-    custom_configs: Optional[Dict[str, Any]],
+    variable_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+    price_column: Optional[str] = None,
+    standardization: str = 'none',
+    models_to_run: Optional[List[str]] = None,
+    custom_configs: Optional[Dict[str, Any]] = None,
     test_size: float = 0.2,
     k_folds: int = 5,
     bucket_name: Optional[str] = None
@@ -537,6 +531,30 @@ async def train_models_for_combination_enhanced(
         }
         variable_averages[y_variable] = float(y_data.mean())
         
+        # Apply per-variable transformations if variable_configs is provided
+        transformation_metadata = {}
+        if variable_configs and len(variable_configs) > 0:
+            logger.info(f"🔧 Applying per-variable transformations with configs: {variable_configs}")
+            
+            # Import transformation engine
+            from .mmm_training import MMMTransformationEngine
+            transformation_engine = MMMTransformationEngine()
+            
+            # Apply transformations to the dataframe
+            try:
+                transformed_df, transformation_metadata, updated_variable_configs = transformation_engine.apply_variable_transformations(
+                    df, variable_configs
+                )
+                logger.info(f"✅ Successfully applied transformations")
+                
+                # Use transformed dataframe for modeling
+                df = transformed_df
+            except Exception as transform_error:
+                logger.error(f"❌ Error applying transformations: {transform_error}")
+                logger.warning("⚠️ Proceeding without transformations")
+        else:
+            logger.info("ℹ️ No variable_configs provided, skipping per-variable transformations")
+        
         # Prepare features and target
         X_original = df[x_variables]
         y_original = df[y_variable]
@@ -549,15 +567,7 @@ async def train_models_for_combination_enhanced(
         x_stds = X_original.std().values
         y_mean = y_original.mean()
         y_std = y_original.std()
-        
-        # Apply standardization
-        scaler = None
-        if standardization == 'standard':
-            scaler = StandardScaler()
-            X = scaler.fit_transform(X)
-        elif standardization == 'minmax':
-            scaler = MinMaxScaler()
-            X = scaler.fit_transform(X)
+
         
         # Train/test split
         X_train, X_test, y_train, y_test = train_test_split(
@@ -740,47 +750,55 @@ async def train_models_for_combination_enhanced(
             r2_train = r2_score(y_train, y_train_pred)
             r2_test = r2_score(y_test, y_test_pred)
             
-            # Calculate elasticity ONLY if price is in x_variables
+            # Calculate elasticity ONLY if price is in x_variables (using per-variable destandardized coefficients)
             overall_elasticity = None
             if calculate_elasticity and hasattr(model, 'coef_'):
-                # Get coefficients
+                # Use per-variable destandardization for elasticity calculation
                 coefs = {}
                 intercept = model.intercept_ if hasattr(model, 'intercept_') else 0.0
+                intercept_adjustment_temp = 0.0
                 
-                # Back-transform coefficients for elasticity calculation
-                if standardization == 'standard':
-                    for i, var in enumerate(x_variables):
-                        if x_stds[i] != 0:
-                            unstandardized_coef = model.coef_[i] / x_stds[i]
-                        else:
-                            unstandardized_coef = model.coef_[i]
-                        coefs[f"Beta_{var}"] = float(unstandardized_coef)
+                for i, var in enumerate(x_variables):
+                    coef_value = model.coef_[i]
                     
-                    intercept = y_mean - np.sum(
-                        [coefs[f"Beta_{var}"] * x_means[i] 
-                         for i, var in enumerate(x_variables)]
-                    )
-                elif standardization == 'minmax':
-                    for i, var in enumerate(x_variables):
-                        # Get original data statistics for proper destandardization
-                        x_mins = X_original.min().values
-                        x_ranges = X_original.max().values - x_mins
-                        
-                        # Correct min-max destandardization: β_original = β_scaled * (1/range(X))
-                        if x_ranges[i] != 0:
-                            unstandardized_coef = model.coef_[i] * (1 / x_ranges[i])
-                        else:
-                            unstandardized_coef = model.coef_[i]
-                        coefs[f"Beta_{var}"] = float(unstandardized_coef)
+                    # Get variable config and transformation metadata
+                    var_config = variable_configs.get(var, {}) if variable_configs else {}
+                    var_type = var_config.get("type", "none")
+                    transform_meta = transformation_metadata.get(var, {}) if transformation_metadata else {}
                     
-                    # Calculate intercept using original data statistics
-                    intercept = intercept - np.sum(
-                        [coefs[f"Beta_{var}"] * x_mins[i] 
-                         for i, var in enumerate(x_variables)]
-                    )
-                else:
-                    for i, var in enumerate(x_variables):
-                        coefs[f"Beta_{var}"] = float(model.coef_[i])
+                    # Destandardize coefficient based on transformation type
+                    if var_type == "media":
+                        unstandardized_coef = coef_value
+                    elif var_type == "standard":
+                        if transform_meta and "original_std" in transform_meta:
+                            original_std = transform_meta["original_std"]
+                            original_mean = transform_meta.get("original_mean", 0)
+                            if original_std != 0:
+                                unstandardized_coef = coef_value / original_std
+                                intercept_adjustment_temp += unstandardized_coef * original_mean
+                            else:
+                                unstandardized_coef = coef_value
+                        else:
+                            unstandardized_coef = coef_value
+                    elif var_type == "minmax":
+                        if transform_meta and "original_min" in transform_meta and "original_max" in transform_meta:
+                            original_min = transform_meta["original_min"]
+                            original_max = transform_meta["original_max"]
+                            original_range = original_max - original_min
+                            if original_range != 0:
+                                unstandardized_coef = coef_value / original_range
+                                intercept_adjustment_temp += unstandardized_coef * original_min
+                            else:
+                                unstandardized_coef = coef_value
+                        else:
+                            unstandardized_coef = coef_value
+                    else:  # "none"
+                        unstandardized_coef = coef_value
+                    
+                    coefs[f"Beta_{var}"] = float(unstandardized_coef)
+                
+                # Adjust intercept
+                intercept = intercept - intercept_adjustment_temp
                 
                 # Calculate elasticity
                 overall_elasticity = calculate_price_elasticity(
@@ -792,49 +810,68 @@ async def train_models_for_combination_enhanced(
                     df=df
                 )
             
-            # Get coefficients for final model
+            # Get coefficients for final model with per-variable destandardization
             coefficients = {}
             unstandardized_coefficients = {}
-            unstandardized_intercept = 0.0
+            unstandardized_intercept = model.intercept_ if hasattr(model, 'intercept_') else 0.0
+            intercept_adjustment = 0.0
             
             if hasattr(model, 'coef_'):
-                # Back-transform coefficients for final results
-                if standardization == 'standard':
-                    for i, var in enumerate(x_variables):
-                        if x_stds[i] != 0:
-                            unstandardized_coef = model.coef_[i] / x_stds[i]
-                        else:
-                            unstandardized_coef = model.coef_[i]
-                        coefficients[f"Beta_{var}"] = float(model.coef_[i])
-                        unstandardized_coefficients[f"Beta_{var}"] = float(unstandardized_coef)
+                # Per-variable destandardization based on transformation_metadata
+                for i, var in enumerate(x_variables):
+                    coef_value = model.coef_[i]
+                    coefficients[f"Beta_{var}"] = float(coef_value)
                     
-                    unstandardized_intercept = y_mean - np.sum(
-                        [unstandardized_coefficients[f"Beta_{var}"] * x_means[i] 
-                         for i, var in enumerate(x_variables)]
-                    )
-                elif standardization == 'minmax':
-                    for i, var in enumerate(x_variables):
-                        x_mins = X_original.min().values
-                        x_ranges = X_original.max().values - x_mins
+                    # Get variable config
+                    var_config = variable_configs.get(var, {}) if variable_configs else {}
+                    var_type = var_config.get("type", "none")
+                    
+                    # Get transformation metadata for this variable
+                    transform_meta = transformation_metadata.get(var, {}) if transformation_metadata else {}
+                    
+                    # Destandardize based on variable transformation type
+                    if var_type == "media":
+                        # Media variables: keep coefficient as-is (complex transformations)
+                        unstandardized_coef = coef_value
                         
-                        if x_ranges[i] != 0:
-                            unstandardized_coef = model.coef_[i] * (1 / x_ranges[i])
+                    elif var_type == "standard":
+                        # Standard transformation: destandardize using original_std
+                        if transform_meta and "original_std" in transform_meta:
+                            original_std = transform_meta["original_std"]
+                            original_mean = transform_meta.get("original_mean", 0)
+                            if original_std != 0:
+                                unstandardized_coef = coef_value / original_std
+                                intercept_adjustment += unstandardized_coef * original_mean
+                            else:
+                                unstandardized_coef = coef_value
                         else:
-                            unstandardized_coef = model.coef_[i]
-                        coefficients[f"Beta_{var}"] = float(model.coef_[i])
-                        unstandardized_coefficients[f"Beta_{var}"] = float(unstandardized_coef)
+                            # Fallback: no transformation
+                            unstandardized_coef = coef_value
+                            
+                    elif var_type == "minmax":
+                        # MinMax transformation: destandardize using original range
+                        if transform_meta and "original_min" in transform_meta and "original_max" in transform_meta:
+                            original_min = transform_meta["original_min"]
+                            original_max = transform_meta["original_max"]
+                            original_range = original_max - original_min
+                            if original_range != 0:
+                                unstandardized_coef = coef_value / original_range
+                                intercept_adjustment += unstandardized_coef * original_min
+                            else:
+                                unstandardized_coef = coef_value
+                        else:
+                            # Fallback: no transformation
+                            unstandardized_coef = coef_value
+                            
+                    else:  # "none" or unknown
+                        # No transformation: keep coefficient as-is
+                        unstandardized_coef = coef_value
                     
-                    unstandardized_intercept = model.intercept_ - np.sum(
-                        [unstandardized_coefficients[f"Beta_{var}"] * x_mins[i] 
-                         for i, var in enumerate(x_variables)]
-                    )
-                else:
-                    for i, var in enumerate(x_variables):
-                        coefficients[f"Beta_{var}"] = float(model.coef_[i])
-                        unstandardized_coefficients[f"Beta_{var}"] = float(model.coef_[i])
-                    unstandardized_intercept = model.intercept_ if hasattr(model, 'intercept_') else 0.0
-            else:
-                unstandardized_intercept = model.intercept_ if hasattr(model, 'intercept_') else 0.0
+                    unstandardized_coefficients[f"Beta_{var}"] = float(unstandardized_coef)
+                
+                # Adjust intercept based on transformations
+                if intercept_adjustment != 0:
+                    unstandardized_intercept = unstandardized_intercept - intercept_adjustment
             
             # Calculate AIC and BIC
             n_parameters = len(x_variables) + 1

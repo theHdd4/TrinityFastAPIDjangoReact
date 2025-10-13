@@ -425,6 +425,47 @@ def list_minio_files(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/application-type", tags=["Application Type"])
+async def get_application_type(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
+):
+    """
+    Get the application type for a specific project from MongoDB build configuration.
+    This is used to determine if S-curve features should be displayed (only for MMM applications).
+    """
+    try:
+        # Get the build configuration document
+        document_id = f"{client_name}/{app_name}/{project_name}"
+        mongo_client = get_authenticated_client()
+        db = mongo_client[MONGO_DB]
+        build_config = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
+        
+        if not build_config:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No build configuration found for {document_id}"
+            )
+        
+        # Extract application type
+        application_type = build_config.get("application_type", "general")
+        
+        return {
+            "client_name": client_name,
+            "app_name": app_name,
+            "project_name": project_name,
+            "application_type": application_type,
+            "is_mmm": application_type == "mmm"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting application type: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 @router.get("/files/selected", response_model=SelectedModelsResponse)
 def list_selected_models(
     bucket: str = Query(default=MINIO_BUCKET, description="Bucket to read from"),

@@ -711,6 +711,7 @@ class MMMStackModelDataProcessor:
         return train_positions, test_positions
 
     
+     
     def calculate_combination_betas(self, model_results: List[Dict[str, Any]], combinations: List[str], x_variables: List[str], numerical_columns_for_interaction: List[str], split_cluster_id: str = None, standardization: str = 'none', apply_interaction_terms: bool = True) -> Dict[str, Dict[str, float]]:
         """
         Calculate final beta coefficients for each combination by combining common betas and interaction term betas.
@@ -723,41 +724,38 @@ class MMMStackModelDataProcessor:
             coefficients = model_result['coefficients']
             intercept = model_result['intercept']
             
-            logger.info(f"Calculating combination betas for model: {model_name}")
-            logger.info(f"Available coefficients: {list(coefficients.keys())}")
-            logger.info(f"Requested combinations: {combinations}")
+            # logger.info(f"Calculating combination betas for model: {model_name}")
+            # logger.info(f"Available coefficients: {list(coefficients.keys())}")
+            # logger.info(f"Requested combinations: {combinations}")
             
             # Extract combinations that are actually present in this model's coefficients
+            # Key patterns:
+            # - Beta_encoded_combination_CombName (base combination coefficient)
+            # - Beta_encoded_combination_CombName_x_variable (interaction term)
             available_combinations = []
             for key in coefficients.keys():
-                if key.startswith('Beta_encoded_combination_') and not key.endswith('_x_price') and not key.endswith('_x_d1'):
-                    combination_name = key.replace('Beta_encoded_combination_', '')
-                    logger.info(f"Found encoded combination: '{combination_name}' from key '{key}'")
-                    if combination_name in combinations:
+                if key.startswith('Beta_encoded_combination_'):
+                    # Remove prefix to get the combination part
+                    combination_part = key.replace('Beta_encoded_combination_', '')
+                    
+                    # Check if this is an interaction term (contains _x_)
+                    if '_x_' in combination_part:
+                        # Extract combination name before the _x_ (interaction variable part)
+                        combination_name = combination_part.split('_x_')[0]
+                    else:
+                        # This is a base combination coefficient (no interaction)
+                        combination_name = combination_part
+                    
+                    # Add to available combinations if it matches our requested combinations
+                    if combination_name in combinations and combination_name not in available_combinations:
                         available_combinations.append(combination_name)
-                        logger.info(f"Added combination '{combination_name}' to available_combinations")
+                        logger.info(f"Found combination: '{combination_name}' from key '{key}'")
             
-            logger.info(f"Available combinations for calculation: {available_combinations}")
+            # logger.info(f"Available combinations for calculation: {available_combinations}")
             
-            # Debug: Log all coefficient keys to understand the structure
-            logger.info(f"🔍 DEBUG: All coefficient keys in model {model_name}:")
-            for key in sorted(coefficients.keys()):
-                logger.info(f"   {key}: {coefficients[key]}")
+  
             
-            # If no combinations found, try to extract from all coefficient keys
-            if not available_combinations:
-                logger.warning("No combinations found using standard method, trying alternative extraction")
-                for key in coefficients.keys():
-                    if key.startswith('Beta_encoded_combination_') and not key.endswith('_x_price') and not key.endswith('_x_d1'):
-                        combination_name = key.replace('Beta_encoded_combination_', '')
-                        # Remove any interaction suffixes
-                        if '_x_' in combination_name:
-                            combination_name = combination_name.split('_x_')[0]
-                        if combination_name in combinations and combination_name not in available_combinations:
-                            available_combinations.append(combination_name)
-                            logger.info(f"Found combination via alternative method: '{combination_name}'")
-            
-            logger.info(f"Final available combinations: {available_combinations}")
+            # logger.info(f"Final available combinations: {available_combinations}")
             
             # Calculate final betas only for combinations that are available in this model
             for combination in available_combinations:
@@ -768,8 +766,8 @@ class MMMStackModelDataProcessor:
                 combination_intercept_key = f"Beta_encoded_combination_{combination}"
                 combination_intercept_beta = coefficients.get(combination_intercept_key, 0.0)
                 final_betas['intercept'] = intercept + combination_intercept_beta
-                logger.info(f"Combination intercept key: {combination_intercept_key}")
-                logger.info(f"Combination intercept: {combination_intercept_beta}, Final intercept: {final_betas['intercept']}")
+                # logger.info(f"Combination intercept key: {combination_intercept_key}")
+                # logger.info(f"Combination intercept: {combination_intercept_beta}, Final intercept: {final_betas['intercept']}")
                 
                 # Calculate final betas for x_variables (main model variables)
                 for x_var in x_variables:
@@ -779,8 +777,8 @@ class MMMStackModelDataProcessor:
                     # Common beta for this x_variable (use original variable name)
                     beta_key = f"Beta_{model_var_name}"
                     common_beta = coefficients.get(beta_key, 0.0)
-                    logger.info(f"Common beta for {x_var} (Beta_{model_var_name}): {common_beta}")
-                    logger.info(f"🔍 DEBUG: Looking for coefficient key '{beta_key}', found: {beta_key in coefficients}")
+                    # logger.info(f"Common beta for {x_var} (Beta_{model_var_name}): {common_beta}")
+                    # logger.info(f"🔍 DEBUG: Looking for coefficient key '{beta_key}', found: {beta_key in coefficients}")
                     if beta_key not in coefficients:
                         logger.warning(f"❌ Coefficient key '{beta_key}' not found in coefficients!")
                         logger.info(f"Available keys containing '{model_var_name}': {[k for k in coefficients.keys() if model_var_name in k]}")
@@ -789,14 +787,14 @@ class MMMStackModelDataProcessor:
                     if apply_interaction_terms:
                         interaction_key = f"encoded_combination_{combination}_x_{x_var}"
                         individual_beta = coefficients.get(f"Beta_{interaction_key}", 0.0)
-                        logger.info(f"Individual beta for {x_var} (Beta_{interaction_key}): {individual_beta}")
+                        # logger.info(f"Individual beta for {x_var} (Beta_{interaction_key}): {individual_beta}")
                     else:
                         individual_beta = 0.0
-                        logger.info(f"Individual beta for {x_var} (interaction terms disabled): {individual_beta}")
+                        # logger.info(f"Individual beta for {x_var} (interaction terms disabled): {individual_beta}")
                     
                     final_beta = common_beta + individual_beta
                     final_betas[x_var] = final_beta
-                    logger.info(f"Final beta for {x_var}: {final_beta}")
+                    # logger.info(f"Final beta for {x_var}: {final_beta}")
                     
                 
                 # Calculate final betas for numerical_columns_for_interaction (interaction variables) ONLY if interaction terms are enabled
@@ -820,7 +818,7 @@ class MMMStackModelDataProcessor:
                 combination_betas[combination_key] = final_betas
                 logger.info(f"Stored final betas for {combination_key}: {final_betas}")
         
-        logger.info(f"Final combination_betas result: {combination_betas}")
+        # logger.info(f"Final combination_betas result: {combination_betas}")
         
         # Restructure the result to use combination names as keys instead of model_combination keys
         restructured_betas = {}
@@ -831,7 +829,7 @@ class MMMStackModelDataProcessor:
                 restructured_betas[combination_name] = betas
                 logger.info(f"Restructured key '{key}' -> '{combination_name}': {betas}")
         
-        logger.info(f"Restructured combination_betas: {restructured_betas}")
+        # logger.info(f"Restructured combination_betas: {restructured_betas}")
         return restructured_betas
     
     def unstandardize_coefficients(

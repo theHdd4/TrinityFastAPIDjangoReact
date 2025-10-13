@@ -296,6 +296,12 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   const [isLoadingRoiData, setIsLoadingRoiData] = useState(false);
   const [sCurveData, setSCurveData] = useState<{[key: string]: any}>({});
   const [isLoadingSCurveData, setIsLoadingSCurveData] = useState(false);
+  
+  // State for application type
+  const [applicationType, setApplicationType] = useState<string>(() => {
+    return data.applicationType || 'general';
+  });
+  const [isLoadingApplicationType, setIsLoadingApplicationType] = useState(false);
   const [averagesData, setAveragesData] = useState<{[key: string]: any}>({});
   const [isLoadingAveragesData, setIsLoadingAveragesData] = useState(false);
   
@@ -697,6 +703,57 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     fetchSCurveData();
   }, [data.selectedDataframe, selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
+
+  // Function to fetch application type
+  const fetchApplicationType = async () => {
+    try {
+      setIsLoadingApplicationType(true);
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+
+      const baseUrl = `${EVALUATE_API}/application-type`;
+      
+      const params = new URLSearchParams({
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
+      });
+
+      const response = await fetch(`${baseUrl}?${params}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to fetch application type');
+      }
+      
+      const result = await response.json();
+      
+      if (result && result.application_type) {
+        setApplicationType(result.application_type);
+        onDataChange({ applicationType: result.application_type });
+        console.log('🔍 Application type received:', result.application_type);
+      }
+      
+    } catch (error) {
+      console.error('Error fetching application type:', error);
+      setApplicationType('general');
+      onDataChange({ applicationType: 'general' });
+    } finally {
+      setIsLoadingApplicationType(false);
+    }
+  };
+
+  // Fetch application type when component mounts
+  useEffect(() => {
+    if (atomId) {
+      fetchApplicationType();
+    }
+  }, [atomId]);
 
   // Fetch averages data when dataset and combinations are selected
   useEffect(() => {
@@ -1134,6 +1191,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     { id: '5', name: 'ROI', type: 'roi', selected: true },
     { id: '6', name: 'Beta', type: 'beta', selected: true },
     { id: '7', name: 'Averages', type: 'averages', selected: true },
+    // Only include S-curve for MMM applications
+    ...(applicationType === 'mmm' ? [{ id: '8', name: 'S-Curve Analysis', type: 's-curve', selected: true }] : [])
   ];
   const graphs = data.graphs || defaultGraphs;
   const selectedGraphs = graphs.filter(graph => graph.selected);
@@ -2819,8 +2878,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           </div>
         )}
 
-        {/* S-Curve Charts Section */}
-        {selectedGraphs.some(g => g.type === 's-curve') && data.selectedDataframe && (
+        {/* S-Curve Charts Section - Only for MMM applications */}
+        {applicationType === 'mmm' && selectedGraphs.some(g => g.type === 's-curve') && data.selectedDataframe && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium">S-Curve Analysis</h3>
