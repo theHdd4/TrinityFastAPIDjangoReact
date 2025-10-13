@@ -85,6 +85,8 @@ export interface LayoutCard {
   isExhibited: boolean;
   moleculeId?: string;
   moleculeTitle?: string;
+  title?: string;
+  lastEditedAt?: string;
   presentationSettings?: PresentationSettings;
 }
 
@@ -109,6 +111,15 @@ const isRecord = (value: unknown): value is Record<string, any> => {
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
+
+const isValidDateString = (value: unknown): value is string => {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed);
+};
 
 const isValidCardColor = (value: unknown): value is CardColor =>
   typeof value === 'string' && (CARD_COLORS as readonly string[]).includes(value);
@@ -277,6 +288,19 @@ const withPresentationDefaults = (card: Partial<LayoutCard>): LayoutCard => {
 
   const moleculeId = isNonEmptyString(card.moleculeId) ? card.moleculeId.trim() : undefined;
   const moleculeTitle = isNonEmptyString(card.moleculeTitle) ? card.moleculeTitle.trim() : undefined;
+  const nowIso = new Date().toISOString();
+
+  const resolvedTitle = isNonEmptyString(card.title)
+    ? card.title.trim()
+    : moleculeTitle
+      ? moleculeTitle
+      : atoms.length > 0
+        ? atoms[0].title
+        : 'Untitled Slide';
+
+  const resolvedLastEditedAt = isValidDateString(card.lastEditedAt)
+    ? new Date(card.lastEditedAt).toISOString()
+    : nowIso;
 
   return {
     id,
@@ -285,6 +309,8 @@ const withPresentationDefaults = (card: Partial<LayoutCard>): LayoutCard => {
     isExhibited: typeof card.isExhibited === 'boolean' ? card.isExhibited : true,
     moleculeId,
     moleculeTitle,
+    title: resolvedTitle,
+    lastEditedAt: resolvedLastEditedAt,
     presentationSettings: ensurePresentationSettings(card.presentationSettings),
   };
 };
@@ -568,6 +594,9 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => {
     set(state => {
+      const shouldRefreshTimestamp = Object.keys(updatedCard).some(key => key !== 'lastEditedAt');
+      const timestamp = new Date().toISOString();
+
       let updatedCards = state.cards.map(card => {
         if (card.id !== cardId) {
           return card;
@@ -577,6 +606,10 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
           ...card,
           ...updatedCard,
         };
+
+        if (shouldRefreshTimestamp) {
+          nextCard.lastEditedAt = timestamp;
+        }
 
         if (updatedCard.atoms) {
           nextCard.atoms = updatedCard.atoms;
@@ -603,6 +636,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
           id: cardId,
           atoms: [],
           isExhibited: true,
+          lastEditedAt: timestamp,
           ...updatedCard,
         });
         updatedCards = [...updatedCards, fallbackCard];

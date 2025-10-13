@@ -58,9 +58,23 @@ const ExhibitionMode = () => {
     lastLoadedContext,
   } = useExhibitionStore();
   const { toast } = useToast();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('exhibition:edit');
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
+
+  const presenterDisplayName = useMemo(() => {
+    const username = typeof user?.username === 'string' ? user.username.trim() : '';
+    if (username.length > 0) {
+      return username;
+    }
+
+    const email = typeof user?.email === 'string' ? user.email.trim() : '';
+    if (email.length > 0) {
+      return email;
+    }
+
+    return 'Unknown Presenter';
+  }, [user]);
 
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -320,6 +334,13 @@ const ExhibitionMode = () => {
       updateCard(targetId, { presentationSettings: settings });
     },
     [currentSlide, exhibitedCards, updateCard]
+  );
+
+  const handleTitleChange = useCallback(
+    (title: string, cardId: string) => {
+      updateCard(cardId, { title });
+    },
+    [updateCard],
   );
 
   const handleSlideshowSettingsChange = useCallback(
@@ -1091,6 +1112,8 @@ const ExhibitionMode = () => {
                   onShowNotes={() => setShowNotes(true)}
                   viewMode="horizontal"
                   isActive
+                  onTitleChange={handleTitleChange}
+                  presenterName={presenterDisplayName}
                 />
               ) : (
                 emptyCanvas
@@ -1117,6 +1140,8 @@ const ExhibitionMode = () => {
                     onShowNotes={() => setShowNotes(true)}
                     viewMode="vertical"
                     isActive={currentSlide === index}
+                    onTitleChange={handleTitleChange}
+                    presenterName={presenterDisplayName}
                   />
                 </div>
               ))}
