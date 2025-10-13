@@ -2,25 +2,10 @@ import React, { useMemo } from 'react';
 import TextBoxDisplay from '@/components/AtomList/atoms/text-box/TextBoxDisplay';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
+import TableTemplate from '@/templates/tables/table';
 import type { DroppedAtom } from '../store/exhibitionStore';
 import FeatureOverviewSlideVisualization from './FeatureOverviewSlideVisualization';
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  AreaChart,
-  Area,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-} from 'recharts';
 
 interface ExhibitedAtomRendererProps {
   atom: DroppedAtom;
@@ -47,6 +32,43 @@ interface ChartPreviewSpec {
   xKey: string;
   series: ChartPreviewSeries[];
   data: Array<Record<string, unknown>>;
+}
+
+interface ChartStateMetadata {
+  chartType?: string;
+  theme?: string;
+  showLegend?: boolean;
+  showAxisLabels?: boolean;
+  showDataLabels?: boolean;
+  showGrid?: boolean;
+  xAxisField?: string;
+  yAxisField?: string;
+  colorPalette?: string[];
+  title?: string;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  legendField?: string;
+}
+
+type ChartRendererType = 'bar_chart' | 'line_chart' | 'area_chart' | 'pie_chart';
+
+interface ChartRendererConfig {
+  type: ChartRendererType;
+  data: Array<Record<string, unknown>>;
+  height: number;
+  xField?: string;
+  yField?: string;
+  yFields?: string[];
+  legendField?: string;
+  colors?: string[];
+  theme?: string;
+  title?: string;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  showLegend?: boolean;
+  showAxisLabels?: boolean;
+  showDataLabels?: boolean;
+  showGrid?: boolean;
 }
 
 const ensureArray = <T,>(value: unknown): T[] => {
@@ -301,135 +323,203 @@ const extractChartSpec = (metadata: AtomMetadata): ChartPreviewSpec | null => {
   };
 };
 
-const renderTablePreview = (table: TablePreviewData, variant: 'full' | 'compact') => {
+const DEFAULT_CHART_COLORS = ['#458EE2', '#41C185', '#FFBD59', '#6B5CD5', '#E75A7C', '#5CC3E2'];
+
+const asString = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+
+const asBoolean = (value: unknown): boolean | undefined =>
+  typeof value === 'boolean' ? value : undefined;
+
+const asStringArray = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const entries = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  return entries.length > 0 ? entries : undefined;
+};
+
+const getMetadataString = (metadata: AtomMetadata, keys: string[]): string | undefined => {
+  if (!metadata) {
+    return undefined;
+  }
+
+  for (const key of keys) {
+    const value = metadata[key];
+    const result = asString(value);
+    if (result) {
+      return result;
+    }
+  }
+
+  return undefined;
+};
+
+const extractChartState = (metadata: AtomMetadata): ChartStateMetadata | undefined => {
+  if (!metadata) {
+    return undefined;
+  }
+
+  const candidate = metadata['chartState'] ?? metadata['chart_state'] ?? metadata['chartConfig'] ?? metadata['chart_config'];
+  if (!isRecord(candidate)) {
+    return undefined;
+  }
+
+  return {
+    chartType: asString(candidate['chartType'] ?? candidate['chart_type']),
+    theme: asString(candidate['theme']),
+    showLegend: asBoolean(candidate['showLegend'] ?? candidate['show_legend']),
+    showAxisLabels: asBoolean(candidate['showAxisLabels'] ?? candidate['show_axis_labels']),
+    showDataLabels: asBoolean(candidate['showDataLabels'] ?? candidate['show_data_labels']),
+    showGrid: asBoolean(candidate['showGrid'] ?? candidate['show_grid']),
+    xAxisField: asString(candidate['xAxisField'] ?? candidate['x_axis_field'] ?? candidate['xAxis']),
+    yAxisField: asString(candidate['yAxisField'] ?? candidate['y_axis_field'] ?? candidate['yAxis']),
+    colorPalette: asStringArray(candidate['colorPalette'] ?? candidate['color_palette']),
+    title: asString(candidate['title']),
+    xAxisLabel: asString(candidate['xAxisLabel'] ?? candidate['x_axis_label']),
+    yAxisLabel: asString(candidate['yAxisLabel'] ?? candidate['y_axis_label']),
+    legendField: asString(candidate['legendField'] ?? candidate['legend_field']),
+  };
+};
+
+const extractColorPalette = (
+  metadata: AtomMetadata,
+  chartState: ChartStateMetadata | undefined,
+  seriesLength: number,
+): string[] | undefined => {
+  const candidates = [
+    chartState?.colorPalette,
+    asStringArray(metadata?.['colors']),
+    asStringArray(metadata?.['colorPalette']),
+    asStringArray(metadata?.['palette']),
+    asStringArray(metadata?.['seriesColors']),
+    asStringArray(metadata?.['series_colors']),
+    asStringArray(metadata?.['colorScheme']),
+    asStringArray(metadata?.['color_scheme']),
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && candidate.length > 0) {
+      return candidate;
+    }
+  }
+
+  if (seriesLength > 0) {
+    return DEFAULT_CHART_COLORS.slice(0, Math.max(seriesLength, 1));
+  }
+
+  return undefined;
+};
+
+const createChartRendererConfig = (
+  spec: ChartPreviewSpec,
+  metadata: AtomMetadata,
+  variant: 'full' | 'compact',
+): ChartRendererConfig | null => {
+  const chartState = extractChartState(metadata ?? {});
+  const height = variant === 'compact' ? 240 : 360;
+  const typeMap: Record<ChartKind, ChartRendererType> = {
+    bar: 'bar_chart',
+    line: 'line_chart',
+    area: 'area_chart',
+    pie: 'pie_chart',
+  };
+
+  const base: ChartRendererConfig = {
+    type: typeMap[spec.type],
+    data: spec.data,
+    height,
+  };
+
+  const colorPalette = extractColorPalette(metadata, chartState, spec.series.length);
+  const metadataTitle = getMetadataString(metadata, ['chartTitle', 'chart_title', 'title']);
+  const metadataXAxis = getMetadataString(metadata, ['xAxisLabel', 'x_axis_label', 'xAxis', 'x_axis']);
+  const metadataYAxis = getMetadataString(metadata, ['yAxisLabel', 'y_axis_label', 'yAxis', 'y_axis']);
+  const metadataLegendField = getMetadataString(metadata, ['legendField', 'legend_field']);
+
+  if (spec.type === 'pie') {
+    base.xField = 'name';
+    base.yField = 'value';
+    base.legendField = chartState?.legendField ?? metadataLegendField ?? 'name';
+    base.colors = colorPalette;
+    base.showLegend = chartState?.showLegend ?? true;
+  } else {
+    const primarySeries = spec.series[0];
+    if (!primarySeries) {
+      return null;
+    }
+    base.xField = chartState?.xAxisField ?? spec.xKey;
+    base.yField = chartState?.yAxisField ?? primarySeries.key;
+    if (spec.series.length > 1) {
+      base.yFields = spec.series.map(series => series.key);
+      base.showLegend = chartState?.showLegend ?? true;
+    } else if (chartState?.showLegend !== undefined) {
+      base.showLegend = chartState.showLegend;
+    }
+    base.colors = colorPalette;
+    if (chartState?.legendField || metadataLegendField) {
+      base.legendField = chartState?.legendField ?? metadataLegendField;
+    }
+  }
+
+  base.theme = chartState?.theme ?? getMetadataString(metadata, ['theme']);
+  base.title = chartState?.title ?? metadataTitle;
+  base.xAxisLabel = chartState?.xAxisLabel ?? metadataXAxis;
+  base.yAxisLabel = chartState?.yAxisLabel ?? metadataYAxis;
+
+  if (chartState?.showAxisLabels !== undefined) {
+    base.showAxisLabels = chartState.showAxisLabels;
+  }
+  if (chartState?.showDataLabels !== undefined) {
+    base.showDataLabels = chartState.showDataLabels;
+  }
+  if (chartState?.showGrid !== undefined) {
+    base.showGrid = chartState.showGrid;
+  }
+
+  if (!base.xAxisLabel && typeof base.xField === 'string') {
+    base.xAxisLabel = humanize(base.xField);
+  }
+  if (!base.yAxisLabel && typeof base.yField === 'string') {
+    base.yAxisLabel = humanize(base.yField);
+  }
+
+  return base;
+};
+
+const renderTableTemplate = (table: TablePreviewData, variant: 'full' | 'compact') => {
   const rowLimit = variant === 'compact' ? 6 : 12;
   const rows = table.rows.slice(0, rowLimit);
 
   return (
-    <div className="rounded-2xl border border-border bg-background/80 shadow-sm">
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-border text-sm">
-          <thead className="bg-muted/70">
-            <tr>
-              {table.headers.map(header => (
-                <th
-                  key={header}
-                  scope="col"
-                  className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                >
-                  {header}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {rows.map((row, index) => (
-              <tr key={`row-${index}`} className="hover:bg-muted/30">
-                {table.headers.map(header => (
-                  <td key={header} className="px-4 py-2 whitespace-nowrap text-muted-foreground">
-                    {formatValue(row[header])}
-                  </td>
-                ))}
-              </tr>
+    <div className="space-y-2">
+      <TableTemplate
+        headers={table.headers.map(header => (
+          <span key={header} className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {header}
+          </span>
+        ))}
+        minimizable={false}
+        bodyClassName="max-h-72"
+        borderColor="border-purple-500"
+      >
+        {rows.map((row, index) => (
+          <tr key={`row-${index}`} className="odd:bg-muted/20 even:bg-background">
+            {table.headers.map(header => (
+              <td key={header} className="px-4 py-2 text-sm text-foreground/80">
+                {formatValue(row[header])}
+              </td>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </tr>
+        ))}
+      </TableTemplate>
       {table.rows.length > rows.length && (
-        <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
+        <div className="text-xs text-muted-foreground">
           Showing {rows.length.toLocaleString()} of {table.rows.length.toLocaleString()} rows
         </div>
       )}
     </div>
-  );
-};
-
-const palette = ['#458EE2', '#41C185', '#FFBD59', '#6B5CD5', '#E75A7C', '#5CC3E2'];
-
-const renderChartPreview = (spec: ChartPreviewSpec, variant: 'full' | 'compact') => {
-  const height = variant === 'compact' ? 200 : 280;
-
-  if (spec.type === 'pie') {
-    const data = spec.data as Array<{ name: string | number; value: number }>;
-    return (
-      <div className="flex items-center justify-center">
-        <ResponsiveContainer width="100%" height={height}>
-          <PieChart>
-            <Tooltip formatter={value => (typeof value === 'number' ? value.toLocaleString() : value)} />
-            <Legend />
-            <Pie
-              data={data}
-              dataKey="value"
-              nameKey="name"
-              cx="50%"
-              cy="50%"
-              outerRadius={variant === 'compact' ? 70 : 100}
-              innerRadius={variant === 'compact' ? 30 : 50}
-              paddingAngle={2}
-            >
-              {data.map((entry, index) => (
-                <Cell key={`slice-${index}`} fill={palette[index % palette.length]} />
-              ))}
-            </Pie>
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
-    );
-  }
-
-  const commonAxes = (
-    <>
-      <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-      <XAxis dataKey={spec.xKey} tickLine={false} axisLine={false} />
-      <YAxis
-        tickLine={false}
-        axisLine={false}
-        tickFormatter={value => (typeof value === 'number' ? value.toLocaleString() : String(value))}
-      />
-      <Tooltip formatter={value => (typeof value === 'number' ? value.toLocaleString() : value)} />
-      {spec.series.length > 1 && <Legend />}
-    </>
-  );
-
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      {spec.type === 'line' ? (
-        <LineChart data={spec.data}>
-          {commonAxes}
-          {spec.series.map((serie, index) => (
-            <Line
-              key={serie.key}
-              type="monotone"
-              dataKey={serie.key}
-              stroke={palette[index % palette.length]}
-              strokeWidth={2}
-              dot={false}
-            />
-          ))}
-        </LineChart>
-      ) : spec.type === 'area' ? (
-        <AreaChart data={spec.data}>
-          {commonAxes}
-          {spec.series.map((serie, index) => (
-            <Area
-              key={serie.key}
-              type="monotone"
-              dataKey={serie.key}
-              stroke={palette[index % palette.length]}
-              fill={palette[index % palette.length]}
-              fillOpacity={0.25}
-            />
-          ))}
-        </AreaChart>
-      ) : (
-        <BarChart data={spec.data}>
-          {commonAxes}
-          {spec.series.map((serie, index) => (
-            <Bar key={serie.key} dataKey={serie.key} fill={palette[index % palette.length]} radius={[8, 8, 0, 0]} />
-          ))}
-        </BarChart>
-      )}
-    </ResponsiveContainer>
   );
 };
 
@@ -515,6 +605,10 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
   );
   const tableData = useMemo(() => extractTableData(metadata), [metadata]);
   const chartSpec = useMemo(() => extractChartSpec(metadata), [metadata]);
+  const chartConfig = useMemo(
+    () => (chartSpec ? createChartRendererConfig(chartSpec, metadata, variant) : null),
+    [chartSpec, metadata, variant],
+  );
   const htmlPreview = useMemo(() => renderHtmlPreview(metadata), [metadata]);
 
   if (atom.atomId === 'text-box') {
@@ -544,13 +638,13 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
   }
 
   if (tableData) {
-    return renderTablePreview(tableData, variant);
+    return renderTableTemplate(tableData, variant);
   }
 
-  if (chartSpec) {
+  if (chartConfig) {
     return (
       <div className="rounded-2xl border border-border bg-background/80 p-4 shadow-sm">
-        {renderChartPreview(chartSpec, variant)}
+        <RechartsChartRenderer {...chartConfig} />
       </div>
     );
   }
