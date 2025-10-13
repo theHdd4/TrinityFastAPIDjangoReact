@@ -30,13 +30,14 @@ def generate_scaled_media_series(recent_series: List[float], x_range: List[float
         percent_changes.append(x)  # Keep as percentage value
     return scaled_series_list, percent_changes
 
-def apply_transformation_steps(series: List[float], transformation_steps: List[Dict[str, Any]]) -> List[float]:
+def apply_transformation_steps(series: List[float], transformation_steps: List[Dict[str, Any]], recalculate_scaling: bool = False) -> List[float]:
     """
     Apply transformation steps in sequence as they were applied in the model.
     
     Args:
         series: Input series values
         transformation_steps: List of transformation steps with parameters
+        recalculate_scaling: If True, recalculate standardization/minmax parameters from current series
     
     Returns:
         Transformed series
@@ -47,7 +48,7 @@ def apply_transformation_steps(series: List[float], transformation_steps: List[D
         step_type = step.get('step', '')
 
         if step_type == 'adstock':
-            # Adstock transformation: apply decay rate
+            # Adstock transformation: apply decay rate (use model parameter - same for all series)
             decay_rate = step.get('decay_rate', 0.4)
             adstock_series = []
             for i, value in enumerate(current_series):
@@ -60,18 +61,26 @@ def apply_transformation_steps(series: List[float], transformation_steps: List[D
             logger.info(f"🔍 Current series after adstock transformation: {current_series}")
         
         elif step_type == 'standardization':
-            # Standard scaling: (x - scaler_mean) / scaler_scale
-            scaler_mean = step.get('scaler_mean', 0)
-            scaler_scale = step.get('scaler_scale', 1)
-            logger.info(f"🔍 Standardization: scaler_mean={scaler_mean}, scaler_scale={scaler_scale}")
+            if recalculate_scaling:
+                # Recalculate fresh standardization parameters from current series
+                scaler_mean = np.mean(current_series)
+                scaler_scale = np.std(current_series)
+                # logger.info(f"🔍 Recalculated Standardization: scaler_mean={scaler_mean}, scaler_scale={scaler_scale}")
+            else:
+                # Use saved parameters from original data
+                scaler_mean = step.get('scaler_mean', 0)
+                scaler_scale = step.get('scaler_scale', 1)
+                logger.info(f"🔍 Using saved Standardization: scaler_mean={scaler_mean}, scaler_scale={scaler_scale}")
+            
             if scaler_scale == 0:
                 current_series = [0.0] * len(current_series)
             else:
                 current_series = [(x - scaler_mean) / scaler_scale for x in current_series]
-            logger.info(f"🔍 Current series after standardization: {current_series}")
+            if not recalculate_scaling:
+                logger.info(f"🔍 Current series after standardization: {current_series}")
 
         elif step_type == 'logistic':
-            # Logistic transformation: 1 / (1 + exp(-growth_rate * (x - midpoint)))
+            # Logistic transformation: 1 / (1 + exp(-growth_rate * (x - midpoint))) (use model parameters - same for all series)
             growth_rate = step.get('growth_rate', 1.0)
             midpoint = step.get('midpoint', 0.0)
             carryover = step.get('carryover', 0.0)
@@ -80,15 +89,23 @@ def apply_transformation_steps(series: List[float], transformation_steps: List[D
             # logger.info(f"current series after logistic transformation: {current_series}")
         
         elif step_type == 'minmax':
-            # MinMax scaling: (x - scaler_min) / scaler_scale
-            scaler_min = step.get('scaler_min', 0)
-            scaler_scale = step.get('scaler_scale', 1)
+            if recalculate_scaling:
+                # Recalculate fresh minmax parameters from current series
+                scaler_min = np.min(current_series)
+                scaler_max = np.max(current_series)
+                scaler_scale = scaler_max - scaler_min
+                # logger.info(f"🔍 Recalculated MinMax: scaler_min={scaler_min}, scaler_scale={scaler_scale}")
+            else:
+                # Use saved parameters from original data
+                scaler_min = step.get('scaler_min', 0)
+                scaler_scale = step.get('scaler_scale', 1)
+                # logger.info(f"🔍 Using saved MinMax: scaler_min={scaler_min}, scaler_scale={scaler_scale}")
+            
             if scaler_scale == 0:
                 current_series = [0.0] * len(current_series)
             else:
                 current_series = [(x - scaler_min) / scaler_scale for x in current_series]
             # logger.info(f"🔍 Current series after MinMax scaling: {current_series}")
-            # logger.info(f"🔍 Scaler min: {scaler_min}, scaler scale: {scaler_scale}")
         
  
     
@@ -491,9 +508,11 @@ def calculate_volume_series(
         List of volume values
     """
     # Apply transformations to the scaled series
+    # IMPORTANT: Use recalculate_scaling=True to recalculate standardization/minmax parameters
+    # for each scaled series, ensuring proper S-curve generation
     if variable_name in transformation_metadata:
         transformation_steps = transformation_metadata[variable_name].get('transformation_steps', [])
-        transformed_scaled_series = apply_transformation_steps(scaled_series, transformation_steps)
+        transformed_scaled_series = apply_transformation_steps(scaled_series, transformation_steps, recalculate_scaling=True)
     else:
         transformed_scaled_series = scaled_series
     
