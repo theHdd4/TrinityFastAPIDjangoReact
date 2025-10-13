@@ -1,53 +1,49 @@
-import React from 'react';
-import type { LucideIcon } from 'lucide-react';
-import {
-  Sparkles,
-  Type,
-  Image,
-  Table,
-  BarChart3,
-  Layers,
-  FileText,
-  Palette,
-  Settings,
-  Maximize2,
-  Download,
-} from 'lucide-react';
+import React, { useMemo } from 'react';
+import { Layers, Download, Maximize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import type { PaletteOperation } from './types';
+import { createAiAssistantOperation } from './operations/ai-assistant';
+import { createTextOperation } from './operations/text';
+import { createImagesOperation } from './operations/images';
+import { createTablesOperation } from './operations/tables';
+import { createChartsOperation } from './operations/charts';
+import { createTemplatesTool } from './tools/templates';
+import { createThemesTool } from './tools/themes';
+import { createSettingsTool } from './tools/settings';
 
 interface OperationsPaletteProps {
   onFullscreen: () => void;
   onExport?: () => void;
   onGridView?: () => void;
+  onCreateTextBox?: () => void;
+  canEdit?: boolean;
 }
-
-interface PaletteItem {
-  icon: LucideIcon;
-  label: string;
-  colorClass?: string;
-}
-
-const operations: PaletteItem[] = [
-  { icon: Sparkles, label: 'AI Assistant', colorClass: 'text-purple-500' },
-  { icon: Type, label: 'Text' },
-  { icon: Image, label: 'Images' },
-  { icon: Table, label: 'Tables' },
-  { icon: BarChart3, label: 'Charts' },
-];
-
-const tools: PaletteItem[] = [
-  { icon: FileText, label: 'Templates' },
-  { icon: Palette, label: 'Themes' },
-  { icon: Settings, label: 'Settings' },
-];
 
 export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
   onFullscreen,
   onExport,
   onGridView,
+  onCreateTextBox,
+  canEdit = true,
 }) => {
+  const operations = useMemo<PaletteOperation[]>(
+    () => [
+      createAiAssistantOperation(),
+      createTextOperation({ onCreateTextBox, canEdit }),
+      createImagesOperation(),
+      createTablesOperation(),
+      createChartsOperation(),
+    ],
+    [onCreateTextBox, canEdit],
+  );
+
+  const tools = useMemo<PaletteOperation[]>(
+    () => [createTemplatesTool(), createThemesTool(), createSettingsTool()],
+    [],
+  );
+
   return (
     <div className="w-12 h-full bg-background border-l border-border flex flex-col items-center py-4 gap-4">
       <div className="flex flex-col items-center gap-3 w-full">
@@ -55,23 +51,25 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
           Tools
         </span>
         <div className="flex flex-col items-center gap-2">
-          {operations.map((op, index) => (
+          {operations.map(operation => (
             <Button
-              key={index}
+              key={operation.label}
               variant="ghost"
               size="icon"
               className={cn(
                 'w-9 h-9 rounded-lg hover:bg-muted transition-all group relative',
-                'hover:scale-105 hover:shadow-lg'
+                'hover:scale-105 hover:shadow-lg',
+                operation.isDisabled && 'opacity-50 pointer-events-none',
               )}
-              title={op.label}
+              title={operation.label}
               type="button"
+              onClick={operation.onSelect}
             >
-              <op.icon
-                className={cn('h-4 w-4', op.colorClass ?? 'text-black dark:text-white')}
+              <operation.icon
+                className={cn('h-4 w-4', operation.colorClass ?? 'text-black dark:text-white')}
               />
               <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-                {op.label}
+                {operation.label}
               </span>
             </Button>
           ))}
@@ -85,17 +83,19 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
           More
         </span>
         <div className="flex flex-col items-center gap-2">
-          {tools.map((tool, index) => (
+          {tools.map(tool => (
             <Button
-              key={index}
+              key={tool.label}
               variant="ghost"
               size="icon"
               className={cn(
                 'w-9 h-9 rounded-lg hover:bg-muted transition-all group relative',
-                'hover:scale-105 hover:shadow-lg'
+                'hover:scale-105 hover:shadow-lg',
+                tool.isDisabled && 'opacity-50 pointer-events-none',
               )}
               title={tool.label}
               type="button"
+              onClick={tool.onSelect}
             >
               <tool.icon
                 className={cn('h-4 w-4', tool.colorClass ?? 'text-black dark:text-white')}

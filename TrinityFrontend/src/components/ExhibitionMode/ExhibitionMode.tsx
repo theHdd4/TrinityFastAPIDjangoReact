@@ -12,7 +12,7 @@ import {
 } from './store/exhibitionStore';
 import { ExhibitionCatalogue } from './components/ExhibitionCatalogue';
 import { SlideCanvas } from './components/SlideCanvas';
-import { OperationsPalette } from './components/OperationsPalette';
+import { OperationsPalette } from './components/operationsPalette';
 import { SlideNavigation } from './components/SlideNavigation';
 import { SlideThumbnails } from './components/SlideThumbnails';
 import { SlideNotes } from './components/SlideNotes';
@@ -27,6 +27,8 @@ import {
   type ExhibitionComponentPayload,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
+import { createDefaultTextBox } from './components/operationsPalette/textBox/constants';
+import type { SlideTextBox, TextBoxPosition } from './components/operationsPalette/textBox/types';
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
 const SLIDESHOW_ANIMATION_MS = 450;
@@ -106,6 +108,7 @@ const ExhibitionMode = () => {
   const [isSlideshowActive, setIsSlideshowActive] = useState(false);
   const [slideshowTransform, setSlideshowTransform] = useState('translateX(0px) scale(1)');
   const [slideshowOpacity, setSlideshowOpacity] = useState(1);
+  const [textBoxesByCard, setTextBoxesByCard] = useState<Record<string, SlideTextBox[]>>({});
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const verticalSlideRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -134,6 +137,88 @@ const ExhibitionMode = () => {
     clearAutoAdvanceTimer();
     clearTransitionTimer();
   }, [clearAutoAdvanceTimer, clearTransitionTimer]);
+
+  const generateTextBoxId = useCallback(() => {
+    if (typeof crypto !== 'undefined' && typeof (crypto as Crypto).randomUUID === 'function') {
+      return (crypto as Crypto).randomUUID();
+    }
+    return `textbox-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }, []);
+
+  const updateTextBoxState = useCallback(
+    (cardId: string, boxId: string, updates: Partial<SlideTextBox>) => {
+      setTextBoxesByCard(prev => {
+        const existing = prev[cardId];
+        if (!existing) {
+          return prev;
+        }
+
+        let hasChanged = false;
+        const next = existing.map(box => {
+          if (box.id !== boxId) {
+            return box;
+          }
+
+          const updated = { ...box, ...updates };
+          hasChanged = Object.entries(updates).some(([key, value]) => (box as Record<string, unknown>)[key] !== value);
+          return updated;
+        });
+
+        if (!hasChanged) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          [cardId]: next,
+        };
+      });
+    },
+    [],
+  );
+
+  const handleTextBoxTextChange = useCallback(
+    (cardId: string, boxId: string, text: string) => {
+      updateTextBoxState(cardId, boxId, { text });
+    },
+    [updateTextBoxState],
+  );
+
+  const handleTextBoxPositionChange = useCallback(
+    (cardId: string, boxId: string, position: TextBoxPosition) => {
+      updateTextBoxState(cardId, boxId, { x: position.x, y: position.y });
+    },
+    [updateTextBoxState],
+  );
+
+  const handleTextBoxRemove = useCallback((cardId: string, boxId: string) => {
+    setTextBoxesByCard(prev => {
+      const existing = prev[cardId];
+      if (!existing) {
+        return prev;
+      }
+
+      const filtered = existing.filter(box => box.id !== boxId);
+      if (filtered.length === existing.length) {
+        return prev;
+      }
+
+      const next = { ...prev };
+      if (filtered.length > 0) {
+        next[cardId] = filtered;
+      } else {
+        delete next[cardId];
+      }
+      return next;
+    });
+  }, []);
+
+  const handleTextBoxStyleChange = useCallback(
+    (cardId: string, boxId: string, updates: Partial<SlideTextBox>) => {
+      updateTextBoxState(cardId, boxId, updates);
+    },
+    [updateTextBoxState],
+  );
 
   const getTransitionStates = useCallback(
     (transition: SlideshowTransition, direction: 'forward' | 'backward') => {
@@ -961,6 +1046,52 @@ const ExhibitionMode = () => {
     </div>
   );
 
+  const currentCard = exhibitedCards[currentSlide] ?? null;
+  const currentPresentationSettings: PresentationSettings = {
+    ...DEFAULT_PRESENTATION_SETTINGS,
+    ...currentCard?.presentationSettings,
+  };
+
+  const handleCreateTextBox = useCallback(() => {
+    const targetCard = exhibitedCards[currentSlide];
+    if (!targetCard) {
+      return;
+    }
+
+    setTextBoxesByCard(prev => {
+      const existing = prev[targetCard.id] ?? [];
+      const offset = existing.length * 32;
+      const newBox = createDefaultTextBox(generateTextBoxId(), {
+        x: 120 + offset,
+        y: 120 + offset,
+      });
+
+      return {
+        ...prev,
+        [targetCard.id]: [...existing, newBox],
+      };
+    });
+  }, [currentSlide, exhibitedCards, generateTextBoxId]);
+  const slideWrapperStyle: React.CSSProperties | undefined = isSlideshowActive
+    ? {
+        opacity: slideshowOpacity,
+        transform: slideshowTransform,
+        transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
+      }
+    : undefined;
+
+  const emptyCanvas = (
+    <div className="flex-1 flex items-center justify-center bg-muted/10">
+      <div className="max-w-md text-center space-y-3 px-6">
+        <h3 className="text-2xl font-semibold text-foreground">Create your first slide</h3>
+        <p className="text-muted-foreground">
+          Use the <span className="font-medium text-foreground">+</span> button below to create a slide, then drag exhibited
+          components from the catalogue to start building your presentation.
+        </p>
+      </div>
+    </div>
+  );
+
   if (exhibitedCards.length === 0 && catalogueCards.length === 0) {
     return (
       <div className="h-screen bg-background flex flex-col">
@@ -986,31 +1117,6 @@ const ExhibitionMode = () => {
       </div>
     );
   }
-
-  const currentCard = exhibitedCards[currentSlide] ?? null;
-  const currentPresentationSettings: PresentationSettings = {
-    ...DEFAULT_PRESENTATION_SETTINGS,
-    ...currentCard?.presentationSettings,
-  };
-  const slideWrapperStyle: React.CSSProperties | undefined = isSlideshowActive
-    ? {
-        opacity: slideshowOpacity,
-        transform: slideshowTransform,
-        transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
-      }
-    : undefined;
-
-  const emptyCanvas = (
-    <div className="flex-1 flex items-center justify-center bg-muted/10">
-      <div className="max-w-md text-center space-y-3 px-6">
-        <h3 className="text-2xl font-semibold text-foreground">Create your first slide</h3>
-        <p className="text-muted-foreground">
-          Use the <span className="font-medium text-foreground">+</span> button below to create a slide, then drag exhibited
-          components from the catalogue to start building your presentation.
-        </p>
-      </div>
-    </div>
-  );
 
   return (
     <div
@@ -1114,6 +1220,11 @@ const ExhibitionMode = () => {
                   isActive
                   onTitleChange={handleTitleChange}
                   presenterName={presenterDisplayName}
+                  textBoxes={textBoxesByCard[currentCard.id] ?? []}
+                  onTextBoxChange={(boxId, updates) => handleTextBoxStyleChange(currentCard.id, boxId, updates)}
+                  onTextBoxTextChange={(boxId, text) => handleTextBoxTextChange(currentCard.id, boxId, text)}
+                  onTextBoxPositionChange={(boxId, position) => handleTextBoxPositionChange(currentCard.id, boxId, position)}
+                  onTextBoxRemove={boxId => handleTextBoxRemove(currentCard.id, boxId)}
                 />
               ) : (
                 emptyCanvas
@@ -1142,6 +1253,11 @@ const ExhibitionMode = () => {
                     isActive={currentSlide === index}
                     onTitleChange={handleTitleChange}
                     presenterName={presenterDisplayName}
+                    textBoxes={textBoxesByCard[card.id] ?? []}
+                    onTextBoxChange={(boxId, updates) => handleTextBoxStyleChange(card.id, boxId, updates)}
+                    onTextBoxTextChange={(boxId, text) => handleTextBoxTextChange(card.id, boxId, text)}
+                    onTextBoxPositionChange={(boxId, position) => handleTextBoxPositionChange(card.id, boxId, position)}
+                    onTextBoxRemove={boxId => handleTextBoxRemove(card.id, boxId)}
                   />
                 </div>
               ))}
@@ -1165,6 +1281,8 @@ const ExhibitionMode = () => {
             onFullscreen={toggleFullscreen}
             onExport={() => setIsExportOpen(true)}
             onGridView={() => setShowGridView(true)}
+            onCreateTextBox={handleCreateTextBox}
+            canEdit={canEdit}
           />
         )}
       </div>
