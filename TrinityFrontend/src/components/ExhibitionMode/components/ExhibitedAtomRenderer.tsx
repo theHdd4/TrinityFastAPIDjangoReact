@@ -27,6 +27,8 @@ interface ExhibitedAtomRendererProps {
   variant?: 'full' | 'compact';
 }
 
+type AtomMetadata = Record<string, unknown> | undefined;
+
 type TableRow = Record<string, unknown>;
 
 interface TablePreviewData {
@@ -78,7 +80,7 @@ const formatValue = (value: unknown): string => {
   return String(value);
 };
 
-const extractTableData = (metadata: Record<string, unknown> | undefined): TablePreviewData | null => {
+const extractTableData = (metadata: AtomMetadata): TablePreviewData | null => {
   if (!metadata) {
     return null;
   }
@@ -187,7 +189,7 @@ const normaliseMultiSeriesData = (
   return Object.values(grouped);
 };
 
-const extractChartSpec = (metadata: Record<string, unknown> | undefined): ChartPreviewSpec | null => {
+const extractChartSpec = (metadata: AtomMetadata): ChartPreviewSpec | null => {
   if (!metadata) {
     return null;
   }
@@ -431,7 +433,7 @@ const renderChartPreview = (spec: ChartPreviewSpec, variant: 'full' | 'compact')
   );
 };
 
-const renderHtmlPreview = (metadata: Record<string, unknown> | undefined) => {
+const renderHtmlPreview = (metadata: AtomMetadata) => {
   if (!metadata) {
     return null;
   }
@@ -453,12 +455,14 @@ const renderHtmlPreview = (metadata: Record<string, unknown> | undefined) => {
   );
 };
 
-const DefaultExhibitedAtom: React.FC<ExhibitedAtomRendererProps> = ({ atom, variant }) => {
-  const metadata = isRecord(atom.metadata) ? atom.metadata : {};
-  const simpleEntries = Object.entries(metadata).filter(([, value]) =>
+const DefaultExhibitedAtom: React.FC<
+  ExhibitedAtomRendererProps & { metadata: AtomMetadata }
+> = ({ atom, variant, metadata }) => {
+  const safeMetadata = metadata ?? {};
+  const simpleEntries = Object.entries(safeMetadata).filter(([, value]) =>
     value == null || ['string', 'number', 'boolean'].includes(typeof value),
   );
-  const complexEntries = Object.entries(metadata).filter(([, value]) =>
+  const complexEntries = Object.entries(safeMetadata).filter(([, value]) =>
     value != null && typeof value === 'object',
   );
 
@@ -505,7 +509,10 @@ const DefaultExhibitedAtom: React.FC<ExhibitedAtomRendererProps> = ({ atom, vari
 };
 
 const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, variant = 'full' }) => {
-  const metadata = useMemo(() => (isRecord(atom.metadata) ? atom.metadata : undefined), [atom.metadata]);
+  const metadata = useMemo<AtomMetadata>(
+    () => (isRecord(atom.metadata) ? atom.metadata : undefined),
+    [atom.metadata],
+  );
   const tableData = useMemo(() => extractTableData(metadata), [metadata]);
   const chartSpec = useMemo(() => extractChartSpec(metadata), [metadata]);
   const htmlPreview = useMemo(() => renderHtmlPreview(metadata), [metadata]);
@@ -566,7 +573,7 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
           {atom.category}
         </Badge>
       </div>
-      <DefaultExhibitedAtom atom={atom} variant={variant} />
+      <DefaultExhibitedAtom atom={atom} variant={variant} metadata={metadata} />
     </div>
   );
 };
