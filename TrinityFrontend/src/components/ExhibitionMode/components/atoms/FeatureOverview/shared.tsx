@@ -449,25 +449,49 @@ const sanitizeTimeseries = (
   entries: Array<Record<string, unknown>>,
   xField: string,
   yField: string,
-): Array<Record<string, unknown>> =>
-  entries
+): Array<Record<string, unknown>> => {
+  const xFieldFallbacks = [xField, 'date', 'timestamp', 'time'].filter(
+    (field): field is string => typeof field === 'string' && field.length > 0,
+  );
+  const yFieldFallbacks = [yField, 'value', 'metricValue', 'metric_value', 'y'].filter(
+    (field, index, array): field is string =>
+      typeof field === 'string' && field.length > 0 && array.indexOf(field) === index,
+  );
+
+  return entries
     .map((entry, index) => {
-      if (typeof entry[xField] === 'undefined' || entry[xField] === null) {
-        return { ...entry, [xField]: index + 1 };
+      const normalised: Record<string, unknown> = { ...entry };
+
+      const resolvedX = xFieldFallbacks.find(field => entry[field] != null);
+      if (resolvedX) {
+        normalised[xField] = entry[resolvedX];
+      } else if (normalised[xField] == null) {
+        normalised[xField] = index + 1;
       }
-      return entry;
+
+      const resolvedYField = yFieldFallbacks.find(field => entry[field] != null);
+      if (!resolvedYField) {
+        return null;
+      }
+
+      const rawValue = entry[resolvedYField];
+      const numericValue =
+        typeof rawValue === 'number'
+          ? rawValue
+          : typeof rawValue === 'string'
+          ? Number(rawValue)
+          : Number.NaN;
+
+      if (!Number.isFinite(numericValue)) {
+        return null;
+      }
+
+      normalised[yField] = numericValue;
+
+      return normalised;
     })
-    .filter(entry => {
-      const value = entry[yField];
-      if (typeof value === 'number') {
-        return Number.isFinite(value);
-      }
-      if (typeof value === 'string') {
-        const parsed = Number(value);
-        return Number.isFinite(parsed);
-      }
-      return false;
-    });
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+};
 
 const prepareChartData = (
   stats: FeatureOverviewStatistics | undefined,

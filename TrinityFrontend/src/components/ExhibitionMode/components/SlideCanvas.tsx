@@ -645,11 +645,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                           Add components from the catalogue to build your presentation slide.
                         </div>
                       ) : card.atoms.length > 0 ? (
-                        <div className="flex h-full w-full flex-col gap-4">
+                        <div className="flex h-full w-full min-w-0 flex-col gap-4">
                           {card.atoms.map(atom => (
                             <div
                               key={atom.id}
-                              className="group relative flex-1 rounded-3xl border-2 border-border bg-background/95 p-6 shadow-xl transition-all duration-300 hover:shadow-2xl"
+                              className="group relative box-border flex-1 min-w-0 max-w-full overflow-hidden rounded-3xl border-2 border-border bg-background/95 p-6 shadow-xl transition-all duration-300 hover:shadow-2xl"
                             >
                               <div className="flex items-center gap-3 mb-4">
                                 <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
