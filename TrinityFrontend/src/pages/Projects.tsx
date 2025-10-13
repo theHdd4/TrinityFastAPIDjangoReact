@@ -118,7 +118,7 @@ const Projects = () => {
         };
       case 'blank':
         return {
-          title: 'Blank App',
+          title: 'Custom Workspace',
           description: 'Custom analysis workflow from scratch',
           icon: Plus,
           color: 'from-gray-500 to-gray-700',

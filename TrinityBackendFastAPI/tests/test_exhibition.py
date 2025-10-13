@@ -28,24 +28,27 @@ async def test_exhibition_storage_roundtrip() -> None:
             "client_name": "Quant Matrix",
             "app_name": "Insights",
             "project_name": "Q3 Launch",
-            "cards": [
+            "atoms": [
                 {
-                    "id": "card-1",
-                    "atoms": [
-                        {"id": "atom-1", "atomId": "feature-overview", "title": "Overview", "category": "Feature"}
-                    ],
-                    "isExhibited": True,
-                    "exhibitionControlEnabled": True,
-                }
-            ],
-            "feature_overview": [
-                {
-                    "atomId": "feature-overview",
-                    "cardId": "card-1",
-                    "components": {"skuStatistics": True, "trendAnalysis": False},
-                    "skus": [
-                        {"id": "sku-1", "title": "Alpha", "details": {"revenue": 1200}},
-                        {"id": "sku-2", "title": "Beta", "details": {"revenue": 900}},
+                    "id": "feature-overview",
+                    "atom_name": "Feature Overview",
+                    "exhibited_components": [
+                        {
+                            "id": "sku-1",
+                            "atomId": "feature-overview",
+                            "title": "Alpha",
+                            "category": "Feature",
+                            "color": "bg-amber-500",
+                            "metadata": {"revenue": 1200},
+                        },
+                        {
+                            "id": "sku-2",
+                            "atomId": "feature-overview",
+                            "title": "Beta",
+                            "category": "Feature",
+                            "color": "bg-amber-500",
+                            "metadata": {"revenue": 900},
+                        },
                     ],
                 }
             ],
@@ -56,16 +59,50 @@ async def test_exhibition_storage_roundtrip() -> None:
         assert saved["app_name"] == "Insights"
         assert saved["project_name"] == "Q3 Launch"
         assert "updated_at" in saved
+        assert len(saved["atoms"]) == 1
 
         # Persisted to disk
         assert storage_path.exists()
         on_disk = json.loads(storage_path.read_text())
         assert isinstance(on_disk, list)
-        assert on_disk[0]["feature_overview"][0]["skus"][0]["title"] == "Alpha"
+        assert on_disk[0]["atom_name"] == "Feature Overview"
+        assert on_disk[0]["exhibited_components"][0]["title"] == "Alpha"
 
         fetched = await storage.get_configuration("Quant Matrix", "Insights", "Q3 Launch")
         assert fetched is not None
-        assert fetched["feature_overview"][0]["skus"][1]["id"] == "sku-2"
+        assert fetched["atoms"][0]["exhibited_components"][1]["id"] == "sku-2"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exhibition_storage_handles_legacy_exhibited_cards_key() -> None:
+    with TemporaryDirectory() as tmpdir:
+        storage_path = Path(tmpdir) / "config.json"
+        legacy_payload = [
+            {
+                "id": "legacy-atom",
+                "client_name": "Quant Matrix",
+                "app_name": "Insights",
+                "project_name": "Q3 Launch",
+                "atom_name": "Legacy Feature",
+                "exhibited_cards": [
+                    {
+                        "id": "legacy-component",
+                        "title": "Legacy Component",
+                        "color": "bg-blue-500",
+                    }
+                ],
+            }
+        ]
+        storage_path.write_text(json.dumps(legacy_payload))
+
+        storage = ExhibitionStorage(storage_path)
+        fetched = await storage.get_configuration("Quant Matrix", "Insights", "Q3 Launch")
+
+        assert fetched is not None
+        assert fetched["atoms"][0]["id"] == "legacy-atom"
+        components = fetched["atoms"][0]["exhibited_components"]
+        assert len(components) == 1
+        assert components[0]["id"] == "legacy-component"
 
 
 @pytest.mark.anyio("asyncio")

@@ -86,16 +86,89 @@ class ExhibitionStorage:
         return value.strip()
 
     @staticmethod
-    def _sanitise_cards(cards: Any) -> List[Dict[str, Any]]:
-        if isinstance(cards, list):
-            return [card for card in cards if isinstance(card, dict)]
+    def _resolve_component_payload(atom_like: Any) -> Any:
+        """Return the raw component collection from a Mongo or file entry.
+
+        Historic documents have stored the exhibited components under a few
+        different keys (``exhibited_components``, ``exhibited_cards`` or even a
+        spaced variant).  The latest API contract standardises on
+        ``exhibited_components`` so we normalise any of these legacy keys here
+        before sanitising.
+        """
+
+        if isinstance(atom_like, dict):
+            for key in (
+                "exhibited_components",
+                "exhibited_cards",
+                "exhibitedComponents",
+                "exhibitedCards",
+                "exhibited components",
+            ):
+                if key in atom_like:
+                    return atom_like.get(key)
         return []
 
     @staticmethod
-    def _sanitise_feature_overview(feature_overview: Any) -> List[Dict[str, Any]]:
-        if isinstance(feature_overview, list):
-            return [entry for entry in feature_overview if isinstance(entry, dict)]
-        return []
+    def _sanitise_components(components: Any) -> List[Dict[str, Any]]:
+        if not isinstance(components, list):
+            return []
+
+        sanitised: List[Dict[str, Any]] = []
+        for component in components:
+            if not isinstance(component, dict):
+                continue
+
+            identifier = str(component.get("id", "")).strip()
+            if not identifier:
+                continue
+
+            sanitised_component: Dict[str, Any] = {"id": identifier}
+            for key in ("atomId", "title", "category", "color"):
+                value = component.get(key)
+                if value is None:
+                    continue
+                sanitised_component[key] = value
+
+            metadata = component.get("metadata")
+            if isinstance(metadata, dict):
+                sanitised_component["metadata"] = metadata
+
+            sanitised.append(sanitised_component)
+
+        return sanitised
+
+    @staticmethod
+    def _sanitise_atoms(atoms: Any) -> List[Dict[str, Any]]:
+        if not isinstance(atoms, list):
+            return []
+
+        sanitised: List[Dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        for atom in atoms:
+            if not isinstance(atom, dict):
+                continue
+
+            raw_atom_name = str(atom.get("atom_name", "")).strip()
+            raw_identifier = str(atom.get("id", raw_atom_name)).strip()
+            if not raw_atom_name or not raw_identifier:
+                continue
+
+            if raw_identifier in seen_ids:
+                continue
+
+            raw_components = ExhibitionStorage._resolve_component_payload(atom)
+            components = ExhibitionStorage._sanitise_components(raw_components)
+            sanitised.append(
+                {
+                    "id": raw_identifier,
+                    "atom_name": raw_atom_name,
+                    "exhibited_components": components,
+                }
+            )
+            seen_ids.add(raw_identifier)
+
+        return sanitised
 
     @staticmethod
     def _timestamp() -> str:
@@ -127,25 +200,33 @@ class ExhibitionStorage:
 
         return False
 
-    def _mongo_document_id(self, client: str, app: str, project: str) -> str:
-        return f"{client}/{app}/{project}"
+    def _mongo_document_id(self, client: str, app: str, project: str, entry_id: str) -> str:
+        return f"{client}/{app}/{project}/{entry_id}"
 
-    def _fetch_from_mongo(self, document_id: str) -> Optional[Dict[str, Any]]:
+    def _fetch_project_entries_from_mongo(self, client: str, app: str, project: str) -> List[Dict[str, Any]]:
         if not self._ensure_mongo_ready():
-            return None
+            return []
 
         try:
-            document = self._mongo_collection.find_one({"_id": document_id})
+            cursor = self._mongo_collection.find(
+                {
+                    "client_name": client,
+                    "app_name": app,
+                    "project_name": project,
+                }
+            )
+            documents = list(cursor)
         except PyMongoError as exc:  # pragma: no cover - best effort logging
             logging.error("MongoDB read error for exhibition catalogue: %s", exc)
-            return None
+            return []
 
-        if not document:
-            return None
+        entries: List[Dict[str, Any]] = []
+        for document in documents:
+            entry = dict(document)
+            entry.pop("_id", None)
+            entries.append(entry)
 
-        payload = dict(document)
-        payload.pop("_id", None)
-        return payload
+        return entries
 
     def _persist_to_mongo(self, payload: Dict[str, Any]) -> None:
         if not self._ensure_mongo_ready():
@@ -154,18 +235,76 @@ class ExhibitionStorage:
         client = payload.get("client_name", "")
         app = payload.get("app_name", "")
         project = payload.get("project_name", "")
+        entries = payload.get("atoms", [])
         if not client or not app or not project:
             return
 
-        document_id = self._mongo_document_id(client, app, project)
-        mongo_payload = dict(payload)
-        mongo_payload["_id"] = document_id
+        if not isinstance(entries, list):
+            entries = []
 
         try:
-            existing = self._mongo_collection.find_one({"_id": document_id})
-            if existing and "created_at" in existing and "created_at" not in mongo_payload:
-                mongo_payload["created_at"] = existing["created_at"]
-            self._mongo_collection.replace_one({"_id": document_id}, mongo_payload, upsert=True)
+            existing_docs = list(
+                self._mongo_collection.find(
+                    {
+                        "client_name": client,
+                        "app_name": app,
+                        "project_name": project,
+                    }
+                )
+            )
+        except PyMongoError as exc:  # pragma: no cover - best effort logging
+            logging.error("MongoDB read error for exhibition catalogue: %s", exc)
+            existing_docs = []
+
+        existing_index = {str(doc.get("id", "")): doc for doc in existing_docs if doc.get("id")}
+        incoming_ids = set()
+
+        try:
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+
+                entry_id = str(entry.get("id", "")).strip()
+                atom_name = str(entry.get("atom_name", "")).strip()
+                if not entry_id or not atom_name:
+                    continue
+
+                incoming_ids.add(entry_id)
+                document_id = self._mongo_document_id(client, app, project, entry_id)
+                components = ExhibitionStorage._sanitise_components(
+                    ExhibitionStorage._resolve_component_payload(entry)
+                )
+
+                mongo_payload = {
+                    "_id": document_id,
+                    "id": entry_id,
+                    "client_name": client,
+                    "app_name": app,
+                    "project_name": project,
+                    "atom_name": atom_name,
+                    "exhibited_components": components,
+                    "updated_at": entry.get("updated_at"),
+                }
+
+                existing = existing_index.get(entry_id)
+                if existing and existing.get("created_at") and "created_at" not in mongo_payload:
+                    mongo_payload["created_at"] = existing["created_at"]
+                else:
+                    mongo_payload.setdefault("created_at", entry.get("created_at"))
+
+                self._mongo_collection.replace_one({"_id": document_id}, mongo_payload, upsert=True)
+
+            if existing_index:
+                obsolete_ids = [doc_id for doc_id in existing_index.keys() if doc_id not in incoming_ids]
+                if obsolete_ids:
+                    self._mongo_collection.delete_many(
+                        {
+                            "client_name": client,
+                            "app_name": app,
+                            "project_name": project,
+                            "id": {"$in": obsolete_ids},
+                        }
+                    )
         except PyMongoError as exc:  # pragma: no cover - best effort logging
             logging.error("MongoDB save error for exhibition catalogue: %s", exc)
 
@@ -199,72 +338,143 @@ class ExhibitionStorage:
 
     async def get_configuration(self, client_name: str, app_name: str, project_name: str) -> Optional[Dict[str, Any]]:
         if self._ensure_mongo_ready():
-            document_id = self._mongo_document_id(
-                self._normalise_identity(client_name),
-                self._normalise_identity(app_name),
-                self._normalise_identity(project_name),
+            mongo_result = await run_in_threadpool(
+                lambda: self._fetch_project_entries_from_mongo(
+                    self._normalise_identity(client_name),
+                    self._normalise_identity(app_name),
+                    self._normalise_identity(project_name),
+                )
             )
-            mongo_result = await run_in_threadpool(lambda: self._fetch_from_mongo(document_id))
             if mongo_result:
-                return mongo_result
+                return self._aggregate_entries(
+                    client_name,
+                    app_name,
+                    project_name,
+                    mongo_result,
+                )
 
         def _lookup() -> Optional[Dict[str, Any]]:
             client = self._normalise_identity(client_name)
             app = self._normalise_identity(app_name)
             project = self._normalise_identity(project_name)
 
-            for record in self._read_all_sync():
-                if (
-                    self._normalise_identity(str(record.get("client_name", ""))) == client
-                    and self._normalise_identity(str(record.get("app_name", ""))) == app
-                    and self._normalise_identity(str(record.get("project_name", ""))) == project
-                ):
-                    return record
-            return None
+            records = [
+                record
+                for record in self._read_all_sync()
+                if self._normalise_identity(str(record.get("client_name", ""))) == client
+                and self._normalise_identity(str(record.get("app_name", ""))) == app
+                and self._normalise_identity(str(record.get("project_name", ""))) == project
+            ]
+
+            if not records:
+                return None
+
+            return self._aggregate_entries(client, app, project, records)
 
         return await run_in_threadpool(_lookup)
 
     async def save_configuration(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         def _save() -> Dict[str, Any]:
-            records = self._read_all_sync()
-
             client = self._normalise_identity(str(payload.get("client_name", "")))
             app = self._normalise_identity(str(payload.get("app_name", "")))
             project = self._normalise_identity(str(payload.get("project_name", "")))
 
-            updated_payload: Dict[str, Any] = {
-                **payload,
-                "client_name": client,
-                "app_name": app,
-                "project_name": project,
-                "cards": self._sanitise_cards(payload.get("cards")),
-                "feature_overview": self._sanitise_feature_overview(payload.get("feature_overview")),
-            }
-
+            atoms = self._sanitise_atoms(payload.get("atoms"))
             timestamp = self._timestamp()
-            updated_payload.setdefault("created_at", timestamp)
-            updated_payload["updated_at"] = timestamp
 
-            replaced = False
-            for index, record in enumerate(records):
-                if (
+            records = self._read_all_sync()
+            remaining_records = [
+                record
+                for record in records
+                if not (
                     self._normalise_identity(str(record.get("client_name", ""))) == client
                     and self._normalise_identity(str(record.get("app_name", ""))) == app
                     and self._normalise_identity(str(record.get("project_name", ""))) == project
-                ):
-                    updated_payload.setdefault("created_at", record.get("created_at", timestamp))
-                    records[index] = updated_payload
-                    replaced = True
-                    break
+                )
+            ]
 
-            if not replaced:
-                records.append(updated_payload)
+            existing_by_id = {
+                str(record.get("id", "")): record
+                for record in records
+                if self._normalise_identity(str(record.get("client_name", ""))) == client
+                and self._normalise_identity(str(record.get("app_name", ""))) == app
+                and self._normalise_identity(str(record.get("project_name", ""))) == project
+                and record.get("id")
+            }
 
-            self._write_all_sync(records)
-            self._persist_to_mongo(updated_payload)
-            return updated_payload
+            project_entries: List[Dict[str, Any]] = []
+            for atom_entry in atoms:
+                entry_id = atom_entry["id"]
+                previous = existing_by_id.get(entry_id)
+                entry = {
+                    "id": entry_id,
+                    "client_name": client,
+                    "app_name": app,
+                    "project_name": project,
+                    "atom_name": atom_entry["atom_name"],
+                    "exhibited_components": atom_entry.get("exhibited_components", []),
+                    "updated_at": timestamp,
+                    "created_at": previous.get("created_at", timestamp) if previous else timestamp,
+                }
+                project_entries.append(entry)
+
+            serialised = remaining_records + project_entries
+            self._write_all_sync(serialised)
+
+            persist_payload = {
+                "client_name": client,
+                "app_name": app,
+                "project_name": project,
+                "atoms": project_entries,
+            }
+            self._persist_to_mongo(persist_payload)
+
+            aggregated = self._aggregate_entries(client, app, project, project_entries)
+            aggregated["updated_at"] = timestamp
+            return aggregated
 
         return await run_in_threadpool(_save)
+
+    def _aggregate_entries(
+        self,
+        client: str,
+        app: str,
+        project: str,
+        entries: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        atoms: List[Dict[str, Any]] = []
+        latest_update: Optional[str] = None
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+
+            entry_id = str(entry.get("id", "")).strip()
+            atom_name = str(entry.get("atom_name", "")).strip()
+            if not entry_id or not atom_name:
+                continue
+
+            raw_components = self._resolve_component_payload(entry)
+            components = self._sanitise_components(raw_components)
+            atom_payload = {
+                "id": entry_id,
+                "atom_name": atom_name,
+                "exhibited_components": components,
+            }
+            atoms.append(atom_payload)
+
+            updated_at = entry.get("updated_at")
+            if isinstance(updated_at, str):
+                if latest_update is None or updated_at > latest_update:
+                    latest_update = updated_at
+
+        return {
+            "client_name": client,
+            "app_name": app,
+            "project_name": project,
+            "atoms": atoms,
+            "updated_at": latest_update,
+        }
 
 
 __all__ = ["ExhibitionStorage"]
