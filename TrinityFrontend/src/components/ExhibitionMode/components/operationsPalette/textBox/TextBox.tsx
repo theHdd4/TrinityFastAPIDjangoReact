@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -46,6 +46,7 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragOrigin, setDragOrigin] = useState<TextBoxPosition>({ x: data.x, y: data.y });
   const [position, setPosition] = useState<TextBoxPosition>({ x: data.x, y: data.y });
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
 
   const runCommand = (command: string) => {
     if (!isEditable || typeof document === 'undefined') {
@@ -96,18 +97,6 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
   useEffect(() => {
     setPosition({ x: data.x, y: data.y });
   }, [data.x, data.y]);
-
-  useEffect(() => {
-    if (isActive) {
-      setShowToolbar(true);
-    }
-  }, [isActive]);
-
-  useEffect(() => {
-    if (!isActive) {
-      setShowToolbar(false);
-    }
-  }, [isActive]);
 
   useEffect(() => {
     if (!isActive) {
@@ -168,7 +157,6 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
     }
     setIsEditing(true);
     setIsActive(true);
-    setShowToolbar(true);
     onInteract?.();
 
     requestAnimationFrame(() => {
@@ -217,6 +205,74 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
     }
     setIsActive(true);
     onInteract?.();
+  };
+
+  const isNodeWithinText = useCallback(
+    (node: Node | null): boolean => {
+      if (!node || !textRef.current) {
+        return false;
+      }
+
+      if (node === textRef.current) {
+        return true;
+      }
+
+      if (node instanceof Element) {
+        return textRef.current.contains(node);
+      }
+
+      return isNodeWithinText(node.parentNode);
+    },
+    [],
+  );
+
+  const hasEditableSelection = useCallback(() => {
+    if (typeof window === 'undefined' || !textRef.current) {
+      return false;
+    }
+
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) {
+      return false;
+    }
+
+    const { anchorNode, focusNode } = selection;
+
+    return isNodeWithinText(anchorNode) && isNodeWithinText(focusNode);
+  }, [isNodeWithinText]);
+
+  const handleContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!isEditable) {
+      return;
+    }
+
+    const validSelection = hasEditableSelection();
+    if (!validSelection) {
+      setShowToolbar(false);
+      setContextMenuOpen(false);
+      event.preventDefault();
+      return;
+    }
+
+    setIsActive(true);
+    onInteract?.();
+  };
+
+  const handleContextMenuOpenChange = (open: boolean) => {
+    if (!open) {
+      setContextMenuOpen(false);
+      setShowToolbar(false);
+      return;
+    }
+
+    if (!hasEditableSelection()) {
+      setContextMenuOpen(false);
+      setShowToolbar(false);
+      return;
+    }
+
+    setContextMenuOpen(true);
+    setShowToolbar(true);
   };
 
   const increaseFontSize = () => {
@@ -339,13 +395,14 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
   } as const;
 
   return (
-    <ContextMenu>
+    <ContextMenu open={contextMenuOpen} onOpenChange={handleContextMenuOpenChange}>
       <ContextMenuTrigger asChild>
         <div
           className={cn('absolute group', isDragging && 'cursor-move opacity-60')}
           style={containerStyles}
           onMouseDown={handleMouseDown}
           onClick={handleClick}
+          onContextMenu={handleContextMenu}
         >
           {showToolbar && isEditable && !isDragging && (
             <TextBoxToolbar {...toolbarProps} />
