@@ -2,11 +2,32 @@ import React from 'react';
 import { Badge } from '@/components/ui/badge';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import TableTemplate from '@/templates/tables/table';
-import { FeatureOverviewMetadata, FeatureOverviewStatistics } from './types';
+import {
+  FeatureOverviewChartState,
+  FeatureOverviewDimension,
+  FeatureOverviewFeatureContext,
+  FeatureOverviewMetadata,
+  FeatureOverviewSkuStatisticsSettings,
+  FeatureOverviewStatistics,
+  FeatureOverviewViewType,
+} from './types';
 
 export const ensureArray = <T,>(value: unknown): T[] => {
   if (!value) return [];
   if (Array.isArray(value)) return value as T[];
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed as T[];
+        }
+      } catch (error) {
+        console.warn('[FeatureOverview] Failed to parse array JSON payload', error);
+      }
+    }
+  }
   return [];
 };
 
@@ -14,8 +35,335 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 export const ensureRecordArray = (value: unknown): Array<Record<string, unknown>> => {
-  if (!Array.isArray(value)) return [];
-  return value.filter(isRecord) as Array<Record<string, unknown>>;
+  return ensureArray<unknown>(value)
+    .filter(isRecord)
+    .map(entry => ({ ...entry } as Record<string, unknown>));
+};
+
+const asString = (value: unknown): string | undefined => {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return undefined;
+};
+
+const asBoolean = (value: unknown): boolean | undefined => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  if (typeof value === 'string') {
+    const lowered = value.trim().toLowerCase();
+    if (lowered === 'true') return true;
+    if (lowered === 'false') return false;
+    if (lowered === '1' || lowered === 'yes' || lowered === 'y') return true;
+    if (lowered === '0' || lowered === 'no' || lowered === 'n') return false;
+  }
+  return undefined;
+};
+
+const safeJsonParse = (value: string): unknown => {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    console.warn('[FeatureOverview] Failed to parse JSON payload', error);
+    return null;
+  }
+};
+
+const toRecord = (value: unknown): Record<string, unknown> | null => {
+  if (isRecord(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      const parsed = safeJsonParse(trimmed);
+      if (isRecord(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return null;
+};
+
+const normaliseDimensions = (value: unknown) => {
+  const dimensions = ensureArray<unknown>(value)
+    .map(entry => {
+      const record = toRecord(entry);
+      if (!record) return null;
+      const name =
+        asString(record.name) ??
+        asString(record.dimension) ??
+        asString(record.label);
+      const dimensionValue = asString(record.value) ?? asString(record.key) ?? asString(record.id);
+
+      if (!name && !dimensionValue) {
+        return null;
+      }
+
+      return {
+        ...(name ? { name } : {}),
+        ...(dimensionValue ? { value: dimensionValue } : {}),
+      } as FeatureOverviewDimension;
+    })
+    .filter((dimension): dimension is FeatureOverviewDimension => Boolean(dimension));
+
+  return dimensions.length > 0 ? dimensions : undefined;
+};
+
+const normaliseStatistics = (value: unknown): FeatureOverviewStatistics | undefined => {
+  const record = toRecord(value);
+  if (!record) {
+    return undefined;
+  }
+
+  let summaryRecord = toRecord(record.summary ?? record['statistical_summary']);
+  if (!summaryRecord) {
+    const summaryEntries = ensureArray<unknown>(record.summary).map(entry => {
+      const summaryItem = toRecord(entry);
+      if (!summaryItem) {
+        return null;
+      }
+
+      const key =
+        asString(summaryItem.key) ??
+        asString(summaryItem.label) ??
+        asString(summaryItem.metric) ??
+        asString(summaryItem.name);
+      if (!key) {
+        return null;
+      }
+
+      const value = summaryItem.value ?? summaryItem.metricValue ?? summaryItem.data;
+      return [key, value] as [string, unknown];
+    });
+
+    const filteredEntries = summaryEntries.filter((entry): entry is [string, unknown] => Boolean(entry));
+    if (filteredEntries.length > 0) {
+      summaryRecord = filteredEntries.reduce<Record<string, unknown>>((acc, [key, value]) => {
+        acc[key] = value;
+        return acc;
+      }, {});
+    }
+  }
+
+  const summary = summaryRecord ? { ...summaryRecord } : undefined;
+  const timeseries = ensureRecordArray(record.timeseries ?? record['time_series']);
+  const fullRecord = toRecord(record.full);
+
+  if (!summary && timeseries.length === 0 && !fullRecord) {
+    return undefined;
+  }
+
+  const result: FeatureOverviewStatistics = {};
+  if (summary) {
+    result.summary = summary;
+  }
+  if (timeseries.length > 0) {
+    result.timeseries = timeseries;
+  }
+  if (fullRecord) {
+    result.full = fullRecord;
+  }
+
+  return result;
+};
+
+const normaliseFeatureContext = (value: unknown): FeatureOverviewFeatureContext | undefined => {
+  const record = toRecord(value);
+  if (!record) {
+    return undefined;
+  }
+
+  const result: FeatureOverviewFeatureContext = {};
+
+  const dataSource = asString(record.dataSource ?? record['data_source']);
+  if (dataSource) {
+    result.dataSource = dataSource;
+  }
+
+  const availableMetrics = ensureArray<string>(record.availableMetrics ?? record['available_metrics']).filter(
+    metric => typeof metric === 'string',
+  );
+  if (availableMetrics.length > 0) {
+    result.availableMetrics = availableMetrics;
+  }
+
+  const xAxis = asString(record.xAxis ?? record['x_axis']);
+  if (xAxis) {
+    result.xAxis = xAxis;
+  }
+
+  const dimensionMapRecord = toRecord(record.dimensionMap ?? record['dimension_map']);
+  if (dimensionMapRecord) {
+    const dimensionMap = Object.entries(dimensionMapRecord).reduce<Record<string, string[]>>((acc, [key, rawValue]) => {
+      const entries = ensureArray<string>(rawValue).filter(entry => typeof entry === 'string');
+      if (entries.length > 0) {
+        acc[key] = entries;
+      }
+      return acc;
+    }, {});
+
+    if (Object.keys(dimensionMap).length > 0) {
+      result.dimensionMap = dimensionMap;
+    }
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+};
+
+const normaliseSkuStatisticsSettings = (value: unknown): FeatureOverviewSkuStatisticsSettings | undefined => {
+  const record = toRecord(value);
+  if (!record) {
+    return undefined;
+  }
+
+  const visibilityRecord = toRecord(record.visibility);
+  const visibility = visibilityRecord
+    ? Object.entries(visibilityRecord).reduce<Record<string, boolean>>((acc, [key, rawValue]) => {
+        const boolValue = asBoolean(rawValue);
+        if (boolValue !== undefined) {
+          acc[key] = boolValue;
+        }
+        return acc;
+      }, {})
+    : undefined;
+
+  const tableRows = ensureRecordArray(record.tableRows ?? record['table_rows']);
+  const tableColumns = ensureArray<string>(record.tableColumns ?? record['table_columns']).filter(
+    (column): column is string => typeof column === 'string',
+  );
+
+  if (!visibility && tableRows.length === 0 && tableColumns.length === 0) {
+    return undefined;
+  }
+
+  const result: FeatureOverviewSkuStatisticsSettings = {};
+
+  if (visibility && Object.keys(visibility).length > 0) {
+    result.visibility = visibility;
+  }
+  if (tableRows.length > 0) {
+    result.tableRows = tableRows;
+  }
+  if (tableColumns.length > 0) {
+    result.tableColumns = tableColumns;
+  }
+
+  return result;
+};
+
+const normaliseChartState = (value: unknown): FeatureOverviewChartState | undefined => {
+  const record = toRecord(value);
+  if (!record) {
+    return undefined;
+  }
+
+  const chartState: FeatureOverviewChartState = {};
+
+  const chartType = asString(record.chartType ?? record['chart_type']);
+  if (chartType) {
+    chartState.chartType = chartType;
+  }
+
+  const theme = asString(record.theme);
+  if (theme) {
+    chartState.theme = theme;
+  }
+
+  const showDataLabels = asBoolean(record.showDataLabels ?? record['show_data_labels']);
+  if (showDataLabels !== undefined) {
+    chartState.showDataLabels = showDataLabels;
+  }
+
+  const showAxisLabels = asBoolean(record.showAxisLabels ?? record['show_axis_labels']);
+  if (showAxisLabels !== undefined) {
+    chartState.showAxisLabels = showAxisLabels;
+  }
+
+  const showGrid = asBoolean(record.showGrid ?? record['show_grid']);
+  if (showGrid !== undefined) {
+    chartState.showGrid = showGrid;
+  }
+
+  const showLegend = asBoolean(record.showLegend ?? record['show_legend']);
+  if (showLegend !== undefined) {
+    chartState.showLegend = showLegend;
+  }
+
+  const xAxisField = asString(record.xAxisField ?? record['x_axis_field'] ?? record['xAxis']);
+  if (xAxisField) {
+    chartState.xAxisField = xAxisField;
+  }
+
+  const yAxisField = asString(record.yAxisField ?? record['y_axis_field'] ?? record['yAxis']);
+  if (yAxisField) {
+    chartState.yAxisField = yAxisField;
+  }
+
+  const palette = ensureArray<string>(record.colorPalette ?? record['color_palette']).filter(
+    (color): color is string => typeof color === 'string',
+  );
+  if (palette.length > 0) {
+    chartState.colorPalette = palette;
+  }
+
+  const legendField = asString(record.legendField ?? record['legend_field']);
+  if (legendField) {
+    chartState.legendField = legendField;
+  }
+
+  const xAxisLabel = asString(record.xAxisLabel ?? record['x_axis_label']);
+  if (xAxisLabel) {
+    chartState.xAxisLabel = xAxisLabel;
+  }
+
+  const yAxisLabel = asString(record.yAxisLabel ?? record['y_axis_label']);
+  if (yAxisLabel) {
+    chartState.yAxisLabel = yAxisLabel;
+  }
+
+  const rawSortOrder = record.sortOrder ?? record['sort_order'];
+  if (rawSortOrder === null) {
+    chartState.sortOrder = null;
+  }
+
+  const sortOrder = asString(rawSortOrder);
+  if (sortOrder === 'asc' || sortOrder === 'desc') {
+    chartState.sortOrder = sortOrder;
+  }
+
+  return Object.keys(chartState).length > 0 ? chartState : undefined;
+};
+
+const parsePossibleJson = (value: unknown): unknown => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      const parsed = safeJsonParse(trimmed);
+      if (parsed !== null) {
+        return parsed;
+      }
+    }
+  }
+  return value;
+};
+
+const normaliseViewType = (value: unknown): FeatureOverviewViewType => {
+  const candidate = asString(value)?.toLowerCase();
+  if (candidate === 'trend_analysis' || candidate === 'trend-analysis') {
+    return 'trend_analysis';
+  }
+  return 'statistical_summary';
 };
 
 export const humanize = (value: string): string =>
@@ -413,10 +761,92 @@ export const renderTable = (
 };
 
 export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverviewMetadata | null => {
-  if (!isRecord(metadata)) {
+  const record = toRecord(metadata);
+  if (!record) {
     return null;
   }
-  return metadata as FeatureOverviewMetadata;
+
+  const nested = toRecord(record.metadata);
+  const base = nested ? { ...record, ...nested } : record;
+
+  const result: FeatureOverviewMetadata = {};
+
+  const metric = asString(base['metric'] ?? base['dependent_variable']);
+  if (metric) {
+    result.metric = metric;
+  }
+
+  const combination = toRecord(base['combination'] ?? base['combination_details']);
+  if (combination) {
+    result.combination = { ...combination };
+  }
+
+  const dimensions = normaliseDimensions(base['dimensions'] ?? base['dimension_combinations']);
+  if (dimensions) {
+    result.dimensions = dimensions;
+  }
+
+  const label = asString(base['label'] ?? base['title'] ?? base['metric_label']);
+  if (label) {
+    result.label = label;
+  }
+
+  const chartState = normaliseChartState(base['chartState'] ?? base['chart_state']);
+  if (chartState) {
+    result.chartState = chartState;
+  }
+
+  const featureContext = normaliseFeatureContext(base['featureContext'] ?? base['feature_context']);
+  if (featureContext) {
+    result.featureContext = featureContext;
+  }
+
+  const statisticalDetails = normaliseStatistics(base['statisticalDetails'] ?? base['statistical_details']);
+  if (statisticalDetails) {
+    result.statisticalDetails = statisticalDetails;
+  }
+
+  const skuRow = toRecord(base['skuRow'] ?? base['sku_row']);
+  if (skuRow) {
+    result.skuRow = skuRow;
+  }
+
+  const capturedAt = asString(base['capturedAt'] ?? base['captured_at']);
+  if (capturedAt) {
+    result.capturedAt = capturedAt;
+  }
+
+  const skuStatisticsSettings = normaliseSkuStatisticsSettings(
+    base['skuStatisticsSettings'] ?? base['sku_statistics_settings'],
+  );
+  if (skuStatisticsSettings) {
+    result.skuStatisticsSettings = skuStatisticsSettings;
+  }
+
+  if ('chartRendererProps' in base || 'chart_renderer_props' in base) {
+    result.chartRendererProps = parsePossibleJson(
+      base['chartRendererProps'] ?? base['chart_renderer_props'],
+    );
+  }
+
+  if ('chartRendererConfig' in base || 'chart_renderer_config' in base) {
+    result.chartRendererConfig = parsePossibleJson(
+      base['chartRendererConfig'] ?? base['chart_renderer_config'],
+    );
+  }
+
+  if ('chartConfig' in base) {
+    result.chartConfig = parsePossibleJson(base['chartConfig']);
+  }
+
+  if ('chart_config' in base) {
+    result.chart_config = parsePossibleJson(base['chart_config']);
+  }
+
+  const viewType = normaliseViewType(base['viewType'] ?? base['view_type']);
+  result.viewType = viewType;
+
+  return result;
 };
 
 export const renderSummaryEntries = (entries: Array<[string, unknown]>) => {
