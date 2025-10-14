@@ -21,10 +21,7 @@ import { cn } from '@/lib/utils';
 import type { TextAlignOption } from './types';
 import { FONT_OPTIONS } from './constants';
 
-type ToolbarVariant = 'floating' | 'context';
-
 interface TextBoxToolbarProps {
-  variant?: ToolbarVariant;
   fontFamily: string;
   onFontFamilyChange: (font: string) => void;
   fontSize: number;
@@ -51,7 +48,6 @@ interface TextBoxToolbarProps {
 }
 
 export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
-  variant = 'floating',
   fontFamily,
   onFontFamilyChange,
   fontSize,
@@ -76,68 +72,62 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
   onRequestPosition,
   onDelete,
 }) => {
-  const isContext = variant === 'context';
-
   return (
     <div
       className={cn(
-        'bg-background border border-border rounded-lg shadow-lg p-1 flex items-center gap-1 z-[1000]',
-        !isContext && 'absolute -top-12 left-0',
+        'bg-background border border-border rounded-lg shadow-xl p-2 flex flex-wrap items-center gap-1 z-[2100] min-w-[320px]'
       )}
     >
-      {!isContext && (
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs">
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="sm" className="h-8 px-2 text-xs min-w-[96px] justify-between">
+            <span className="truncate" style={{ fontFamily }}>
               {fontFamily}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-48 p-2">
-            <div className="space-y-1">
-              {FONT_OPTIONS.map(option => (
-                <Button
-                  key={option}
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start"
-                  onClick={() => onFontFamilyChange(option)}
-                  style={{ fontFamily: option }}
-                  type="button"
-                >
-                  {option}
-                </Button>
-              ))}
-            </div>
-          </PopoverContent>
-        </Popover>
-      )}
-
-      {!isContext && <Separator orientation="vertical" className="h-6" />}
-
-      {!isContext && (
-        <>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0"
-            onClick={onDecreaseFontSize}
-            type="button"
-          >
-            -
+            </span>
           </Button>
-          <span className="text-sm font-medium w-8 text-center">{fontSize}</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0"
-            onClick={onIncreaseFontSize}
-            type="button"
-          >
-            +
-          </Button>
-          <Separator orientation="vertical" className="h-6" />
-        </>
-      )}
+        </PopoverTrigger>
+        <PopoverContent className="w-48 p-2">
+          <div className="space-y-1">
+            {FONT_OPTIONS.map(option => (
+              <Button
+                key={option}
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start"
+                onClick={() => onFontFamilyChange(option)}
+                style={{ fontFamily: option }}
+                type="button"
+              >
+                {option}
+              </Button>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      <Separator orientation="vertical" className="h-6" />
+
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={onDecreaseFontSize}
+        type="button"
+      >
+        -
+      </Button>
+      <span className="text-sm font-medium w-10 text-center">{fontSize}</span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={onIncreaseFontSize}
+        type="button"
+      >
+        +
+      </Button>
+
+      <Separator orientation="vertical" className="h-6" />
 
       <Button
         variant={bold ? 'secondary' : 'ghost'}
@@ -206,100 +196,81 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         <AlignRight className="h-4 w-4" />
       </Button>
 
-      {!isContext && (
-        <>
-          <Separator orientation="vertical" className="h-6" />
+      <Separator orientation="vertical" className="h-6" />
 
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0"
-            onClick={onBulletedList}
-            type="button"
-          >
-            <List className="h-4 w-4" />
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={onBulletedList}
+        type="button"
+      >
+        <List className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={onNumberedList}
+        type="button"
+      >
+        <ListOrdered className="h-4 w-4" />
+      </Button>
+
+      <Separator orientation="vertical" className="h-6" />
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <PaletteIcon className="h-4 w-4" />
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0"
-            onClick={onNumberedList}
-            type="button"
-          >
-            <ListOrdered className="h-4 w-4" />
-          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-2">
+          <input
+            type="color"
+            value={color}
+            onChange={event => onColorChange(event.target.value)}
+            className="h-8 w-32 cursor-pointer rounded border border-border"
+          />
+        </PopoverContent>
+      </Popover>
 
-          <Separator orientation="vertical" className="h-6" />
+      <Separator orientation="vertical" className="h-6" />
 
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                <PaletteIcon className="h-4 w-4" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-2">
-              <input
-                type="color"
-                value={color}
-                onChange={event => onColorChange(event.target.value)}
-                className="w-32 h-8 cursor-pointer"
-              />
-            </PopoverContent>
-          </Popover>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 px-2 text-xs"
+        onClick={onRequestEffects}
+        type="button"
+      >
+        Effects
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 px-2 text-xs gap-1"
+        onClick={onRequestAnimate}
+        type="button"
+      >
+        <Sparkles className="h-3 w-3 text-purple-500" />
+        Animate
+      </Button>
 
-          <Separator orientation="vertical" className="h-6" />
+      <Separator orientation="vertical" className="h-6" />
 
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 px-2 text-xs"
-            onClick={onRequestEffects}
-            type="button"
-          >
-            Effects
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 px-2 text-xs gap-1"
-            onClick={onRequestAnimate}
-            type="button"
-          >
-            <Sparkles className="h-3 w-3 text-purple-500" />
-            Animate
-          </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 px-2 text-xs gap-1"
+        onClick={onRequestPosition}
+        type="button"
+      >
+        <Move className="h-3 w-3" />
+        Position
+      </Button>
 
-          <Separator orientation="vertical" className="h-6" />
-
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 px-2 text-xs gap-1"
-            onClick={onRequestPosition}
-            type="button"
-          >
-            <Move className="h-3 w-3" />
-            Position
-          </Button>
-
-          {onDelete && (
-            <>
-              <Separator orientation="vertical" className="h-6" />
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0 text-destructive"
-                onClick={onDelete}
-                type="button"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </>
-          )}
-        </>
-      )}
-
-      {isContext && onDelete && (
+      {onDelete && (
         <>
           <Separator orientation="vertical" className="h-6" />
           <Button
