@@ -56,6 +56,7 @@ export interface FeatureOverviewMetadata {
   chart_config?: unknown;
   chartConfig?: unknown;
   viewType?: FeatureOverviewViewType;
+  visualizationManifest?: Record<string, unknown>;
 }
 
 export interface FeatureOverviewComponentProps {

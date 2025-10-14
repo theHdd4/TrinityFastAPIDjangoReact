@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import {
+  fetchExhibitionComponentManifest,
   saveExhibitionConfiguration,
   type ExhibitionAtomPayload,
   type ExhibitionComponentPayload,
@@ -771,6 +772,12 @@ const ExhibitionMode = () => {
 
   const handleDragStart = (atom: DroppedAtom, cardId: string, origin: 'catalogue' | 'slide' = 'catalogue') => {
     if (!canEdit) return;
+    console.info('[Exhibition] Drag start', {
+      componentId: atom.id,
+      atomId: atom.atomId,
+      cardId,
+      origin,
+    });
     setDraggedAtom({ atom, cardId, origin });
   };
 
@@ -790,61 +797,162 @@ const ExhibitionMode = () => {
       origin: 'catalogue' | 'slide' = 'catalogue',
       placement?: { x: number; y: number; width: number; height: number },
     ) => {
-      const sourceCard = cards.find(card => card.id === sourceCardId);
-      const destinationCard = cards.find(card => card.id === targetCardId);
+      void (async () => {
+        console.info('[Exhibition] Drop attempt', {
+          componentId: atom.id,
+          atomId: atom.atomId,
+          sourceCardId,
+          targetCardId,
+          origin,
+        });
 
-      if (!sourceCard || !destinationCard) {
+        const sourceCard = cards.find(card => card.id === sourceCardId);
+        const destinationCard = cards.find(card => card.id === targetCardId);
+
+        if (!sourceCard || !destinationCard) {
+          console.warn('[Exhibition] Drop aborted because source or destination slide could not be resolved');
+          setDraggedAtom(null);
+          return;
+        }
+
+        const activeContext = projectContext ?? getActiveProjectContext();
+        let hydratedAtom: DroppedAtom = atom;
+
+        if (activeContext) {
+          try {
+            const manifestResponse = await fetchExhibitionComponentManifest({
+              component_id: atom.id,
+              client_name: activeContext.client_name,
+              app_name: activeContext.app_name,
+              project_name: activeContext.project_name,
+            });
+
+            if (manifestResponse?.component) {
+              const component = manifestResponse.component;
+              const remoteMetadata =
+                component.metadata && typeof component.metadata === 'object'
+                  ? { ...(component.metadata as Record<string, any>) }
+                  : {};
+
+              const manifestPayload =
+                component.visualizationManifest ??
+                component.visualization_manifest ??
+                (remoteMetadata.visualizationManifest as Record<string, any> | undefined) ??
+                (remoteMetadata.visualization_manifest as Record<string, any> | undefined);
+
+              if (manifestPayload) {
+                remoteMetadata.visualizationManifest = manifestPayload;
+                if (remoteMetadata.visualization_manifest) {
+                  delete remoteMetadata.visualization_manifest;
+                }
+              }
+
+              if (component.thumbnail && typeof remoteMetadata.previewImage !== 'string') {
+                remoteMetadata.previewImage = component.thumbnail;
+              }
+
+              if (!remoteMetadata.skuDetails) {
+                remoteMetadata.skuDetails =
+                  component.skuDetails ?? component.sku_details ?? remoteMetadata.skuDetails;
+              }
+
+              hydratedAtom = {
+                ...atom,
+                id: component.id ?? atom.id,
+                atomId: component.atomId ?? atom.atomId,
+                title: component.title ?? atom.title,
+                category: component.category ?? atom.category,
+                color: component.color ?? atom.color,
+                metadata: {
+                  ...(atom.metadata ?? {}),
+                  ...remoteMetadata,
+                },
+              };
+
+              console.info('[Exhibition] Loaded component manifest', {
+                componentId: hydratedAtom.id,
+                atomId: hydratedAtom.atomId,
+                manifestVersion:
+                  manifestPayload && typeof manifestPayload === 'object'
+                    ? (manifestPayload as Record<string, any>).version
+                    : undefined,
+              });
+            }
+          } catch (error) {
+            console.warn('[Exhibition] Failed to hydrate component manifest before drop', error);
+          }
+        }
+
+        const destinationAlreadyHasAtom = destinationCard.atoms.some(
+          a => a.id === hydratedAtom.id || a.id === atom.id,
+        );
+        if (destinationAlreadyHasAtom) {
+          toast({
+            title: 'Component already on slide',
+            description: `${hydratedAtom.title} is already part of this slide.`,
+          });
+          console.info('[Exhibition] Drop cancelled because component already exists on target slide', {
+            componentId: hydratedAtom.id,
+            targetCardId,
+          });
+          setDraggedAtom(null);
+          return;
+        }
+
+        const destinationAtoms = [...destinationCard.atoms, hydratedAtom];
+
+        updateCard(destinationCard.id, { atoms: destinationAtoms });
+        addSlideObject(
+          destinationCard.id,
+          createSlideObjectFromAtom(hydratedAtom, {
+            id: hydratedAtom.id,
+            x: placement?.x ?? 96,
+            y: placement?.y ?? 96,
+            width: placement?.width ?? DEFAULT_CANVAS_OBJECT_WIDTH,
+            height: placement?.height ?? DEFAULT_CANVAS_OBJECT_HEIGHT,
+          }),
+        );
+
+        if (origin === 'slide' && sourceCard.id !== destinationCard.id) {
+          const sourceAtoms = sourceCard.atoms.filter(
+            a => a.id !== hydratedAtom.id && a.id !== atom.id,
+          );
+          updateCard(sourceCard.id, { atoms: sourceAtoms });
+          removeSlideObject(sourceCard.id, hydratedAtom.id);
+        }
+
+        const targetIndex = exhibitedCards.findIndex(card => card.id === destinationCard.id);
+        if (targetIndex !== -1) {
+          toast({
+            title: 'Component added',
+            description: `${hydratedAtom.title} moved to slide ${targetIndex + 1}.`,
+          });
+          setCurrentSlide(targetIndex);
+        } else {
+          toast({
+            title: 'Component added',
+            description: `${hydratedAtom.title} moved to a slide.`,
+          });
+        }
+
+        console.info('[Exhibition] Drop completed', {
+          componentId: hydratedAtom.id,
+          targetCardId,
+          origin,
+        });
+
         setDraggedAtom(null);
-        return;
-      }
-
-      const destinationAlreadyHasAtom = destinationCard.atoms.some(a => a.id === atom.id);
-      if (destinationAlreadyHasAtom) {
-        toast({
-          title: 'Component already on slide',
-          description: `${atom.title} is already part of this slide.`,
-        });
-        setDraggedAtom(null);
-        return;
-      }
-
-      const destinationAtoms = [...destinationCard.atoms, atom];
-
-      updateCard(destinationCard.id, { atoms: destinationAtoms });
-      addSlideObject(
-        destinationCard.id,
-        createSlideObjectFromAtom(atom, {
-          id: atom.id,
-          x: placement?.x ?? 96,
-          y: placement?.y ?? 96,
-          width: placement?.width ?? DEFAULT_CANVAS_OBJECT_WIDTH,
-          height: placement?.height ?? DEFAULT_CANVAS_OBJECT_HEIGHT,
-        }),
-      );
-
-      if (origin === 'slide' && sourceCard.id !== destinationCard.id) {
-        const sourceAtoms = sourceCard.atoms.filter(a => a.id !== atom.id);
-        updateCard(sourceCard.id, { atoms: sourceAtoms });
-        removeSlideObject(sourceCard.id, atom.id);
-      }
-
-      const targetIndex = exhibitedCards.findIndex(card => card.id === destinationCard.id);
-      if (targetIndex !== -1) {
-        toast({
-          title: 'Component added',
-          description: `${atom.title} moved to slide ${targetIndex + 1}.`,
-        });
-        setCurrentSlide(targetIndex);
-      } else {
-        toast({
-          title: 'Component added',
-          description: `${atom.title} moved to a slide.`,
-        });
-      }
-
-      setDraggedAtom(null);
+      })();
     },
-    [addSlideObject, cards, exhibitedCards, removeSlideObject, toast, updateCard]
+    [
+      addSlideObject,
+      cards,
+      exhibitedCards,
+      projectContext,
+      removeSlideObject,
+      toast,
+      updateCard,
+    ],
   );
 
   const handleRemoveAtom = useCallback(

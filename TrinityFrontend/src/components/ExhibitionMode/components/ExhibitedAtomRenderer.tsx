@@ -124,6 +124,11 @@ const ensureArray = <T,>(value: unknown): T[] => {
   return [];
 };
 
+const ensureRecordArray = (value: unknown): Array<Record<string, unknown>> =>
+  ensureArray<unknown>(value)
+    .filter(isRecord)
+    .map(entry => ({ ...(entry as Record<string, unknown>) }));
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -149,6 +154,159 @@ const formatValue = (value: unknown): string => {
     return value ? 'Yes' : 'No';
   }
   return String(value);
+};
+
+const resolveVisualizationManifest = (metadata: AtomMetadata): Record<string, unknown> | null => {
+  if (!metadata) {
+    return null;
+  }
+
+  const manifestCandidate =
+    metadata['visualizationManifest'] ?? metadata['visualization_manifest'] ?? metadata['manifest'];
+
+  if (isRecord(manifestCandidate)) {
+    return { ...manifestCandidate };
+  }
+
+  if (typeof manifestCandidate === 'string') {
+    const trimmed = manifestCandidate.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (isRecord(parsed)) {
+          return parsed;
+        }
+      } catch (error) {
+        console.warn('[Exhibition] Unable to parse visualization manifest payload', error);
+      }
+    }
+  }
+
+  return null;
+};
+
+const buildChartConfigFromTemplate = (
+  template: ChartTemplateConfigLike,
+  variant: 'full' | 'compact',
+  fallbackData: Array<Record<string, unknown>> = [],
+  fallbackTheme?: string,
+): ChartRendererConfig | null => {
+  const chartType = normaliseChartType(
+    template.chart_type ?? template.chartType ?? template.type,
+  );
+
+  if (!chartType) {
+    return null;
+  }
+
+  const templateData = ensureArray<Record<string, unknown>>(
+    template.data ?? template.filtered_data ?? template.filteredData,
+  ).filter(isRecord);
+
+  const data = templateData.length > 0 ? templateData : fallbackData;
+  if (data.length === 0) {
+    return null;
+  }
+
+  const height = typeof template.height === 'number'
+    ? template.height
+    : variant === 'compact'
+      ? 260
+      : 360;
+
+  const config: ChartRendererConfig = {
+    type: chartType,
+    data: data.map(entry => ({ ...entry })),
+    height,
+  };
+
+  const xFieldCandidate =
+    asString(template.xField) ?? asString(template['x_field']) ?? asString(template['xColumn']);
+  if (xFieldCandidate) {
+    config.xField = xFieldCandidate;
+  }
+
+  const yFieldCandidate =
+    asString(template.yField) ??
+    asString(template['y_field']) ??
+    asString(template['yColumn']) ??
+    asString(template['dataKey']);
+  if (yFieldCandidate) {
+    config.yField = yFieldCandidate;
+  }
+
+  const yFieldsCandidate = template.yFields ?? template['y_fields'];
+  if (Array.isArray(yFieldsCandidate)) {
+    const yFields = yFieldsCandidate.filter(entry => typeof entry === 'string') as string[];
+    if (yFields.length > 0) {
+      config.yFields = yFields;
+    }
+  }
+
+  const yAxisLabelsCandidate = template.yAxisLabels ?? template['y_axis_labels'];
+  if (Array.isArray(yAxisLabelsCandidate)) {
+    const yAxisLabels = yAxisLabelsCandidate.filter(entry => typeof entry === 'string') as string[];
+    if (yAxisLabels.length > 0) {
+      config.yAxisLabels = yAxisLabels;
+    }
+  }
+
+  const legendFieldCandidate = template.legendField ?? template['legend_field'];
+  if (typeof legendFieldCandidate === 'string') {
+    config.legendField = legendFieldCandidate;
+  }
+
+  const colorsCandidate = template.colors ?? template.palette;
+  if (Array.isArray(colorsCandidate)) {
+    const palette = colorsCandidate.filter(entry => typeof entry === 'string') as string[];
+    if (palette.length > 0) {
+      config.colors = palette;
+    }
+  }
+
+  if (typeof template.theme === 'string') {
+    config.theme = template.theme;
+  } else if (fallbackTheme) {
+    config.theme = fallbackTheme;
+  }
+
+  if (typeof template.title === 'string') {
+    config.title = template.title;
+  }
+
+  if (typeof template.xAxisLabel === 'string') {
+    config.xAxisLabel = template.xAxisLabel;
+  }
+  if (typeof template.yAxisLabel === 'string') {
+    config.yAxisLabel = template.yAxisLabel;
+  }
+
+  const sortOrderCandidate = template.sortOrder ?? template['sort_order'];
+  if (sortOrderCandidate === 'asc' || sortOrderCandidate === 'desc' || sortOrderCandidate === null) {
+    config.sortOrder = sortOrderCandidate;
+  }
+
+  const showLegendCandidate = asBoolean(template.showLegend ?? template['show_legend']);
+  if (typeof showLegendCandidate === 'boolean') {
+    config.showLegend = showLegendCandidate;
+  }
+
+  const showAxisLabelsCandidate = asBoolean(template.showAxisLabels ?? template['show_axis_labels']);
+  if (typeof showAxisLabelsCandidate === 'boolean') {
+    config.showAxisLabels = showAxisLabelsCandidate;
+  }
+
+  const showDataLabelsCandidate = asBoolean(template.showDataLabels ?? template['show_data_labels']);
+  if (typeof showDataLabelsCandidate === 'boolean') {
+    config.showDataLabels = showDataLabelsCandidate;
+  }
+
+  const showGridCandidate = asBoolean(template.showGrid ?? template['show_grid']);
+  if (typeof showGridCandidate === 'boolean') {
+    config.showGrid = showGridCandidate;
+  }
+
+  return config;
 };
 
 const extractTableData = (metadata: AtomMetadata): TablePreviewData | null => {
@@ -492,6 +650,44 @@ const extractDirectChartRendererConfig = (
 ): ChartRendererConfig | null => {
   if (!metadata) {
     return null;
+  }
+
+  const manifest = resolveVisualizationManifest(metadata);
+  if (manifest) {
+    const manifestChart = asRecord(manifest['chart']);
+    const manifestRendererCandidate = manifestChart ? asRecord(manifestChart['renderer']) : undefined;
+    const manifestTheme =
+      asString(manifestChart?.['theme']) ??
+      asString(manifestRendererCandidate?.['theme']);
+    const manifestData = ensureRecordArray(
+      manifestRendererCandidate?.['data'] ??
+        manifestChart?.['data'] ??
+        (isRecord(manifest['data']) ? (manifest['data'] as Record<string, unknown>)['timeseries'] : undefined),
+    );
+
+    if (manifestRendererCandidate) {
+      const manifestConfig = buildChartConfigFromTemplate(
+        manifestRendererCandidate as ChartTemplateConfigLike,
+        variant,
+        manifestData,
+        manifestTheme,
+      );
+      if (manifestConfig) {
+        return manifestConfig;
+      }
+    }
+
+    if (manifestChart) {
+      const manifestConfig = buildChartConfigFromTemplate(
+        manifestChart as ChartTemplateConfigLike,
+        variant,
+        manifestData,
+        manifestTheme,
+      );
+      if (manifestConfig) {
+        return manifestConfig;
+      }
+    }
   }
 
   const configCandidate =

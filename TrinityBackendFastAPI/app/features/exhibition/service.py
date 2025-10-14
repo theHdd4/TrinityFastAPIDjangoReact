@@ -133,9 +133,89 @@ class ExhibitionStorage:
             if isinstance(metadata, dict):
                 sanitised_component["metadata"] = metadata
 
+            manifest = ExhibitionStorage._normalise_manifest(component)
+            if manifest is not None:
+                sanitised_component["visualization_manifest"] = manifest
+                if isinstance(sanitised_component.get("metadata"), dict):
+                    sanitised_component["metadata"].setdefault("visualizationManifest", manifest)
+
+            thumbnail = ExhibitionStorage._normalise_thumbnail(component)
+            if thumbnail is not None:
+                sanitised_component["thumbnail"] = thumbnail
+                if isinstance(sanitised_component.get("metadata"), dict):
+                    sanitised_component["metadata"].setdefault("previewImage", thumbnail)
+
+            sku_details = ExhibitionStorage._normalise_sku_details(component)
+            if sku_details is not None:
+                sanitised_component["sku_details"] = sku_details
+                if isinstance(sanitised_component.get("metadata"), dict):
+                    sanitised_component["metadata"].setdefault("skuDetails", sku_details)
+
             sanitised.append(sanitised_component)
 
         return sanitised
+
+    @staticmethod
+    def _normalise_manifest(component: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(component, dict):
+            return None
+
+        raw_manifest = (
+            component.get("visualization_manifest")
+            or component.get("visualizationManifest")
+            or component.get("visualisation_manifest")
+            or component.get("visualisationManifest")
+            or component.get("manifest")
+        )
+
+        return ExhibitionStorage._coerce_dict(raw_manifest)
+
+    @staticmethod
+    def _normalise_thumbnail(component: Any) -> Optional[str]:
+        if not isinstance(component, dict):
+            return None
+
+        thumbnail = component.get("thumbnail") or component.get("previewImage")
+        if isinstance(thumbnail, str) and thumbnail.strip():
+            return thumbnail.strip()
+
+        metadata = component.get("metadata")
+        if isinstance(metadata, dict):
+            candidate = metadata.get("previewImage") or metadata.get("thumbnail")
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+
+        return None
+
+    @staticmethod
+    def _normalise_sku_details(component: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(component, dict):
+            return None
+
+        raw_sku = component.get("sku_details") or component.get("skuDetails")
+        if raw_sku is None:
+            metadata = component.get("metadata")
+            if isinstance(metadata, dict):
+                raw_sku = metadata.get("skuDetails") or metadata.get("sku")
+
+        return ExhibitionStorage._coerce_dict(raw_sku)
+
+    @staticmethod
+    def _coerce_dict(value: Any) -> Optional[Dict[str, Any]]:
+        if isinstance(value, dict):
+            return value
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError:
+                    return None
+                if isinstance(parsed, dict):
+                    return parsed
+
+        return None
 
     @staticmethod
     def _sanitise_atoms(atoms: Any) -> List[Dict[str, Any]]:
@@ -434,6 +514,54 @@ class ExhibitionStorage:
             return aggregated
 
         return await run_in_threadpool(_save)
+
+    async def get_component(
+        self,
+        client_name: str,
+        app_name: str,
+        project_name: str,
+        component_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        component_identifier = component_id.strip()
+        if not component_identifier:
+            return None
+
+        configuration = await self.get_configuration(client_name, app_name, project_name)
+        if not configuration:
+            return None
+
+        atoms = configuration.get("atoms")
+        if not isinstance(atoms, list):
+            return None
+
+        for atom in atoms:
+            if not isinstance(atom, dict):
+                continue
+
+            components = atom.get("exhibited_components")
+            if not isinstance(components, list):
+                continue
+
+            for component in components:
+                if not isinstance(component, dict):
+                    continue
+                if str(component.get("id", "")).strip() != component_identifier:
+                    continue
+
+                atom_id = str(atom.get("id", "")).strip()
+                atom_name = str(atom.get("atom_name", "")).strip() or atom_id or "Exhibited Atom"
+
+                return {
+                    "client_name": configuration.get("client_name", client_name),
+                    "app_name": configuration.get("app_name", app_name),
+                    "project_name": configuration.get("project_name", project_name),
+                    "atom_id": atom_id,
+                    "atom_name": atom_name,
+                    "component": component,
+                    "updated_at": configuration.get("updated_at"),
+                }
+
+        return None
 
     def _aggregate_entries(
         self,

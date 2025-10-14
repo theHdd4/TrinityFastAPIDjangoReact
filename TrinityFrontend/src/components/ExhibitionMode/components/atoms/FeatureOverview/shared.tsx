@@ -986,6 +986,67 @@ export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverview
 
   const result: FeatureOverviewMetadata = {};
 
+  const manifest = toRecord(base['visualizationManifest'] ?? base['visualization_manifest']);
+  if (manifest) {
+    result.visualizationManifest = { ...manifest };
+
+    const manifestChart = toRecord(manifest['chart']);
+    const manifestSpec = toRecord(manifestChart?.['spec']);
+    if (manifestSpec && !result.chartState) {
+      result.chartState = {
+        chartType: asString(manifestSpec['chartType'] ?? manifestSpec['chart_type']) ?? undefined,
+        theme: asString(manifestSpec['theme']),
+        showDataLabels: asBoolean(manifestSpec['showDataLabels'] ?? manifestSpec['show_data_labels']),
+        showAxisLabels: asBoolean(manifestSpec['showAxisLabels'] ?? manifestSpec['show_axis_labels']),
+        showGrid: asBoolean(manifestSpec['showGrid'] ?? manifestSpec['show_grid']),
+        showLegend: asBoolean(manifestSpec['showLegend'] ?? manifestSpec['show_legend']),
+        xAxisField: asString(manifestSpec['xAxisField'] ?? manifestSpec['x_axis_field'] ?? manifestSpec['xAxis']),
+        yAxisField: asString(manifestSpec['yAxisField'] ?? manifestSpec['y_axis_field'] ?? manifestSpec['yAxis']),
+        colorPalette: Array.isArray(manifestSpec['colorPalette'])
+          ? (manifestSpec['colorPalette'] as string[])
+          : undefined,
+      } as FeatureOverviewChartState;
+    }
+
+    const manifestRenderer = toRecord(manifestChart?.['renderer']);
+    if (manifestRenderer && !result.chartRendererConfig) {
+      result.chartRendererConfig = { ...manifestRenderer };
+    }
+
+    const manifestData = toRecord(manifest['data']);
+    if (manifestData) {
+      const manifestSummary = toRecord(manifestData['summary']);
+      const manifestTimeseries = ensureRecordArray(manifestData['timeseries']);
+      const manifestFull = toRecord(manifestData['full']);
+      if (!result.statisticalDetails && (manifestSummary || manifestTimeseries.length > 0 || manifestFull)) {
+        result.statisticalDetails = {
+          summary: manifestSummary ?? undefined,
+          timeseries: manifestTimeseries.length > 0 ? manifestTimeseries : undefined,
+          full: manifestFull ?? undefined,
+        };
+      }
+
+      const manifestSku = toRecord(manifestData['sku']);
+      if (manifestSku && !result.skuRow) {
+        result.skuRow = manifestSku;
+      }
+
+      const manifestSkuStats = toRecord(manifestData['skuStatistics']);
+      if (manifestSkuStats && !result.skuStatisticsSettings) {
+        const visibility = toRecord(manifestSkuStats['visibility']);
+        const tableRows = ensureRecordArray(manifestSkuStats['tableRows']);
+        const tableColumns = Array.isArray(manifestSkuStats['tableColumns'])
+          ? (manifestSkuStats['tableColumns'] as unknown[]).filter((entry): entry is string => typeof entry === 'string')
+          : undefined;
+        result.skuStatisticsSettings = {
+          visibility: visibility ? { ...visibility } : undefined,
+          tableRows: tableRows.length > 0 ? tableRows : undefined,
+          tableColumns,
+        };
+      }
+    }
+  }
+
   const metric = asString(base['metric'] ?? base['dependent_variable']);
   if (metric) {
     result.metric = metric;

@@ -33,6 +33,239 @@ const INITIAL_VISIBILITY = {
 
 type VisibilityKey = keyof typeof INITIAL_VISIBILITY;
 
+type SerializableRecord = Record<string, any>;
+
+type NormalisedChartState = {
+  chartType: string;
+  theme: string;
+  showDataLabels: boolean;
+  showAxisLabels: boolean;
+  showGrid: boolean;
+  showLegend: boolean;
+  xAxisField: string;
+  yAxisField: string;
+  colorPalette?: string[];
+};
+
+const cloneRecord = (value: unknown): SerializableRecord | undefined => {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return undefined;
+  }
+
+  return { ...(value as SerializableRecord) };
+};
+
+const cloneRecordArray = (value: unknown): SerializableRecord[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter(entry => entry && typeof entry === 'object' && !Array.isArray(entry))
+    .map(entry => ({ ...(entry as SerializableRecord) }));
+};
+
+const deepClone = <T,>(value: T): T => {
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch {
+    return value;
+  }
+};
+
+const normaliseRendererType = (chartType: string | undefined): string => {
+  switch ((chartType || '').toLowerCase()) {
+    case 'bar':
+    case 'bar_chart':
+    case 'bar-chart':
+      return 'bar_chart';
+    case 'area':
+    case 'area_chart':
+    case 'area-chart':
+      return 'area_chart';
+    case 'pie':
+    case 'pie_chart':
+    case 'pie-chart':
+      return 'pie_chart';
+    case 'scatter':
+    case 'scatter_chart':
+    case 'scatter-chart':
+      return 'scatter_chart';
+    case 'line':
+    case 'line_chart':
+    case 'line-chart':
+    default:
+      return 'line_chart';
+  }
+};
+
+const safeBase64Encode = (value: string): string | null => {
+  try {
+    if (typeof window !== 'undefined' && typeof window.btoa === 'function') {
+      return window.btoa(unescape(encodeURIComponent(value)));
+    }
+
+    if (typeof globalThis !== 'undefined') {
+      const candidate = (globalThis as unknown as { btoa?: (input: string) => string }).btoa;
+      if (typeof candidate === 'function') {
+        return candidate(unescape(encodeURIComponent(value)));
+      }
+    }
+  } catch (error) {
+    console.warn('[Exhibition] Failed to encode manifest thumbnail', error);
+  }
+
+  return null;
+};
+
+const generateSparklineThumbnail = (
+  timeseries: SerializableRecord[] | undefined,
+  metricKey: string,
+  colorPalette?: string[],
+): string | null => {
+  if (!Array.isArray(timeseries) || timeseries.length < 2) {
+    return null;
+  }
+
+  const numericValues = timeseries
+    .map(entry => {
+      const rawValue = entry?.[metricKey];
+      const numeric = typeof rawValue === 'number' ? rawValue : Number(rawValue);
+      return Number.isFinite(numeric) ? numeric : null;
+    })
+    .filter((value): value is number => value !== null);
+
+  if (numericValues.length < 2) {
+    return null;
+  }
+
+  const width = 320;
+  const height = 144;
+  const minValue = Math.min(...numericValues);
+  const maxValue = Math.max(...numericValues);
+  const range = maxValue - minValue || 1;
+  const step = width / (numericValues.length - 1);
+  const strokeColor = colorPalette?.[0] ?? '#6366f1';
+
+  const points = numericValues
+    .map((value, index) => {
+      const x = index * step;
+      const normalised = (value - minValue) / range;
+      const y = height - normalised * height;
+      return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(' ');
+
+  const areaPoints = numericValues
+    .map((value, index) => {
+      const x = index * step;
+      const normalised = (value - minValue) / range;
+      const y = height - normalised * height;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(' ');
+
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+  <defs>
+    <linearGradient id="sparklineGradient" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="${strokeColor}" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="${strokeColor}" stop-opacity="0.05" />
+    </linearGradient>
+  </defs>
+  <rect width="${width}" height="${height}" rx="16" ry="16" fill="white" />
+  <polyline points="${areaPoints}" fill="url(#sparklineGradient)" stroke="none" />
+  <path d="${points}" fill="none" stroke="${strokeColor}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+</svg>`;
+
+  const encoded = safeBase64Encode(svg);
+  return encoded ? `data:image/svg+xml;base64,${encoded}` : null;
+};
+
+const buildVisualizationManifest = ({
+  selection,
+  chartState,
+  statisticalDetails,
+  featureContext,
+  skuStatisticsSettings,
+  resolvedAtomTitle,
+}: {
+  selection: FeatureOverviewExhibitionSelection;
+  chartState: NormalisedChartState;
+  statisticalDetails?: {
+    summary?: SerializableRecord;
+    timeseries?: SerializableRecord[];
+    full?: SerializableRecord;
+  };
+  featureContext?: SerializableRecord;
+  skuStatisticsSettings: {
+    visibility: Record<string, boolean>;
+    tableRows?: SerializableRecord[];
+    tableColumns?: string[];
+  };
+  resolvedAtomTitle: string;
+}): Record<string, any> => {
+  const timeseries = cloneRecordArray(statisticalDetails?.timeseries);
+  const summary = cloneRecord(statisticalDetails?.summary);
+  const fullDetails = cloneRecord(statisticalDetails?.full);
+  const skuRow = cloneRecord(selection.skuRow);
+  const filters = cloneRecord(selection.combination) ?? { ...selection.combination };
+
+  const rendererConfig = {
+    type: normaliseRendererType(chartState.chartType),
+    data: timeseries,
+    height: 360,
+    xField: chartState.xAxisField,
+    yField: chartState.yAxisField,
+    colors: Array.isArray(chartState.colorPalette) ? [...chartState.colorPalette] : undefined,
+    theme: chartState.theme,
+    title: selection.label || resolvedAtomTitle,
+    xAxisLabel: chartState.xAxisField,
+    yAxisLabel: chartState.yAxisField,
+    showLegend: chartState.showLegend,
+    showAxisLabels: chartState.showAxisLabels,
+    showDataLabels: chartState.showDataLabels,
+    showGrid: chartState.showGrid,
+    sortOrder: null as 'asc' | 'desc' | null,
+  };
+
+  const thumbnail = generateSparklineThumbnail(timeseries, chartState.yAxisField, chartState.colorPalette);
+
+  return {
+    version: '1.0.0',
+    generatedAt: new Date().toISOString(),
+    title: selection.label || resolvedAtomTitle,
+    sku: skuRow,
+    filters,
+    chart: {
+      type: chartState.chartType,
+      theme: chartState.theme,
+      spec: chartState,
+      renderer: rendererConfig,
+    },
+    data: {
+      timeseries,
+      summary,
+      full: fullDetails,
+      featureContext: featureContext ? { ...featureContext } : undefined,
+      skuStatistics: {
+        visibility: { ...skuStatisticsSettings.visibility },
+        tableRows: skuStatisticsSettings.tableRows
+          ? skuStatisticsSettings.tableRows.map(row => ({ ...row }))
+          : undefined,
+        tableColumns: skuStatisticsSettings.tableColumns
+          ? [...skuStatisticsSettings.tableColumns]
+          : undefined,
+      },
+    },
+    thumbnail,
+  };
+};
+
 const THEME_COLOR_MAP: Record<string, string[]> = {
   default: ['#6366f1', '#a5b4fc', '#e0e7ff', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'],
   blue: ['#1e40af', '#3b82f6', '#60a5fa', '#93c5fd', '#dbeafe', '#eff6ff'],
@@ -229,43 +462,66 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
         const fallbackTheme = baseChartState?.theme || 'default';
         const fallbackXAxis = baseChartState?.xAxisField || selection.featureContext?.xAxis || 'date';
         const fallbackYAxis = baseChartState?.yAxisField || selection.metric;
-        const normalisedChartState = {
-          chartType: baseChartState?.chartType || 'line_chart',
-          theme: fallbackTheme,
-          showDataLabels: baseChartState?.showDataLabels ?? false,
-          showAxisLabels: baseChartState?.showAxisLabels ?? true,
-          showGrid: baseChartState?.showGrid ?? true,
-          showLegend: baseChartState?.showLegend ?? true,
-          xAxisField: fallbackXAxis,
-          yAxisField: fallbackYAxis,
-          colorPalette: resolvePalette(fallbackTheme, baseChartState?.colorPalette),
-        };
+      const normalisedChartState = {
+        chartType: baseChartState?.chartType || 'line_chart',
+        theme: fallbackTheme,
+        showDataLabels: baseChartState?.showDataLabels ?? false,
+        showAxisLabels: baseChartState?.showAxisLabels ?? true,
+        showGrid: baseChartState?.showGrid ?? true,
+        showLegend: baseChartState?.showLegend ?? true,
+        xAxisField: fallbackXAxis,
+        yAxisField: fallbackYAxis,
+        colorPalette: resolvePalette(fallbackTheme, baseChartState?.colorPalette),
+      } satisfies NormalisedChartState;
 
-        const featureContextDetails = selection.featureContext
-          ? {
-              ...selection.featureContext,
-              xAxis: selection.featureContext.xAxis || normalisedChartState.xAxisField,
-            }
-          : undefined;
+      const featureContextDetails = selection.featureContext
+        ? {
+            ...selection.featureContext,
+            xAxis: selection.featureContext.xAxis || normalisedChartState.xAxisField,
+          }
+        : undefined;
 
-        const statisticalDetails = selection.statisticalDetails
-          ? {
-              summary: selection.statisticalDetails.summary,
-              timeseries: selection.statisticalDetails.timeseries,
-              full: selection.statisticalDetails.full,
-            }
-          : undefined;
+      const statisticalDetails = selection.statisticalDetails
+        ? {
+            summary: cloneRecord(selection.statisticalDetails.summary),
+            timeseries: cloneRecordArray(selection.statisticalDetails.timeseries),
+            full: cloneRecord(selection.statisticalDetails.full),
+          }
+        : undefined;
 
-        return {
-          id: selection.key || `${atomId}-${index}`,
-          title,
-          chartState: normalisedChartState,
-          featureContext: featureContextDetails,
-          statisticalDetails,
-          selection,
-          sourceAtomTitle: resolvedAtomTitle,
-        };
+      const manifest = buildVisualizationManifest({
+        selection,
+        chartState: normalisedChartState,
+        statisticalDetails,
+        featureContext: featureContextDetails,
+        skuStatisticsSettings,
+        resolvedAtomTitle,
       });
+
+      const manifestThumbnail = typeof manifest.thumbnail === 'string' ? manifest.thumbnail : null;
+      const rendererConfig =
+        manifest?.chart && typeof manifest.chart === 'object' ? (manifest.chart.renderer as SerializableRecord | undefined) : undefined;
+      const skuDetails = (manifest?.sku && typeof manifest.sku === 'object' && !Array.isArray(manifest.sku))
+        ? { ...(manifest.sku as SerializableRecord) }
+        : undefined;
+      const manifestClone = deepClone(manifest);
+      const rendererConfigClone = rendererConfig ? deepClone(rendererConfig) : undefined;
+      const skuDetailsClone = skuDetails ? deepClone(skuDetails) : undefined;
+
+      return {
+        id: selection.key || `${atomId}-${index}`,
+        title,
+        chartState: normalisedChartState,
+        featureContext: featureContextDetails,
+        statisticalDetails,
+        selection,
+        sourceAtomTitle: resolvedAtomTitle,
+        manifest: manifestClone,
+        manifestThumbnail,
+        rendererConfig: rendererConfigClone,
+        skuDetails: skuDetailsClone,
+      };
+    });
 
       const stagedRows = processedSelections
         .map(item => item.selection.skuRow)
@@ -295,6 +551,10 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
           statisticalDetails,
           selection: baseSelection,
           sourceAtomTitle: originatingAtomTitle,
+          manifest,
+          manifestThumbnail,
+          rendererConfig,
+          skuDetails,
         }) => {
           const baseMetadata = {
             metric: baseSelection.metric,
@@ -317,6 +577,29 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
             },
           };
 
+          const metadataPayload: Record<string, any> = {
+            ...baseMetadata,
+            visualizationManifest: manifestClone,
+          };
+
+          if (rendererConfigClone && typeof rendererConfigClone === 'object') {
+            metadataPayload.chartRendererConfig = rendererConfigClone;
+            metadataPayload.chartRendererProps = rendererConfigClone;
+            if (Array.isArray(rendererConfigClone.data)) {
+              metadataPayload.chartData = rendererConfigClone.data.map(entry => ({ ...entry }));
+            }
+          } else if (manifest?.data && typeof manifest.data === 'object' && Array.isArray(manifest.data.timeseries)) {
+            metadataPayload.chartData = manifest.data.timeseries.map((entry: SerializableRecord) => ({ ...entry }));
+          }
+
+          if (manifestThumbnail) {
+            metadataPayload.previewImage = manifestThumbnail;
+          }
+
+          if (skuDetailsClone) {
+            metadataPayload.skuDetails = { ...skuDetailsClone };
+          }
+
           return [
             {
               id: `${id}-summary`,
@@ -324,8 +607,11 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
               title: `${title} · Statistical Summary`,
               category: 'Feature Overview',
               color: 'bg-amber-500',
+              thumbnail: manifestThumbnail ?? undefined,
+              skuDetails: skuDetailsClone,
+              visualizationManifest: manifestClone,
               metadata: {
-                ...baseMetadata,
+                ...metadataPayload,
                 viewType: 'statistical_summary' as const,
               },
             },
@@ -335,8 +621,11 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
               title: `${title} · Trend Analysis`,
               category: 'Feature Overview',
               color: 'bg-amber-500',
+              thumbnail: manifestThumbnail ?? undefined,
+              skuDetails: skuDetailsClone,
+              visualizationManifest: manifestClone,
               metadata: {
-                ...baseMetadata,
+                ...metadataPayload,
                 viewType: 'trend_analysis' as const,
               },
             },

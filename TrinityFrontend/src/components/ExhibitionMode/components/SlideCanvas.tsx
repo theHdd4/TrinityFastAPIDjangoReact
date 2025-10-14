@@ -1716,6 +1716,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           {objects.map(object => {
             const isSelected = selectedIds.includes(object.id);
             const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
+            const computedZIndex = (isSelected ? zIndex + 100 : zIndex) + 50;
             const isAccentImageObject = object.type === 'accent-image';
             const isTextBoxObject = object.type === 'text-box';
             const isEditingTextBox =
@@ -1735,7 +1736,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 top: object.y,
                 width: object.width,
                 height: object.height,
-                zIndex: isSelected ? zIndex + 100 : zIndex,
+                zIndex: computedZIndex,
               }}
               onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
               onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}

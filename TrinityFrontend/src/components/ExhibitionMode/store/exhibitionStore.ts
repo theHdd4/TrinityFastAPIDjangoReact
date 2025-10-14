@@ -209,7 +209,9 @@ const looksLikeFeatureOverviewMetadata = (metadata: Record<string, any> | undefi
     metadata.chartRendererConfig != null ||
     metadata.chart_renderer_config != null ||
     metadata.chartConfig != null ||
-    metadata.chart_config != null;
+    metadata.chart_config != null ||
+    metadata.visualizationManifest != null ||
+    metadata.visualization_manifest != null;
 
   return Boolean(hasMetric && (hasDimensions || hasStatistics || hasChartConfig));
 };
@@ -524,7 +526,94 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     ? candidate.color.trim()
     : FALLBACK_COLOR;
 
-  const metadata = parseMetadataRecord(candidate.metadata);
+  let metadata = parseMetadataRecord(candidate.metadata);
+
+  const manifestFromCandidate =
+    parseMetadataRecord(
+      (candidate as Record<string, unknown>).visualizationManifest ??
+        (candidate as Record<string, unknown>).visualization_manifest ??
+        (candidate as Record<string, unknown>).manifest,
+    ) ?? undefined;
+
+  const manifestFromMetadata = metadata
+    ? isRecord(metadata.visualizationManifest)
+      ? { ...(metadata.visualizationManifest as Record<string, unknown>) }
+      : parseMetadataRecord(metadata.visualizationManifest)
+    : undefined;
+
+  const manifestFromMetadataSnake = metadata
+    ? isRecord(metadata.visualization_manifest)
+      ? { ...(metadata.visualization_manifest as Record<string, unknown>) }
+      : parseMetadataRecord(metadata.visualization_manifest)
+    : undefined;
+
+  const manifest = manifestFromCandidate ?? manifestFromMetadata ?? manifestFromMetadataSnake;
+
+  if (manifest) {
+    metadata = metadata ? { ...metadata } : {};
+    metadata.visualizationManifest = manifest;
+    if ('visualization_manifest' in metadata) {
+      delete metadata.visualization_manifest;
+    }
+
+    const manifestThumbnail =
+      typeof (manifest as Record<string, unknown>).thumbnail === 'string'
+        ? ((manifest as Record<string, unknown>).thumbnail as string)
+        : undefined;
+
+    if (manifestThumbnail && typeof metadata.previewImage !== 'string') {
+      metadata.previewImage = manifestThumbnail;
+    }
+
+    const manifestSku = (manifest as Record<string, unknown>).sku;
+    if (isRecord(manifestSku) && !metadata.skuDetails) {
+      metadata.skuDetails = { ...manifestSku };
+    }
+
+    const manifestData = (manifest as Record<string, unknown>).data;
+    if (isRecord(manifestData) && Array.isArray(manifestData.timeseries) && !metadata.chartData) {
+      metadata.chartData = manifestData.timeseries.map(entry =>
+        isRecord(entry) ? { ...entry } : entry,
+      );
+    }
+
+    const manifestChart = (manifest as Record<string, unknown>).chart;
+    if (isRecord(manifestChart)) {
+      const renderer = manifestChart.renderer;
+      if (isRecord(renderer)) {
+        if (!metadata.chartRendererConfig) {
+          metadata.chartRendererConfig = { ...renderer };
+        }
+        if (!metadata.chartRendererProps) {
+          metadata.chartRendererProps = { ...renderer };
+        }
+        if (Array.isArray(renderer.data) && !metadata.chartData) {
+          metadata.chartData = renderer.data.map(entry => (isRecord(entry) ? { ...entry } : entry));
+        }
+      }
+    }
+  }
+
+  const candidateThumbnail =
+    typeof (candidate as Record<string, unknown>).thumbnail === 'string'
+      ? ((candidate as Record<string, unknown>).thumbnail as string)
+      : undefined;
+  if (candidateThumbnail) {
+    metadata = metadata ? { ...metadata } : {};
+    if (typeof metadata.previewImage !== 'string') {
+      metadata.previewImage = candidateThumbnail;
+    }
+  }
+
+  const skuDetailsCandidate =
+    parseMetadataRecord(
+      (candidate as Record<string, unknown>).skuDetails ??
+        (candidate as Record<string, unknown>).sku_details,
+    ) ?? undefined;
+  if (skuDetailsCandidate) {
+    metadata = metadata ? { ...metadata } : {};
+    metadata.skuDetails = { ...skuDetailsCandidate };
+  }
 
   const id = resolvedId ?? resolvedAtomId ?? `atom-${Math.random().toString(36).slice(2, 10)}`;
   let atomId = resolvedAtomId ?? id;

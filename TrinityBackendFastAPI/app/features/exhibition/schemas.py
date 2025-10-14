@@ -18,6 +18,20 @@ class ExhibitionComponent(BaseModel):
         default=None,
         description="Additional metadata captured for the exhibited component",
     )
+    visualization_manifest: Optional[Dict[str, Any]] = Field(
+        default=None,
+        alias="visualizationManifest",
+        description="Serialised visualisation specification used to render the component",
+    )
+    thumbnail: Optional[str] = Field(
+        default=None,
+        description="Preview thumbnail (usually a data URI) representing the component",
+    )
+    sku_details: Optional[Dict[str, Any]] = Field(
+        default=None,
+        alias="skuDetails",
+        description="Captured SKU level data associated with the component",
+    )
 
 
 class ExhibitionAtomEntry(BaseModel):
@@ -44,6 +58,21 @@ class ExhibitionConfigurationIn(ExhibitionConfigurationBase):
 
 class ExhibitionConfigurationOut(ExhibitionConfigurationBase):
     updated_at: Optional[datetime] = Field(default=None, description="Timestamp of the last update")
+
+    class Config:
+        orm_mode = True
+
+
+class ExhibitionComponentManifestOut(BaseModel):
+    """Read-only payload describing a single exhibited component manifest."""
+
+    client_name: str = Field(..., min_length=1)
+    app_name: str = Field(..., min_length=1)
+    project_name: str = Field(..., min_length=1)
+    atom_id: str = Field(..., min_length=1)
+    atom_name: str = Field(..., min_length=1)
+    component: ExhibitionComponent
+    updated_at: Optional[datetime] = Field(default=None, description="Last catalogue update timestamp")
 
     class Config:
         orm_mode = True

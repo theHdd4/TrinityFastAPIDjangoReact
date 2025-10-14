@@ -7,6 +7,11 @@ export interface ExhibitionComponentPayload {
   category?: string;
   color?: string;
   metadata?: Record<string, any>;
+  visualizationManifest?: Record<string, any>;
+  visualization_manifest?: Record<string, any>;
+  thumbnail?: string;
+  skuDetails?: Record<string, any>;
+  sku_details?: Record<string, any>;
 }
 
 export interface ExhibitionAtomPayload {
@@ -23,6 +28,16 @@ export interface ExhibitionConfigurationPayload {
 }
 
 export interface ExhibitionConfigurationResponse extends ExhibitionConfigurationPayload {
+  updated_at?: string;
+}
+
+export interface ExhibitionComponentManifestResponse {
+  client_name: string;
+  app_name: string;
+  project_name: string;
+  atom_id: string;
+  atom_name: string;
+  component: ExhibitionComponentPayload;
   updated_at?: string;
 }
 
@@ -69,4 +84,26 @@ export async function fetchExhibitionConfiguration(
   }
 
   return response.json() as Promise<ExhibitionConfigurationResponse>;
+}
+
+export interface ExhibitionComponentManifestQuery extends ExhibitionConfigurationQuery {
+  component_id: string;
+}
+
+export async function fetchExhibitionComponentManifest(
+  params: ExhibitionComponentManifestQuery,
+): Promise<ExhibitionComponentManifestResponse> {
+  const { component_id, ...context } = params;
+  const search = new URLSearchParams(context as Record<string, string>);
+  const response = await fetch(`${EXHIBITION_API}/catalogue/${component_id}?${search.toString()}`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || 'Failed to fetch exhibition component manifest');
+  }
+
+  return response.json() as Promise<ExhibitionComponentManifestResponse>;
 }

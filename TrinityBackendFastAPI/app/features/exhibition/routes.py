@@ -4,7 +4,11 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from .schemas import ExhibitionConfigurationIn, ExhibitionConfigurationOut
+from .schemas import (
+    ExhibitionComponentManifestOut,
+    ExhibitionConfigurationIn,
+    ExhibitionConfigurationOut,
+)
 from .service import ExhibitionStorage
 
 router = APIRouter(prefix="/exhibition", tags=["Exhibition"])
@@ -43,3 +47,17 @@ async def save_configuration(
     saved = await storage.save_configuration(payload)
 
     return {"status": "ok", "updated_at": saved.get("updated_at")}
+
+
+@router.get("/catalogue/{component_id}", response_model=ExhibitionComponentManifestOut)
+async def get_component_manifest(
+    component_id: str,
+    client_name: str = Query(..., min_length=1),
+    app_name: str = Query(..., min_length=1),
+    project_name: str = Query(..., min_length=1),
+) -> ExhibitionComponentManifestOut:
+    record = await storage.get_component(client_name, app_name, project_name, component_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exhibition component not found")
+
+    return ExhibitionComponentManifestOut(**record)
