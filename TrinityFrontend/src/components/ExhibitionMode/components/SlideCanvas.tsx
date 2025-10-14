@@ -96,6 +96,27 @@ const isAtomObject = (
 const STRUCTURAL_OBJECT_TYPES = new Set(['title', 'accent-image']);
 const UNTITLED_SLIDE_TEXT = 'Untitled Slide';
 
+const CARD_COLOR_GRADIENTS: Record<CardColor, string> = {
+  default: 'from-purple-500 via-pink-500 to-orange-400',
+  blue: 'from-blue-500 via-cyan-500 to-teal-400',
+  purple: 'from-violet-500 via-purple-500 to-fuchsia-400',
+  green: 'from-emerald-500 via-green-500 to-lime-400',
+  orange: 'from-orange-500 via-amber-500 to-yellow-400',
+};
+
+const toPlainText = (value: string): string => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value
+    .replace(/<br\s*\/?>(?=\s|$)/gi, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
 interface SlideCanvasProps {
   card: LayoutCard;
   slideNumber: number;
@@ -354,6 +375,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const showOverview = layoutConfig.showOverview && atomObjects.length > 1;
 
   const resolvedTitle = useMemo(() => resolveCardTitle(card), [card]);
+  const titleTextBoxId = useMemo(() => buildSlideTitleObjectId(card.id), [card.id]);
 
   const presenterLabel = useMemo(() => {
     if (typeof presenterName === 'string' && presenterName.trim().length > 0) {
@@ -489,13 +511,80 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const cardColorClasses = {
-    default: 'from-purple-500 via-pink-500 to-orange-400',
-    blue: 'from-blue-500 via-cyan-500 to-teal-400',
-    purple: 'from-violet-500 via-purple-500 to-fuchsia-400',
-    green: 'from-emerald-500 via-green-500 to-lime-400',
-    orange: 'from-orange-500 via-amber-500 to-yellow-400',
-  };
+  const accentOverlay = useMemo(() => {
+    const layoutConfigForAccent = (() => {
+      switch (settings.cardLayout) {
+        case 'top':
+          return {
+            area: 'inset-x-0 top-0 h-[34%]',
+            shape: settings.fullBleed ? '' : 'rounded-t-2xl',
+          } as const;
+        case 'bottom':
+          return {
+            area: 'inset-x-0 bottom-0 h-[34%]',
+            shape: settings.fullBleed ? '' : 'rounded-b-2xl',
+          } as const;
+        case 'left':
+          return {
+            area: 'inset-y-0 left-0 w-[32%]',
+            shape: settings.fullBleed ? '' : 'rounded-l-2xl',
+          } as const;
+        case 'right':
+          return {
+            area: 'inset-y-0 right-0 w-[32%]',
+            shape: settings.fullBleed ? '' : 'rounded-r-2xl',
+          } as const;
+        case 'full':
+          return {
+            area: 'inset-0',
+            shape: settings.fullBleed ? '' : 'rounded-2xl',
+          } as const;
+        default:
+          return null;
+      }
+    })();
+
+    if (!layoutConfigForAccent) {
+      return null;
+    }
+
+    const containerClasses = cn(
+      'pointer-events-none absolute z-0 overflow-hidden transition-all duration-300',
+      layoutConfigForAccent.area,
+      layoutConfigForAccent.shape,
+    );
+
+    if (settings.accentImage) {
+      return (
+        <div className={containerClasses}>
+          <img
+            src={settings.accentImage}
+            alt={settings.accentImageName || 'Accent'}
+            className="h-full w-full object-cover"
+          />
+        </div>
+      );
+    }
+
+    const gradientClass = CARD_COLOR_GRADIENTS[settings.cardColor] ?? CARD_COLOR_GRADIENTS.default;
+    return (
+      <div className={containerClasses}>
+        <div className={cn('h-full w-full bg-gradient-to-br opacity-90', gradientClass)} />
+      </div>
+    );
+  }, [settings.cardLayout, settings.fullBleed, settings.accentImage, settings.accentImageName, settings.cardColor]);
+
+  const handleCommittedTextBox = useCallback(
+    (boxId: string, html: string) => {
+      onTextBoxTextChange?.(boxId, html);
+      if (boxId === titleTextBoxId) {
+        const plain = toPlainText(html);
+        const resolvedTitleText = plain.length > 0 ? plain : UNTITLED_SLIDE_TEXT;
+        onTitleChange?.(resolvedTitleText, card.id);
+      }
+    },
+    [card.id, onTextBoxTextChange, onTitleChange, titleTextBoxId],
+  );
 
   const containerClasses =
     viewMode === 'horizontal'
@@ -554,6 +643,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
             >
+              {accentOverlay}
               <CanvasStage
                 ref={canvasRef}
                 canEdit={canEdit}
@@ -577,7 +667,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   data={textBox}
                   isEditable={canEdit}
                   onChange={(id, updates) => onTextBoxChange?.(id, updates)}
-                  onTextChange={(id, updatedText) => onTextBoxTextChange?.(id, updatedText)}
+                  onTextChange={handleCommittedTextBox}
                   onPositionChange={(id, nextPosition) => onTextBoxPositionChange?.(id, nextPosition)}
                   onDelete={id => onTextBoxRemove?.(id)}
                   onInteract={handleCanvasInteraction}
@@ -1113,54 +1203,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       setEditingTextState(null);
     }, []);
 
-    const beginEditingTitle = useCallback(
-      (objectId: string) => {
-        if (!canEdit) {
-          return;
-        }
-        const object = objectsMap.get(objectId);
-        if (!object || object.type !== 'title') {
-          return;
-        }
-        const currentText = typeof object.props?.text === 'string' ? object.props.text : '';
-        onInteract();
-        focusCanvas();
-        setSelectedIds([objectId]);
-        setEditingTextState({ id: objectId, value: currentText, original: currentText });
-      },
-      [canEdit, focusCanvas, objectsMap, onInteract],
-    );
-
-    const handleEditingValueChange = useCallback(
-      (value: string) => {
-        setEditingTextState(prev => {
-          if (!prev || prev.value === value) {
-            return prev;
-          }
-          onInteract();
-          return { ...prev, value };
-        });
-      },
-      [onInteract],
-    );
-
-    const handleObjectDoubleClick = useCallback(
-      (event: React.MouseEvent<HTMLDivElement>, objectId: string) => {
-        if (!canEdit) {
-          return;
-        }
-        const object = objectsMap.get(objectId);
-        if (!object) {
-          return;
-        }
-        if (object.type === 'title') {
-          event.stopPropagation();
-          beginEditingTitle(objectId);
-        }
-      },
-      [beginEditingTitle, canEdit, objectsMap],
-    );
-
     const clampPosition = useCallback((x: number, y: number, width: number, height: number) => {
       const canvas = internalRef.current;
       if (!canvas) {
@@ -1568,11 +1610,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         )}
 
         {objects.map(object => {
+          if (object.type === 'title') {
+            return null;
+          }
           const isSelected = selectedIds.includes(object.id);
           const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
           const isAccentImageObject = object.type === 'accent-image';
-          const isTitleObject = object.type === 'title';
-          const isEditingTitle = isTitleObject && editingTextState?.id === object.id;
 
           return (
             <div
@@ -1586,7 +1629,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 zIndex: isSelected ? zIndex + 100 : zIndex,
               }}
               onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
-              onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
             >
               <div
                 className={cn(
@@ -1609,7 +1651,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 <div
                   className={cn(
                     'relative z-10 flex-1 overflow-hidden',
-                    isAccentImageObject || isTitleObject ? undefined : 'p-4',
+                    isAccentImageObject ? undefined : 'p-4',
                   )}
                 >
                   <div
@@ -1617,35 +1659,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       'relative z-20 h-full w-full overflow-hidden pointer-events-auto',
                       isAccentImageObject
                         ? undefined
-                        : isTitleObject
-                          ? 'bg-transparent'
-                          : 'rounded-2xl bg-background/90 p-3',
+                        : 'rounded-2xl bg-background/90 p-3',
                     )}
                   >
-                    {isEditingTitle ? (
-                      <textarea
-                        ref={editingTextareaRef}
-                        value={editingTextState.value}
-                        onChange={event => handleEditingValueChange(event.target.value)}
-                        onBlur={commitEditingText}
-                        onKeyDown={event => {
-                          if (event.key === 'Enter' && !event.shiftKey) {
-                            event.preventDefault();
-                            commitEditingText();
-                          }
-                          if (event.key === 'Escape') {
-                            event.preventDefault();
-                            cancelEditingText();
-                          }
-                        }}
-                        placeholder={UNTITLED_SLIDE_TEXT}
-                        className="h-full w-full resize-none bg-transparent px-6 py-4 text-4xl font-bold leading-tight text-foreground outline-none focus:outline-none focus:ring-0"
-                        spellCheck={false}
-                        onPointerDown={event => event.stopPropagation()}
-                      />
-                    ) : (
-                      renderObjectContent(object)
-                    )}
+                    {renderObjectContent(object)}
                   </div>
                 </div>
                 {canEdit && isAtomObject(object) && onRemoveAtom && (

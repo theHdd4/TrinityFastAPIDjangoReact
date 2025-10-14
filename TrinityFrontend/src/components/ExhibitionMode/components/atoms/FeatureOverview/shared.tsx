@@ -933,6 +933,19 @@ export const deriveChartConfig = (
               : DEFAULT_TREND_CHART_HEIGHT[variant],
         };
 
+        if (clonedConfig.data.length === 0) {
+          const manifestTimeseries = ensureRecordArray(
+            metadata.visualisationManifest?.chartData?.['timeseries'],
+          );
+          const metadataTimeseries = ensureRecordArray(metadata.statisticalDetails?.timeseries);
+          const fallbackData =
+            manifestTimeseries.length > 0 ? manifestTimeseries : metadataTimeseries;
+
+          if (fallbackData.length > 0) {
+            clonedConfig.data = fallbackData.map(entry => ({ ...entry }));
+          }
+        }
+
         if (manifestConfig.yFields) {
           clonedConfig.yFields = [...manifestConfig.yFields];
         }

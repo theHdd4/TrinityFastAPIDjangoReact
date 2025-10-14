@@ -80,8 +80,10 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
 
   return (
     <div
+      data-textbox-toolbar
+      style={{ backgroundImage: 'none' }}
       className={cn(
-        'bg-background border border-border rounded-lg shadow-lg p-1 flex items-center gap-1 z-[1000]',
+        'bg-background border border-border rounded-lg shadow-md p-1 flex items-center gap-1 z-[1000]',
         !isContext && 'absolute -top-12 left-0',
       )}
     >

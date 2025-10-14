@@ -79,6 +79,27 @@ type ChartRendererType = 'bar_chart' | 'line_chart' | 'area_chart' | 'pie_chart'
 const cloneRecords = (rows?: Array<Record<string, any>> | null): Array<Record<string, any>> =>
   Array.isArray(rows) ? rows.map(row => ({ ...row })) : [];
 
+type ChartRendererManifestConfig = {
+  type: ChartRendererType;
+  data: Array<Record<string, any>>;
+  height: number;
+  xField?: string;
+  yField?: string;
+  yFields?: string[];
+  yAxisLabels?: string[];
+  legendField?: string;
+  colors?: string[];
+  theme?: string;
+  title?: string;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  showLegend?: boolean;
+  showAxisLabels?: boolean;
+  showDataLabels?: boolean;
+  showGrid?: boolean;
+  sortOrder?: 'asc' | 'desc' | null;
+};
+
 const cloneRecord = <T extends Record<string, any>>(value: T | undefined | null): T | undefined =>
   value ? ({ ...value } as T) : undefined;
 
@@ -110,36 +131,144 @@ const sanitiseChartType = (value?: string | null): ChartRendererType => {
   }
 };
 
+const buildCaseInsensitiveMap = (keys: string[]): Map<string, string> => {
+  const entries = keys.map(key => [key.toLowerCase(), key] as const);
+  return new Map(entries);
+};
+
+const resolveCandidateField = (
+  maps: Array<Map<string, string>>,
+  candidates: Array<string | undefined>,
+  exclude: Set<string> = new Set(),
+): string | undefined => {
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    const lowered = candidate.toLowerCase();
+    for (const map of maps) {
+      const resolved = map.get(lowered);
+      if (resolved && !exclude.has(resolved)) {
+        return resolved;
+      }
+    }
+  }
+  return undefined;
+};
+
+const normaliseChartManifestConfig = (
+  config: ChartRendererManifestConfig,
+  data: Array<Record<string, any>>,
+  fallbacks: {
+    x?: Array<string | undefined>;
+    y?: Array<string | undefined>;
+    legend?: Array<string | undefined>;
+  } = {},
+): ChartRendererManifestConfig => {
+  if (data.length === 0) {
+    return config;
+  }
+
+  const referenceEntry = data.find(entry => entry && typeof entry === 'object') as
+    | Record<string, unknown>
+    | undefined;
+
+  if (!referenceEntry) {
+    return config;
+  }
+
+  const allKeys = Object.keys(referenceEntry);
+  if (allKeys.length === 0) {
+    return config;
+  }
+
+  const numericKeys = allKeys.filter(key => {
+    const value = referenceEntry[key];
+    return typeof value === 'number' && Number.isFinite(value);
+  });
+  const textualKeys = allKeys.filter(key => typeof referenceEntry[key] === 'string');
+
+  const allMap = buildCaseInsensitiveMap(allKeys);
+  const numericMap = buildCaseInsensitiveMap(numericKeys);
+  const textMap = buildCaseInsensitiveMap(textualKeys);
+
+  const resolvedConfig: ChartRendererManifestConfig = { ...config };
+
+  const resolvedXField = resolveCandidateField(
+    [allMap, textMap],
+    [config.xField, ...(fallbacks.x ?? []), 'date', 'period', 'month', 'week', 'timestamp'],
+  );
+  if (resolvedXField) {
+    resolvedConfig.xField = resolvedXField;
+  }
+
+  const legendExclude = new Set<string>(resolvedXField ? [resolvedXField] : []);
+  const resolvedLegendField = resolveCandidateField(
+    [allMap, textMap],
+    [config.legendField, ...(fallbacks.legend ?? []), 'series', 'segment', 'category', 'group'],
+    legendExclude,
+  );
+  if (resolvedLegendField) {
+    resolvedConfig.legendField = resolvedLegendField;
+  } else {
+    delete resolvedConfig.legendField;
+    resolvedConfig.showLegend = false;
+  }
+
+  const numericExclude = new Set<string>([
+    resolvedConfig.xField,
+    resolvedConfig.legendField,
+  ].filter((value): value is string => Boolean(value)));
+
+  const resolvedYField = resolveCandidateField(
+    [numericMap, allMap],
+    [config.yField, ...(fallbacks.y ?? []), 'value'],
+    numericExclude,
+  );
+
+  if (resolvedYField) {
+    resolvedConfig.yField = resolvedYField;
+  } else if (numericKeys.length > 0) {
+    const fallbackNumeric = numericKeys.find(key => !numericExclude.has(key)) ?? numericKeys[0];
+    resolvedConfig.yField = fallbackNumeric;
+  }
+
+  if (Array.isArray(config.yFields) && config.yFields.length > 0) {
+    const distinctFields = config.yFields
+      .map(field => resolveCandidateField([numericMap, allMap], [field], numericExclude))
+      .filter((field): field is string => Boolean(field));
+
+    if (distinctFields.length > 0) {
+      const unique = Array.from(new Set(distinctFields));
+      resolvedConfig.yFields = unique;
+      if (!resolvedConfig.yField) {
+        resolvedConfig.yField = unique[0];
+      }
+    } else {
+      delete resolvedConfig.yFields;
+    }
+  }
+
+  if (Array.isArray(resolvedConfig.yAxisLabels) && resolvedConfig.yFields) {
+    if (resolvedConfig.yAxisLabels.length !== resolvedConfig.yFields.length) {
+      resolvedConfig.yAxisLabels = resolvedConfig.yFields.map(field => field);
+    }
+  }
+
+  return resolvedConfig;
+};
+
 const buildManifestChartConfig = (
   selection: FeatureOverviewExhibitionSelection,
   chartState: FeatureOverviewExhibitionSelection['chartState'] | undefined,
   data: Array<Record<string, any>>,
   title: string,
-): {
-  type: ChartRendererType;
-  data: Array<Record<string, any>>;
-  height: number;
-  xField?: string;
-  yField?: string;
-  yFields?: string[];
-  yAxisLabels?: string[];
-  legendField?: string;
-  colors?: string[];
-  theme?: string;
-  title?: string;
-  xAxisLabel?: string;
-  yAxisLabel?: string;
-  showLegend?: boolean;
-  showAxisLabels?: boolean;
-  showDataLabels?: boolean;
-  showGrid?: boolean;
-  sortOrder?: 'asc' | 'desc' | null;
-} => {
+): ChartRendererManifestConfig => {
   const type = sanitiseChartType(chartState?.chartType);
   const xField = chartState?.xAxisField || selection.featureContext?.xAxis || 'index';
   const yField = chartState?.yAxisField || selection.metric || 'value';
 
-  return {
+  const baseConfig: ChartRendererManifestConfig = {
     type,
     data,
     height: DEFAULT_MANIFEST_HEIGHT,
@@ -156,6 +285,12 @@ const buildManifestChartConfig = (
     showGrid: chartState?.showGrid,
     sortOrder: null,
   };
+
+  return normaliseChartManifestConfig(baseConfig, data, {
+    x: [chartState?.xAxisField, selection.featureContext?.xAxis],
+    y: [chartState?.yAxisField, selection.metric, 'value'],
+    legend: [chartState?.legendField, 'series'],
+  });
 };
 
 const createVisualizationManifest = (

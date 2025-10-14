@@ -12,6 +12,8 @@ import {
   createSlideObjectFromAtom,
   DEFAULT_CANVAS_OBJECT_WIDTH,
   DEFAULT_CANVAS_OBJECT_HEIGHT,
+  buildSlideTitleObjectId,
+  resolveCardTitle,
 } from './store/exhibitionStore';
 import { ExhibitionCatalogue } from './components/ExhibitionCatalogue';
 import { SlideCanvas } from './components/SlideCanvas';
@@ -49,6 +51,19 @@ const contextsEqual = (a: ProjectContext | null, b: ProjectContext | null): bool
     a.app_name === b.app_name &&
     a.project_name === b.project_name
   );
+};
+
+const toPlainText = (value: string): string => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  return value
+    .replace(/<br\s*\/?>(?=\s|$)/gi, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 };
 
 const ExhibitionMode = () => {
@@ -114,6 +129,7 @@ const ExhibitionMode = () => {
   const [slideshowTransform, setSlideshowTransform] = useState('translateX(0px) scale(1)');
   const [slideshowOpacity, setSlideshowOpacity] = useState(1);
   const [textBoxesByCard, setTextBoxesByCard] = useState<Record<string, SlideTextBox[]>>({});
+  const [titleBoxSuppression, setTitleBoxSuppression] = useState<Record<string, boolean>>({});
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const verticalSlideRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -142,6 +158,113 @@ const ExhibitionMode = () => {
     clearAutoAdvanceTimer();
     clearTransitionTimer();
   }, [clearAutoAdvanceTimer, clearTransitionTimer]);
+
+  useEffect(() => {
+    if (cards.length === 0) {
+      setTextBoxesByCard(prev => (Object.keys(prev).length === 0 ? prev : {}));
+      setTitleBoxSuppression(prev => (Object.keys(prev).length === 0 ? prev : {}));
+      return;
+    }
+
+    const exhibitedCards = cards.filter(card => card.isExhibited);
+    const exhibitedIds = new Set(exhibitedCards.map(card => card.id));
+    const addedTitleBoxes: string[] = [];
+    const seen = new Set<string>();
+
+    setTextBoxesByCard(prev => {
+      let changed = false;
+      const next = { ...prev } as Record<string, SlideTextBox[]>;
+
+      exhibitedCards.forEach(card => {
+        const cardId = card.id;
+        const titleId = buildSlideTitleObjectId(cardId);
+        const existing = next[cardId] ?? [];
+        const titleIndex = existing.findIndex(box => box.id === titleId);
+        const resolvedTitle = resolveCardTitle(card).trim();
+        const suppressed = Boolean(titleBoxSuppression[cardId]);
+
+        if (titleIndex === -1) {
+          if (!suppressed) {
+            const titleBox = createDefaultTextBox(titleId, {
+              text: resolvedTitle,
+              x: 64,
+              y: 48,
+              fontSize: 36,
+              align: 'left',
+              color: '#111827',
+            });
+            next[cardId] = [titleBox, ...existing];
+            changed = true;
+            addedTitleBoxes.push(cardId);
+          } else if (!next[cardId]) {
+            next[cardId] = existing;
+          }
+        } else {
+          const current = existing[titleIndex];
+          const plain = toPlainText(current.text);
+          let updated = current;
+
+          if (current.fontSize !== 36 || current.align !== 'left' || current.color !== '#111827') {
+            updated = {
+              ...updated,
+              fontSize: 36,
+              align: 'left',
+              color: '#111827',
+            };
+          }
+
+          if (plain.length === 0 || plain === 'Untitled Slide') {
+            if (resolvedTitle.length > 0 && resolvedTitle !== plain) {
+              updated = { ...updated, text: resolvedTitle };
+            }
+          }
+
+          if (updated !== current) {
+            const buffer = [...existing];
+            buffer[titleIndex] = updated;
+            next[cardId] = buffer;
+            changed = true;
+          }
+        }
+
+        if (!next[cardId]) {
+          next[cardId] = existing;
+        }
+
+        seen.add(cardId);
+      });
+
+      Object.keys(next).forEach(cardId => {
+        if (!seen.has(cardId)) {
+          delete next[cardId];
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+
+    setTitleBoxSuppression(prev => {
+      let mutated = false;
+      const next = { ...prev } as Record<string, boolean>;
+
+      Object.keys(next).forEach(cardId => {
+        if (!exhibitedIds.has(cardId)) {
+          delete next[cardId];
+          mutated = true;
+        }
+      });
+
+      addedTitleBoxes.forEach(cardId => {
+        if (next[cardId]) {
+          delete next[cardId];
+          mutated = true;
+        }
+      });
+
+      return mutated ? next : prev;
+    });
+  }, [cards, titleBoxSuppression]);
 
   const generateTextBoxId = useCallback(() => {
     if (typeof crypto !== 'undefined' && typeof (crypto as Crypto).randomUUID === 'function') {
@@ -216,6 +339,15 @@ const ExhibitionMode = () => {
       }
       return next;
     });
+    const titleId = buildSlideTitleObjectId(cardId);
+    if (boxId === titleId) {
+      setTitleBoxSuppression(prev => {
+        if (prev[cardId]) {
+          return prev;
+        }
+        return { ...prev, [cardId]: true };
+      });
+    }
   }, []);
 
   const handleTextBoxStyleChange = useCallback(
