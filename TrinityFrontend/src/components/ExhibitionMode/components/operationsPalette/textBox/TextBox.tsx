@@ -1,9 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
 import TextBoxToolbar from './TextBoxToolbar';
 import type { SlideTextBox, TextBoxPosition } from './types';
@@ -46,7 +41,6 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragOrigin, setDragOrigin] = useState<TextBoxPosition>({ x: data.x, y: data.y });
   const [position, setPosition] = useState<TextBoxPosition>({ x: data.x, y: data.y });
-  const [contextMenuOpen, setContextMenuOpen] = useState(false);
 
   const runCommand = (command: string) => {
     if (!isEditable || typeof document === 'undefined') {
@@ -112,6 +106,7 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
         return;
       }
       setIsActive(false);
+      setShowToolbar(false);
     };
 
     document.addEventListener('mousedown', handlePointerDown);
@@ -166,6 +161,7 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
 
   const handleBlur = () => {
     setIsEditing(false);
+    setShowToolbar(false);
     if (textRef.current) {
       const html = textRef.current.innerHTML.trim();
       setText(html);
@@ -249,30 +245,14 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
     const validSelection = hasEditableSelection();
     if (!validSelection) {
       setShowToolbar(false);
-      setContextMenuOpen(false);
       event.preventDefault();
       return;
     }
 
     setIsActive(true);
-    onInteract?.();
-  };
-
-  const handleContextMenuOpenChange = (open: boolean) => {
-    if (!open) {
-      setContextMenuOpen(false);
-      setShowToolbar(false);
-      return;
-    }
-
-    if (!hasEditableSelection()) {
-      setContextMenuOpen(false);
-      setShowToolbar(false);
-      return;
-    }
-
-    setContextMenuOpen(true);
     setShowToolbar(true);
+    onInteract?.();
+    event.preventDefault();
   };
 
   const increaseFontSize = () => {
@@ -352,9 +332,9 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
     () => ({
       left: position.x,
       top: position.y,
-      zIndex: isActive ? 60 : 20,
+      zIndex: showToolbar || isActive ? 1000 : 20,
     }),
-    [position.x, position.y, isActive],
+    [position.x, position.y, isActive, showToolbar],
   );
 
   const textDecoration = useMemo(() => {
@@ -395,54 +375,46 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
   } as const;
 
   return (
-    <ContextMenu open={contextMenuOpen} onOpenChange={handleContextMenuOpenChange}>
-      <ContextMenuTrigger asChild>
-        <div
-          className={cn('absolute group', isDragging && 'cursor-move opacity-60')}
-          style={containerStyles}
-          onMouseDown={handleMouseDown}
-          onClick={handleClick}
-          onContextMenu={handleContextMenu}
-        >
-          {showToolbar && isEditable && !isDragging && (
-            <TextBoxToolbar {...toolbarProps} />
-          )}
+    <div
+      className={cn('absolute group', isDragging && 'cursor-move opacity-60')}
+      style={containerStyles}
+      onMouseDown={handleMouseDown}
+      onClick={handleClick}
+      onContextMenu={handleContextMenu}
+    >
+      {showToolbar && isEditable && !isDragging && (
+        <TextBoxToolbar {...toolbarProps} />
+      )}
 
-          <div
-            ref={textRef}
-            className={cn(
-              'min-w-[200px] min-h-[40px] p-3 rounded border-2 transition-all outline-none bg-background/80 backdrop-blur',
-              isEditing
-                ? 'border-primary shadow-lg'
-                : isActive
-                ? 'border-primary/50 cursor-move'
-                : 'border-transparent hover:border-border cursor-move',
-              isDragging && 'pointer-events-none',
-            )}
-            contentEditable={isEditable && isEditing}
-            suppressContentEditableWarning
-            onDoubleClick={handleDoubleClick}
-            onBlur={handleBlur}
-            onInput={handleInput}
-            style={{
-              fontSize: `${fontSize}px`,
-              fontFamily,
-              fontWeight: bold ? 'bold' : 'normal',
-              fontStyle: italic ? 'italic' : 'normal',
-              textDecoration,
-              textAlign: align,
-              color,
-              userSelect: isEditable ? undefined : 'none',
-            }}
-            data-placeholder={DEFAULT_TEXT_BOX_TEXT}
-          />
-        </div>
-      </ContextMenuTrigger>
-
-      <ContextMenuContent className="w-auto">
-        <TextBoxToolbar variant="context" {...toolbarProps} />
-      </ContextMenuContent>
-    </ContextMenu>
+      <div
+        ref={textRef}
+        className={cn(
+          'min-w-[200px] min-h-[40px] p-3 rounded border-2 transition-all outline-none bg-background/80 backdrop-blur',
+          isEditing
+            ? 'border-primary shadow-lg'
+            : isActive
+            ? 'border-primary/50 cursor-move'
+            : 'border-transparent hover:border-border cursor-move',
+          isDragging && 'pointer-events-none',
+        )}
+        contentEditable={isEditable && isEditing}
+        suppressContentEditableWarning
+        onDoubleClick={handleDoubleClick}
+        onBlur={handleBlur}
+        onInput={handleInput}
+        style={{
+          fontSize: `${fontSize}px`,
+          fontFamily,
+          fontWeight: bold ? 'bold' : 'normal',
+          fontStyle: italic ? 'italic' : 'normal',
+          textDecoration,
+          textAlign: align,
+          color,
+          userSelect: isEditable ? undefined : 'none',
+        }}
+        data-placeholder={DEFAULT_TEXT_BOX_TEXT}
+      />
+    </div>
   );
 };
 
