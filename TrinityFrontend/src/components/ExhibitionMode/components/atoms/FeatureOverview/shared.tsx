@@ -523,18 +523,55 @@ const toRendererType = (value: unknown): ChartRendererType | null => {
   }
 };
 
+const addFallbackCandidate = (fallbacks: string[], candidate?: string | null) => {
+  if (!candidate) {
+    return;
+  }
+
+  const trimmed = candidate.trim();
+  if (!trimmed) {
+    return;
+  }
+
+  if (!fallbacks.includes(trimmed)) {
+    fallbacks.push(trimmed);
+  }
+};
+
+const buildFieldFallbacks = (
+  field: string | undefined,
+  additional: string[],
+): string[] => {
+  const fallbacks: string[] = [];
+
+  if (typeof field === 'string' && field.length > 0) {
+    const trimmed = field.trim();
+    addFallbackCandidate(fallbacks, trimmed);
+    addFallbackCandidate(fallbacks, trimmed.toLowerCase());
+
+    const snake = trimmed
+      .replace(/([a-z\d])([A-Z])/g, '$1_$2')
+      .replace(/[\s-]+/g, '_');
+    addFallbackCandidate(fallbacks, snake);
+    addFallbackCandidate(fallbacks, snake.toLowerCase());
+
+    const condensed = trimmed.replace(/[\s_-]+/g, '');
+    addFallbackCandidate(fallbacks, condensed);
+    addFallbackCandidate(fallbacks, condensed.toLowerCase());
+  }
+
+  additional.forEach(candidate => addFallbackCandidate(fallbacks, candidate));
+
+  return fallbacks;
+};
+
 const sanitizeTimeseries = (
   entries: Array<Record<string, unknown>>,
   xField: string,
   yField: string,
 ): Array<Record<string, unknown>> => {
-  const xFieldFallbacks = [xField, 'date', 'timestamp', 'time'].filter(
-    (field): field is string => typeof field === 'string' && field.length > 0,
-  );
-  const yFieldFallbacks = [yField, 'value', 'metricValue', 'metric_value', 'y'].filter(
-    (field, index, array): field is string =>
-      typeof field === 'string' && field.length > 0 && array.indexOf(field) === index,
-  );
+  const xFieldFallbacks = buildFieldFallbacks(xField, ['date', 'timestamp', 'time', 'index', 'period']);
+  const yFieldFallbacks = buildFieldFallbacks(yField, ['value', 'metricValue', 'metric_value', 'metricvalue', 'y']);
 
   return entries
     .map((entry, index) => {
