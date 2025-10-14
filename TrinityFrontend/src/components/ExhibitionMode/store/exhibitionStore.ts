@@ -92,7 +92,14 @@ export interface SlideObject {
 
 export const DEFAULT_CANVAS_OBJECT_WIDTH = 420;
 export const DEFAULT_CANVAS_OBJECT_HEIGHT = 320;
+const DEFAULT_TITLE_OBJECT_WIDTH = 560;
+const DEFAULT_TITLE_OBJECT_HEIGHT = 120;
+const DEFAULT_ACCENT_IMAGE_OBJECT_WIDTH = 360;
+const DEFAULT_ACCENT_IMAGE_OBJECT_HEIGHT = 240;
 export const CANVAS_SNAP_GRID = 8;
+
+export const buildSlideTitleObjectId = (cardId: string) => `${cardId}::slide-title`;
+export const buildSlideAccentImageObjectId = (cardId: string) => `${cardId}::accent-image`;
 
 export const createSlideObjectFromAtom = (
   atom: DroppedAtom,
@@ -101,7 +108,7 @@ export const createSlideObjectFromAtom = (
   id: atom.id,
   type: 'atom',
   x: 96,
-  y: 96,
+  y: 192,
   width: DEFAULT_CANVAS_OBJECT_WIDTH,
   height: DEFAULT_CANVAS_OBJECT_HEIGHT,
   zIndex: 1,
@@ -310,6 +317,26 @@ const mergeCatalogueAtoms = (
 const normaliseZIndices = (objects: SlideObject[]): SlideObject[] =>
   objects.map((object, index) => ({ ...object, zIndex: index + 1 }));
 
+export const resolveCardTitle = (card: LayoutCard, fallbackAtoms: DroppedAtom[] = []): string => {
+  if (typeof card.title === 'string' && card.title.trim().length > 0) {
+    return card.title.trim();
+  }
+
+  if (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0) {
+    return card.moleculeTitle.trim();
+  }
+
+  const atoms = Array.isArray(card.atoms) && card.atoms.length > 0 ? card.atoms : fallbackAtoms;
+  if (atoms.length > 0) {
+    const firstTitle = atoms[0]?.title;
+    if (typeof firstTitle === 'string' && firstTitle.trim().length > 0) {
+      return firstTitle.trim();
+    }
+  }
+
+  return 'Untitled Slide';
+};
+
 const synchroniseSlideObjects = (
   existing: SlideObject[] | undefined,
   card: LayoutCard,
@@ -317,7 +344,7 @@ const synchroniseSlideObjects = (
   const atoms = Array.isArray(card.atoms) ? card.atoms : [];
   const atomMap = new Map(atoms.map(atom => [atom.id, atom]));
   const used = new Set<string>();
-  const next: SlideObject[] = [];
+  let next: SlideObject[] = [];
 
   if (Array.isArray(existing)) {
     existing.forEach(object => {
@@ -336,6 +363,31 @@ const synchroniseSlideObjects = (
           type: 'atom',
           props: { ...(object.props || {}), atom },
         });
+      } else if (object.type === 'title') {
+        next.push({
+          ...object,
+          id: buildSlideTitleObjectId(card.id),
+          type: 'title',
+          props: {
+            ...(object.props || {}),
+            text: resolveCardTitle(card, atoms),
+          },
+        });
+      } else if (object.type === 'accent-image') {
+        const accentImage = card.presentationSettings?.accentImage;
+        if (!accentImage) {
+          return;
+        }
+        next.push({
+          ...object,
+          id: buildSlideAccentImageObjectId(card.id),
+          type: 'accent-image',
+          props: {
+            ...(object.props || {}),
+            src: accentImage,
+            name: card.presentationSettings?.accentImageName ?? null,
+          },
+        });
       } else {
         next.push({ ...object });
       }
@@ -347,7 +399,7 @@ const synchroniseSlideObjects = (
       if (used.has(atom.id)) {
         return;
       }
-      const fallbackY = 96 + (next.length + index) * 40;
+      const fallbackY = 192 + (next.length + index) * 40;
       next.push(
         createSlideObjectFromAtom(atom, {
           id: atom.id,
@@ -358,6 +410,74 @@ const synchroniseSlideObjects = (
       );
     });
   }
+
+  const accentId = buildSlideAccentImageObjectId(card.id);
+  const titleId = buildSlideTitleObjectId(card.id);
+
+  const accentImage = card.presentationSettings?.accentImage;
+  if (accentImage) {
+    const accentIndex = next.findIndex(object => object.id === accentId || object.type === 'accent-image');
+    const accentName = card.presentationSettings?.accentImageName ?? null;
+    const accentObject: SlideObject = accentIndex !== -1
+      ? {
+          ...next[accentIndex],
+          id: accentId,
+          type: 'accent-image',
+          props: {
+            ...(next[accentIndex].props || {}),
+            src: accentImage,
+            name: accentName,
+          },
+        }
+      : {
+          id: accentId,
+          type: 'accent-image',
+          x: 48,
+          y: 160,
+          width: DEFAULT_ACCENT_IMAGE_OBJECT_WIDTH,
+          height: DEFAULT_ACCENT_IMAGE_OBJECT_HEIGHT,
+          zIndex: 1,
+          groupId: null,
+          props: {
+            src: accentImage,
+            name: accentName,
+          },
+        };
+
+    next = next.filter(object => object.id !== accentId && object.type !== 'accent-image');
+    next = [accentObject, ...next];
+  } else {
+    next = next.filter(object => object.id !== accentId && object.type !== 'accent-image');
+  }
+
+  const resolvedTitle = resolveCardTitle(card, atoms);
+  const titleIndex = next.findIndex(object => object.id === titleId || object.type === 'title');
+  const titleObject: SlideObject = titleIndex !== -1
+    ? {
+        ...next[titleIndex],
+        id: titleId,
+        type: 'title',
+        props: {
+          ...(next[titleIndex].props || {}),
+          text: resolvedTitle,
+        },
+      }
+    : {
+        id: titleId,
+        type: 'title',
+        x: 64,
+        y: 48,
+        width: DEFAULT_TITLE_OBJECT_WIDTH,
+        height: DEFAULT_TITLE_OBJECT_HEIGHT,
+        zIndex: next.length + 1,
+        groupId: null,
+        props: {
+          text: resolvedTitle,
+        },
+      };
+
+  next = next.filter(object => object.id !== titleId && object.type !== 'title');
+  next = [...next, titleObject];
 
   return normaliseZIndices(next);
 };

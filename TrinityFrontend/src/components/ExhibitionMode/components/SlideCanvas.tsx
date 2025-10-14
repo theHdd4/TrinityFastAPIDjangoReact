@@ -38,6 +38,8 @@ import {
   DEFAULT_CANVAS_OBJECT_WIDTH,
   DEFAULT_CANVAS_OBJECT_HEIGHT,
   CANVAS_SNAP_GRID,
+  buildSlideTitleObjectId,
+  resolveCardTitle,
 } from '../store/exhibitionStore';
 import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
 import { ExhibitionTextBox } from './operationsPalette/textBox/TextBox';
@@ -84,6 +86,8 @@ const isAtomObject = (
   const candidate = payload.atom as DroppedAtom | undefined;
   return Boolean(candidate && typeof candidate.id === 'string');
 };
+
+const STRUCTURAL_OBJECT_TYPES = new Set(['title', 'accent-image']);
 
 interface SlideCanvasProps {
   card: LayoutCard;
@@ -152,6 +156,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const groupSlideObjects = useExhibitionStore(state => state.groupSlideObjects);
 
   const atomObjects = useMemo(() => slideObjects.filter(isAtomObject), [slideObjects]);
+  const nonStructuralObjects = useMemo(
+    () => slideObjects.filter(object => !STRUCTURAL_OBJECT_TYPES.has(object.type)),
+    [slideObjects],
+  );
 
   const handleBulkUpdate = useCallback(
     (updates: Record<string, Partial<SlideObject>>) => {
@@ -251,12 +259,12 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   }, [showFormatPanel]);
 
   useEffect(() => {
-    if (slideObjects.length > 0 || textBoxes.length > 0) {
+    if (nonStructuralObjects.length > 0 || textBoxes.length > 0) {
       setHasInteracted(true);
     } else {
       setHasInteracted(false);
     }
-  }, [card.id, slideObjects.length, textBoxes.length]);
+  }, [card.id, nonStructuralObjects.length, textBoxes.length]);
 
   const updateSettings = (partial: Partial<PresentationSettings>) => {
     setSettings(prev => {
@@ -338,18 +346,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
 
   const showOverview = layoutConfig.showOverview && atomObjects.length > 1;
 
-  const resolvedTitle = useMemo(() => {
-    if (typeof card.title === 'string' && card.title.trim().length > 0) {
-      return card.title.trim();
-    }
-    if (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0) {
-      return card.moleculeTitle.trim();
-    }
-    if (atomObjects.length > 0) {
-      return atomObjects[0].props.atom.title;
-    }
-    return 'Untitled Slide';
-  }, [atomObjects, card]);
+  const resolvedTitle = useMemo(() => resolveCardTitle(card), [card]);
 
   const [titleDraft, setTitleDraft] = useState(resolvedTitle);
 
@@ -382,7 +379,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
   }, [card.lastEditedAt]);
 
-  const [hasInteracted, setHasInteracted] = useState(() => slideObjects.length > 0 || textBoxes.length > 0);
+  const [hasInteracted, setHasInteracted] = useState(
+    () => nonStructuralObjects.length > 0 || textBoxes.length > 0,
+  );
 
   const handleTitleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!canEdit) {
@@ -408,6 +407,15 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
 
     setTitleDraft(nextTitle);
+
+    const titleObjectId = buildSlideTitleObjectId(card.id);
+    const titleObject = slideObjects.find(object => object.id === titleObjectId);
+    const nextProps = titleObject?.props ? { ...titleObject.props } : {};
+    handleBulkUpdate({
+      [titleObjectId]: {
+        props: { ...nextProps, text: nextTitle },
+      },
+    });
   };
 
   const handleTitleBlur = () => {
@@ -425,66 +433,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const handleCanvasInteraction = () => {
     setHasInteracted(true);
   };
-
-  const accentLayout = useMemo(() => {
-    switch (settings.cardLayout) {
-      case 'none':
-        return {
-          showAccent: false,
-          placement: 'before' as const,
-          container: 'flex-col',
-          accentWrapperClass: '',
-          accentInnerClass: '',
-          contentWrapperClass: 'w-full',
-        };
-      case 'top':
-        return {
-          showAccent: true,
-          placement: 'before' as const,
-          container: 'flex-col',
-          accentWrapperClass: 'w-full flex-shrink-0',
-          accentInnerClass: 'min-h-[160px]',
-          contentWrapperClass: 'w-full',
-        };
-      case 'bottom':
-        return {
-          showAccent: true,
-          placement: 'after' as const,
-          container: 'flex-col',
-          accentWrapperClass: 'w-full flex-shrink-0',
-          accentInnerClass: 'min-h-[160px]',
-          contentWrapperClass: 'w-full',
-        };
-      case 'right':
-        return {
-          showAccent: true,
-          placement: 'after' as const,
-          container: 'flex-col lg:flex-row',
-          accentWrapperClass: 'w-full flex-shrink-0 lg:w-[28%] lg:max-w-xs',
-          accentInnerClass: 'min-h-[160px] lg:h-full',
-          contentWrapperClass: 'flex-1',
-        };
-      case 'left':
-        return {
-          showAccent: true,
-          placement: 'before' as const,
-          container: 'flex-col lg:flex-row',
-          accentWrapperClass: 'w-full flex-shrink-0 lg:w-[28%] lg:max-w-xs',
-          accentInnerClass: 'min-h-[160px] lg:h-full',
-          contentWrapperClass: 'flex-1',
-        };
-      case 'full':
-      default:
-        return {
-          showAccent: true,
-          placement: 'overlay' as const,
-          container: 'flex-col',
-          accentWrapperClass: 'absolute inset-0 z-0 pointer-events-none',
-          accentInnerClass: 'h-full w-full',
-          contentWrapperClass: 'relative z-10',
-        };
-    }
-  }, [settings.cardLayout]);
 
   const handleAtomRemove = (atomId: string) => {
     if (!canEdit) {
@@ -579,65 +527,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     orange: 'from-orange-500 via-amber-500 to-yellow-400',
   };
 
-  const heroBackgroundClasses = settings.accentImage
-    ? 'bg-center bg-cover bg-no-repeat'
-    : `bg-gradient-to-br ${cardColorClasses[settings.cardColor]}`;
-
-  const heroBackgroundStyle = settings.accentImage
-    ? { backgroundImage: `url(${settings.accentImage})` }
-    : undefined;
-
-  const accentShapeClass = settings.fullBleed ? '' : 'rounded-2xl';
-
-  const renderAccentSection = () => (
-    <div
-      className={cn(
-        accentLayout.placement !== 'overlay' ? 'relative' : undefined,
-        accentLayout.accentWrapperClass,
-      )}
-    >
-      <div
-        className={cn(
-          'relative flex h-full w-full items-center justify-center overflow-hidden',
-          accentShapeClass,
-          heroBackgroundClasses,
-          accentLayout.accentInnerClass,
-        )}
-        style={heroBackgroundStyle}
-      >
-        <div className="absolute inset-0 bg-gradient-to-br from-black/25 via-transparent to-black/25 backdrop-blur-sm" />
-        <div className="relative z-10 flex w-full flex-col items-start gap-2 p-6 text-background">
-          <span className="inline-flex items-center rounded-full bg-background/90 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-foreground">
-            Slide {slideNumber}
-          </span>
-          {!settings.accentImage && (
-            <p className="max-w-xs text-xs text-background/80">
-              Use card formatting controls to tailor this accent panel with colors or imagery.
-            </p>
-          )}
-        </div>
-        {atomObjects.length > 0 && (
-          <div className="absolute bottom-4 right-4 rounded-full bg-background/90 px-3 py-1 text-xs font-medium text-foreground">
-            {atomObjects.length} {atomObjects.length === 1 ? 'Component' : 'Components'}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const accentBefore =
-    accentLayout.showAccent && accentLayout.placement === 'before' ? renderAccentSection() : null;
-  const accentAfter =
-    accentLayout.showAccent && accentLayout.placement === 'after' ? renderAccentSection() : null;
-  const accentOverlay =
-    accentLayout.showAccent && accentLayout.placement === 'overlay' ? renderAccentSection() : null;
-
-  const alignmentClasses = {
-    top: 'justify-start',
-    center: 'justify-center',
-    bottom: 'justify-end',
-  };
-
   const containerClasses =
     viewMode === 'horizontal'
       ? 'flex-1 h-full bg-muted/20 overflow-auto'
@@ -683,12 +572,27 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             </div>
           </div>
 
-          <div className="relative">
+          <div className="flex flex-col gap-4">
+            <input
+              type="text"
+              value={titleDraft}
+              onChange={handleTitleInputChange}
+              onBlur={handleTitleBlur}
+              onKeyDown={handleTitleKeyDown}
+              placeholder="Untitled slide"
+              readOnly={!canEdit}
+              className={cn(
+                'w-full bg-transparent text-4xl font-bold text-foreground focus:outline-none focus:ring-0 focus:border-b focus:border-primary/40',
+                !canEdit && 'cursor-default text-foreground'
+              )}
+              aria-label="Slide title"
+              aria-readonly={!canEdit}
+            />
+
             <div
               className={cn(
-                'relative flex h-[520px] overflow-hidden bg-card shadow-2xl transition-all duration-300',
+                'relative h-[520px] w-full overflow-hidden bg-card shadow-2xl transition-all duration-300',
                 settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border',
-                accentLayout.container,
                 isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
                 !canEdit && 'opacity-90'
               )}
@@ -696,170 +600,118 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
             >
-              {accentOverlay}
+              <CanvasStage
+                ref={canvasRef}
+                canEdit={canEdit}
+                isDragOver={Boolean(isDragOver && canEdit && draggedAtom)}
+                objects={slideObjects}
+                showEmptyState={!hasInteracted && nonStructuralObjects.length === 0 && !hasTextBoxes}
+                onCanvasDragLeave={handleDragLeave}
+                onCanvasDragOver={handleDragOver}
+                onCanvasDrop={handleDrop}
+                onInteract={handleCanvasInteraction}
+                onRemoveAtom={handleAtomRemove}
+                onBringToFront={handleBringToFront}
+                onSendToBack={handleSendToBack}
+                onBulkUpdate={handleBulkUpdate}
+                onGroupObjects={handleGroupObjects}
+              />
+              {textBoxes.map(textBox => (
+                <ExhibitionTextBox
+                  key={textBox.id}
+                  data={textBox}
+                  isEditable={canEdit}
+                  onChange={(id, updates) => onTextBoxChange?.(id, updates)}
+                  onTextChange={(id, updatedText) => onTextBoxTextChange?.(id, updatedText)}
+                  onPositionChange={(id, nextPosition) => onTextBoxPositionChange?.(id, nextPosition)}
+                  onDelete={id => onTextBoxRemove?.(id)}
+                  onInteract={handleCanvasInteraction}
+                />
+              ))}
 
-              {isDragOver && canEdit && draggedAtom && (
-                <div
-                className={cn(
-                  'absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-primary/60 bg-primary/10 text-primary font-semibold uppercase tracking-wide pointer-events-none',
-                  settings.fullBleed ? 'rounded-none' : 'rounded-2xl'
-                )}
-              >
-                Drop to add component
-              </div>
-            )}
-            <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
-              <Button
-                size="icon"
-                variant="secondary"
-                className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
-                onClick={() => onShowNotes?.()}
-                type="button"
-              >
-                <StickyNote className="h-4 w-4" />
-              </Button>
-              <Button
-                size="icon"
-                variant="secondary"
-                className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
-                onClick={() => setShowFormatPanel(!showFormatPanel)}
-                disabled={!canEdit}
-                type="button"
-                ref={formatToggleRef}
-              >
-                <Settings className="h-4 w-4" />
-              </Button>
-              <Button
-                size="icon"
-                variant="secondary"
-                className="h-8 w-8 bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-lg hover:from-purple-600 hover:to-pink-600"
-                type="button"
-                disabled={!canEdit}
-              >
-                <Sparkles className="h-4 w-4" />
-              </Button>
-            </div>
-
-            {accentBefore}
-
-            <div className={cn('flex flex-1 flex-col min-h-0', accentLayout.contentWrapperClass)}>
-              <div className={cn('flex flex-1 flex-col gap-6 overflow-hidden', layoutConfig.wrapper)}>
-                <div
-                  className={cn(
-                    'p-8 flex flex-col flex-1 overflow-hidden',
-                    alignmentClasses[settings.contentAlignment],
-                    'min-h-[300px]',
-                    layoutConfig.contentClass
-                  )}
-                  onMouseDown={handleCanvasInteraction}
-                  onFocus={handleCanvasInteraction}
-                  tabIndex={canEdit ? 0 : -1}
+              <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+                <Button
+                  size="icon"
+                  variant="secondary"
+                  className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
+                  onClick={() => onShowNotes?.()}
+                  type="button"
                 >
-                  <div className="flex w-full max-w-4xl flex-col gap-4">
-                    <input
-                      type="text"
-                      value={titleDraft}
-                      onChange={handleTitleInputChange}
-                      onBlur={handleTitleBlur}
-                      onKeyDown={handleTitleKeyDown}
-                      placeholder="Untitled slide"
-                      readOnly={!canEdit}
-                      className={cn(
-                        'w-full bg-transparent text-4xl font-bold text-foreground focus:outline-none focus:ring-0 focus:border-b focus:border-primary/40',
-                        !canEdit && 'cursor-default text-foreground'
-                      )}
-                      aria-label="Slide title"
-                      aria-readonly={!canEdit}
-                    />
-
-                  <div className="relative flex-1 min-h-[260px]">
-                    <CanvasStage
-                      ref={canvasRef}
-                      canEdit={canEdit}
-                      isDragOver={Boolean(isDragOver && canEdit && draggedAtom)}
-                      objects={slideObjects}
-                      showEmptyState={!hasInteracted && slideObjects.length === 0 && !hasTextBoxes}
-                      onCanvasDragLeave={handleDragLeave}
-                      onCanvasDragOver={handleDragOver}
-                      onCanvasDrop={handleDrop}
-                      onInteract={handleCanvasInteraction}
-                      onRemoveAtom={handleAtomRemove}
-                      onBringToFront={handleBringToFront}
-                      onSendToBack={handleSendToBack}
-                      onBulkUpdate={handleBulkUpdate}
-                      onGroupObjects={handleGroupObjects}
-                    />
-                    {textBoxes.map(textBox => (
-                      <ExhibitionTextBox
-                        key={textBox.id}
-                        data={textBox}
-                        isEditable={canEdit}
-                        onChange={(id, updates) => onTextBoxChange?.(id, updates)}
-                        onTextChange={(id, updatedText) => onTextBoxTextChange?.(id, updatedText)}
-                        onPositionChange={(id, nextPosition) => onTextBoxPositionChange?.(id, nextPosition)}
-                        onDelete={id => onTextBoxRemove?.(id)}
-                        onInteract={handleCanvasInteraction}
-                      />
-                    ))}
-                  </div>
-                  </div>
-                </div>
-
-                {showOverview && (
-                  <div className={cn('px-8 pb-8 flex flex-col flex-1 min-h-0 overflow-hidden', layoutConfig.overviewOuterClass)}>
-                    <div
-                      className={cn(
-                        'bg-muted/30 rounded-xl border border-border p-6 flex-1 overflow-y-auto',
-                        layoutConfig.overviewContainerClass
-                      )}
-                    >
-                      <h2 className="text-2xl font-bold text-foreground mb-6">Components Overview</h2>
-
-                      <div className={cn('grid gap-4', layoutConfig.gridClass)}>
-                        {atomObjects.map(object => {
-                          const atom = object.props.atom;
-                          return (
-                          <div
-                            key={object.id}
-                            className="relative group p-6 border-2 border-border bg-card rounded-xl hover:shadow-lg hover:border-primary/50 transition-all duration-300"
-                          >
-                            <div className="flex items-center gap-3 mb-3">
-                              <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
-                              <h3 className="font-semibold text-foreground text-lg group-hover:text-primary transition-colors">
-                                {atom.title}
-                              </h3>
-                            </div>
-                            <div className="inline-block px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full mb-3">
-                              {atom.category}
-                            </div>
-                            <div className="text-sm text-muted-foreground space-y-3">
-                              <ExhibitedAtomRenderer atom={atom} variant="compact" />
-                            </div>
-
-                            {canEdit && (
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="absolute top-3 right-3 h-8 w-8 text-muted-foreground hover:text-destructive"
-                                onClick={() => handleAtomRemove(atom.id)}
-                                type="button"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            )}
-                          </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
+                  <StickyNote className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="secondary"
+                  className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
+                  onClick={() => setShowFormatPanel(!showFormatPanel)}
+                  disabled={!canEdit}
+                  type="button"
+                  ref={formatToggleRef}
+                >
+                  <Settings className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="secondary"
+                  className="h-8 w-8 bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-lg hover:from-purple-600 hover:to-pink-600"
+                  type="button"
+                  disabled={!canEdit}
+                >
+                  <Sparkles className="h-4 w-4" />
+                </Button>
               </div>
-            </div>
-
-              {accentAfter}
             </div>
           </div>
+
+          {showOverview && (
+            <div className={cn('px-8 pb-8 flex flex-col flex-1 min-h-0 overflow-hidden', layoutConfig.overviewOuterClass)}>
+              <div
+                className={cn(
+                  'bg-muted/30 rounded-xl border border-border p-6 flex-1 overflow-y-auto',
+                  layoutConfig.overviewContainerClass
+                )}
+              >
+                <h2 className="text-2xl font-bold text-foreground mb-6">Components Overview</h2>
+
+                <div className={cn('grid gap-4', layoutConfig.gridClass)}>
+                  {atomObjects.map(object => {
+                    const atom = object.props.atom;
+                    return (
+                      <div
+                        key={object.id}
+                        className="relative group p-6 border-2 border-border bg-card rounded-xl hover:shadow-lg hover:border-primary/50 transition-all duration-300"
+                      >
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
+                          <h3 className="font-semibold text-foreground text-lg group-hover:text-primary transition-colors">
+                            {atom.title}
+                          </h3>
+                        </div>
+                        <div className="inline-block px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full mb-3">
+                          {atom.category}
+                        </div>
+                        <div className="text-sm text-muted-foreground space-y-3">
+                          <ExhibitedAtomRenderer atom={atom} variant="compact" />
+                        </div>
+
+                        {canEdit && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="absolute top-3 right-3 h-8 w-8 text-muted-foreground hover:text-destructive"
+                            onClick={() => handleAtomRemove(atom.id)}
+                            type="button"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
 
           {showFormatPanel && (
             <div
@@ -1192,7 +1044,7 @@ interface CanvasStageProps {
 }
 
 const MIN_OBJECT_WIDTH = 220;
-const MIN_OBJECT_HEIGHT = 180;
+const MIN_OBJECT_HEIGHT = 120;
 
 const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
   (
@@ -1567,6 +1419,34 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         return <ExhibitedAtomRenderer atom={object.props.atom} />;
       }
 
+      if (object.type === 'title') {
+        const rawText = typeof object.props?.text === 'string' ? object.props.text : '';
+        const text = rawText.trim().length > 0 ? rawText : 'Untitled Slide';
+        return (
+          <div className="flex h-full w-full items-center justify-start px-6">
+            <h2 className="text-4xl font-bold leading-tight text-foreground">{text}</h2>
+          </div>
+        );
+      }
+
+      if (object.type === 'accent-image') {
+        const src = typeof object.props?.src === 'string' ? object.props.src : null;
+        const name =
+          typeof object.props?.name === 'string' && object.props.name.trim().length > 0
+            ? object.props.name.trim()
+            : 'Accent image';
+
+        if (src) {
+          return <img src={src} alt={name} className="h-full w-full object-cover" />;
+        }
+
+        return (
+          <div className="flex h-full w-full items-center justify-center bg-muted/30 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Accent image
+          </div>
+        );
+      }
+
       if (typeof object.props?.text === 'string') {
         return <p className="text-sm leading-relaxed text-muted-foreground">{object.props.text}</p>;
       }
@@ -1603,6 +1483,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         {objects.map(object => {
           const isSelected = selectedIds.includes(object.id);
           const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
+          const isAccentImageObject = object.type === 'accent-image';
+          const isTitleObject = object.type === 'title';
 
           return (
             <div
@@ -1619,7 +1501,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             >
               <div
                 className={cn(
-                  'relative flex h-full w-full flex-col overflow-hidden rounded-3xl border-2 bg-background/95 shadow-xl transition-all',
+                  'relative flex h-full w-full flex-col overflow-hidden rounded-3xl border-2 shadow-xl transition-all',
+                  isAccentImageObject ? 'bg-muted/30' : 'bg-background/95',
                   isSelected ? 'border-primary shadow-2xl' : 'border-border/70 hover:border-primary/40',
                 )}
               >
@@ -1634,8 +1517,22 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     </div>
                   </div>
                 )}
-                <div className="relative flex-1 overflow-hidden p-4">
-                  <div className="h-full w-full overflow-hidden rounded-2xl bg-background/90 p-3">
+                <div
+                  className={cn(
+                    'relative flex-1 overflow-hidden',
+                    isAccentImageObject || isTitleObject ? undefined : 'p-4',
+                  )}
+                >
+                  <div
+                    className={cn(
+                      'h-full w-full overflow-hidden',
+                      isAccentImageObject
+                        ? undefined
+                        : isTitleObject
+                        ? 'bg-transparent'
+                        : 'rounded-2xl bg-background/90 p-3',
+                    )}
+                  >
                     {renderObjectContent(object)}
                   </div>
                 </div>
