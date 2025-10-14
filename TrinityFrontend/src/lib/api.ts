@@ -1,13 +1,16 @@
 const hostIp = import.meta.env.VITE_HOST_IP;
-// When running the dev stack the frontend listens on port 8081 while
-// Django/FASTAPI are published on 8003/8004/8005 respectively. Detect this
-// scenario using the current browser port so the correct defaults are used when
-// no explicit environment variables are provided.
-// Also detect development environment by hostname, port, or environment variable
 const isDevStack =
+<<<<<<< HEAD
   (typeof window !== 'undefined' && window.location.port === '8081') ||
   import.meta.env.VITE_FRONTEND_PORT === '8081' ||
   import.meta.env.VITE_ENVIRONMENT === 'development';
+=======
+  (typeof window !== 'undefined' && window.location.port === '8081') ; //||
+  // import.meta.env.VITE_FRONTEND_PORT === '8081' ||
+  // (typeof window !== 'undefined' && window.location.hostname === '172.19.128.1') ||
+  // (typeof window !== 'undefined' && window.location.port === '8080') ||
+  // import.meta.env.VITE_ENVIRONMENT === 'development';
+>>>>>>> c8e4d77252f2ed1aa9bf08f61b5aa9013e2b5866
 
 const djangoPort =
   import.meta.env.VITE_DJANGO_PORT || (isDevStack ? '8003' : '8000');
@@ -28,37 +31,30 @@ if (!backendOrigin) {
     backendOrigin = `http://localhost:${djangoPort}`;
   }
 } else if (isDevStack && backendOrigin.endsWith(`:${frontendPort}`)) {
-  // When the dev stack is running the frontend uses port 8081 while
-  // Django listens on 8003. Avoid hitting the nginx container by correcting
-  // the port if the backend origin matches the frontend port.
   backendOrigin = backendOrigin.replace(
     new RegExp(`:${frontendPort}$`),
     `:${djangoPort}`,
   );
 }
 
-// When hosting through Traefik the Django service is exposed under the
-// `/admin` prefix while direct container access uses the plain `/api` paths.
-// Detect which form to use based on the backend origin. If it points at the
-// container port `8000` we assume no proxy is stripping `/admin`.
 
 const usesProxy = !backendOrigin.includes(`:${djangoPort}`);
 const djangoPrefix = usesProxy ? '/admin/api' : '/api';
 
 // Set `VITE_BACKEND_ORIGIN` if the APIs live on a different domain.
 
-console.log('🔧 API Configuration Debug:', {
-  hostIp,
-  isDevStack,
-  djangoPort,
-  fastapiPort,
-  aiPort,
-  frontendPort,
-  backendOrigin,
-  windowLocation: typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port}` : 'server-side',
-  buildModelApi: `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-model-feature-based`
-});
-console.log('Using backend origin', backendOrigin);
+// console.log('🔧 API Configuration Debug:', {
+//   hostIp,
+//   isDevStack,
+//   djangoPort,
+//   fastapiPort,
+//   aiPort,
+//   frontendPort,
+//   backendOrigin,
+//   windowLocation: typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port}` : 'server-side',
+//   buildModelApi: `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-model-feature-based`
+// });
+// console.log('Using backend origin', backendOrigin);
 
 const normalizeUrl = (url?: string) => {
   if (!url) return undefined;
@@ -93,6 +89,10 @@ export const VALIDATE_API =
   normalizeUrl(import.meta.env.VITE_VALIDATE_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/data-upload-validate`;
 
+export const EXHIBITION_API =
+  normalizeUrl(import.meta.env.VITE_EXHIBITION_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/exhibition`;
+
 export const CONCAT_API =
   normalizeUrl(import.meta.env.VITE_CONCAT_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/concat`;
@@ -116,25 +116,20 @@ export const SCOPE_SELECTOR_API =
 export const CREATECOLUMN_API =
   import.meta.env.VITE_CREATECOLUMN_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/create-column`;
 
-
-
 export const GROUPBY_API =
   import.meta.env.VITE_GROUPBY_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/groupby`;
-
 
 let aiBase = normalizeUrl(import.meta.env.VITE_TRINITY_AI_API);
 if (!aiBase) {
   aiBase = backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${aiPort}`);
 }
-// Ensure the base URL ends with the `/trinityai` prefix exactly once
+
 const normalizedAiBase = aiBase.replace(/\/?$/, '');
 export const TRINITY_AI_API = normalizedAiBase.endsWith('/trinityai')
   ? normalizedAiBase
   : `${normalizedAiBase}/trinityai`;
 
-
 export const INSIGHT_API = `${TRINITY_AI_API}/insights`;
-
 
 export const LAB_ACTIONS_API = `${REGISTRY_API}/laboratory-actions`;
 
@@ -189,7 +184,7 @@ export const calculateFiscalGrowth = async (params: {
   fiscal_start_month?: number;
   frequency?: string;
   start_year?: number;
-  run_id?: string;  // Add run_id parameter
+  run_id?: string; 
 }) => {
   const formData = new FormData();
   formData.append('scope', params.scope);
@@ -215,6 +210,7 @@ export const calculateFiscalGrowth = async (params: {
 
   return response.json();
 };
+
 
 export const calculateHalfYearlyGrowth = async (params: {
   scope: string;

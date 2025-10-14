@@ -111,7 +111,7 @@ class TenantSerializer(serializers.ModelSerializer):
                     ("Marketing Mix Modeling", "marketing-mix", "Preset: Pre-process + Build"),
                     ("Forecasting Analysis", "forecasting", "Preset: Pre-process + Explore"),
                     ("Promo Effectiveness", "promo-effectiveness", "Preset: Explore + Build"),
-                    ("Blank App", "blank", "Start from an empty canvas"),
+                    ("Custom Workspace", "blank", "Start from an empty canvas"),
                 ]
                 for name, slug, desc in default_apps:
                     App.objects.get_or_create(slug=slug, defaults={"name": name, "description": desc})

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Eye, EyeOff, User, Lock } from 'lucide-react';
+import { Eye, EyeOff, User, Lock, ArrowLeft } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
 import LoginAnimation from '@/components/LoginAnimation';
@@ -148,6 +148,19 @@ const Login = () => {
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
       <LoginAnimation active={showAnimation} onComplete={handleAnimationComplete} />
+      
+      {/* Back to Home Button */}
+      <Button
+        variant="ghost"
+        onClick={() => navigate('/')}
+        className={`absolute top-6 left-6 z-20 text-[#fec107] hover:text-[#e0ad06] hover:bg-transparent font-mono font-light transition-all duration-300 border-0 ${
+          showAnimation ? 'opacity-0 pointer-events-none' : 'opacity-100'
+        }`}
+      >
+        <ArrowLeft className="w-4 h-4 mr-2" />
+        Back to Home
+      </Button>
+      
       <video
         autoPlay
         loop
@@ -166,8 +179,16 @@ const Login = () => {
       >
         <Card className="bg-white/5 backdrop-blur-lg border border-white/10 text-white shadow-2xl">
           <CardHeader className="flex flex-col items-center space-y-2 text-center">
-            <AnimatedLogo className="w-20 h-20 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
-            <CardTitle className="text-4xl font-bold font-mono">
+            <div 
+              className="cursor-pointer hover:scale-110 transition-transform duration-300"
+              onClick={() => navigate('/')}
+            >
+              <AnimatedLogo className="w-20 h-20 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
+            </div>
+            <CardTitle 
+              className="text-4xl font-bold font-mono cursor-pointer hover:text-[#fec107] transition-colors duration-300"
+              onClick={() => navigate('/')}
+            >
               Trinity
             </CardTitle>
             <CardDescription className="w-40 text-sm text-white/70 tracking-[0.2em] text-center whitespace-nowrap">

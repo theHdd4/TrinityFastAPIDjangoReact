@@ -1061,7 +1061,7 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
       ) : headers.length === 0 || data.length === 0 ? (
         <div className="p-4 text-center text-gray-500">No results to display.</div>
       ) : (
-        <div className="mt-6 mx-auto max-w-screen-2xl">
+        <div className="mt-6">
           <Table
             headers={headers.map((header, index) => (
               <ContextMenu key={header}>

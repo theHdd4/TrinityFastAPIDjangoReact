@@ -16,7 +16,7 @@ router = APIRouter()
 # Standalone configuration functions (no circular imports)
 def get_llm_config():
     """Return LLM configuration from environment variables."""
-    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "172.22.64.1"))
+    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "10.2.2.131"))
     llm_port = os.getenv("OLLAMA_PORT", "11434")
     api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
     return {
@@ -45,6 +45,9 @@ agent = ChartMakerAgent(
 class ChartRequest(BaseModel):
     prompt: str = Field(..., description="User prompt describing the chart to create")
     session_id: Optional[str] = Field(None, description="Optional session ID for conversation continuity")
+    client_name: str = Field("", description="Client name for dynamic path resolution")
+    app_name: str = Field("", description="App name for dynamic path resolution")
+    project_name: str = Field("", description="Project name for dynamic path resolution")
 
 class FileContextRequest(BaseModel):
     file_id: str = Field(..., description="File ID for chart generation")
@@ -65,7 +68,6 @@ class ChartResponse(BaseModel):
     processing_time: Optional[float] = Field(None, description="Time taken to process the request")
     # 🔧 CRITICAL FIX: Add missing fields for file information
     file_name: Optional[str] = Field(None, description="Name of the file used for chart generation")
-    data_source: Optional[str] = Field(None, description="Data source file for the chart")
     file_context: Optional[Dict[str, Any]] = Field(None, description="Context about available files and current file")
     # 🔧 SMART RESPONSE: Add smart_response field for user-friendly messages
     smart_response: Optional[str] = Field(None, description="Smart, user-friendly response explaining what was created and next steps")
@@ -84,7 +86,8 @@ def chart_make(request: ChartRequest):
     logger.info(f"Chart request: {request.prompt[:100]}... (Session: {request.session_id})")
     
     try:
-        result = agent.process(request.prompt, request.session_id)
+        result = agent.process(request.prompt, request.session_id, 
+                              request.client_name, request.app_name, request.project_name)
         
         # Add processing time
         result["processing_time"] = round(time.time() - start, 2)

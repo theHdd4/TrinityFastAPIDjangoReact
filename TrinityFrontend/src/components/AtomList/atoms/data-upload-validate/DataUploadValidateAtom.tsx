@@ -166,11 +166,41 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         if (res.ok) {
           const data = await res.json();
           uploaded.push({ name: file.name, path: data.file_path, size: file.size });
-          toast({ title: `${file.name} uploaded successfully` });
+          
+          // Check for data quality warnings
+          if (data.has_data_quality_issues && data.warnings && data.warnings.length > 0) {
+            // Display warning toast with mixed data type information
+            if (data.mixed_dtype_columns && data.mixed_dtype_columns.length > 0) {
+              const colList = data.mixed_dtype_columns.slice(0, 5).join(', ');
+              const moreText = data.mixed_dtype_columns.length > 5 
+                ? ` and ${data.mixed_dtype_columns.length - 5} more` 
+                : '';
+              
+              toast({
+                title: `⚠️ Data Quality Warning - ${file.name}`,
+                description: `File has mixed data types in columns: ${colList}${moreText}. This may lead to unstable results. Please use Dataframe Operations atom to fix column data types.`,
+                variant: 'default',
+                duration: 10000, // Show for 10 seconds
+              });
+            } else {
+              // Generic warning
+              toast({
+                title: `⚠️ ${file.name} uploaded with warnings`,
+                description: data.warnings[0] || 'Some atoms may need data type conversion.',
+                variant: 'default',
+                duration: 8000,
+              });
+            }
+          } else {
+            // Success without warnings
+            toast({ title: `${file.name} uploaded successfully` });
+          }
         } else {
-          toast({ title: `Failed to upload ${file.name}`, variant: 'destructive' });
+          const errorData = await res.json().catch(() => ({}));
+          const errorMessage = errorData.detail || `Failed to upload ${file.name}`;
+          toast({ title: errorMessage, variant: 'destructive' });
         }
-      } catch {
+      } catch (error) {
         toast({ title: `Failed to upload ${file.name}`, variant: 'destructive' });
       }
     }
@@ -593,19 +623,41 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         console.log('Saving to MinIO prefix', data.prefix);
       }
       const newStatus: Record<string, string> = {};
-      const duplicates: string[] = [];
-      data.minio_uploads.forEach((r: any, idx: number) => {
+      const fileResults = Array.isArray(data.minio_uploads)
+        ? data.minio_uploads
+        : [];
+      if (fileResults.length === 0) {
+        toast({ title: 'Dataframes Saved Successfully' });
+      }
+      fileResults.forEach((r: any, idx: number) => {
         const name = uploadedFiles[idx]?.name || r.file_key;
+        if (!name) {
+          return;
+        }
         const obj = r.minio_upload?.object_name;
         if (obj) {
           const env = data.environment || {};
           const loc = `/${env.CLIENT_NAME}/${env.APP_NAME}/${env.PROJECT_NAME}`;
           console.log(`File ${name} saved as ${obj} in ${loc}`);
         }
-        if (r.already_saved && name) {
-          newStatus[name] = 'File is already saved';
-          duplicates.push(name);
+
+        let statusMessage = 'Saved successfully';
+        let variant: 'destructive' | undefined;
+        if (r.error) {
+          statusMessage = `Not saved: ${r.error}`;
+          variant = 'destructive';
+        } else if (r.already_saved) {
+          statusMessage = 'File already saved';
+          variant = 'destructive';
         }
+
+        newStatus[name] = statusMessage;
+
+        toast({
+          title: name,
+          description: statusMessage,
+          variant,
+        });
       });
       setSaveStatus(prev => ({ ...prev, ...newStatus }));
       // Clear temp paths so saved files persist in project state
@@ -622,14 +674,6 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         },
         fileMappings: fileAssignments,
       });
-      if (duplicates.length > 0) {
-        toast({
-          title: 'Same file already present in the project',
-          variant: 'destructive',
-        });
-      } else {
-        toast({ title: 'Dataframes Saved Successfully' });
-      }
       addNavigationItem(user?.id, {
         atom: 'data-upload-validate',
         files: uploadedFiles.map(f => f.name),

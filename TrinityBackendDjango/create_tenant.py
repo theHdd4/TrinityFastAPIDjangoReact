@@ -245,7 +245,7 @@ def main():
         ("Marketing Mix Modeling", "marketing-mix", "Preset: Pre-process + Build"),
         ("Forecasting Analysis", "forecasting", "Preset: Pre-process + Explore"),
         ("Promo Effectiveness", "promo-effectiveness", "Preset: Explore + Build"),
-        ("Blank App", "blank", "Start from an empty canvas"),
+        ("Custom Workspace", "blank", "Start from an empty canvas"),
     ]
 
     allowed_app_ids = []

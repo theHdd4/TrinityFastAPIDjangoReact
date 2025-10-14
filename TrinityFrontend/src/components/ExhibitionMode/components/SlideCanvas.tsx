@@ -1,0 +1,1082 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  User,
+  Calendar,
+  Sparkles,
+  StickyNote,
+  Image as ImageIcon,
+  Palette,
+  Layout,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Maximize2,
+  RotateCcw,
+  Settings,
+  Plus,
+  Trash2,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Switch } from '@/components/ui/switch';
+import { Separator } from '@/components/ui/separator';
+import {
+  CardLayout,
+  CardColor,
+  LayoutCard,
+  DroppedAtom,
+  PresentationSettings,
+  DEFAULT_PRESENTATION_SETTINGS,
+} from '../store/exhibitionStore';
+import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
+import { ExhibitionTextBox } from './operationsPalette/textBox/TextBox';
+import type { SlideTextBox, TextBoxPosition } from './operationsPalette/textBox/types';
+
+interface SlideCanvasProps {
+  card: LayoutCard;
+  slideNumber: number;
+  totalSlides: number;
+  onDrop: (
+    atom: DroppedAtom,
+    sourceCardId: string,
+    targetCardId: string,
+    origin: 'catalogue' | 'slide',
+  ) => void;
+  draggedAtom?: { atom: DroppedAtom; cardId: string; origin: 'catalogue' | 'slide' } | null;
+  canEdit?: boolean;
+  onPresentationChange?: (settings: PresentationSettings, cardId: string) => void;
+  onRemoveAtom?: (atomId: string) => void;
+  onShowNotes?: () => void;
+  viewMode?: 'horizontal' | 'vertical';
+  isActive?: boolean;
+  onTitleChange?: (title: string, cardId: string) => void;
+  presenterName?: string | null;
+  textBoxes?: SlideTextBox[];
+  onTextBoxChange?: (boxId: string, updates: Partial<SlideTextBox>) => void;
+  onTextBoxTextChange?: (boxId: string, text: string) => void;
+  onTextBoxPositionChange?: (boxId: string, position: TextBoxPosition) => void;
+  onTextBoxRemove?: (boxId: string) => void;
+}
+
+export const SlideCanvas: React.FC<SlideCanvasProps> = ({
+  card,
+  slideNumber,
+  totalSlides,
+  onDrop,
+  draggedAtom,
+  canEdit = true,
+  onPresentationChange,
+  onRemoveAtom,
+  onShowNotes,
+  viewMode = 'horizontal',
+  isActive = false,
+  onTitleChange,
+  presenterName,
+  textBoxes = [],
+  onTextBoxChange,
+  onTextBoxTextChange,
+  onTextBoxPositionChange,
+  onTextBoxRemove,
+}) => {
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [showFormatPanel, setShowFormatPanel] = useState(false);
+  const [settings, setSettings] = useState<PresentationSettings>(() => ({
+    ...DEFAULT_PRESENTATION_SETTINGS,
+    ...card.presentationSettings,
+  }));
+  const accentImageInputRef = useRef<HTMLInputElement | null>(null);
+  const formatPanelRef = useRef<HTMLDivElement | null>(null);
+  const formatToggleRef = useRef<HTMLButtonElement | null>(null);
+
+  const layoutDefaultColors: Record<CardLayout, CardColor> = useMemo(
+    () => ({
+      none: 'default',
+      top: 'blue',
+      bottom: 'green',
+      right: 'purple',
+      left: 'orange',
+      full: 'purple',
+    }),
+    [],
+  );
+
+  const cardWidthClass = settings.cardWidth === 'M' ? 'max-w-4xl' : 'max-w-6xl';
+  const hasTextBoxes = textBoxes.length > 0;
+
+  useEffect(() => {
+    setSettings({
+      ...DEFAULT_PRESENTATION_SETTINGS,
+      ...card.presentationSettings,
+    });
+  }, [card]);
+
+  useEffect(() => {
+    if (!canEdit) {
+      setShowFormatPanel(false);
+    }
+  }, [canEdit]);
+
+  useEffect(() => {
+    if (!showFormatPanel) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node | null;
+
+      if (!target) {
+        return;
+      }
+
+      if (formatPanelRef.current?.contains(target)) {
+        return;
+      }
+
+      if (formatToggleRef.current?.contains(target)) {
+        return;
+      }
+
+      setShowFormatPanel(false);
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [showFormatPanel]);
+
+  useEffect(() => {
+    if (card.atoms.length > 0 || textBoxes.length > 0) {
+      setHasInteracted(true);
+    } else {
+      setHasInteracted(false);
+    }
+  }, [card.id, card.atoms.length, textBoxes.length]);
+
+  const updateSettings = (partial: Partial<PresentationSettings>) => {
+    setSettings(prev => {
+      if (!canEdit) {
+        return prev;
+      }
+
+      const merged = { ...prev, ...partial } as PresentationSettings;
+
+      if ('cardLayout' in partial && !('cardColor' in partial)) {
+        const targetLayout = partial.cardLayout ?? prev.cardLayout;
+        const mappedColor = layoutDefaultColors[targetLayout];
+        if (!merged.accentImage && mappedColor && merged.cardColor !== mappedColor) {
+          merged.cardColor = mappedColor;
+        }
+      }
+
+      if ('accentImage' in partial && !partial.accentImage) {
+        const fallbackColor = layoutDefaultColors[merged.cardLayout] ?? 'default';
+        merged.cardColor = fallbackColor;
+        merged.accentImage = null;
+      }
+
+      if ('accentImageName' in partial && !partial.accentImageName) {
+        merged.accentImageName = null;
+      }
+
+      onPresentationChange?.(merged, card.id);
+      return merged;
+    });
+  };
+
+  const resetSettings = () => {
+    if (!canEdit) {
+      return;
+    }
+    const defaults = { ...DEFAULT_PRESENTATION_SETTINGS };
+    setSettings(defaults);
+    onPresentationChange?.(defaults, card.id);
+  };
+
+  const layoutConfig = useMemo(() => {
+    const shared = {
+      showOverview: true,
+      gridClass: 'grid-cols-1 md:grid-cols-2',
+      wrapper: '',
+      contentClass: '',
+      overviewOuterClass: '',
+      overviewContainerClass: '',
+    } as const;
+
+    switch (settings.cardLayout) {
+      case 'none':
+        return {
+          ...shared,
+        };
+      case 'top':
+      case 'bottom':
+        return {
+          ...shared,
+        };
+      case 'left':
+      case 'right':
+        return {
+          ...shared,
+          wrapper: 'lg:flex-row lg:items-stretch',
+          contentClass: 'lg:w-[35%] lg:pr-8',
+          overviewOuterClass: 'lg:flex-1 lg:pl-8 min-h-0',
+          overviewContainerClass: 'h-full',
+        };
+      case 'full':
+      default:
+        return {
+          ...shared,
+          gridClass: 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3',
+        };
+    }
+  }, [settings.cardLayout]);
+
+  const showOverview = layoutConfig.showOverview && card.atoms.length > 1;
+
+  const resolvedTitle = useMemo(() => {
+    if (typeof card.title === 'string' && card.title.trim().length > 0) {
+      return card.title.trim();
+    }
+    if (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0) {
+      return card.moleculeTitle.trim();
+    }
+    if (card.atoms.length > 0) {
+      return card.atoms[0].title;
+    }
+    return 'Untitled Slide';
+  }, [card]);
+
+  const [titleDraft, setTitleDraft] = useState(resolvedTitle);
+
+  useEffect(() => {
+    setTitleDraft(resolvedTitle);
+  }, [resolvedTitle]);
+
+  const presenterLabel = useMemo(() => {
+    if (typeof presenterName === 'string' && presenterName.trim().length > 0) {
+      return presenterName.trim();
+    }
+    return 'Unknown Presenter';
+  }, [presenterName]);
+
+  const formattedLastEdited = useMemo(() => {
+    if (typeof card.lastEditedAt !== 'string') {
+      return 'Not available';
+    }
+    const timestamp = new Date(card.lastEditedAt);
+    if (Number.isNaN(timestamp.getTime())) {
+      return 'Not available';
+    }
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(timestamp);
+    } catch {
+      return timestamp.toLocaleString();
+    }
+  }, [card.lastEditedAt]);
+
+  const [hasInteracted, setHasInteracted] = useState(() => card.atoms.length > 0 || textBoxes.length > 0);
+
+  const handleTitleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) {
+      return;
+    }
+    setTitleDraft(event.target.value);
+  };
+
+  const commitTitle = () => {
+    if (!canEdit) {
+      return;
+    }
+
+    const trimmed = titleDraft.trim();
+    const nextTitle = trimmed.length > 0 ? trimmed : 'Untitled Slide';
+    const currentTitle =
+      typeof card.title === 'string' && card.title.trim().length > 0
+        ? card.title.trim()
+        : resolvedTitle;
+
+    if (nextTitle !== currentTitle) {
+      onTitleChange?.(nextTitle, card.id);
+    }
+
+    setTitleDraft(nextTitle);
+  };
+
+  const handleTitleBlur = () => {
+    commitTitle();
+  };
+
+  const handleTitleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commitTitle();
+      event.currentTarget.blur();
+    }
+  };
+
+  const handleCanvasInteraction = () => {
+    setHasInteracted(true);
+  };
+
+  const accentLayout = useMemo(() => {
+    switch (settings.cardLayout) {
+      case 'none':
+        return {
+          showAccent: false,
+          placement: 'before' as const,
+          container: 'flex-col',
+          accentWrapperClass: '',
+          accentInnerClass: '',
+          contentWrapperClass: 'w-full',
+        };
+      case 'top':
+        return {
+          showAccent: true,
+          placement: 'before' as const,
+          container: 'flex-col',
+          accentWrapperClass: 'w-full flex-shrink-0',
+          accentInnerClass: 'min-h-[160px]',
+          contentWrapperClass: 'w-full',
+        };
+      case 'bottom':
+        return {
+          showAccent: true,
+          placement: 'after' as const,
+          container: 'flex-col',
+          accentWrapperClass: 'w-full flex-shrink-0',
+          accentInnerClass: 'min-h-[160px]',
+          contentWrapperClass: 'w-full',
+        };
+      case 'right':
+        return {
+          showAccent: true,
+          placement: 'after' as const,
+          container: 'flex-col lg:flex-row',
+          accentWrapperClass: 'w-full flex-shrink-0 lg:w-[28%] lg:max-w-xs',
+          accentInnerClass: 'min-h-[160px] lg:h-full',
+          contentWrapperClass: 'flex-1',
+        };
+      case 'left':
+        return {
+          showAccent: true,
+          placement: 'before' as const,
+          container: 'flex-col lg:flex-row',
+          accentWrapperClass: 'w-full flex-shrink-0 lg:w-[28%] lg:max-w-xs',
+          accentInnerClass: 'min-h-[160px] lg:h-full',
+          contentWrapperClass: 'flex-1',
+        };
+      case 'full':
+      default:
+        return {
+          showAccent: true,
+          placement: 'overlay' as const,
+          container: 'flex-col',
+          accentWrapperClass: 'absolute inset-0 z-0 pointer-events-none',
+          accentInnerClass: 'h-full w-full',
+          contentWrapperClass: 'relative z-10',
+        };
+    }
+  }, [settings.cardLayout]);
+
+  const handleAtomRemove = (atomId: string) => {
+    if (!canEdit) {
+      return;
+    }
+    onRemoveAtom?.(atomId);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!canEdit || !draggedAtom) {
+      return;
+    }
+    e.preventDefault();
+    try {
+      e.dataTransfer.dropEffect = 'move';
+    } catch {
+      /* ignore */
+    }
+    setIsDragOver(true);
+    handleCanvasInteraction();
+  };
+
+  const handleDragLeave = () => {
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    if (!canEdit || !draggedAtom) {
+      return;
+    }
+    e.preventDefault();
+    setIsDragOver(false);
+    handleCanvasInteraction();
+    onDrop(draggedAtom.atom, draggedAtom.cardId, card.id, draggedAtom.origin);
+  };
+
+  const handleAccentImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) {
+      return;
+    }
+
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== 'string' || reader.result.length === 0) {
+        return;
+      }
+
+      updateSettings({ accentImage: reader.result, accentImageName: file.name });
+    };
+
+    reader.readAsDataURL(file);
+  };
+
+  const cardColorClasses = {
+    default: 'from-purple-500 via-pink-500 to-orange-400',
+    blue: 'from-blue-500 via-cyan-500 to-teal-400',
+    purple: 'from-violet-500 via-purple-500 to-fuchsia-400',
+    green: 'from-emerald-500 via-green-500 to-lime-400',
+    orange: 'from-orange-500 via-amber-500 to-yellow-400',
+  };
+
+  const heroBackgroundClasses = settings.accentImage
+    ? 'bg-center bg-cover bg-no-repeat'
+    : `bg-gradient-to-br ${cardColorClasses[settings.cardColor]}`;
+
+  const heroBackgroundStyle = settings.accentImage
+    ? { backgroundImage: `url(${settings.accentImage})` }
+    : undefined;
+
+  const accentShapeClass = settings.fullBleed ? '' : 'rounded-2xl';
+
+  const renderAccentSection = () => (
+    <div
+      className={cn(
+        accentLayout.placement !== 'overlay' ? 'relative' : undefined,
+        accentLayout.accentWrapperClass,
+      )}
+    >
+      <div
+        className={cn(
+          'relative flex h-full w-full items-center justify-center overflow-hidden',
+          accentShapeClass,
+          heroBackgroundClasses,
+          accentLayout.accentInnerClass,
+        )}
+        style={heroBackgroundStyle}
+      >
+        <div className="absolute inset-0 bg-gradient-to-br from-black/25 via-transparent to-black/25 backdrop-blur-sm" />
+        <div className="relative z-10 flex w-full flex-col items-start gap-2 p-6 text-background">
+          <span className="inline-flex items-center rounded-full bg-background/90 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-foreground">
+            Slide {slideNumber}
+          </span>
+          {!settings.accentImage && (
+            <p className="max-w-xs text-xs text-background/80">
+              Use card formatting controls to tailor this accent panel with colors or imagery.
+            </p>
+          )}
+        </div>
+        {card.atoms.length > 0 && (
+          <div className="absolute bottom-4 right-4 rounded-full bg-background/90 px-3 py-1 text-xs font-medium text-foreground">
+            {card.atoms.length} {card.atoms.length === 1 ? 'Component' : 'Components'}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const accentBefore =
+    accentLayout.showAccent && accentLayout.placement === 'before' ? renderAccentSection() : null;
+  const accentAfter =
+    accentLayout.showAccent && accentLayout.placement === 'after' ? renderAccentSection() : null;
+  const accentOverlay =
+    accentLayout.showAccent && accentLayout.placement === 'overlay' ? renderAccentSection() : null;
+
+  const alignmentClasses = {
+    top: 'justify-start',
+    center: 'justify-center',
+    bottom: 'justify-end',
+  };
+
+  const containerClasses =
+    viewMode === 'horizontal'
+      ? 'flex-1 h-full bg-muted/20 overflow-auto'
+      : cn(
+          'w-full bg-muted/20 overflow-hidden border rounded-3xl transition-all duration-300 shadow-sm',
+          isActive
+            ? 'border-primary shadow-elegant ring-1 ring-primary/30'
+            : 'border-border hover:border-primary/40'
+        );
+
+  return (
+    <div className={containerClasses}>
+      <div
+        className={cn(
+          'mx-auto transition-all duration-300 p-8',
+          cardWidthClass
+        )}
+      >
+        {viewMode === 'vertical' && (
+          <div className="mb-4 flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Slide {slideNumber}
+            </span>
+            {isActive && (
+              <span className="px-3 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary">
+                Current
+              </span>
+            )}
+          </div>
+        )}
+
+        <div className="space-y-4">
+          <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-2 text-foreground">
+              <User className="h-4 w-4" />
+              <span className="font-semibold">Exhibition presenter:</span>
+              <span>{presenterLabel}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-foreground" />
+              <span className="font-semibold text-foreground">Last edited:</span>
+              <span>{formattedLastEdited}</span>
+            </div>
+          </div>
+
+          <div className="relative">
+            <div
+              className={cn(
+                'relative flex h-[520px] overflow-hidden bg-card shadow-2xl transition-all duration-300',
+                settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border',
+                accentLayout.container,
+                isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
+                !canEdit && 'opacity-90'
+              )}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              {accentOverlay}
+
+              {isDragOver && canEdit && draggedAtom && (
+                <div
+                className={cn(
+                  'absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-primary/60 bg-primary/10 text-primary font-semibold uppercase tracking-wide pointer-events-none',
+                  settings.fullBleed ? 'rounded-none' : 'rounded-2xl'
+                )}
+              >
+                Drop to add component
+              </div>
+            )}
+            <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+              <Button
+                size="icon"
+                variant="secondary"
+                className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
+                onClick={() => onShowNotes?.()}
+                type="button"
+              >
+                <StickyNote className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="secondary"
+                className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
+                onClick={() => setShowFormatPanel(!showFormatPanel)}
+                disabled={!canEdit}
+                type="button"
+                ref={formatToggleRef}
+              >
+                <Settings className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="secondary"
+                className="h-8 w-8 bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-lg hover:from-purple-600 hover:to-pink-600"
+                type="button"
+                disabled={!canEdit}
+              >
+                <Sparkles className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {accentBefore}
+
+            <div className={cn('flex flex-1 flex-col min-h-0', accentLayout.contentWrapperClass)}>
+              <div className={cn('flex flex-1 flex-col gap-6 overflow-hidden', layoutConfig.wrapper)}>
+                <div
+                  className={cn(
+                    'p-8 flex flex-col flex-1 overflow-hidden',
+                    alignmentClasses[settings.contentAlignment],
+                    'min-h-[300px]',
+                    layoutConfig.contentClass
+                  )}
+                  onMouseDown={handleCanvasInteraction}
+                  onFocus={handleCanvasInteraction}
+                  tabIndex={canEdit ? 0 : -1}
+                >
+                  <div className="flex w-full max-w-4xl flex-col gap-4">
+                    <input
+                      type="text"
+                      value={titleDraft}
+                      onChange={handleTitleInputChange}
+                      onBlur={handleTitleBlur}
+                      onKeyDown={handleTitleKeyDown}
+                      placeholder="Untitled slide"
+                      readOnly={!canEdit}
+                      className={cn(
+                        'w-full bg-transparent text-4xl font-bold text-foreground focus:outline-none focus:ring-0 focus:border-b focus:border-primary/40',
+                        !canEdit && 'cursor-default text-foreground'
+                      )}
+                      aria-label="Slide title"
+                      aria-readonly={!canEdit}
+                    />
+
+                  <div className="relative flex-1 min-h-[260px]">
+                      {!hasInteracted && card.atoms.length === 0 && !hasTextBoxes ? (
+                        <div className="flex h-full w-full items-center justify-center rounded-2xl border-2 border-dashed border-border bg-muted/20 px-6 text-center text-sm text-muted-foreground">
+                          Add components from the catalogue to build your presentation slide.
+                        </div>
+                      ) : card.atoms.length > 0 ? (
+                        <div className="flex h-full w-full min-w-0 flex-col gap-4">
+                          {card.atoms.map(atom => (
+                            <div
+                              key={atom.id}
+                              className="group relative box-border flex-1 min-w-0 max-w-full overflow-hidden rounded-3xl border-2 border-border bg-background/95 p-6 shadow-xl transition-all duration-300 hover:shadow-2xl"
+                            >
+                              <div className="flex items-center gap-3 mb-4">
+                                <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
+                                <h3 className="text-2xl font-semibold text-foreground group-hover:text-primary transition-colors">
+                                  {atom.title}
+                                </h3>
+                              </div>
+                              <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-wide text-primary mb-4">
+                                {atom.category}
+                              </div>
+                              <div className="text-base leading-relaxed text-muted-foreground space-y-4">
+                                <ExhibitedAtomRenderer atom={atom} />
+                              </div>
+
+                              {canEdit && (
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="absolute top-3 right-3 h-9 w-9 text-muted-foreground hover:text-destructive"
+                                  onClick={() => handleAtomRemove(atom.id)}
+                                  type="button"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : hasTextBoxes ? (
+                        <div className="h-full w-full" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center rounded-2xl border-2 border-dashed border-border bg-muted/10 px-6 text-center text-sm text-muted-foreground">
+                          Click to start building this slide.
+                        </div>
+                      )}
+                      {textBoxes.map(textBox => (
+                        <ExhibitionTextBox
+                          key={textBox.id}
+                          data={textBox}
+                          isEditable={canEdit}
+                          onChange={(id, updates) => onTextBoxChange?.(id, updates)}
+                          onTextChange={(id, updatedText) => onTextBoxTextChange?.(id, updatedText)}
+                          onPositionChange={(id, nextPosition) => onTextBoxPositionChange?.(id, nextPosition)}
+                          onDelete={id => onTextBoxRemove?.(id)}
+                          onInteract={handleCanvasInteraction}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {showOverview && (
+                  <div className={cn('px-8 pb-8 flex flex-col flex-1 min-h-0 overflow-hidden', layoutConfig.overviewOuterClass)}>
+                    <div
+                      className={cn(
+                        'bg-muted/30 rounded-xl border border-border p-6 flex-1 overflow-y-auto',
+                        layoutConfig.overviewContainerClass
+                      )}
+                    >
+                      <h2 className="text-2xl font-bold text-foreground mb-6">Components Overview</h2>
+
+                      <div className={cn('grid gap-4', layoutConfig.gridClass)}>
+                        {card.atoms.map(atom => (
+                          <div
+                            key={atom.id}
+                            className="relative group p-6 border-2 border-border bg-card rounded-xl hover:shadow-lg hover:border-primary/50 transition-all duration-300"
+                          >
+                            <div className="flex items-center gap-3 mb-3">
+                              <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
+                              <h3 className="font-semibold text-foreground text-lg group-hover:text-primary transition-colors">
+                                {atom.title}
+                              </h3>
+                            </div>
+                            <div className="inline-block px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full mb-3">
+                              {atom.category}
+                            </div>
+                            <div className="text-sm text-muted-foreground space-y-3">
+                              <ExhibitedAtomRenderer atom={atom} variant="compact" />
+                            </div>
+
+                            {canEdit && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="absolute top-3 right-3 h-8 w-8 text-muted-foreground hover:text-destructive"
+                                onClick={() => handleAtomRemove(atom.id)}
+                                type="button"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+              {accentAfter}
+            </div>
+          </div>
+
+          {showFormatPanel && (
+            <div
+              ref={formatPanelRef}
+              className="absolute right-0 top-12 z-30 w-80 rounded-xl border-2 border-border bg-background p-4 shadow-2xl sm:right-3"
+            >
+              <h3 className="mb-4 text-sm font-semibold">Card Formatting</h3>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Layout</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Button
+                      size="icon"
+                      variant={settings.cardLayout === 'none' ? 'default' : 'outline'}
+                      className="h-12 w-12 rounded-lg"
+                      onClick={() => updateSettings({ cardLayout: 'none' })}
+                      type="button"
+                      disabled={!canEdit}
+                    >
+                      <span className="sr-only">No layout</span>
+                      <div className="flex h-6 w-6 items-center justify-center">
+                        <div className="h-6 w-6 rounded border-2 border-current" />
+                      </div>
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant={settings.cardLayout === 'top' ? 'default' : 'outline'}
+                      className="h-12 w-12 rounded-lg"
+                      onClick={() => updateSettings({ cardLayout: 'top' })}
+                      type="button"
+                      disabled={!canEdit}
+                    >
+                      <span className="sr-only">Top layout</span>
+                      <div className="flex h-6 w-6 flex-col">
+                        <div className="h-2 rounded-t border-2 border-current bg-current/20" />
+                        <div className="flex-1 rounded-b border-2 border-current" />
+                      </div>
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant={settings.cardLayout === 'bottom' ? 'default' : 'outline'}
+                      className="h-12 w-12 rounded-lg"
+                      onClick={() => updateSettings({ cardLayout: 'bottom' })}
+                      type="button"
+                      disabled={!canEdit}
+                    >
+                      <span className="sr-only">Bottom layout</span>
+                      <div className="flex h-6 w-6 flex-col">
+                        <div className="flex-1 rounded-t border-2 border-current" />
+                        <div className="h-2 rounded-b border-2 border-current bg-current/20" />
+                      </div>
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant={settings.cardLayout === 'right' ? 'default' : 'outline'}
+                      className="h-12 w-12 rounded-lg"
+                      onClick={() => updateSettings({ cardLayout: 'right' })}
+                      type="button"
+                      disabled={!canEdit}
+                    >
+                      <span className="sr-only">Right layout</span>
+                      <div className="flex h-6 w-6">
+                        <div className="flex-1 rounded-l border-2 border-current" />
+                        <div className="w-2 rounded-r border-2 border-current bg-current/20" />
+                      </div>
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant={settings.cardLayout === 'left' ? 'default' : 'outline'}
+                      className="h-12 w-12 rounded-lg"
+                      onClick={() => updateSettings({ cardLayout: 'left' })}
+                      type="button"
+                      disabled={!canEdit}
+                    >
+                      <span className="sr-only">Left layout</span>
+                      <div className="flex h-6 w-6">
+                        <div className="w-2 rounded-l border-2 border-current bg-current/20" />
+                        <div className="flex-1 rounded-r border-2 border-current" />
+                      </div>
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant={settings.cardLayout === 'full' ? 'default' : 'outline'}
+                      className="h-12 w-12 rounded-lg"
+                      onClick={() => updateSettings({ cardLayout: 'full' })}
+                      type="button"
+                      disabled={!canEdit}
+                    >
+                      <span className="sr-only">Entire background layout</span>
+                      <div className="h-6 w-6 rounded border-2 border-current bg-current/20" />
+                    </Button>
+                  </div>
+                </div>
+
+                <Separator />
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">Accent image</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {settings.accentImage && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs text-destructive"
+                        onClick={() => updateSettings({ accentImage: null, accentImageName: null })}
+                        disabled={!canEdit}
+                        type="button"
+                      >
+                        Remove
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs text-primary"
+                      onClick={() => accentImageInputRef.current?.click()}
+                      disabled={!canEdit}
+                      type="button"
+                    >
+                      {settings.accentImage ? 'Change' : 'Upload'}
+                    </Button>
+                  </div>
+                </div>
+
+                {settings.accentImage && (
+                  <div className="space-y-2">
+                    <div className="relative h-24 overflow-hidden rounded-lg border border-border">
+                      <img
+                        src={settings.accentImage}
+                        alt="Accent"
+                        className="h-full w-full object-cover"
+                      />
+                      {settings.accentImageName && (
+                        <div className="absolute bottom-0 left-0 right-0 bg-background/90 px-2 py-1 text-[11px] truncate">
+                          {settings.accentImageName}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Accent images replace the card color for this slide layout.
+                    </p>
+                  </div>
+                )}
+
+                <input
+                  ref={accentImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleAccentImageChange}
+                  className="hidden"
+                />
+
+                <Separator />
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Palette className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">Card color</span>
+                  </div>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs capitalize"
+                        disabled={!canEdit || Boolean(settings.accentImage)}
+                      >
+                        {settings.cardColor}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="bg-background">
+                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'default' })}>Default</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'blue' })}>Blue</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'purple' })}>Purple</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'green' })}>Green</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'orange' })}>Orange</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+
+                <Separator />
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Layout className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">Full-bleed card</span>
+                  </div>
+                  <Switch
+                    checked={settings.fullBleed}
+                    onCheckedChange={value => updateSettings({ fullBleed: value })}
+                    disabled={!canEdit}
+                  />
+                </div>
+
+                <Separator />
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlignCenter className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">Content alignment</span>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button
+                      size="icon"
+                      variant={settings.contentAlignment === 'top' ? 'default' : 'outline'}
+                      className="h-7 w-7"
+                      onClick={() => updateSettings({ contentAlignment: 'top' })}
+                      disabled={!canEdit}
+                    >
+                      <AlignLeft className="h-3 w-3 rotate-90" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant={settings.contentAlignment === 'center' ? 'default' : 'outline'}
+                      className="h-7 w-7"
+                      onClick={() => updateSettings({ contentAlignment: 'center' })}
+                      disabled={!canEdit}
+                    >
+                      <AlignCenter className="h-3 w-3 rotate-90" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant={settings.contentAlignment === 'bottom' ? 'default' : 'outline'}
+                      className="h-7 w-7"
+                      onClick={() => updateSettings({ contentAlignment: 'bottom' })}
+                      disabled={!canEdit}
+                    >
+                      <AlignRight className="h-3 w-3 rotate-90" />
+                    </Button>
+                  </div>
+                </div>
+
+                <Separator />
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Maximize2 className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">Card width</span>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant={settings.cardWidth === 'M' ? 'default' : 'outline'}
+                      className="h-7 px-3 text-xs"
+                      onClick={() => updateSettings({ cardWidth: 'M' })}
+                      disabled={!canEdit}
+                    >
+                      M
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={settings.cardWidth === 'L' ? 'default' : 'outline'}
+                      className="h-7 px-3 text-xs"
+                      onClick={() => updateSettings({ cardWidth: 'L' })}
+                      disabled={!canEdit}
+                    >
+                      L
+                    </Button>
+                  </div>
+                </div>
+
+                <Separator />
+
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Backdrop</span>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs text-primary">
+                    <Plus className="mr-1 h-3 w-3" />
+                    Add
+                  </Button>
+                </div>
+
+                <Separator />
+
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Card headers & footers</span>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs text-primary">
+                    Edit
+                  </Button>
+                </div>
+
+                <Separator />
+
+                <Button
+                  variant="outline"
+                  className="w-full justify-start text-sm"
+                  onClick={resetSettings}
+                  type="button"
+                  disabled={!canEdit}
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  Reset styling
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {viewMode === 'horizontal' && (
+          <div className="mt-6 text-center">
+            <span className="inline-block px-4 py-2 bg-muted rounded-full text-sm font-medium text-muted-foreground">
+              Slide {slideNumber} of {totalSlides}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default SlideCanvas;

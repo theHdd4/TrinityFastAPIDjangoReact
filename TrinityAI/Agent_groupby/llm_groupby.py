@@ -4,16 +4,14 @@ import uuid
 import logging
 import os
 from typing import Dict, Any, List, Optional
-import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
-import pyarrow.feather as pf
-from io import BytesIO
-from minio import Minio
 from langchain_core.messages import HumanMessage
 from langchain.memory import ConversationBufferWindowMemory
 
 from .ai_logic import build_prompt_group_by, call_llm_group_by, extract_json_group_by
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from file_loader import FileLoader
 
 logger = logging.getLogger("agent.group_by")
 
@@ -48,7 +46,7 @@ SUPPORTED_AGGREGATIONS = {
     "rank_pct": {"requires_weight": False, "description": "Computes the rank of a column as a percentile."}
 }
 
-ALLOWED_KEYS = {"success", "message", "groupby_json", "session_id", "suggestions"}
+ALLOWED_KEYS = {"success", "message", "groupby_json", "session_id", "suggestions", "reasoning", "used_memory", "next_steps", "error", "processing_time", "smart_response", "file_analysis"}
 
 class SmartGroupByAgent:
     def __init__(self, api_url, model_name, bearer_token,
@@ -59,101 +57,189 @@ class SmartGroupByAgent:
         self.bearer_token = bearer_token
         self.bucket = bucket
         self.prefix = prefix
-        try:
-            self.minio_client = Minio(minio_endpoint, access_key=access_key, secret_key=secret_key, secure=False)
-        except Exception as e:
-            logger.critical(f"MinIO init failed: {e}")
-            self.minio_client = None
-        self.files_with_columns: Dict[str, List[str]] = {}
         self.sessions: Dict[str, Dict[str, Any]] = {}
-        self._load_files()
         self.history_window_size = history_window_size
+        
+        # File context for intelligent suggestions
+        self.files_with_columns: Dict[str, List[str]] = {}
+        self.files_metadata: Dict[str, Dict[str, Any]] = {}
+        self.current_file_id: Optional[str] = None
+        
+        # MinIO configuration
+        self.minio_endpoint = minio_endpoint
+        self.access_key = access_key
+        self.secret_key = secret_key
+        
+        # Initialize FileLoader for standardized file handling
+        self.file_loader = FileLoader(
+            minio_endpoint=minio_endpoint,
+            minio_access_key=access_key,
+            minio_secret_key=secret_key,
+            minio_bucket=bucket,
+            object_prefix=prefix
+        )
+        
+        # Files will be loaded lazily when needed
+        self._files_loaded = False
+    
+    def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
+        """
+        Set environment context for dynamic path resolution.
+        This ensures the API call will fetch the correct path for the current project.
+        """
+        if client_name or app_name or project_name:
+            if client_name:
+                os.environ["CLIENT_NAME"] = client_name
+            if app_name:
+                os.environ["APP_NAME"] = app_name
+            if project_name:
+                os.environ["PROJECT_NAME"] = project_name
+            logger.info(f"🔧 Environment context set for dynamic path resolution: {client_name}/{app_name}/{project_name}")
+        else:
+            logger.info("🔧 Using existing environment context for dynamic path resolution")
+
+    def _ensure_files_loaded(self) -> None:
+        """Ensure files are loaded before processing requests"""
+        if not self._files_loaded:
+            self._load_files()
+            self._files_loaded = True
+
+    def _maybe_update_prefix(self) -> None:
+        """Dynamically updates the MinIO prefix using the data_upload_validate API endpoint."""
+        try:
+            # Method 1: Call the data_upload_validate API endpoint
+            try:
+                import requests
+                import os
+                
+                client_name = os.getenv("CLIENT_NAME", "")
+                app_name = os.getenv("APP_NAME", "")
+                project_name = os.getenv("PROJECT_NAME", "")
+                
+                validate_api_url = os.getenv("VALIDATE_API_URL", "http://fastapi:8001")
+                if not validate_api_url.startswith("http"):
+                    validate_api_url = f"http://{validate_api_url}"
+                
+                url = f"{validate_api_url}/api/data-upload-validate/get_object_prefix"
+                params = {
+                    "client_name": client_name,
+                    "app_name": app_name,
+                    "project_name": project_name
+                }
+                
+                logger.info(f"🔍 Fetching dynamic path from: {url}")
+                logger.info(f"🔍 With params: {params}")
+                
+                response = requests.get(url, params=params, timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    current = data.get("prefix", "")
+                    if current and current != self.prefix:
+                        logger.info(f"✅ Dynamic path fetched successfully: {current}")
+                        logger.info("MinIO prefix updated from '%s' to '%s'", self.prefix, current)
+                        self.prefix = current
+                        self._load_files()
+                        return
+                    elif current:
+                        logger.info(f"✅ Dynamic path fetched: {current} (no change needed)")
+                        return
+                    else:
+                        logger.warning(f"API returned empty prefix: {data}")
+                else:
+                    logger.warning(f"API call failed with status {response.status_code}: {response.text}")
+                        
+            except Exception as e:
+                logger.warning(f"Failed to fetch dynamic path from API: {e}")
+            
+            # Method 2: Fallback to environment variables
+            import os
+            client_name = os.getenv("CLIENT_NAME", "default_client")
+            app_name = os.getenv("APP_NAME", "default_app")
+            project_name = os.getenv("PROJECT_NAME", "default_project")
+            current = f"{client_name}/{app_name}/{project_name}/"
+            
+            if self.prefix != current:
+                logger.info("MinIO prefix updated from '%s' to '%s' (env fallback)", self.prefix, current)
+                self.prefix = current
+                self._load_files()
+            else:
+                logger.info(f"Using current prefix: {current}")
+                
+        except Exception as e:
+            logger.error(f"Failed to update prefix: {e}")
 
     def _load_files(self):
-        """Loads files from MinIO, intelligently reading various Arrow formats."""
-        logger.info(f"Loading files from MinIO bucket '{self.bucket}' with prefix '{self.prefix}'...")
-        self.files_with_columns.clear()
-        
-        if not self.minio_client:
-            return
-            
+        """Load available files from MinIO with their columns using dynamic paths"""
         try:
-            objects = self.minio_client.list_objects(self.bucket, prefix=self.prefix, recursive=True)
+            try:
+                from minio import Minio
+                from minio.error import S3Error
+                import pyarrow as pa
+                import pyarrow.ipc as ipc
+                import pandas as pd
+                import io
+            except ImportError as ie:
+                logger.error(f"Failed to import required libraries: {ie}")
+                self.files_with_columns = {}
+                return
             
-            files_loaded = 0
+            # logger.info(f"Loading files with prefix: {self.prefix}")
+            
+            # Initialize MinIO client
+            minio_client = Minio(
+                self.file_loader.minio_endpoint,
+                access_key=self.file_loader.minio_access_key,
+                secret_key=self.file_loader.minio_secret_key,
+                secure=False
+            )
+            
+            # List objects in bucket with current prefix
+            objects = minio_client.list_objects(self.file_loader.minio_bucket, prefix=self.prefix, recursive=True)
+            
+            files_with_columns = {}
+            
             for obj in objects:
-                # We are primarily interested in files with the .arrow extension
-                if not obj.object_name.endswith('.arrow'):
-                    continue
-
-                filename = os.path.basename(obj.object_name)
-                full_object_path = obj.object_name
-                logger.info(f"Processing file: {filename}")
-                logger.info(f"Full MinIO object path: {full_object_path}")
-                logger.info(f"Bucket: {self.bucket}, Prefix: {self.prefix}")
-
                 try:
-                    # Use the full object path, not just the filename
-                    response = self.minio_client.get_object(self.bucket, full_object_path)
-                    file_data = response.read()
-                    logger.info(f"Successfully read file from MinIO path: {full_object_path}")
-                finally:
-                    response.close()
-                    response.release_conn()
-
-                table = None
-                # --- Simplified Reading Logic ---
-                # Define a list of reading functions to try in order of likelihood.
-                # Each function takes a bytes buffer and returns a PyArrow Table.
-                readers = [
-                    ("Parquet", lambda buffer: pq.read_table(buffer)),
-                    ("Feather", lambda buffer: pf.read_table(buffer)),
-                    ("Arrow IPC", lambda buffer: pa.ipc.open_stream(buffer).read_all())
-                ]
-
-                for format_name, reader_func in readers:
-                    try:
-                        # Use a BytesIO buffer to read the in-memory file data
-                        buffer = BytesIO(file_data)
-                        table = reader_func(buffer)
-                        logger.info(f"Successfully read '{filename}' as {format_name} format.")
-                        break  # Stop on the first successful read
-                    except Exception as e:
-                        logger.debug(f"Could not read '{filename}' as {format_name}: {e}")
-
-                # --- Column Extraction ---
-                if table is not None:
-                    columns = table.column_names
-                    self.files_with_columns[filename] = columns
-                    files_loaded += 1
+                    if obj.object_name.endswith('.arrow'):
+                        # Get Arrow file data
+                        response = minio_client.get_object(self.file_loader.minio_bucket, obj.object_name)
+                        data = response.read()
+                        
+                        # Read Arrow file
+                        with pa.ipc.open_file(pa.BufferReader(data)) as reader:
+                            table = reader.read_all()
+                            columns = table.column_names
+                            files_with_columns[obj.object_name] = {"columns": columns}
+                            
+                        # logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
                     
-                    # Enhanced column printing for better visibility
-                    logger.info(f"=== COLUMN EXTRACTION FOR '{filename}' ===")
-                    logger.info(f"Total columns: {len(columns)}")
-                    logger.info(f"Columns: {columns}")
-                    logger.info(f"Column types: {[table.schema.field(col).type for col in columns]}")
-                    logger.info(f"Row count: {table.num_rows}")
-                    logger.info(f"File size: {len(file_data)} bytes")
-                    logger.info("=" * 50)
-                    
-                    # Also print to console for immediate visibility
-                    print(f"\n📁 File: {filename}")
-                    print(f"📊 Columns ({len(columns)}): {columns}")
-                    print(f"📈 Rows: {table.num_rows}")
-                    print(f"💾 Size: {len(file_data)} bytes")
-                    print("-" * 40)
-                    
-                else:
-                    logger.warning(f"Could not read '{filename}' in any supported format.")
-                    
-            logger.info(f"Finished loading. Found and processed {files_loaded} files.")
-            print(f"\n🎯 SUMMARY: Loaded {files_loaded} files with columns:")
-            for filename, columns in self.files_with_columns.items():
-                print(f"  • {filename}: {len(columns)} columns")
-            print("=" * 50)
+                    elif obj.object_name.endswith(('.csv', '.xlsx', '.xls')):
+                        # For CSV/Excel files, try to read headers
+                        response = minio_client.get_object(self.file_loader.minio_bucket, obj.object_name)
+                        data = response.read()
+                        
+                        if obj.object_name.endswith('.csv'):
+                            # Read CSV headers
+                            df_sample = pd.read_csv(io.BytesIO(data), nrows=0)  # Just headers
+                            columns = list(df_sample.columns)
+                        else:
+                            # Read Excel headers
+                            df_sample = pd.read_excel(io.BytesIO(data), nrows=0)  # Just headers
+                            columns = list(df_sample.columns)
+                        
+                        files_with_columns[obj.object_name] = {"columns": columns}
+                        # logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to load file {obj.object_name}: {e}")
+                    continue
+            
+            self.files_with_columns = files_with_columns
+            logger.info(f"Loaded {len(files_with_columns)} files from MinIO")
             
         except Exception as e:
-            logger.error(f"MinIO listing error: {e}")
+            logger.error(f"Error loading files from MinIO: {e}")
+            self.files_with_columns = {}
 
     def _history_str(self, session_id: str) -> str:
         hist = self.sessions[session_id]["memory"].load_memory_variables({}).get("history", [])
@@ -166,68 +252,33 @@ class SmartGroupByAgent:
         return "\n".join(buf)
 
     def _enforce_allowed_keys(self, result: dict, session_id: str) -> dict:
+        """
+        MINIMAL validation - just add session_id and filter keys, let handlers deal with validation
+        """
+        if not result:
+            return {"success": False, "message": "No valid JSON found", "session_id": session_id}
+        
+        # Just add session_id and filter to allowed keys
         result["session_id"] = session_id
         filtered = {k: v for k, v in result.items() if k in ALLOWED_KEYS}
         
-        # If success and groupby_json exists, ensure it has all required fields
-        if filtered.get("success") and "groupby_json" in filtered:
-            groupby_config = filtered["groupby_json"]
-            
-            # Auto-generate missing required fields for backend compatibility
-            if "validator_atom_id" not in groupby_config:
-                # Generate a real validator_atom_id from session
-                groupby_config["validator_atom_id"] = f"groupby_{session_id[:8]}"
-            
-            if "file_key" not in groupby_config:
-                # Use object_names as file_key if available
-                if "object_names" in groupby_config:
-                    groupby_config["file_key"] = groupby_config["object_names"]
-                else:
-                    groupby_config["file_key"] = "unknown_file"
-            
-            # Ensure bucket_name is set
-            if "bucket_name" not in groupby_config:
-                groupby_config["bucket_name"] = "trinity"
-                
-            # Ensure all required fields are present and valid
-            required_fields = ["bucket_name", "object_names", "identifiers", "aggregations", "validator_atom_id", "file_key"]
-            missing_fields = [field for field in required_fields if field not in groupby_config or not groupby_config[field]]
-            
-            if missing_fields:
-                logger.warning(f"Missing or empty required fields: {missing_fields}")
-                # Try to fill missing fields with sensible defaults
-                if "identifiers" not in groupby_config or not groupby_config["identifiers"]:
-                    groupby_config["identifiers"] = []
-                if "aggregations" not in groupby_config or not groupby_config["aggregations"]:
-                    groupby_config["aggregations"] = {}
-                    
-            # 🔧 CRITICAL FIX: Convert all column names to lowercase for backend compatibility
-            if "identifiers" in groupby_config and groupby_config["identifiers"]:
-                groupby_config["identifiers"] = [col.lower() for col in groupby_config["identifiers"]]
-                
-            if "aggregations" in groupby_config and groupby_config["aggregations"]:
-                # Convert aggregation column names to lowercase
-                new_aggregations = {}
-                for col_name, agg_config in groupby_config["aggregations"].items():
-                    new_aggregations[col_name.lower()] = agg_config
-                groupby_config["aggregations"] = new_aggregations
-                
-        elif filtered.get("success") and "groupby_json" not in filtered:
-            filtered["groupby_json"] = {}
-            
-        if not filtered.get("success"):
-            filtered.pop("groupby_json", None)
-            
-        filtered.setdefault("suggestions", [] if filtered.get("success") else ["Please provide more details."])
-        filtered.setdefault("message", "")
+        logger.info(f"✅ Minimal validation passed, returning {len(filtered)} keys")
         return filtered
 
-    def process_request(self, user_prompt: str, session_id: Optional[str] = None):
+    def process_request(self, user_prompt: str, session_id: Optional[str] = None, client_name: str = "", app_name: str = "", project_name: str = ""):
+        # Set environment context for dynamic path resolution (like explore agent)
+        self.set_context(client_name, app_name, project_name)
+        
         if not user_prompt.strip():
             return {"success": False, "message": "Empty prompt.", "session_id": session_id or str(uuid.uuid4()),
                     "suggestions": ["Please describe the aggregation you want."]}
-        if not self.files_with_columns:
-            self._load_files()
+        
+        # Check if MinIO prefix needs an update (and files need reloading)
+        self._maybe_update_prefix()
+        
+        # Load files lazily only when needed
+        self._ensure_files_loaded()
+        
         if not self.files_with_columns:
             return {"success": False, "message": "No files loaded.", "session_id": session_id or str(uuid.uuid4()),
                     "suggestions": ["Check MinIO connection."]}
@@ -244,41 +295,85 @@ class SmartGroupByAgent:
 
         prompt = build_prompt_group_by(user_prompt, session_id, self.files_with_columns, sup_det, OPERATION_FORMAT, hist_str)
         
-        # 🔍 DETAILED LOGGING: Print what we're sending to LLM
-        print("\n" + "="*80)
-        print("🚀 SENDING TO LLM (GROUPBY AGENT):")
-        print("="*80)
-        print(f"📝 User Prompt: {user_prompt}")
-        print(f"🆔 Session ID: {session_id}")
-        print(f"📁 Files with Columns: {json.dumps(self.files_with_columns, indent=2)}")
-        print(f"⚙️ Supported Aggregations: {sup_det}")
-        print(f"📋 Operation Format: {OPERATION_FORMAT}")
-        print(f"📚 History: {hist_str}")
-        print("="*80)
-        print("📤 FULL PROMPT SENT TO LLM:")
-        print("="*80)
-        print(prompt)
-        print("="*80)
+        # 🔧 LOG LLM REQUEST AND RESPONSE
+        logger.info(f"🤖 GROUPBY LLM REQUEST:")
+        logger.info(f"📝 User Prompt: {user_prompt}")
+        logger.info(f"🔧 Session ID: {session_id}")
+        logger.info(f"📁 Available Files: {list(self.files_with_columns.keys())}")
+        logger.info(f"📋 Prompt Length: {len(prompt)} characters")
 
         raw = call_llm_group_by(self.api_url, self.model_name, self.bearer_token, prompt)
         
-        # 🔍 DETAILED LOGGING: Print what LLM returned
-        print("\n" + "="*80)
-        print("🤖 LLM RESPONSE RECEIVED:")
-        print("="*80)
-        print(f"📥 Raw Response: {raw}")
-        print("="*80)
+        # 🔧 LOG LLM RESPONSE
+        logger.info(f"🤖 GROUPBY LLM RESPONSE:")
+        logger.info(f"📄 Raw Response Length: {len(raw) if raw else 0} characters")
+        if raw:
+            logger.info(f"📄 FULL RAW LLM RESPONSE:")
+            logger.info("=" * 80)
+            logger.info(raw)
+            logger.info("=" * 80)
+        else:
+            logger.warning("❌ No response from LLM")
         
         if not raw:
-            print("❌ LLM returned NO response!")
             return {"success": False, "message": "No response from LLM", "session_id": session_id, "suggestions": ["Try again."]}
 
         parsed = extract_json_group_by(raw) or {}
-        print(f"🔍 Parsed JSON: {json.dumps(parsed, indent=2)}")
+        
+        # 🔧 LOG PARSED JSON
+        logger.info(f"🔍 GROUPBY PARSED JSON:")
+        logger.info(f"✅ Success: {parsed.get('success', False)}")
+        logger.info(f"📊 Has groupby_json: {bool(parsed.get('groupby_json'))}")
+        logger.info(f"💬 Has smart_response: {bool(parsed.get('smart_response'))}")
+        logger.info(f"📋 Has suggestions: {bool(parsed.get('suggestions'))}")
+        if parsed.get('smart_response'):
+            logger.info(f"💬 Smart Response: {parsed['smart_response'][:200]}...")
+        logger.info(f"🔍 FULL PARSED JSON:")
+        logger.info("=" * 80)
+        logger.info(json.dumps(parsed, indent=2))
+        logger.info("=" * 80)
+        
+        # LENIENT HANDLING: If JSON extraction fails, create a helpful fallback response
+        if not parsed:
+            logger.warning("JSON extraction failed, creating fallback response")
+            # Build file list for suggestions
+            file_list = []
+            for name, data in self.files_with_columns.items():
+                col_count = len(data.get('columns', []))
+                file_list.append(f"{name} ({col_count} columns)")
+            
+            # Build detailed file info for smart_response
+            file_details = []
+            for name, data in self.files_with_columns.items():
+                columns = data.get('columns', [])
+                col_count = len(columns)
+                sample_cols = ', '.join(columns[:8])
+                if col_count > 8:
+                    sample_cols += '...'
+                file_details.append(f"**{name}** ({col_count} columns) - {sample_cols}")
+            
+            parsed = {
+                "success": False,
+                "suggestions": [
+                    "Here's what I found about your files:",
+                    f"Available files for groupby: {', '.join(file_list)}",
+                    "To complete groupby, specify: file + group columns + aggregation functions",
+                    "Or say 'yes' to use my suggestions"
+                ],
+                "message": "Here's what I can help you with",
+                "smart_response": f"I'd be happy to help you with GroupBy operations! Here are your available files and their columns:\n" + 
+                               "\n".join(file_details) +
+                               "\n\nI can help you group and aggregate this data by specifying which columns to group by and which aggregation functions to use.",
+                "available_files": self.files_with_columns,
+                "next_steps": [
+                    "Tell me which file you want to group",
+                    "Specify the columns to group by",
+                    "Choose the aggregation functions (sum, mean, count, etc.)",
+                    "Ask me to suggest the best grouping strategy"
+                ]
+            }
         
         result = self._enforce_allowed_keys(parsed, session_id)
-        print(f"✅ Final Result: {json.dumps(result, indent=2)}")
-        print("="*80)
         
         mem.save_context({"input": user_prompt}, {"output": json.dumps(result)})
         return result

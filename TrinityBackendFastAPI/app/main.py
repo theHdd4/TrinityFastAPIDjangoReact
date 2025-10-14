@@ -1,10 +1,3 @@
-# from fastapi import FastAPI
-# from app.api.router import api_router
-
-# app = FastAPI()
-
-# app.include_router(api_router)
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router, text_router
@@ -16,13 +9,17 @@ from DataStorageRetrieval.arrow_client import load_env_from_redis
 def _default_cors_origins() -> List[str]:
     """Build the default list of CORS origins.
 
-    The list keeps existing explicit hosts while automatically appending the
-    ``HOST_IP`` address exposed to the container when available.
+    Combine the historical explicit hosts with dynamic values derived from the
+    container's HOST_IP/FRONTEND_PORT and common localhost URLs. This mirrors the
+    broader compatibility that existed on ``codex/fix-cors-error-in-api`` while
+    keeping prior ``dev`` behaviour.
     """
 
     host_ip = os.getenv("HOST_IP", "").strip()
+    frontend_port = os.getenv("FRONTEND_PORT", "8080").strip() or "8080"
+
     defaults = [
-        "http://10.95.49.220:8080",
+        "http://10.19.4.220:8080",
         "http://10.2.4.48:8080",
         "http://127.0.0.1:8080",
         "http://10.2.1.207:8080",
@@ -30,37 +27,46 @@ def _default_cors_origins() -> List[str]:
         "http://10.2.3.55:8080",
         "https://trinity.quantmatrixai.com",
         "https://trinity-dev.quantmatrixai.com",
+        "http://localhost:8080",
     ]
 
     if host_ip:
         defaults.extend(
             [
+                f"http://{host_ip}:{frontend_port}",
                 f"http://{host_ip}:8080",
                 f"http://{host_ip}:8081",
                 f"https://{host_ip}",
             ]
         )
 
-    # Preserve order while removing duplicates
-    return list(dict.fromkeys(defaults))
+    defaults.extend(
+        [
+            f"http://127.0.0.1:{frontend_port}",
+            f"http://localhost:{frontend_port}",
+        ]
+    )
+
+    # Preserve order while removing duplicates and empty entries.
+    return [origin for origin in dict.fromkeys(defaults) if origin]
 
 
 def _load_cors_origins() -> List[str]:
+    """Return configured origins or the calculated default list."""
+
     configured = os.getenv("FASTAPI_CORS_ORIGINS")
     if configured:
+        configured = configured.strip()
+        if configured == "*":
+            return ["*"]
         return [origin.strip() for origin in configured.split(",") if origin.strip()]
     return _default_cors_origins()
 
 
 app = FastAPI()
 
-origins = os.getenv(
-    "FASTAPI_CORS_ORIGINS",
-    "http://10.2.3.55:8080,http://10.95.49.220:8080,http://10.2.1.207:8080,http://127.0.0.1:8080,http://172.22.64.1:8080,http://10.2.2.12:8080,http://172.22.64.1:8080,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com,http://10.2.65:8080"
-)
-allowed_origins = [o.strip() for o in origins.split(",") if o.strip()]
+allowed_origins = _load_cors_origins()
 
-# Allow requests from the frontend hosts configured in FASTAPI_CORS_ORIGINS.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -70,7 +76,6 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api")
-
 # Include the text router under /api/text
 app.include_router(text_router, prefix="/api/t")
 
@@ -81,6 +86,7 @@ async def log_env():
     # are available when the service starts.
     load_env_from_redis()
     from DataStorageRetrieval.arrow_client import get_minio_prefix
+
     prefix = get_minio_prefix()
     print(
         "🚀 env CLIENT_NAME=%s APP_NAME=%s PROJECT_NAME=%s PREFIX=%s"
@@ -91,4 +97,3 @@ async def log_env():
             prefix,
         )
     )
-

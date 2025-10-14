@@ -32,10 +32,13 @@
 
 .table-base {
   @apply min-w-[700px] w-full border-collapse text-sm;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed !important; /* Ensure consistent column widths */
 }
 
 .table-header {
-  @apply sticky top-0 z-10 bg-green-50 text-slate-600;
+  @apply sticky top-0 z-10 bg-white text-black;
 }
 
 .table-header-row {
@@ -43,7 +46,14 @@
 }
 
 .table-header-cell {
-  @apply px-5 py-3 text-left font-bold text-gray-800;
+  @apply px-5 py-3 text-left font-bold text-black bg-white;
+  width: 150px; /* Default column width - removed !important to allow dynamic changes */
+  min-width: 50px;
+  max-width: 500px;
+  font-weight: 700 !important; /* Ensure bold text */
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
 }
 
 .table-row {
@@ -51,7 +61,13 @@
 }
 
 .table-cell {
-  @apply px-5 py-3 text-slate-700;
+  @apply px-5 py-3 text-slate-700 text-left;
+  width: 150px; /* Default column width - removed !important to allow dynamic changes */
+  min-width: 50px;
+  max-width: 500px;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
 }
 
 .table-cell-primary {
@@ -74,4 +90,212 @@
 /* Custom header styles */
 .table-custom-header {
   @apply bg-white;
+}
+
+/* Frozen column styles */
+.frozen-column {
+  @apply bg-white;
+  border-right: 2px solid #22c55e !important;
+  border-left: 1px solid #d1d5db !important;
+  border-top: 1px solid #d1d5db !important;
+  border-bottom: 1px solid #d1d5db !important;
+  box-shadow: 2px 0 4px rgba(0,0,0,0.1);
+  position: sticky !important;
+  background-color: white !important;
+  opacity: 1 !important;
+  z-index: 1001 !important;
+}
+
+/* Ensure no gaps between frozen columns */
+.table-header-cell.frozen-column,
+.table-cell.frozen-column {
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Fix for frozen column positioning */
+.table-base {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+}
+
+/* Ensure frozen columns stick together */
+.frozen-column {
+  margin-right: 0 !important;
+  border-right: 2px solid #22c55e !important;
+  background-color: white !important;
+  z-index: 10 !important;
+}
+
+/* Last frozen column should have margin to separate from scrollable content */
+.frozen-column:last-of-type {
+  margin-right: 2px !important;
+}
+
+/* Ensure frozen columns completely cover scrolling content */
+.table-header-cell.frozen-column {
+  background-color: white !important;
+  z-index: 1000 !important;
+  opacity: 1 !important;
+  position: sticky !important;
+}
+
+.table-cell.frozen-column {
+  background-color: white !important;
+  z-index: 999 !important;
+  opacity: 1 !important;
+  position: sticky !important;
+}
+
+/* Remove any gaps between frozen columns */
+.frozen-column + .frozen-column {
+  margin-left: 0 !important;
+  border-left: none !important;
+}
+
+/* Ensure frozen columns are completely opaque and cover content */
+.table-overflow {
+  position: relative;
+  overflow-x: auto;
+}
+
+.frozen-column {
+  isolation: isolate !important;
+  will-change: transform !important;
+}
+
+/* Ensure scrolling content stays behind frozen columns */
+.table-base {
+  position: relative;
+}
+
+/* Force frozen columns to be on top of everything */
+.table-header-cell.frozen-column,
+.table-cell.frozen-column {
+  position: sticky !important;
+  z-index: 1000 !important;
+  background-color: white !important;
+  opacity: 1 !important;
+}
+
+/* Remove overlay - frozen columns will handle background blocking */
+
+/* Ensure frozen columns are above the overlay */
+.table-header-cell.frozen-column,
+.table-cell.frozen-column {
+  z-index: 1001 !important;
+}
+
+/* Frozen header cell specific styles */
+.table-header-cell.frozen-column {
+  border-right: 1px solid #d1d5db !important;
+  border-left: 1px solid #d1d5db !important;
+  border-top: 1px solid #d1d5db !important;
+  border-bottom: 1px solid #d1d5db !important;
+  background-color: white !important;
+}
+
+/* Frozen table cell specific styles */
+.table-cell.frozen-column {
+  border-right: 1px solid #d1d5db !important;
+  border-left: 1px solid #d1d5db !important;
+  border-top: 1px solid #d1d5db !important;
+  border-bottom: 1px solid #d1d5db !important;
+  background-color: white !important;
+}
+
+/* First frozen column (usually # column) should have left border */
+.table-header-cell.frozen-column:first-child,
+.table-cell.frozen-column:first-child {
+  border-left: 2px solid #22c55e !important;
+}
+
+/* Last frozen column should have stronger right border */
+.table-header-cell.frozen-column:last-child,
+.table-cell.frozen-column:last-child {
+  border-right: 2px solid #22c55e !important;
+}
+
+/* Excel-like column resize handle styles */
+.column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 10;
+  transition: background-color 0.15s ease;
+}
+
+.column-resize-handle:hover {
+  background: #3b82f6;
+}
+
+.column-resize-handle:active {
+  background: #1d4ed8;
+}
+
+/* Excel-like cell content styling */
+.table-cell-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+/* Excel-like header content styling */
+.table-header-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  font-weight: 700;
+}
+
+/* Ensure consistent spacing and no gaps */
+.table-header-cell,
+.table-cell {
+  margin: 0 !important;
+  border-spacing: 0 !important;
+}
+
+/* Remove any default margins/padding that could cause gaps */
+.table-base td,
+.table-base th {
+  margin: 0 !important;
+  padding: 12px 20px !important; /* Consistent padding */
+  border-spacing: 0 !important;
+}
+
+/* Special styling for # column (row number/selection column) */
+.table-header-cell.row-number-column,
+.table-cell.row-number-column {
+  width: 64px !important; /* Smaller fixed width for # column */
+  min-width: 64px !important;
+  max-width: 64px !important;
+  padding: 8px 4px !important; /* Reduced padding for smaller column */
+  text-align: center !important;
+}
+
+/* Ensure # column is always frozen when freeze pane is active */
+.row-number-column.frozen-column {
+  position: sticky !important;
+  left: 0px !important;
+  z-index: 1001 !important;
+  background-color: white !important;
+  border-left: 2px solid #22c55e !important;
+  border-right: 1px solid #d1d5db !important;
+  border-top: 1px solid #d1d5db !important;
+  border-bottom: 1px solid #d1d5db !important;
 }

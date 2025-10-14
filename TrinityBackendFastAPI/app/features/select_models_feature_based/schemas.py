@@ -94,6 +94,7 @@ class FilteredModel(BaseModel):
     # Add dynamic fields for different methods
     self_beta: Optional[float] = None
     self_avg: Optional[float] = None
+    self_roi: Optional[float] = None
 
 # ---------- Weighted ensemble (blend) ----------
 
@@ -293,3 +294,10 @@ class ScopeListResponse(BaseModel):
     total_scopes: int
     scopes: List[ScopeSummary]
     pagination: Dict[str, int]
+
+class SCurveRequest(BaseModel):
+    client_name: str
+    app_name: str
+    project_name: str
+    combination_name: str
+    model_name: str

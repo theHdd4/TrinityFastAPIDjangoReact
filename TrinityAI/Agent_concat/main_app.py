@@ -52,6 +52,9 @@ agent = SmartConcatAgent(
 class ConcatRequest(BaseModel):
     prompt: str
     session_id: Optional[str] = None
+    client_name: str = ""
+    app_name: str = ""
+    project_name: str = ""
 
 @router.post("/concat")
 def concatenate_files(request: ConcatRequest):
@@ -64,7 +67,8 @@ def concatenate_files(request: ConcatRequest):
     
     try:
         # Process with complete memory context
-        result = agent.process_request(request.prompt, request.session_id)
+        result = agent.process_request(request.prompt, request.session_id, 
+                                     request.client_name, request.app_name, request.project_name)
 
         # Add timing
         processing_time = round(time.time() - start_time, 2)
@@ -74,6 +78,9 @@ def concatenate_files(request: ConcatRequest):
         logger.info(f"Success: {result.get('success', False)}")
         logger.info(f"Used Memory: {result.get('used_memory', False)}")
         logger.info(f"Processing Time: {processing_time}s")
+
+        # 🔧 PRESERVE LLM SMART RESPONSE: Don't override the smart_response from LLM
+        # The LLM already provides detailed smart_response with file information
 
         if result.get("success") and result.get("concat_json"):
             cfg = result["concat_json"]

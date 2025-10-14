@@ -65,6 +65,12 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
   const [combinationStatusMinimized, setCombinationStatusMinimized] = useState(() => {
     return data.combinationStatusMinimized || false;
   });
+  
+  // State for application type
+  const [applicationType, setApplicationType] = useState<string>(() => {
+    return data.applicationType || 'general';
+  });
+  const [isLoadingApplicationType, setIsLoadingApplicationType] = useState(false);
   // Refs to track previous values for auto-update
   const prevSelectedVariable = useRef<any>(null);
   const prevSelectedMethod = useRef<string | null>(null);
@@ -95,7 +101,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
   const [yoyChartSortOrder, setYoyChartSortOrder] = useState<'asc' | 'desc' | null>(null);
 
   // Chart settings for predicted vs actual chart
-  const [predictedVsActualChartType, setPredictedVsActualChartType] = useState<'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'>('scatter_chart');
+  const [predictedVsActualChartType, setPredictedVsActualChartType] = useState<'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'>('line_chart');
   const [predictedVsActualChartTheme, setPredictedVsActualChartTheme] = useState<string>('default');
   const [predictedVsActualChartDataLabels, setPredictedVsActualChartDataLabels] = useState<boolean>(false);
   const [predictedVsActualChartSortOrder, setPredictedVsActualChartSortOrder] = useState<'asc' | 'desc' | null>(null);
@@ -211,6 +217,26 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                      ensemble.weighted_metrics[`Weighted_Avg_${variable}`] || 
                      ensemble.weighted_metrics[`Avg_${variable}`] ||
                      ensemble.weighted_metrics[variable];
+            } else if (data.selectedMethod === 'roi') {
+              const roiKeys = [
+                `${variable}_roi`,
+                `Weighted_ROI_${variable}`,
+                `ROI_${variable}`,
+                `${variable.toLowerCase()}_roi`,
+                variable
+              ];
+              console.log(`🔍 Looking for ROI for variable: ${variable}`);
+              console.log(`🔍 Checking keys:`, roiKeys);
+              console.log(`🔍 Weighted metrics keys:`, Object.keys(ensemble.weighted_metrics || {}));
+              console.log(`🔍 Aliases keys:`, Object.keys(ensemble.aliases || {}));
+              
+              value = ensemble.weighted_metrics[`${variable}_roi`] || 
+                     ensemble.weighted_metrics[`Weighted_ROI_${variable}`] || 
+                     ensemble.weighted_metrics[`ROI_${variable}`] ||
+                     ensemble.aliases[`${variable.toLowerCase()}_roi`] ||
+                     ensemble.weighted_metrics[variable];
+              
+              console.log(`🔍 Final ROI value for ${variable}:`, value);
             }
             
             ensembleData[variable] = value;
@@ -273,6 +299,45 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     }
   }, [data.elasticityData, data.selectedDataset, data.selectedCombinationId, data.ensembleMethod]);
 
+  // Fetch S-curve data when model is selected
+  useEffect(() => {
+    if (data.selectedCombinationId && data.selectedModel && data.selectedModel !== 'no-models') {
+      fetchSCurveData(data.selectedCombinationId, data.selectedModel);
+    }
+  }, [data.selectedCombinationId, data.selectedModel]);
+
+  // Fetch application type when component mounts
+  useEffect(() => {
+    if (atomId) {
+      fetchApplicationType();
+    }
+  }, [atomId]);
+
+  // Fetch all data when Ensemble is selected as default
+  useEffect(() => {
+    if (data.selectedCombinationId && data.selectedModel === 'Ensemble' && data.selectedDataset && data.weightedEnsembleData && data.weightedEnsembleData.length > 0) {
+      // Fetch ensemble performance metrics
+      const ensemble = data.weightedEnsembleData[0];
+      if (ensemble && ensemble.weighted_metrics) {
+        const ensemblePerformance = [
+          { name: 'MAPE Train', value: ensemble.weighted_metrics?.mape_train || 0 },
+          { name: 'MAPE Test', value: ensemble.weighted_metrics?.mape_test || 0 },
+          { name: 'R² Train', value: ensemble.weighted_metrics?.r2_train || 0 },
+          { name: 'R² Test', value: ensemble.weighted_metrics?.r2_test || 0 },
+          { name: 'AIC', value: ensemble.weighted_metrics?.aic || 0 },
+          { name: 'BIC', value: ensemble.weighted_metrics?.bic || 0 }
+        ];
+        handleDataChange({ selectedModelPerformance: ensemblePerformance });
+        
+        // Fetch all ensemble data
+        fetchActualVsPredictedEnsemble(data.selectedCombinationId);
+        fetchModelContributionEnsemble(data.selectedCombinationId, data.selectedDataset);
+        fetchYoYDataEnsemble(data.selectedCombinationId);
+        fetchSCurveData(data.selectedCombinationId, 'Ensemble');
+      }
+    }
+  }, [data.selectedCombinationId, data.selectedModel, data.selectedDataset, data.weightedEnsembleData]);
+
   // Fetch cardinality data when dataset is selected
   useEffect(() => {
     if (data.selectedDataset) {
@@ -329,12 +394,13 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
   const handleCombinationChange = (value: string) => {
     handleDataChange({ 
       selectedCombinationId: value,
-      selectedModel: 'Select Model to View Model Performance',
+      selectedModel: 'Ensemble',
       selectedModelPerformance: [],
       actualVsPredictedData: [],
       contributionData: [],
       yoyData: [],
       weightedEnsembleData: [],
+      sCurveData: null,
       elasticityData: [], // Clear graph data
       modelFilters: {} // Clear filter data
     });
@@ -751,8 +817,29 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
             // Get the correct column value based on selected method
             // Handle special case for "average" method which uses "avg" in field names
             const methodSuffix = data.selectedMethod === 'average' ? 'avg' : data.selectedMethod;
-            const columnName = `self_${methodSuffix}`;
-            value = item[columnName] || 0;
+            let columnName = `self_${methodSuffix}`;
+            
+            // For ROI, try multiple column name patterns
+            if (data.selectedMethod === 'roi') {
+              // Try different ROI column patterns
+              const roiPatterns = [
+                `self_roi`,
+                `${variable}_roi`,
+                `${variable.toUpperCase()}_ROI`,
+                `ROI_${variable}`,
+                `roi_${variable}`,
+                `${variable}_CPRP_VALUE`
+              ];
+              
+              for (const pattern of roiPatterns) {
+                if (item[pattern] !== undefined && item[pattern] !== null) {
+                  value = item[pattern];
+                  break;
+                }
+              }
+            } else {
+              value = item[columnName] || 0;
+            }
           
           return {
             name: item.model_name || 'Unknown Model',
@@ -1052,8 +1139,29 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           // Get the correct column value based on selected method
           // Handle special case for "average" method which uses "avg" in field names
           const methodSuffix = data.selectedMethod === 'average' ? 'avg' : data.selectedMethod;
-          const columnName = `self_${methodSuffix}`;
-          value = item[columnName] || 0;
+          let columnName = `self_${methodSuffix}`;
+          
+          // For ROI, try multiple column name patterns
+          if (data.selectedMethod === 'roi') {
+            // Try different ROI column patterns
+            const roiPatterns = [
+              `self_roi`,
+              `${variable}_roi`,
+              `${variable.toUpperCase()}_ROI`,
+              `ROI_${variable}`,
+              `roi_${variable}`,
+              `${variable}_CPRP_VALUE`
+            ];
+            
+            for (const pattern of roiPatterns) {
+              if (item[pattern] !== undefined && item[pattern] !== null) {
+                value = item[pattern];
+                break;
+              }
+            }
+          } else {
+            value = item[columnName] || 0;
+          }
           
           return {
             name: item.model_name || 'Unknown Model',
@@ -1159,8 +1267,29 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           // Get the correct column value based on selected method
           // Handle special case for "average" method which uses "avg" in field names
           const methodSuffix = data.selectedMethod === 'average' ? 'avg' : data.selectedMethod;
-          const columnName = `self_${methodSuffix}`;
-          value = item[columnName] || 0;
+          let columnName = `self_${methodSuffix}`;
+          
+          // For ROI, try multiple column name patterns
+          if (data.selectedMethod === 'roi') {
+            // Try different ROI column patterns
+            const roiPatterns = [
+              `self_roi`,
+              `${variable}_roi`,
+              `${variable.toUpperCase()}_ROI`,
+              `ROI_${variable}`,
+              `roi_${variable}`,
+              `${variable}_CPRP_VALUE`
+            ];
+            
+            for (const pattern of roiPatterns) {
+              if (item[pattern] !== undefined && item[pattern] !== null) {
+                value = item[pattern];
+                break;
+              }
+            }
+          } else {
+            value = item[columnName] || 0;
+          }
           
           return {
             name: item.model_name || 'Unknown Model',
@@ -1224,7 +1353,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
   // Function to save selected model
   const handleSaveModel = async () => {
-    if (!data.selectedModel || data.selectedModel === 'Select Model to View Model Performance' || !data.selectedDataset) {
+    if (!data.selectedModel || data.selectedModel === 'no-models' || !data.selectedDataset) {
       return;
     }
 
@@ -1446,11 +1575,18 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         const suspiciousActual = result.actual_values.filter(val => Math.abs(val) > 1000);
         
         
-        // Convert arrays to scatter chart format
+        // Convert arrays to chart format with dates
         const actualVsPredictedData = result.actual_values.map((actual: number, index: number) => ({
+          date: result.dates ? result.dates[index] : `Period ${index + 1}`,
           actual: actual,
           predicted: result.predicted_values[index] || 0
-        })).sort((a, b) => a.actual - b.actual); // Sort by actual values (low to high)
+        })).sort((a, b) => {
+          // Sort by date if available, otherwise by actual values
+          if (result.dates) {
+            return new Date(a.date).getTime() - new Date(b.date).getTime();
+          }
+          return a.actual - b.actual;
+        });
         
         
         // Use all data points without filtering extreme outliers
@@ -1571,13 +1707,25 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       // Transform the data to match the expected format
       if (result.actual_values && result.predicted_values && Array.isArray(result.actual_values)) {
         const actualVsPredictedData = result.actual_values.map((actual: number, index: number) => ({
+          date: result.dates ? result.dates[index] : `Period ${index + 1}`,
           actual: actual,
           predicted: result.predicted_values[index] || 0
-        })).sort((a, b) => a.actual - b.actual); // Sort by actual values (low to high)
+        })).sort((a, b) => {
+          // Sort by date if available, otherwise by actual values
+          if (result.dates) {
+            return new Date(a.date).getTime() - new Date(b.date).getTime();
+          }
+          return a.actual - b.actual;
+        });
         
+        // Transform data for single y-axis with legend
+        const transformedData = actualVsPredictedData.flatMap(item => [
+          { date: item.date, value: item.actual, series: 'Actual' },
+          { date: item.date, value: item.predicted, series: 'Predicted' }
+        ]);
         
         handleDataChange({
-          actualVsPredictedData: actualVsPredictedData,
+          actualVsPredictedData: transformedData,
           actualVsPredictedMetrics: result.performance_metrics
         });
         
@@ -1763,6 +1911,18 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           y_pred_at_mean: item.y_pred_at_mean
         }));
         
+        // Debug logging for ROI data
+        console.log('🔍 Ensemble data received:', ensembleData);
+        if (ensembleData[0]?.aliases) {
+          console.log('🔍 Ensemble aliases:', ensembleData[0].aliases);
+          const roiAliases = Object.keys(ensembleData[0].aliases).filter(key => key.includes('roi'));
+          console.log('🔍 ROI aliases found:', roiAliases);
+        }
+        if (ensembleData[0]?.weighted_metrics) {
+          const roiMetrics = Object.keys(ensembleData[0].weighted_metrics).filter(key => key.toLowerCase().includes('roi'));
+          console.log('🔍 ROI metrics found:', roiMetrics);
+        }
+        
         handleDataChange({ weightedEnsembleData: ensembleData });
       } else {
         handleDataChange({ weightedEnsembleData: [] });
@@ -1770,6 +1930,98 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       
     } catch (error) {
       handleDataChange({ weightedEnsembleData: [] });
+    }
+  };
+
+  // Function to fetch S-curve data
+  const fetchSCurveData = async (combinationId: string, modelName: string) => {
+    if (!combinationId || combinationId === 'all' || !modelName || modelName === 'no-models') {
+      return;
+    }
+    
+    try {
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+
+      const baseUrl = `${SELECT_API}/models/s-curve`;
+      
+      const requestBody = {
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || '',
+        combination_name: combinationId,
+        model_name: modelName
+      };
+
+      const response = await fetch(baseUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to fetch S-curve data');
+      }
+      
+      const result = await response.json();
+      
+      if (result && result.success && result.s_curves) {
+        handleDataChange({ sCurveData: result });
+        console.log('🔍 S-curve data received:', result);
+      } else {
+        handleDataChange({ sCurveData: null });
+      }
+      
+    } catch (error) {
+      console.error('Error fetching S-curve data:', error);
+      handleDataChange({ sCurveData: null });
+    }
+  };
+
+  // Function to fetch application type
+  const fetchApplicationType = async () => {
+    try {
+      setIsLoadingApplicationType(true);
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+
+      const baseUrl = `${SELECT_API}/application-type`;
+      
+      const params = new URLSearchParams({
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
+      });
+
+      const response = await fetch(`${baseUrl}?${params}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to fetch application type');
+      }
+      
+      const result = await response.json();
+      
+      if (result && result.application_type) {
+        setApplicationType(result.application_type);
+        handleDataChange({ applicationType: result.application_type });
+        console.log('🔍 Application type received:', result.application_type);
+      }
+      
+    } catch (error) {
+      console.error('Error fetching application type:', error);
+      setApplicationType('general');
+      handleDataChange({ applicationType: 'general' });
+    } finally {
+      setIsLoadingApplicationType(false);
     }
   };
 
@@ -2462,6 +2714,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     <SelectItem value="elasticity">Elasticity</SelectItem>
                     <SelectItem value="beta">Beta</SelectItem>
                     <SelectItem value="average">Average</SelectItem>
+                    <SelectItem value="roi">ROI</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -2490,11 +2743,10 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     yAxisLabel={data.selectedMethod ? data.selectedMethod.charAt(0).toUpperCase() + data.selectedMethod.slice(1) : 'Value'}
                     theme={methodByModelChartTheme}
                     enableScroll={false}
-                    width="100%"
                     height={300}
                     showDataLabels={methodByModelChartDataLabels}
                     showLegend={true}
-                    sortOrder={methodByModelChartSortOrder}
+                    sortOrder={methodByModelChartSortOrder as 'asc' | 'desc' | null}
                     onThemeChange={handleMethodByModelChartThemeChange}
                     onChartTypeChange={handleMethodByModelChartTypeChange}
                     onDataLabelsToggle={handleMethodByModelChartDataLabelsChange}
@@ -3341,7 +3593,17 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                           <Select value={data.selectedModel} onValueChange={(value) => {
                 handleDataChange({ selectedModel: value });
                 if (value && value !== 'no-models' && data.selectedDataset && data.selectedCombinationId) {
+                  // Clear existing data first
+                  handleDataChange({
+                    selectedModelPerformance: [],
+                    actualVsPredictedData: [],
+                    contributionData: [],
+                    yoyData: [],
+                    sCurveData: null
+                  });
+                  
                   if (value === 'Ensemble') {
+                    console.log('🔄 Fetching Ensemble data for:', value);
                     // Use ensemble data for all calculations
                     if (data.weightedEnsembleData && data.weightedEnsembleData.length > 0) {
                       const ensemble = data.weightedEnsembleData[0];
@@ -3358,26 +3620,43 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                       handleDataChange({ selectedModelPerformance: ensemblePerformance });
                       
                       // Calculate actual vs predicted using ensemble betas but same source file concept
+                      console.log('📊 Fetching Actual vs Predicted Ensemble...');
                       fetchActualVsPredictedEnsemble(data.selectedCombinationId);
                       
                       // Fetch ensemble contribution data
+                      console.log('📊 Fetching Contribution Ensemble...');
                       fetchModelContributionEnsemble(data.selectedCombinationId, data.selectedDataset);
                       
                       // Calculate YoY using ensemble betas but same source file concept
+                      console.log('📊 Fetching YoY Ensemble...');
                       fetchYoYDataEnsemble(data.selectedCombinationId);
+                      
+                      // Fetch S-curve data for ensemble
+                      console.log('📊 Fetching S-Curve Ensemble...');
+                      fetchSCurveData(data.selectedCombinationId, value);
                     }
                   } else {
+                    console.log('🔄 Fetching Individual model data for:', value);
                     // Use individual model data
+                    console.log('📊 Fetching Performance...');
                     fetchModelPerformance(value, data.selectedCombinationId, data.selectedDataset);
+                    console.log('📊 Fetching Actual vs Predicted...');
                     fetchActualVsPredicted(value, data.selectedCombinationId);
+                    console.log('📊 Fetching Contribution...');
                     fetchModelContribution(value, data.selectedCombinationId, data.selectedDataset);
+                    console.log('📊 Fetching YoY...');
                     fetchYoYData(value, data.selectedCombinationId);
+                    console.log('📊 Fetching Weighted Ensemble...');
                     fetchWeightedEnsembleData(data.selectedDataset, data.selectedCombinationId);
+                    
+                    // Fetch S-curve data for individual model
+                    console.log('📊 Fetching S-Curve...');
+                    fetchSCurveData(data.selectedCombinationId, value);
                   }
                 }
               }}>
               <SelectTrigger className="w-full max-w-md border-orange-200 focus:border-orange-500 focus:ring-orange-200">
-                <SelectValue placeholder="Select Model to View Model Performance" />
+                <SelectValue placeholder="Ensemble (Default)" />
               </SelectTrigger>
               <SelectContent className="border-orange-200">
                 {data.elasticityData && data.elasticityData.length > 0 ? (
@@ -3441,17 +3720,17 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                   <RechartsChartRenderer
                     type={predictedVsActualChartType}
                     data={data.actualVsPredictedData}
-                    xField="actual"
-                    yField="predicted"
-                    xAxisLabel="Actual"
-                    yAxisLabel="Predicted"
+                    xField="date"
+                    yField="value"
+                    legendField="series"
+                    xAxisLabel="Date"
+                    yAxisLabel="Value"
                     theme={predictedVsActualChartTheme}
                     enableScroll={false}
-                    width="100%"
                     height={300}
                     showDataLabels={predictedVsActualChartDataLabels}
-                    showLegend={predictedVsActualChartType === 'pie_chart'}
-                    sortOrder={predictedVsActualChartSortOrder}
+                    showLegend={true}
+                    sortOrder={predictedVsActualChartSortOrder as 'asc' | 'desc' | null}
                     onThemeChange={handlePredictedVsActualChartThemeChange}
                     onChartTypeChange={handlePredictedVsActualChartTypeChange}
                     onDataLabelsToggle={handlePredictedVsActualChartDataLabelsChange}
@@ -3470,6 +3749,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
               )}
             </div>
 
+
             {/* Contribution Chart */}
             <div className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
                 <h5 className="text-sm font-medium text-orange-800 mb-3">
@@ -3486,11 +3766,10 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                       yAxisLabel="Contribution"
                       theme={contributionChartTheme}
                       enableScroll={false}
-                      width="100%"
                       height={300}
                       showDataLabels={contributionChartDataLabels}
                       showLegend={contributionChartType === 'pie_chart'}
-                      sortOrder={contributionChartSortOrder}
+                      sortOrder={contributionChartSortOrder as 'asc' | 'desc' | null}
                       onThemeChange={handleContributionChartThemeChange}
                       onChartTypeChange={handleContributionChartTypeChange}
                       onDataLabelsToggle={handleContributionChartDataLabelsChange}
@@ -3523,11 +3802,10 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     yAxisLabel="Growth Value"
                     theme={yoyChartTheme}
                     enableScroll={false}
-                    width="100%"
                     height={300}
                     showDataLabels={yoyChartDataLabels}
                     showLegend={yoyChartType === 'pie_chart'}
-                    sortOrder={yoyChartSortOrder}
+                    sortOrder={yoyChartSortOrder as 'asc' | 'desc' | null}
                     onThemeChange={handleYoyChartThemeChange}
                     onChartTypeChange={handleYoyChartTypeChange}
                     onDataLabelsToggle={handleYoyChartDataLabelsChange}
@@ -3551,11 +3829,53 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
           </div>
 
+          {/* S-Curve Analysis - Full Width - Only for MMM applications */}
+          {applicationType === 'mmm' && (
+          <div className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 mb-6">
+            {data.sCurveData && data.sCurveData.success ? (
+              <div className="grid grid-cols-2 gap-6">
+                {Object.entries(data.sCurveData.s_curves).slice(0, 2).map(([variable, curveData]: [string, any]) => (
+                  <div key={variable} className="border border-gray-200 rounded-lg p-4">
+                    <div className="w-full h-[350px]">
+                      <RechartsChartRenderer
+                        type="line_chart"
+                        data={curveData.percent_changes.map((percent: number, index: number) => ({
+                          name: `${percent > 0 ? '+' : ''}${percent.toFixed(0)}%`,
+                          value: curveData.total_volumes[index] || 0,
+                          percentage: percent
+                        }))}
+                        xField="name"
+                        yField="value"
+                        xAxisLabel={variable.replace(/_/g, ' ')}
+                        yAxisLabel="Total Volume"
+                        theme="default"
+                        enableScroll={false}
+                        height={350}
+                        showDataLabels={false}
+                        showLegend={false}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="h-[300px] flex items-center justify-center">
+                <p className="text-xs text-orange-600 text-center">
+                  {data.selectedModel && data.selectedModel !== 'no-models' 
+                    ? 'Loading S-curve data...' 
+                    : 'Select a model to view S-curve analysis'
+                  }
+                </p>
+              </div>
+            )}
+          </div>
+          )}
+
           {/* Save Results */}
           <div className="pt-4 border-t border-orange-200/50">
             <Button 
               onClick={handleSaveModel}
-              disabled={isSaving || !data.selectedModel || data.selectedModel === 'Select Model to View Model Performance'}
+              disabled={isSaving || !data.selectedModel || data.selectedModel === 'no-models'}
               className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Save className="h-4 w-4 mr-2" />
