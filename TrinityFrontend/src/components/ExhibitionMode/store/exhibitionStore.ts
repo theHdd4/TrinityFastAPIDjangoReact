@@ -78,6 +78,38 @@ export interface DroppedAtom {
   metadata?: Record<string, any>;
 }
 
+export interface SlideObject {
+  id: string;
+  type: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  zIndex: number;
+  groupId?: string | null;
+  props: Record<string, unknown>;
+}
+
+export const DEFAULT_CANVAS_OBJECT_WIDTH = 420;
+export const DEFAULT_CANVAS_OBJECT_HEIGHT = 320;
+export const CANVAS_SNAP_GRID = 8;
+
+export const createSlideObjectFromAtom = (
+  atom: DroppedAtom,
+  overrides: Partial<SlideObject> = {},
+): SlideObject => ({
+  id: atom.id,
+  type: 'atom',
+  x: 96,
+  y: 96,
+  width: DEFAULT_CANVAS_OBJECT_WIDTH,
+  height: DEFAULT_CANVAS_OBJECT_HEIGHT,
+  zIndex: 1,
+  groupId: null,
+  props: { atom } as Record<string, unknown>,
+  ...overrides,
+});
+
 export interface LayoutCard {
   id: string;
   atoms: DroppedAtom[];
@@ -96,10 +128,17 @@ interface ExhibitionStore {
   catalogueCards: LayoutCard[];
   catalogueEntries: ExhibitionAtomPayload[];
   lastLoadedContext: ProjectContext | null;
+  slideObjectsByCardId: Record<string, SlideObject[]>;
   loadSavedConfiguration: (context?: ProjectContext | null) => Promise<void>;
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => void;
   addBlankSlide: (afterSlideIndex?: number) => LayoutCard | null;
   setCards: (cards: LayoutCard[] | unknown) => void;
+  addSlideObject: (cardId: string, object: SlideObject) => void;
+  bulkUpdateSlideObjects: (cardId: string, updates: Record<string, Partial<SlideObject>>) => void;
+  removeSlideObject: (cardId: string, objectId: string) => void;
+  bringSlideObjectsToFront: (cardId: string, objectIds: string[]) => void;
+  sendSlideObjectsToBack: (cardId: string, objectIds: string[]) => void;
+  groupSlideObjects: (cardId: string, objectIds: string[], groupId: string | null) => void;
   reset: () => void;
 }
 
@@ -266,6 +305,61 @@ const mergeCatalogueAtoms = (
   const start = Array.isArray(base) ? base : [];
   const extra = Array.isArray(additions) ? additions : [];
   return dedupeAtoms([...start, ...extra]);
+};
+
+const normaliseZIndices = (objects: SlideObject[]): SlideObject[] =>
+  objects.map((object, index) => ({ ...object, zIndex: index + 1 }));
+
+const synchroniseSlideObjects = (
+  existing: SlideObject[] | undefined,
+  card: LayoutCard,
+): SlideObject[] => {
+  const atoms = Array.isArray(card.atoms) ? card.atoms : [];
+  const atomMap = new Map(atoms.map(atom => [atom.id, atom]));
+  const used = new Set<string>();
+  const next: SlideObject[] = [];
+
+  if (Array.isArray(existing)) {
+    existing.forEach(object => {
+      if (object.type === 'atom') {
+        const props = object.props as Record<string, unknown> | undefined;
+        const atomId = typeof props?.atom === 'object' && props?.atom
+          ? (props.atom as DroppedAtom).id
+          : object.id;
+        const atom = atomMap.get(atomId);
+        if (!atom) {
+          return;
+        }
+        used.add(atom.id);
+        next.push({
+          ...object,
+          type: 'atom',
+          props: { ...(object.props || {}), atom },
+        });
+      } else {
+        next.push({ ...object });
+      }
+    });
+  }
+
+  if (atoms.length > 0) {
+    atoms.forEach((atom, index) => {
+      if (used.has(atom.id)) {
+        return;
+      }
+      const fallbackY = 96 + (next.length + index) * 40;
+      next.push(
+        createSlideObjectFromAtom(atom, {
+          id: atom.id,
+          x: 96,
+          y: fallbackY,
+          zIndex: next.length + index + 1,
+        }),
+      );
+    });
+  }
+
+  return normaliseZIndices(next);
 };
 
 const normalizeAtom = (component: unknown): DroppedAtom | null => {
@@ -532,6 +626,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   catalogueCards: [],
   catalogueEntries: [],
   lastLoadedContext: null,
+  slideObjectsByCardId: {},
 
   loadSavedConfiguration: async (explicitContext?: ProjectContext | null) => {
     let loadedCards: LayoutCard[] = [];
@@ -613,6 +708,11 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         ? computeCatalogueCards(remoteCards)
         : computeCatalogueCards(ensuredCards);
 
+      const nextSlideObjects: Record<string, SlideObject[]> = {};
+      ensuredCards.forEach(card => {
+        nextSlideObjects[card.id] = synchroniseSlideObjects(state.slideObjectsByCardId[card.id], card);
+      });
+
       console.info(
         `[Exhibition] Exhibition catalogue ready with ${nextCatalogueCards.length} catalogue card(s)` +
           (resolvedContext ? ` for ${contextLabel}` : ' without a remote context'),
@@ -657,6 +757,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         catalogueCards: nextCatalogueCards,
         catalogueEntries,
         lastLoadedContext: resolvedContext,
+        slideObjectsByCardId: nextSlideObjects,
       };
     });
   },
@@ -712,11 +813,16 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       }
 
       const exhibitedCards = updatedCards.filter(card => card.isExhibited);
+      const nextSlideObjects: Record<string, SlideObject[]> = {};
+      updatedCards.forEach(card => {
+        nextSlideObjects[card.id] = synchroniseSlideObjects(state.slideObjectsByCardId[card.id], card);
+      });
       return {
         cards: updatedCards,
         exhibitedCards,
         catalogueCards: state.catalogueCards,
         catalogueEntries: state.catalogueEntries,
+        slideObjectsByCardId: nextSlideObjects,
       };
     });
   },
@@ -745,11 +851,17 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       cards.splice(insertPosition, 0, newCard);
       const exhibitedCards = cards.filter(card => card.isExhibited);
 
+      const slideObjectsByCardId = {
+        ...state.slideObjectsByCardId,
+        [newCard.id]: synchroniseSlideObjects([], newCard),
+      };
+
       return {
         cards,
         exhibitedCards,
         catalogueCards: state.catalogueCards,
         catalogueEntries: state.catalogueEntries,
+        slideObjectsByCardId,
       };
     });
 
@@ -762,12 +874,143 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     const cardsWithDefaults = safeCards.map(withPresentationDefaults);
 
     const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
-    set(state => ({
-      cards: cardsWithDefaults,
-      exhibitedCards,
-      catalogueCards: state.catalogueCards,
-      catalogueEntries: state.catalogueEntries,
-    }));
+    set(state => {
+      const nextSlideObjects: Record<string, SlideObject[]> = {};
+      cardsWithDefaults.forEach(card => {
+        nextSlideObjects[card.id] = synchroniseSlideObjects(state.slideObjectsByCardId[card.id], card);
+      });
+
+      return {
+        cards: cardsWithDefaults,
+        exhibitedCards,
+        catalogueCards: state.catalogueCards,
+        catalogueEntries: state.catalogueEntries,
+        slideObjectsByCardId: nextSlideObjects,
+      };
+    });
+  },
+  addSlideObject: (cardId: string, object: SlideObject) => {
+    set(state => {
+      const existing = state.slideObjectsByCardId[cardId] ?? [];
+      const maxZ = existing.reduce((acc, entry) => Math.max(acc, entry.zIndex ?? 0), 0);
+      const prepared: SlideObject = {
+        ...object,
+        zIndex: typeof object.zIndex === 'number' ? object.zIndex : maxZ + 1,
+      };
+      const index = existing.findIndex(entry => entry.id === prepared.id);
+      const nextList =
+        index === -1
+          ? [...existing, prepared]
+          : existing.map(entry => (entry.id === prepared.id ? { ...entry, ...prepared } : entry));
+
+      return {
+        slideObjectsByCardId: {
+          ...state.slideObjectsByCardId,
+          [cardId]: normaliseZIndices(nextList),
+        },
+      };
+    });
+  },
+  bulkUpdateSlideObjects: (cardId: string, updates: Record<string, Partial<SlideObject>>) => {
+    set(state => {
+      const existing = state.slideObjectsByCardId[cardId] ?? [];
+      let changed = false;
+      const next = existing.map(object => {
+        const patch = updates[object.id];
+        if (!patch) {
+          return object;
+        }
+        changed = true;
+        return { ...object, ...patch };
+      });
+
+      if (!changed) {
+        return {};
+      }
+
+      return {
+        slideObjectsByCardId: {
+          ...state.slideObjectsByCardId,
+          [cardId]: next,
+        },
+      };
+    });
+  },
+  removeSlideObject: (cardId: string, objectId: string) => {
+    set(state => {
+      const existing = state.slideObjectsByCardId[cardId] ?? [];
+      const filtered = existing.filter(object => object.id !== objectId);
+      if (filtered.length === existing.length) {
+        return {};
+      }
+
+      return {
+        slideObjectsByCardId: {
+          ...state.slideObjectsByCardId,
+          [cardId]: filtered,
+        },
+      };
+    });
+  },
+  bringSlideObjectsToFront: (cardId: string, objectIds: string[]) => {
+    set(state => {
+      const existing = state.slideObjectsByCardId[cardId] ?? [];
+      if (existing.length === 0 || objectIds.length === 0) {
+        return {};
+      }
+
+      const targetSet = new Set(objectIds);
+      const next = existing.filter(object => !targetSet.has(object.id)).concat(
+        existing.filter(object => targetSet.has(object.id)),
+      );
+
+      return {
+        slideObjectsByCardId: {
+          ...state.slideObjectsByCardId,
+          [cardId]: normaliseZIndices(next),
+        },
+      };
+    });
+  },
+  sendSlideObjectsToBack: (cardId: string, objectIds: string[]) => {
+    set(state => {
+      const existing = state.slideObjectsByCardId[cardId] ?? [];
+      if (existing.length === 0 || objectIds.length === 0) {
+        return {};
+      }
+
+      const targetSet = new Set(objectIds);
+      const next = existing
+        .filter(object => targetSet.has(object.id))
+        .concat(existing.filter(object => !targetSet.has(object.id)));
+
+      return {
+        slideObjectsByCardId: {
+          ...state.slideObjectsByCardId,
+          [cardId]: normaliseZIndices(next),
+        },
+      };
+    });
+  },
+  groupSlideObjects: (cardId: string, objectIds: string[], groupId: string | null) => {
+    set(state => {
+      const existing = state.slideObjectsByCardId[cardId] ?? [];
+      if (existing.length === 0 || objectIds.length === 0) {
+        return {};
+      }
+
+      const targetSet = new Set(objectIds);
+      const next = existing.map(object =>
+        targetSet.has(object.id) ? { ...object, groupId: groupId ?? null } : object,
+      );
+
+      return {
+        slideObjectsByCardId: {
+          ...state.slideObjectsByCardId,
+          [cardId]: next,
+        },
+      };
+    });
   },
   reset: () => {
     set({
@@ -776,6 +1019,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       catalogueCards: [],
       catalogueEntries: [],
       lastLoadedContext: null,
+      slideObjectsByCardId: {},
     });
   },
 }));

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   User,
   Calendar,
@@ -27,16 +27,63 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import {
+  useExhibitionStore,
   CardLayout,
   CardColor,
   LayoutCard,
   DroppedAtom,
   PresentationSettings,
   DEFAULT_PRESENTATION_SETTINGS,
+  type SlideObject,
+  DEFAULT_CANVAS_OBJECT_WIDTH,
+  DEFAULT_CANVAS_OBJECT_HEIGHT,
+  CANVAS_SNAP_GRID,
 } from '../store/exhibitionStore';
 import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
 import { ExhibitionTextBox } from './operationsPalette/textBox/TextBox';
 import type { SlideTextBox, TextBoxPosition } from './operationsPalette/textBox/types';
+
+interface CanvasDropPlacement {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+const snapToGrid = (value: number) => Math.round(value / CANVAS_SNAP_GRID) * CANVAS_SNAP_GRID;
+
+type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se';
+
+type ActiveInteraction =
+  | {
+      kind: 'move';
+      objectIds: string[];
+      startClientX: number;
+      startClientY: number;
+      initialPositions: Map<string, { x: number; y: number }>;
+    }
+  | {
+      kind: 'resize';
+      objectId: string;
+      handle: ResizeHandle;
+      startClientX: number;
+      startClientY: number;
+      initial: { x: number; y: number; width: number; height: number };
+    };
+
+const isAtomObject = (
+  object: SlideObject,
+): object is SlideObject & { props: { atom: DroppedAtom } } => {
+  if (object.type !== 'atom') {
+    return false;
+  }
+  const payload = object.props as Record<string, unknown> | undefined;
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+  const candidate = payload.atom as DroppedAtom | undefined;
+  return Boolean(candidate && typeof candidate.id === 'string');
+};
 
 interface SlideCanvasProps {
   card: LayoutCard;
@@ -47,6 +94,7 @@ interface SlideCanvasProps {
     sourceCardId: string,
     targetCardId: string,
     origin: 'catalogue' | 'slide',
+    placement: CanvasDropPlacement,
   ) => void;
   draggedAtom?: { atom: DroppedAtom; cardId: string; origin: 'catalogue' | 'slide' } | null;
   canEdit?: boolean;
@@ -93,6 +141,54 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const accentImageInputRef = useRef<HTMLInputElement | null>(null);
   const formatPanelRef = useRef<HTMLDivElement | null>(null);
   const formatToggleRef = useRef<HTMLButtonElement | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+
+  const slideObjects = useExhibitionStore(
+    useCallback(state => state.slideObjectsByCardId[card.id] ?? [], [card.id]),
+  );
+  const bulkUpdateSlideObjects = useExhibitionStore(state => state.bulkUpdateSlideObjects);
+  const bringSlideObjectsToFront = useExhibitionStore(state => state.bringSlideObjectsToFront);
+  const sendSlideObjectsToBack = useExhibitionStore(state => state.sendSlideObjectsToBack);
+  const groupSlideObjects = useExhibitionStore(state => state.groupSlideObjects);
+
+  const atomObjects = useMemo(() => slideObjects.filter(isAtomObject), [slideObjects]);
+
+  const handleBulkUpdate = useCallback(
+    (updates: Record<string, Partial<SlideObject>>) => {
+      bulkUpdateSlideObjects(card.id, updates);
+    },
+    [bulkUpdateSlideObjects, card.id],
+  );
+
+  const handleBringToFront = useCallback(
+    (objectIds: string[]) => {
+      if (objectIds.length === 0) {
+        return;
+      }
+      bringSlideObjectsToFront(card.id, objectIds);
+    },
+    [bringSlideObjectsToFront, card.id],
+  );
+
+  const handleSendToBack = useCallback(
+    (objectIds: string[]) => {
+      if (objectIds.length === 0) {
+        return;
+      }
+      sendSlideObjectsToBack(card.id, objectIds);
+    },
+    [card.id, sendSlideObjectsToBack],
+  );
+
+  const handleGroupObjects = useCallback(
+    (objectIds: string[], groupId: string | null) => {
+      if (objectIds.length === 0) {
+        return;
+      }
+      groupSlideObjects(card.id, objectIds, groupId);
+    },
+    [card.id, groupSlideObjects],
+  );
 
   const layoutDefaultColors: Record<CardLayout, CardColor> = useMemo(
     () => ({
@@ -155,12 +251,12 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   }, [showFormatPanel]);
 
   useEffect(() => {
-    if (card.atoms.length > 0 || textBoxes.length > 0) {
+    if (slideObjects.length > 0 || textBoxes.length > 0) {
       setHasInteracted(true);
     } else {
       setHasInteracted(false);
     }
-  }, [card.id, card.atoms.length, textBoxes.length]);
+  }, [card.id, slideObjects.length, textBoxes.length]);
 
   const updateSettings = (partial: Partial<PresentationSettings>) => {
     setSettings(prev => {
@@ -240,7 +336,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
   }, [settings.cardLayout]);
 
-  const showOverview = layoutConfig.showOverview && card.atoms.length > 1;
+  const showOverview = layoutConfig.showOverview && atomObjects.length > 1;
 
   const resolvedTitle = useMemo(() => {
     if (typeof card.title === 'string' && card.title.trim().length > 0) {
@@ -249,11 +345,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     if (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0) {
       return card.moleculeTitle.trim();
     }
-    if (card.atoms.length > 0) {
-      return card.atoms[0].title;
+    if (atomObjects.length > 0) {
+      return atomObjects[0].props.atom.title;
     }
     return 'Untitled Slide';
-  }, [card]);
+  }, [atomObjects, card]);
 
   const [titleDraft, setTitleDraft] = useState(resolvedTitle);
 
@@ -286,7 +382,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
   }, [card.lastEditedAt]);
 
-  const [hasInteracted, setHasInteracted] = useState(() => card.atoms.length > 0 || textBoxes.length > 0);
+  const [hasInteracted, setHasInteracted] = useState(() => slideObjects.length > 0 || textBoxes.length > 0);
 
   const handleTitleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!canEdit) {
@@ -422,7 +518,33 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     e.preventDefault();
     setIsDragOver(false);
     handleCanvasInteraction();
-    onDrop(draggedAtom.atom, draggedAtom.cardId, card.id, draggedAtom.origin);
+    const canvas = canvasRef.current;
+    const width = DEFAULT_CANVAS_OBJECT_WIDTH;
+    const height = DEFAULT_CANVAS_OBJECT_HEIGHT;
+    let dropX = 0;
+    let dropY = 0;
+
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      dropX = e.clientX - rect.left - width / 2;
+      dropY = e.clientY - rect.top - height / 2;
+      const maxX = Math.max(0, canvas.clientWidth - width);
+      const maxY = Math.max(0, canvas.clientHeight - height);
+      dropX = Math.min(Math.max(0, dropX), maxX);
+      dropY = Math.min(Math.max(0, dropY), maxY);
+      dropX = Math.min(Math.max(0, snapToGrid(dropX)), maxX);
+      dropY = Math.min(Math.max(0, snapToGrid(dropY)), maxY);
+    } else {
+      dropX = snapToGrid(dropX);
+      dropY = snapToGrid(dropY);
+    }
+
+    onDrop(draggedAtom.atom, draggedAtom.cardId, card.id, draggedAtom.origin, {
+      x: dropX,
+      y: dropY,
+      width,
+      height,
+    });
   };
 
   const handleAccentImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -494,9 +616,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             </p>
           )}
         </div>
-        {card.atoms.length > 0 && (
+        {atomObjects.length > 0 && (
           <div className="absolute bottom-4 right-4 rounded-full bg-background/90 px-3 py-1 text-xs font-medium text-foreground">
-            {card.atoms.length} {card.atoms.length === 1 ? 'Component' : 'Components'}
+            {atomObjects.length} {atomObjects.length === 1 ? 'Component' : 'Components'}
           </div>
         )}
       </div>
@@ -651,64 +773,35 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                     />
 
                   <div className="relative flex-1 min-h-[260px]">
-                      {!hasInteracted && card.atoms.length === 0 && !hasTextBoxes ? (
-                        <div className="flex h-full w-full items-center justify-center rounded-2xl border-2 border-dashed border-border bg-muted/20 px-6 text-center text-sm text-muted-foreground">
-                          Add components from the catalogue to build your presentation slide.
-                        </div>
-                      ) : card.atoms.length > 0 ? (
-                        <div className="flex h-full w-full min-w-0 flex-col gap-4">
-                          {card.atoms.map(atom => (
-                            <div
-                              key={atom.id}
-                              className="group relative box-border flex-1 min-w-0 max-w-full overflow-hidden rounded-3xl border-2 border-border bg-background/95 p-6 shadow-xl transition-all duration-300 hover:shadow-2xl"
-                            >
-                              <div className="flex items-center gap-3 mb-4">
-                                <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
-                                <h3 className="text-2xl font-semibold text-foreground group-hover:text-primary transition-colors">
-                                  {atom.title}
-                                </h3>
-                              </div>
-                              <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-wide text-primary mb-4">
-                                {atom.category}
-                              </div>
-                              <div className="text-base leading-relaxed text-muted-foreground space-y-4">
-                                <ExhibitedAtomRenderer atom={atom} />
-                              </div>
-
-                              {canEdit && (
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  className="absolute top-3 right-3 h-9 w-9 text-muted-foreground hover:text-destructive"
-                                  onClick={() => handleAtomRemove(atom.id)}
-                                  type="button"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      ) : hasTextBoxes ? (
-                        <div className="h-full w-full" />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center rounded-2xl border-2 border-dashed border-border bg-muted/10 px-6 text-center text-sm text-muted-foreground">
-                          Click to start building this slide.
-                        </div>
-                      )}
-                      {textBoxes.map(textBox => (
-                        <ExhibitionTextBox
-                          key={textBox.id}
-                          data={textBox}
-                          isEditable={canEdit}
-                          onChange={(id, updates) => onTextBoxChange?.(id, updates)}
-                          onTextChange={(id, updatedText) => onTextBoxTextChange?.(id, updatedText)}
-                          onPositionChange={(id, nextPosition) => onTextBoxPositionChange?.(id, nextPosition)}
-                          onDelete={id => onTextBoxRemove?.(id)}
-                          onInteract={handleCanvasInteraction}
-                        />
-                      ))}
-                    </div>
+                    <CanvasStage
+                      ref={canvasRef}
+                      canEdit={canEdit}
+                      isDragOver={Boolean(isDragOver && canEdit && draggedAtom)}
+                      objects={slideObjects}
+                      showEmptyState={!hasInteracted && slideObjects.length === 0 && !hasTextBoxes}
+                      onCanvasDragLeave={handleDragLeave}
+                      onCanvasDragOver={handleDragOver}
+                      onCanvasDrop={handleDrop}
+                      onInteract={handleCanvasInteraction}
+                      onRemoveAtom={handleAtomRemove}
+                      onBringToFront={handleBringToFront}
+                      onSendToBack={handleSendToBack}
+                      onBulkUpdate={handleBulkUpdate}
+                      onGroupObjects={handleGroupObjects}
+                    />
+                    {textBoxes.map(textBox => (
+                      <ExhibitionTextBox
+                        key={textBox.id}
+                        data={textBox}
+                        isEditable={canEdit}
+                        onChange={(id, updates) => onTextBoxChange?.(id, updates)}
+                        onTextChange={(id, updatedText) => onTextBoxTextChange?.(id, updatedText)}
+                        onPositionChange={(id, nextPosition) => onTextBoxPositionChange?.(id, nextPosition)}
+                        onDelete={id => onTextBoxRemove?.(id)}
+                        onInteract={handleCanvasInteraction}
+                      />
+                    ))}
+                  </div>
                   </div>
                 </div>
 
@@ -723,9 +816,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                       <h2 className="text-2xl font-bold text-foreground mb-6">Components Overview</h2>
 
                       <div className={cn('grid gap-4', layoutConfig.gridClass)}>
-                        {card.atoms.map(atom => (
+                        {atomObjects.map(object => {
+                          const atom = object.props.atom;
+                          return (
                           <div
-                            key={atom.id}
+                            key={object.id}
                             className="relative group p-6 border-2 border-border bg-card rounded-xl hover:shadow-lg hover:border-primary/50 transition-all duration-300"
                           >
                             <div className="flex items-center gap-3 mb-3">
@@ -753,7 +848,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                               </Button>
                             )}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -1078,5 +1174,511 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     </div>
   );
 };
+
+interface CanvasStageProps {
+  canEdit: boolean;
+  objects: SlideObject[];
+  isDragOver: boolean;
+  showEmptyState: boolean;
+  onCanvasDragOver: (event: React.DragEvent) => void;
+  onCanvasDragLeave: () => void;
+  onCanvasDrop: (event: React.DragEvent) => void;
+  onInteract: () => void;
+  onRemoveAtom?: (atomId: string) => void;
+  onBringToFront: (objectIds: string[]) => void;
+  onSendToBack: (objectIds: string[]) => void;
+  onBulkUpdate: (updates: Record<string, Partial<SlideObject>>) => void;
+  onGroupObjects: (objectIds: string[], groupId: string | null) => void;
+}
+
+const MIN_OBJECT_WIDTH = 220;
+const MIN_OBJECT_HEIGHT = 180;
+
+const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
+  (
+    {
+      canEdit,
+      objects,
+      isDragOver,
+      showEmptyState,
+      onCanvasDragOver,
+      onCanvasDragLeave,
+      onCanvasDrop,
+      onInteract,
+      onRemoveAtom,
+      onBringToFront,
+      onSendToBack,
+      onBulkUpdate,
+      onGroupObjects,
+    },
+    forwardedRef,
+  ) => {
+    const internalRef = useRef<HTMLDivElement | null>(null);
+    const setRef = useCallback(
+      (node: HTMLDivElement | null) => {
+        internalRef.current = node;
+        if (typeof forwardedRef === 'function') {
+          forwardedRef(node);
+        } else if (forwardedRef) {
+          forwardedRef.current = node;
+        }
+      },
+      [forwardedRef],
+    );
+
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const [activeInteraction, setActiveInteraction] = useState<ActiveInteraction | null>(null);
+
+    const focusCanvas = useCallback(() => {
+      const node = internalRef.current;
+      if (node && typeof node.focus === 'function') {
+        node.focus();
+      }
+    }, []);
+
+    const objectsMap = useMemo(() => new Map(objects.map(object => [object.id, object])), [objects]);
+
+    useEffect(() => {
+      setSelectedIds(prev => prev.filter(id => objectsMap.has(id)));
+    }, [objectsMap]);
+
+    const clampPosition = useCallback((x: number, y: number, width: number, height: number) => {
+      const canvas = internalRef.current;
+      if (!canvas) {
+        return { x, y };
+      }
+      const maxX = Math.max(0, canvas.clientWidth - width);
+      const maxY = Math.max(0, canvas.clientHeight - height);
+      return {
+        x: Math.min(Math.max(0, x), maxX),
+        y: Math.min(Math.max(0, y), maxY),
+      };
+    }, []);
+
+    const clampAndSnapPosition = useCallback(
+      (x: number, y: number, width: number, height: number) => {
+        const canvas = internalRef.current;
+        const { x: clampedX, y: clampedY } = clampPosition(x, y, width, height);
+        const maxX = canvas ? Math.max(0, canvas.clientWidth - width) : clampedX;
+        const maxY = canvas ? Math.max(0, canvas.clientHeight - height) : clampedY;
+        const snappedX = Math.min(Math.max(0, snapToGrid(clampedX)), maxX);
+        const snappedY = Math.min(Math.max(0, snapToGrid(clampedY)), maxY);
+        return { x: snappedX, y: snappedY };
+      },
+      [clampPosition],
+    );
+
+    const handleBackgroundPointerDown = useCallback(
+      (event: React.PointerEvent<HTMLDivElement>) => {
+        if (!canEdit) {
+          return;
+        }
+        if (event.target !== event.currentTarget) {
+          return;
+        }
+        onInteract();
+        setSelectedIds([]);
+        focusCanvas();
+      },
+      [canEdit, focusCanvas, onInteract],
+    );
+
+    const handleObjectPointerDown = useCallback(
+      (event: React.PointerEvent<HTMLDivElement>, objectId: string) => {
+        if (!canEdit) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        onInteract();
+        focusCanvas();
+
+        const isMulti = event.shiftKey || event.metaKey || event.ctrlKey;
+        const baseSelection = isMulti
+          ? selectedIds.includes(objectId)
+            ? selectedIds
+            : [...selectedIds, objectId]
+          : [objectId];
+        const uniqueSelection = Array.from(new Set(baseSelection));
+        setSelectedIds(uniqueSelection);
+
+        const initialPositions = new Map<string, { x: number; y: number }>();
+        uniqueSelection.forEach(id => {
+          const object = objectsMap.get(id);
+          if (object) {
+            initialPositions.set(id, { x: object.x, y: object.y });
+          }
+        });
+
+        if (initialPositions.size === 0) {
+          return;
+        }
+
+        onBringToFront(uniqueSelection);
+        setActiveInteraction({
+          kind: 'move',
+          objectIds: Array.from(initialPositions.keys()),
+          startClientX: event.clientX,
+          startClientY: event.clientY,
+          initialPositions,
+        });
+      },
+      [canEdit, focusCanvas, onInteract, objectsMap, onBringToFront, selectedIds],
+    );
+
+    const handleResizeStart = useCallback(
+      (event: React.PointerEvent<HTMLSpanElement>, objectId: string, handle: ResizeHandle) => {
+        if (!canEdit) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        onInteract();
+        focusCanvas();
+        const target = objectsMap.get(objectId);
+        if (!target) {
+          return;
+        }
+        setSelectedIds([objectId]);
+        onBringToFront([objectId]);
+        setActiveInteraction({
+          kind: 'resize',
+          objectId,
+          handle,
+          startClientX: event.clientX,
+          startClientY: event.clientY,
+          initial: {
+            x: target.x,
+            y: target.y,
+            width: target.width,
+            height: target.height,
+          },
+        });
+      },
+      [canEdit, focusCanvas, onInteract, objectsMap, onBringToFront],
+    );
+
+    const handleKeyDown = useCallback(
+      (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (!canEdit) {
+          return;
+        }
+
+        if (event.key === 'Escape') {
+          setSelectedIds([]);
+          return;
+        }
+
+        if (selectedIds.length === 0) {
+          return;
+        }
+
+        const step = event.shiftKey ? CANVAS_SNAP_GRID * 2 : CANVAS_SNAP_GRID;
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+          event.preventDefault();
+          const deltaX = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
+          const deltaY = event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0;
+          const updates: Record<string, Partial<SlideObject>> = {};
+          selectedIds.forEach(id => {
+            const object = objectsMap.get(id);
+            if (!object) {
+              return;
+            }
+            const { x, y } = clampAndSnapPosition(object.x + deltaX, object.y + deltaY, object.width, object.height);
+            updates[id] = { x, y };
+          });
+          if (Object.keys(updates).length > 0) {
+            onInteract();
+            onBulkUpdate(updates);
+          }
+          return;
+        }
+
+        if ((event.key === 'Backspace' || event.key === 'Delete') && onRemoveAtom) {
+          event.preventDefault();
+          onInteract();
+          selectedIds.forEach(id => {
+            const object = objectsMap.get(id);
+            if (object && isAtomObject(object)) {
+              onRemoveAtom(object.props.atom.id);
+            }
+          });
+          return;
+        }
+
+        if ((event.key === 'g' || event.key === 'G') && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          if (event.shiftKey) {
+            onInteract();
+            onGroupObjects(selectedIds, null);
+          } else {
+            const groupId = `group-${Date.now()}`;
+            onInteract();
+            onGroupObjects(selectedIds, groupId);
+          }
+          return;
+        }
+
+        if (event.key === ']' && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          onInteract();
+          onBringToFront(selectedIds);
+          return;
+        }
+
+        if (event.key === '[' && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          onInteract();
+          onSendToBack(selectedIds);
+          return;
+        }
+      },
+      [
+        canEdit,
+        clampAndSnapPosition,
+        onBulkUpdate,
+        onRemoveAtom,
+        onGroupObjects,
+        onBringToFront,
+        onSendToBack,
+        onInteract,
+        objectsMap,
+        selectedIds,
+      ],
+    );
+
+    useEffect(() => {
+      if (!activeInteraction) {
+        return;
+      }
+
+      const handlePointerMove = (event: PointerEvent) => {
+        if (!canEdit) {
+          return;
+        }
+
+        if (activeInteraction.kind === 'move') {
+          const deltaX = event.clientX - activeInteraction.startClientX;
+          const deltaY = event.clientY - activeInteraction.startClientY;
+          const updates: Record<string, Partial<SlideObject>> = {};
+          activeInteraction.objectIds.forEach(id => {
+            const initial = activeInteraction.initialPositions.get(id);
+            const object = objectsMap.get(id);
+            if (!initial || !object) {
+              return;
+            }
+            const { x, y } = clampAndSnapPosition(initial.x + deltaX, initial.y + deltaY, object.width, object.height);
+            updates[id] = { x, y };
+          });
+          if (Object.keys(updates).length > 0) {
+            onBulkUpdate(updates);
+          }
+        } else if (activeInteraction.kind === 'resize') {
+          const { handle, initial, objectId } = activeInteraction;
+          const target = objectsMap.get(objectId);
+          if (!target) {
+            return;
+          }
+
+          const deltaX = event.clientX - activeInteraction.startClientX;
+          const deltaY = event.clientY - activeInteraction.startClientY;
+
+          let nextX = initial.x;
+          let nextY = initial.y;
+          let nextWidth = initial.width;
+          let nextHeight = initial.height;
+
+          if (handle === 'nw' || handle === 'sw') {
+            nextX = initial.x + deltaX;
+            nextWidth = initial.width - deltaX;
+          }
+          if (handle === 'ne' || handle === 'se') {
+            nextWidth = initial.width + deltaX;
+          }
+          if (handle === 'nw' || handle === 'ne') {
+            nextY = initial.y + deltaY;
+            nextHeight = initial.height - deltaY;
+          }
+          if (handle === 'sw' || handle === 'se') {
+            nextHeight = initial.height + deltaY;
+          }
+
+          const canvas = internalRef.current;
+          if (canvas) {
+            nextWidth = Math.min(nextWidth, canvas.clientWidth);
+            nextHeight = Math.min(nextHeight, canvas.clientHeight);
+          }
+
+          if (nextWidth < MIN_OBJECT_WIDTH) {
+            if (handle === 'nw' || handle === 'sw') {
+              nextX -= MIN_OBJECT_WIDTH - nextWidth;
+            }
+            nextWidth = MIN_OBJECT_WIDTH;
+          }
+
+          if (nextHeight < MIN_OBJECT_HEIGHT) {
+            if (handle === 'nw' || handle === 'ne') {
+              nextY -= MIN_OBJECT_HEIGHT - nextHeight;
+            }
+            nextHeight = MIN_OBJECT_HEIGHT;
+          }
+
+          const { x, y } = clampAndSnapPosition(nextX, nextY, nextWidth, nextHeight);
+          const snappedWidth = Math.max(MIN_OBJECT_WIDTH, snapToGrid(nextWidth));
+          const snappedHeight = Math.max(MIN_OBJECT_HEIGHT, snapToGrid(nextHeight));
+          const widthLimit = canvas ? Math.max(MIN_OBJECT_WIDTH, Math.min(snappedWidth, canvas.clientWidth)) : snappedWidth;
+          const heightLimit = canvas ? Math.max(MIN_OBJECT_HEIGHT, Math.min(snappedHeight, canvas.clientHeight)) : snappedHeight;
+
+          onBulkUpdate({
+            [objectId]: {
+              x,
+              y,
+              width: widthLimit,
+              height: heightLimit,
+            },
+          });
+        }
+      };
+
+      const handlePointerUp = () => {
+        setActiveInteraction(null);
+      };
+
+      window.addEventListener('pointermove', handlePointerMove);
+      window.addEventListener('pointerup', handlePointerUp);
+      return () => {
+        window.removeEventListener('pointermove', handlePointerMove);
+        window.removeEventListener('pointerup', handlePointerUp);
+      };
+    }, [activeInteraction, canEdit, clampAndSnapPosition, onBulkUpdate, objectsMap]);
+
+    const handleDefinitions: Array<{ handle: ResizeHandle; className: string; cursor: string }> = useMemo(
+      () => [
+        { handle: 'nw', className: 'top-0 left-0 -translate-x-1/2 -translate-y-1/2', cursor: 'nwse-resize' },
+        { handle: 'ne', className: 'top-0 right-0 translate-x-1/2 -translate-y-1/2', cursor: 'nesw-resize' },
+        { handle: 'sw', className: 'bottom-0 left-0 -translate-x-1/2 translate-y-1/2', cursor: 'nesw-resize' },
+        { handle: 'se', className: 'bottom-0 right-0 translate-x-1/2 translate-y-1/2', cursor: 'nwse-resize' },
+      ],
+      [],
+    );
+
+    const renderObjectContent = (object: SlideObject) => {
+      if (isAtomObject(object)) {
+        return <ExhibitedAtomRenderer atom={object.props.atom} />;
+      }
+
+      if (typeof object.props?.text === 'string') {
+        return <p className="text-sm leading-relaxed text-muted-foreground">{object.props.text}</p>;
+      }
+
+      return (
+        <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
+          Unsupported component type: {object.type}
+        </div>
+      );
+    };
+
+    return (
+      <div
+        ref={setRef}
+        className={cn(
+          'relative h-full w-full rounded-3xl border-2 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+          canEdit ? 'bg-background/95' : 'bg-background/80',
+          showEmptyState ? 'border-dashed border-border/70' : 'border-border/60',
+          isDragOver ? 'border-primary/60 ring-2 ring-primary/20 shadow-xl scale-[0.99]' : undefined,
+        )}
+        tabIndex={canEdit ? 0 : -1}
+        onPointerDown={handleBackgroundPointerDown}
+        onKeyDown={handleKeyDown}
+        onDragOver={onCanvasDragOver}
+        onDragLeave={onCanvasDragLeave}
+        onDrop={onCanvasDrop}
+      >
+        {showEmptyState && (
+          <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center rounded-3xl border-2 border-dashed border-border/60 bg-muted/20 px-6 text-center text-sm text-muted-foreground">
+            Add components from the catalogue to build your presentation slide.
+          </div>
+        )}
+
+        {objects.map(object => {
+          const isSelected = selectedIds.includes(object.id);
+          const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
+
+          return (
+            <div
+              key={object.id}
+              className="absolute group"
+              style={{
+                left: object.x,
+                top: object.y,
+                width: object.width,
+                height: object.height,
+                zIndex: isSelected ? zIndex + 100 : zIndex,
+              }}
+              onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
+            >
+              <div
+                className={cn(
+                  'relative flex h-full w-full flex-col overflow-hidden rounded-3xl border-2 bg-background/95 shadow-xl transition-all',
+                  isSelected ? 'border-primary shadow-2xl' : 'border-border/70 hover:border-primary/40',
+                )}
+              >
+                {isAtomObject(object) && (
+                  <div className="flex items-center gap-2 border-b border-border/60 bg-muted/10 px-4 py-2">
+                    <div className={`h-2.5 w-2.5 rounded-full ${object.props.atom.color}`} />
+                    <div className="flex flex-col">
+                      <span className="text-sm font-semibold text-foreground">{object.props.atom.title}</span>
+                      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {object.props.atom.category}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                <div className="relative flex-1 overflow-hidden p-4">
+                  <div className="h-full w-full overflow-hidden rounded-2xl bg-background/90 p-3">
+                    {renderObjectContent(object)}
+                  </div>
+                </div>
+                {canEdit && isAtomObject(object) && onRemoveAtom && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="absolute top-3 right-3 z-30 h-9 w-9 text-muted-foreground hover:text-destructive"
+                    onPointerDown={event => event.stopPropagation()}
+                    onClick={() => onRemoveAtom(object.props.atom.id)}
+                    type="button"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+
+              {canEdit && isSelected &&
+                handleDefinitions.map(definition => (
+                  <span
+                    key={definition.handle}
+                    className={cn(
+                      'absolute z-40 h-3 w-3 rounded-full border border-background bg-primary shadow',
+                      definition.className,
+                    )}
+                    style={{ cursor: definition.cursor }}
+                    onPointerDown={event => handleResizeStart(event, object.id, definition.handle)}
+                  />
+                ))}
+            </div>
+          );
+        })}
+
+        {isDragOver && canEdit && (
+          <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center rounded-3xl border-2 border-dashed border-primary/60 bg-primary/10 text-xs font-semibold uppercase tracking-wide text-primary">
+            Drop to add component
+          </div>
+        )}
+      </div>
+    );
+  },
+);
+
+CanvasStage.displayName = 'CanvasStage';
 
 export default SlideCanvas;

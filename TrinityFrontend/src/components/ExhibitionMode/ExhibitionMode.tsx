@@ -9,6 +9,9 @@ import {
   type PresentationSettings,
   type LayoutCard,
   type SlideshowTransition,
+  createSlideObjectFromAtom,
+  DEFAULT_CANVAS_OBJECT_WIDTH,
+  DEFAULT_CANVAS_OBJECT_HEIGHT,
 } from './store/exhibitionStore';
 import { ExhibitionCatalogue } from './components/ExhibitionCatalogue';
 import { SlideCanvas } from './components/SlideCanvas';
@@ -58,6 +61,8 @@ const ExhibitionMode = () => {
     addBlankSlide,
     setCards,
     lastLoadedContext,
+    addSlideObject,
+    removeSlideObject,
   } = useExhibitionStore();
   const { toast } = useToast();
   const { hasPermission, user } = useAuth();
@@ -858,6 +863,7 @@ const ExhibitionMode = () => {
       sourceCardId: string,
       targetCardId: string,
       origin: 'catalogue' | 'slide' = 'catalogue',
+      placement?: { x: number; y: number; width: number; height: number },
     ) => {
       const sourceCard = cards.find(card => card.id === sourceCardId);
       const destinationCard = cards.find(card => card.id === targetCardId);
@@ -880,10 +886,21 @@ const ExhibitionMode = () => {
       const destinationAtoms = [...destinationCard.atoms, atom];
 
       updateCard(destinationCard.id, { atoms: destinationAtoms });
+      addSlideObject(
+        destinationCard.id,
+        createSlideObjectFromAtom(atom, {
+          id: atom.id,
+          x: placement?.x ?? 96,
+          y: placement?.y ?? 96,
+          width: placement?.width ?? DEFAULT_CANVAS_OBJECT_WIDTH,
+          height: placement?.height ?? DEFAULT_CANVAS_OBJECT_HEIGHT,
+        }),
+      );
 
       if (origin === 'slide' && sourceCard.id !== destinationCard.id) {
         const sourceAtoms = sourceCard.atoms.filter(a => a.id !== atom.id);
         updateCard(sourceCard.id, { atoms: sourceAtoms });
+        removeSlideObject(sourceCard.id, atom.id);
       }
 
       const targetIndex = exhibitedCards.findIndex(card => card.id === destinationCard.id);
@@ -902,7 +919,7 @@ const ExhibitionMode = () => {
 
       setDraggedAtom(null);
     },
-    [cards, exhibitedCards, toast, updateCard]
+    [addSlideObject, cards, exhibitedCards, removeSlideObject, toast, updateCard]
   );
 
   const handleRemoveAtom = useCallback(
@@ -923,12 +940,13 @@ const ExhibitionMode = () => {
 
       const nextAtoms = latestCard.atoms.filter(atom => atom.id !== atomId);
       updateCard(latestCard.id, { atoms: nextAtoms });
+      removeSlideObject(latestCard.id, atomId);
       toast({
         title: 'Component removed',
         description: 'The component has been removed from this slide.',
       });
     },
-    [cards, currentSlide, exhibitedCards, toast, updateCard]
+    [cards, currentSlide, exhibitedCards, removeSlideObject, toast, updateCard]
   );
 
   const handleNotesChange = (slideIndex: number, value: string) => {
