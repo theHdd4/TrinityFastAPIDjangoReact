@@ -8,7 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles } from 'lucide-react';
 import Header from '@/components/Header';
 import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
-import { REGISTRY_API } from '@/lib/api';
+import { REGISTRY_API, USECASES_API } from '@/lib/api';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 import { cn } from '@/lib/utils';
 
@@ -17,9 +17,22 @@ interface BackendApp {
   slug: string;
 }
 
+interface UseCaseApp {
+  id: number;
+  name: string;
+  slug: string;
+  description: string;
+  modules: string[];
+  molecules: string[];
+  molecule_atoms: Record<string, any>;
+  atoms_in_molecules: string[];
+}
+
 const Apps = () => {
   const navigate = useNavigate();
   const [appMap, setAppMap] = useState<Record<string, number>>({});
+  const [apps, setApps] = useState<UseCaseApp[]>([]);
+  const [loading, setLoading] = useState(true);
   const [playIntro, setPlayIntro] = useState(false);
   const [introBaseDelay, setIntroBaseDelay] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
@@ -27,24 +40,39 @@ const Apps = () => {
 
   useEffect(() => {
     const loadApps = async () => {
-      console.log('Fetching apps from backend...');
+      console.log('Fetching apps from usecase API...');
+      setLoading(true);
       try {
-        const res = await fetch(`${REGISTRY_API}/apps/`, { credentials: 'include' });
-        console.log('Apps response status', res.status);
-        if (res.ok) {
-          const data: BackendApp[] = await res.json();
-          console.log('Loaded apps', data);
-          const map: Record<string, number> = {};
-          data.forEach((a) => {
-            map[a.slug] = a.id;
-          });
-          setAppMap(map);
+        // Fetch apps from our usecase API
+        const usecaseRes = await fetch(`${USECASES_API}/apps-for-frontend/`, { credentials: 'include' });
+        console.log('Usecase apps response status', usecaseRes.status);
+        
+        if (usecaseRes.ok) {
+          const usecaseData = await usecaseRes.json();
+          console.log('Loaded usecase apps', usecaseData);
+          
+          if (usecaseData.success && usecaseData.apps) {
+            setApps(usecaseData.apps);
+            
+            // Also fetch registry apps for mapping
+            const registryRes = await fetch(`${REGISTRY_API}/apps/`, { credentials: 'include' });
+            if (registryRes.ok) {
+              const registryData: BackendApp[] = await registryRes.json();
+              const map: Record<string, number> = {};
+              registryData.forEach((a) => {
+                map[a.slug] = a.id;
+              });
+              setAppMap(map);
+            }
+          }
         } else {
-          const text = await res.text();
-          console.log('Failed to load apps:', text);
+          const text = await usecaseRes.text();
+          console.log('Failed to load usecase apps:', text);
         }
       } catch (err) {
         console.log('Apps fetch error', err);
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -144,111 +172,76 @@ const Apps = () => {
     { id: 'ml', label: 'Machine Learning', icon: Brain },
   ];
 
-  const apps = [
-    {
-      id: 'marketing-mix',
-      title: 'Marketing Mix Modeling',
-      description: 'Optimize marketing spend allocation across different channels and measure incremental impact',
-      icon: Target,
-      color: 'bg-blue-600',
-      category: 'marketing',
-      featured: true,
-      modules: ['marketing-data-prep', 'marketing-explore', 'mmm-builder']
-    },
-    {
-      id: 'forecasting',
-      title: 'Forecasting Analysis',
-      description: 'Predict future trends and patterns with advanced time series analysis and modeling',
-      icon: LineChart,
-      color: 'bg-green-600',
-      category: 'analytics',
-      featured: true,
-      modules: ['time-series-prep', 'forecasting-explore', 'forecast-builder']
-    },
-    {
-      id: 'promo-effectiveness',
-      title: 'Promo Effectiveness',
-      description: 'Measure and analyze promotional campaign performance and ROI across touchpoints',
-      icon: Zap,
-      color: 'bg-orange-600',
-      category: 'marketing',
-      featured: true,
-      modules: ['promo-data-prep', 'promo-explore', 'promo-builder']
-    },
-    {
-      id: 'exploratory-data-analysis',
-      title: 'Exploratory Data Analysis',
-      description: 'Perform comprehensive exploratory data analysis with advanced visualization and statistical insights',
-      icon: PieChart,
-      color: 'bg-purple-600',
-      category: 'analytics',
-      featured: false,
-      modules: ['eda-data-prep', 'eda-explore', 'eda-visualize']
-    },
-    {
-      id: 'customer-segmentation',
-      title: 'Customer Segmentation',
-      description: 'Segment customers based on behavior, demographics, and purchase patterns using ML clustering',
-      icon: Users,
-      color: 'bg-indigo-600',
-      category: 'ml',
-      featured: false,
-      modules: ['segment-prep', 'cluster-analysis', 'segment-profile']
-    },
-    {
-      id: 'demand-forecasting',
-      title: 'Demand Forecasting',
-      description: 'Predict product demand and inventory requirements with machine learning models',
-      icon: TrendingUp,
-      color: 'bg-emerald-600',
-      category: 'business',
-      featured: false,
-      modules: ['demand-prep', 'forecast-models', 'inventory-optimizer']
-    },
-    {
-      id: 'price-optimization',
-      title: 'Price Optimization',
-      description: 'Optimize pricing strategies using elasticity models and competitive intelligence',
-      icon: ShoppingCart,
-      color: 'bg-rose-600',
-      category: 'business',
-      featured: false,
-      modules: ['price-prep', 'elasticity-model', 'price-simulator']
-    },
-    {
-      id: 'churn-prediction',
-      title: 'Churn Prediction',
-      description: 'Identify at-risk customers and predict churn probability with ML classification models',
-      icon: Brain,
-      color: 'bg-amber-600',
-      category: 'ml',
-      featured: false,
-      modules: ['churn-prep', 'feature-engineering', 'churn-model']
-    },
-    {
-      id: 'data-integration',
-      title: 'Data Integration Hub',
-      description: 'Connect, transform, and consolidate data from multiple sources into unified datasets',
-      icon: Database,
-      color: 'bg-cyan-600',
-      category: 'analytics',
-      featured: false,
-      modules: ['data-connectors', 'etl-pipeline', 'data-quality']
-    },
-    {
-      id: 'blank',
-      title: 'Create Blank App',
-      description: 'Start from scratch with a clean canvas and build your custom analysis workflow',
-      icon: Plus,
-      color: 'bg-slate-600',
-      category: 'all',
-      featured: false,
-      custom: true,
-      modules: []
-    }
-  ];
+  // Icon mapping for apps
+  const getAppIcon = (slug: string) => {
+    const iconMap: Record<string, any> = {
+      'marketing-mix': Target,
+      'forecasting': LineChart,
+      'promo-effectiveness': Zap,
+      'exploratory-data-analysis': PieChart,
+      'customer-segmentation': Users,
+      'demand-forecasting': TrendingUp,
+      'price-optimization': ShoppingCart,
+      'churn-prediction': Brain,
+      'data-integration': Database,
+      'blank': Plus,
+      'customer-analytics': BarChart3,
+    };
+    return iconMap[slug] || Target;
+  };
 
-  const filteredApps = apps.filter(app => {
+  // Color mapping for apps
+  const getAppColor = (slug: string) => {
+    const colorMap: Record<string, string> = {
+      'marketing-mix': 'bg-blue-600',
+      'forecasting': 'bg-green-600',
+      'promo-effectiveness': 'bg-orange-600',
+      'exploratory-data-analysis': 'bg-purple-600',
+      'customer-segmentation': 'bg-indigo-600',
+      'demand-forecasting': 'bg-emerald-600',
+      'price-optimization': 'bg-rose-600',
+      'churn-prediction': 'bg-amber-600',
+      'data-integration': 'bg-cyan-600',
+      'blank': 'bg-slate-600',
+      'customer-analytics': 'bg-violet-600',
+    };
+    return colorMap[slug] || 'bg-gray-600';
+  };
+
+  // Category mapping for apps
+  const getAppCategory = (slug: string) => {
+    const categoryMap: Record<string, string> = {
+      'marketing-mix': 'marketing',
+      'promo-effectiveness': 'marketing',
+      'forecasting': 'analytics',
+      'exploratory-data-analysis': 'analytics',
+      'data-integration': 'analytics',
+      'customer-analytics': 'analytics',
+      'demand-forecasting': 'business',
+      'price-optimization': 'business',
+      'customer-segmentation': 'ml',
+      'churn-prediction': 'ml',
+      'blank': 'all',
+    };
+    return categoryMap[slug] || 'analytics';
+  };
+
+  // Transform database apps to display format
+  const displayApps = apps.map(app => ({
+    id: app.slug,
+    title: app.name,
+    description: app.description,
+    icon: getAppIcon(app.slug),
+    color: getAppColor(app.slug),
+    category: getAppCategory(app.slug),
+    featured: ['marketing-mix', 'forecasting', 'promo-effectiveness'].includes(app.slug),
+    custom: app.slug === 'blank',
+    modules: app.modules || [],
+    molecules: app.molecules || [],
+    atoms_in_molecules: app.atoms_in_molecules || []
+  }));
+
+  const filteredApps = displayApps.filter(app => {
     const matchesSearch = app.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          app.description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory === 'all' || app.category === selectedCategory;
@@ -292,44 +285,56 @@ const Apps = () => {
                 Powerful pre-configured applications for every analytics need. Select your use case and start building insights immediately.
               </p>
 
-              {/* Search Bar */}
-              <div className="max-w-2xl mx-auto mb-8 animate-scale-in" style={animationStyle(0.6)}>
-                <div className="relative">
-                  <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                  <Input
-                    type="text"
-                    placeholder="Search applications..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-12 pr-4 py-6 text-lg bg-card border-2 border-border focus:border-primary transition-all shadow-sm"
-                  />
+              {/* Loading State */}
+              {loading && (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                  <span className="ml-3 text-muted-foreground">Loading applications...</span>
                 </div>
-              </div>
+              )}
+
+              {/* Search Bar */}
+              {!loading && (
+                <div className="max-w-2xl mx-auto mb-8 animate-scale-in" style={animationStyle(0.6)}>
+                  <div className="relative">
+                    <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                    <Input
+                      type="text"
+                      placeholder="Search applications..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-12 pr-4 py-6 text-lg bg-card border-2 border-border focus:border-primary transition-all shadow-sm"
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Category Filters */}
-              <div className="flex flex-wrap justify-center gap-3 mb-8 animate-scale-in" style={animationStyle(0.8)}>
-                {categories.map((category) => {
-                  const CategoryIcon = category.icon;
-                  return (
-                    <Button
-                      key={category.id}
-                      variant={selectedCategory === category.id ? 'default' : 'outline'}
-                      onClick={() => setSelectedCategory(category.id)}
-                      className={cn(
-                        "hover-scale transition-all",
-                        selectedCategory === category.id && "shadow-lg"
-                      )}
-                    >
-                      <CategoryIcon className="w-4 h-4 mr-2" />
-                      {category.label}
-                    </Button>
-                  );
-                })}
-              </div>
+              {!loading && (
+                <div className="flex flex-wrap justify-center gap-3 mb-8 animate-scale-in" style={animationStyle(0.8)}>
+                  {categories.map((category) => {
+                    const CategoryIcon = category.icon;
+                    return (
+                      <Button
+                        key={category.id}
+                        variant={selectedCategory === category.id ? 'default' : 'outline'}
+                        onClick={() => setSelectedCategory(category.id)}
+                        className={cn(
+                          "hover-scale transition-all",
+                          selectedCategory === category.id && "shadow-lg"
+                        )}
+                      >
+                        <CategoryIcon className="w-4 h-4 mr-2" />
+                        {category.label}
+                      </Button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Featured Apps */}
-            {featuredApps.length > 0 && (
+            {!loading && featuredApps.length > 0 && (
               <div className="mb-12 animate-fade-in" style={animationStyle(1.0)}>
                 <div className="flex items-center gap-2 mb-6">
                   <Sparkles className="w-5 h-5 text-primary" />
@@ -407,7 +412,7 @@ const Apps = () => {
             )}
 
             {/* Custom Applications */}
-            {customApps.length > 0 && (
+            {!loading && customApps.length > 0 && (
               <div className="mb-12 animate-fade-in" style={animationStyle(1.4)}>
                 <div className="flex items-center gap-2 mb-6">
                   <Plus className="w-5 h-5 text-primary" />
@@ -459,7 +464,7 @@ const Apps = () => {
             )}
 
             {/* All Other Apps */}
-            {otherApps.length > 0 && (
+            {!loading && otherApps.length > 0 && (
               <div className="animate-fade-in" style={animationStyle(1.6)}>
                 <h3 className="text-2xl font-bold text-foreground mb-6">All Applications</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -530,7 +535,7 @@ const Apps = () => {
             )}
 
             {/* No Results */}
-            {filteredApps.length === 0 && (
+            {!loading && filteredApps.length === 0 && (
               <div className="text-center py-20 animate-fade-in">
                 <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-secondary/50 flex items-center justify-center">
                   <Search className="w-10 h-10 text-muted-foreground" />

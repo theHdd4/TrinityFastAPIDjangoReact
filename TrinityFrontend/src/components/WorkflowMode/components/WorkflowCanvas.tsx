@@ -243,7 +243,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   }, [nodes, edges]); // eslint-disable-line react-hooks/exhaustive-deps -- omit onCanvasMoleculesUpdate from deps
 
   return (
-    <div ref={reactFlowWrapper} className="h-full bg-card rounded-lg border border-border overflow-hidden shadow-sm">
+    <div ref={reactFlowWrapper} className="h-full bg-gradient-to-br from-background via-background to-secondary/10 rounded-xl border-2 border-border overflow-hidden shadow-lg">
       <ReactFlowProvider>
         <ReactFlow
           nodes={nodes}
@@ -260,13 +260,42 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           elementsSelectable={canEdit}
           fitView
           proOptions={{ hideAttribution: true }}
-          zoomOnScroll={false}
-          zoomOnPinch={false}
+          defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
+          minZoom={0.2}
+          maxZoom={2}
+          zoomOnScroll={true}
+          zoomOnPinch={true}
+          zoomOnDoubleClick={true}
           panOnDrag={true}
           panOnScroll={false}
+          defaultEdgeOptions={{
+            type: 'smoothstep',
+            animated: true,
+            style: { 
+              stroke: 'hsl(var(--primary))', 
+              strokeWidth: 2
+            },
+            markerEnd: {
+              type: 'arrowclosed',
+              color: 'hsl(var(--primary))',
+              width: 20,
+              height: 20
+            }
+          }}
         >
-          <Background gap={20} color="rgba(0,0,0,0.05)" />
-          <Controls />
+          <Background 
+            gap={24} 
+            size={2}
+            color="hsl(var(--border))" 
+            variant="dots"
+            className="opacity-40"
+          />
+          <Controls 
+            className="!bg-card !border-2 !border-border !rounded-xl !shadow-lg"
+            showZoom={true}
+            showFitView={true}
+            showInteractive={false}
+          />
         </ReactFlow>
       </ReactFlowProvider>
     </div>

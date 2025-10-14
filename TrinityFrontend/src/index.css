@@ -7,6 +7,40 @@
   @apply hidden;
 }
 
+/* Custom scrollbar for molecule nodes */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 10px;
+  transition: background 0.2s;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--primary) / 0.5);
+}
+
+/* React Flow custom styles */
+.react-flow__node.selected {
+  @apply shadow-2xl;
+}
+
+.react-flow__edge {
+  transition: stroke 0.2s;
+}
+
+.react-flow__edge:hover {
+  stroke: hsl(var(--primary)) !important;
+  stroke-width: 3px !important;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

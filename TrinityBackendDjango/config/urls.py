@@ -21,4 +21,5 @@ urlpatterns = [
     path("api/roles/", include("apps.roles.urls")),
     path("api/audit/", include("apps.audit.urls")),
     path("api/session/", include("apps.session_state.urls")),
+    path("api/usecases/", include("apps.usecase.urls")),
 ]

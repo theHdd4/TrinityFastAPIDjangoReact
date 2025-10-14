@@ -3,14 +3,12 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Play, Save, Share2, Download, Upload } from 'lucide-react';
+import { Play } from 'lucide-react';
 import Header from '@/components/Header';
 import WorkflowCanvas from './components/WorkflowCanvas';
 import MoleculeList from '@/components/MoleculeList/MoleculeList';
 import { useToast } from '@/hooks/use-toast';
-import { REGISTRY_API, WORKFLOWS_API } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { getCsrfHeaders } from '@/utils/csrf';
 
 interface SelectedAtom {
   atomName: string;
@@ -22,8 +20,6 @@ interface SelectedAtom {
 const WorkflowMode = () => {
   const [selectedMoleculeId, setSelectedMoleculeId] = useState<string>();
   const [canvasMolecules, setCanvasMolecules] = useState<any[]>([]);
-  const [savedWorkflows, setSavedWorkflows] = useState<any[]>([]);
-  const [currentProject, setCurrentProject] = useState<any>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
   const { hasPermission } = useAuth();
@@ -48,184 +44,22 @@ const WorkflowMode = () => {
     }
   }, []);
 
-  // Load current project and saved workflows
-  useEffect(() => {
-    const loadProjectAndWorkflows = async () => {
-      const current = localStorage.getItem('current-project');
-      if (current) {
-        try {
-          const project = JSON.parse(current);
-          setCurrentProject(project);
-          
-          // Note: Workflow list endpoint is disabled for performance/security
-          // Workflows are accessed individually by ID or through project relationships
-          // If you need to display saved workflows, implement a project-specific endpoint
-        } catch (error) {
-          console.error('Failed to load project or workflows:', error);
-        }
-      }
-    };
-
-    loadProjectAndWorkflows();
-  }, []);
 
   const handleMoleculeSelect = (moleculeId: string) => {
     if (!canEdit) return;
     setSelectedMoleculeId(moleculeId);
   };
 
-  // Note: Auto-save functionality removed - workflows are only saved when "Render Workflow" is clicked
-
   const handleCanvasMoleculesUpdate = useCallback(
     (molecules: any[]) => {
       if (!canEdit) return;
       setCanvasMolecules(molecules);
 
-      // Still save to localStorage for immediate access
+      // Save to localStorage for session persistence
       localStorage.setItem('workflow-canvas-molecules', safeStringify(molecules));
-
-      const current = localStorage.getItem('current-project');
-      if (current) {
-        try {
-          const proj = JSON.parse(current);
-          // Save to project state (legacy)
-          fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
-            method: 'PATCH',
-            credentials: 'include',
-            headers: getCsrfHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ state: { workflow_canvas: molecules } })
-          }).catch(() => {});
-
-          // Note: Auto-save disabled - workflows are only saved when "Render Workflow" is clicked
-        } catch {
-          /* ignore */
-        }
-      }
     },
     [canEdit]
   );
-
-  const saveWorkflowToDatabase = async () => {
-    if (!currentProject || canvasMolecules.length === 0) {
-      toast({
-        title: 'No workflow to save',
-        description: 'Please create a workflow on the canvas before saving.',
-        variant: 'destructive'
-      });
-      return;
-    }
-
-    // Auto-generate workflow name from context
-    const envStr = localStorage.getItem('env');
-    let workflowName = 'Untitled Workflow';
-    let appName = 'Unknown App';
-    let projectName = currentProject.name || 'Unknown Project';
-    
-    try {
-      if (envStr) {
-        const env = JSON.parse(envStr);
-        appName = env.APP_NAME || 'Unknown App';
-        // Override projectName if available in env
-        if (env.PROJECT_NAME) {
-          projectName = env.PROJECT_NAME;
-        }
-        workflowName = `${appName} - ${projectName}`;
-      }
-    } catch (error) {
-      console.warn('Failed to parse environment for workflow naming:', error);
-    }
-
-    // Add timestamp to make it unique
-    const timestamp = new Date().toLocaleString();
-    workflowName = `${workflowName} - ${timestamp}`;
-
-    const slug = workflowName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
-    // Extract molecule names (IDs) and atoms from canvas molecules
-    const moleculesUsed = canvasMolecules.map(m => m.id || m.title);
-    
-    // Build atoms_in_molecules mapping: { moleculeId: [atom1, atom2, ...] }
-    const atomsInMolecules: Record<string, string[]> = {};
-    canvasMolecules.forEach(molecule => {
-      const moleculeId = molecule.id || molecule.title;
-      atomsInMolecules[moleculeId] = molecule.atomOrder || [];
-    });
-
-    // Build DAG spec with nodes and edges
-    const nodes = canvasMolecules.map((molecule, index) => ({
-      id: molecule.id,
-      title: molecule.title,
-      position: molecule.position || { x: 0, y: 0 },
-      atomOrder: molecule.atomOrder || [],
-      selectedAtoms: molecule.selectedAtoms || {},
-      order: index
-    }));
-
-    const edges = canvasMolecules.flatMap(molecule => 
-      (molecule.connections || []).map((conn: { target: string }) => ({
-        source: molecule.id,
-        target: conn.target
-      }))
-    );
-
-    const dagSpec = {
-      nodes,
-      edges,
-      metadata: {
-        created_at: new Date().toISOString(),
-        molecule_count: canvasMolecules.length,
-        total_atoms: Object.values(atomsInMolecules).flat().length,
-        app_name: appName,
-        project_name: projectName
-      }
-    };
-
-    try {
-      const response = await fetch(`${WORKFLOWS_API}/workflows/`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: getCsrfHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          project_id: currentProject.id,
-          project_name: projectName,
-          name: workflowName,
-          slug: slug,
-          app_name: appName,
-          molecules_used: moleculesUsed,
-          atoms_in_molecules: atomsInMolecules,
-          dag_spec: dagSpec
-        })
-      });
-
-      if (response.ok) {
-        const savedWorkflow = await response.json();
-        toast({
-          title: 'Workflow saved successfully!',
-          description: `Workflow "${workflowName}" has been saved to PostgreSQL database.`
-        });
-        
-        console.log('Saved workflow to database:', savedWorkflow);
-        
-        // Note: Workflow saved successfully but list endpoint is disabled
-        // The workflow is stored in the database and accessible by its ID
-      } else {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('Failed to save workflow:', errorData);
-        toast({
-          title: 'Failed to save workflow',
-          description: errorData.detail || errorData.message || 'Unknown error occurred',
-          variant: 'destructive'
-        });
-      }
-    } catch (error) {
-      console.error('Error saving workflow:', error);
-      toast({
-        title: 'Error saving workflow',
-        description: 'An unexpected error occurred while saving.',
-        variant: 'destructive'
-      });
-    }
-  };
 
   const renderWorkflow = async () => {
     if (!canEdit) return;
@@ -348,26 +182,6 @@ const WorkflowMode = () => {
     localStorage.setItem('workflow-selected-atoms', safeStringify(selectedAtoms));
     localStorage.removeItem('laboratory-layout-cards');
 
-    const current = localStorage.getItem('current-project');
-    if (current) {
-      try {
-        const proj = JSON.parse(current);
-        await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
-          method: 'PATCH',
-          headers: getCsrfHeaders({ 'Content-Type': 'application/json' }),
-          credentials: 'include',
-          body: JSON.stringify({
-            state: { workflow_selected_atoms: selectedAtoms },
-          }),
-        });
-      } catch {
-        /* ignore */
-      }
-    }
-
-    // Auto-save workflow to database before rendering
-    await saveWorkflowToDatabase();
-
     toast({
       title: 'Workflow Rendered',
       description: `Successfully rendered ${selectedAtoms.length} atoms to Laboratory mode.`
@@ -393,34 +207,6 @@ const WorkflowMode = () => {
           </div>
           
           <div className="flex items-center space-x-4">
-            <Button
-              variant="outline"
-              size="sm"
-              className={canEdit ? '' : 'opacity-50 cursor-not-allowed'}
-              onClick={canEdit ? saveWorkflowToDatabase : undefined}
-              disabled={!canEdit}
-            >
-              <Save className="w-4 h-4 mr-2" />
-              Save Workflow
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className={canEdit ? '' : 'opacity-50 cursor-not-allowed'}
-              disabled={!canEdit}
-            >
-              <Upload className="w-4 h-4 mr-2" />
-              Load Workflow
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className={canEdit ? '' : 'opacity-50 cursor-not-allowed'}
-              disabled={!canEdit}
-            >
-              <Share2 className="w-4 h-4 mr-2" />
-              Share
-            </Button>
             <Button
               className={`bg-primary text-primary-foreground px-6 ${
                 canEdit ? 'hover:bg-primary/90' : 'opacity-50 cursor-not-allowed'

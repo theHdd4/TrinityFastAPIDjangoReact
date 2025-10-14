@@ -116,13 +116,16 @@ SHARED_APPS = [
     "guardian",
     "simple_history",
     
-    # Workflows saved in public schema (trinity_db public tables)
-    "apps.workflows",
-    "apps.usecase",  # UseCase table in public schema
+    # UseCase app - stores app definitions in public schema
+    "apps.usecase",
 ]
 
 TENANT_APPS = [
-    "apps.atoms",                 # Add this line
+    # Workflows are tenant-specific (saved in tenant schema)
+    "apps.workflows",
+    
+    # Other tenant-specific apps
+    "apps.atoms",
     "apps.registry",
     "apps.subscriptions",
     "apps.atom_configs",

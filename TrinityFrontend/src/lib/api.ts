@@ -63,6 +63,9 @@ export const REGISTRY_API =
   normalizeUrl(import.meta.env.VITE_REGISTRY_API) ||
   `${backendOrigin}${djangoPrefix}/registry`;
 
+export const USECASES_API =
+  normalizeUrl(import.meta.env.VITE_USECASES_API) ||
+  `${backendOrigin}${djangoPrefix}/usecases`;
 
 export const TENANTS_API =
   normalizeUrl(import.meta.env.VITE_TENANTS_API) ||

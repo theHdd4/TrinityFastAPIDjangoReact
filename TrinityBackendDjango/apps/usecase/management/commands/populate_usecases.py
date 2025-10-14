@@ -1,154 +1,110 @@
 from django.core.management.base import BaseCommand
 from apps.usecase.models import UseCase
-from apps.usecase.sync_utils import MoleculeAtomSync
 
 
 class Command(BaseCommand):
-    help = 'Populate the UseCase table with predefined use cases using dynamic sync from frontend'
+    help = 'Populate the UseCase table with data from Apps.tsx'
 
     def handle(self, *args, **options):
         """
-        Populate the UseCase table with apps from frontend.
-        Uses dynamic sync from frontend Apps.tsx file.
+        Populate the UseCase table with predefined use cases.
         """
-        # Initialize sync utility
-        sync_util = MoleculeAtomSync()
-        
-        self.stdout.write("🔄 Starting dynamic sync from frontend...")
-        
-        try:
-            # Sync apps from frontend to database
-            result = sync_util.sync_apps_to_database(UseCase)
-            
-            if result['success']:
-                self.stdout.write(
-                    self.style.SUCCESS(
-                        f"✅ Successfully synced {result['apps_count']} apps from frontend!"
-                    )
-                )
-                self.stdout.write(f"📊 Results:")
-                self.stdout.write(f"  • Apps found: {result['apps_count']}")
-                self.stdout.write(f"  • Molecules: {result['molecules_count']}")
-                self.stdout.write(f"  • Atoms: {result['atoms_count']}")
-                self.stdout.write(f"  • Created: {result['created_usecases']}")
-                self.stdout.write(f"  • Updated: {result['updated_usecases']}")
-                
-                # Show which apps were processed
-                self.stdout.write("\n📱 Apps processed:")
-                try:
-                    frontend_apps = sync_util.get_apps_from_frontend()
-                    for app in frontend_apps:
-                        self.stdout.write(f"  • {app['name']} ({app['slug']})")
-                except Exception as e:
-                    self.stdout.write(f"  ⚠️ Could not list apps: {e}")
-                    
-            else:
-                self.stdout.write(
-                    self.style.ERROR(f"❌ Sync failed: {result['error']}")
-                )
-                self.stdout.write(
-                    self.style.WARNING("⚠️ Falling back to hardcoded apps...")
-                )
-                
-                # Fallback to hardcoded data
-                self._fallback_populate()
-                
-        except Exception as e:
-            self.stdout.write(
-                self.style.ERROR(f"❌ Unexpected error: {str(e)}")
-            )
-            self.stdout.write(
-                self.style.WARNING("⚠️ Falling back to hardcoded apps...")
-            )
-            
-            # Fallback to hardcoded data
-            self._fallback_populate()
-    
-    def _fallback_populate(self):
-        """
-        Fallback method to populate with hardcoded data if frontend sync fails.
-        """
-        sync_util = MoleculeAtomSync()
-        
-        try:
-            # Get fallback molecules and atoms
-            all_molecules = sync_util._get_fallback_molecules()
-            all_atoms = sync_util.get_all_atoms_from_molecules(all_molecules)
-            
-            self.stdout.write(f"📦 Using fallback data: {len(all_molecules)} molecules, {len(all_atoms)} atoms")
-            
-        except Exception as e:
-            self.stdout.write(
-                self.style.ERROR(f"❌ Even fallback failed: {e}")
-            )
-            return
-        
-        # Hardcoded fallback apps
-        use_cases_data = [
+        # Data from Apps.tsx
+        apps_data = [
             {
                 'name': 'Marketing Mix Modeling',
                 'slug': 'marketing-mix',
-                'description': 'Preset: Pre-process + Build',
-                'molecules': all_molecules,
-                'atoms': all_atoms
+                'description': 'Optimize marketing spend allocation across different channels and measure incremental impact',
+                'modules': ['marketing-data-prep', 'marketing-explore', 'mmm-builder']
             },
             {
                 'name': 'Forecasting Analysis',
                 'slug': 'forecasting',
-                'description': 'Preset: Pre-process + Explore',
-                'molecules': all_molecules,
-                'atoms': all_atoms
+                'description': 'Predict future trends and patterns with advanced time series analysis and modeling',
+                'modules': ['time-series-prep', 'forecasting-explore', 'forecast-builder']
             },
             {
                 'name': 'Promo Effectiveness',
                 'slug': 'promo-effectiveness',
-                'description': 'Preset: Explore + Build',
-                'molecules': all_molecules,
-                'atoms': all_atoms
+                'description': 'Measure and analyze promotional campaign performance and ROI across touchpoints',
+                'modules': ['promo-data-prep', 'promo-explore', 'promo-builder']
             },
             {
-                'name': 'Blank App',
+                'name': 'Exploratory Data Analysis',
+                'slug': 'exploratory-data-analysis',
+                'description': 'Perform comprehensive exploratory data analysis with advanced visualization and statistical insights',
+                'modules': ['eda-data-prep', 'eda-explore', 'eda-visualize']
+            },
+            {
+                'name': 'Customer Segmentation',
+                'slug': 'customer-segmentation',
+                'description': 'Segment customers based on behavior, demographics, and purchase patterns using ML clustering',
+                'modules': ['segment-prep', 'cluster-analysis', 'segment-profile']
+            },
+            {
+                'name': 'Demand Forecasting',
+                'slug': 'demand-forecasting',
+                'description': 'Predict product demand and inventory requirements with machine learning models',
+                'modules': ['demand-prep', 'forecast-models', 'inventory-optimizer']
+            },
+            {
+                'name': 'Price Optimization',
+                'slug': 'price-optimization',
+                'description': 'Optimize pricing strategies using elasticity models and competitive intelligence',
+                'modules': ['price-prep', 'elasticity-model', 'price-simulator']
+            },
+            {
+                'name': 'Churn Prediction',
+                'slug': 'churn-prediction',
+                'description': 'Identify at-risk customers and predict churn probability with ML classification models',
+                'modules': ['churn-prep', 'feature-engineering', 'churn-model']
+            },
+            {
+                'name': 'Data Integration Hub',
+                'slug': 'data-integration',
+                'description': 'Connect, transform, and consolidate data from multiple sources into unified datasets',
+                'modules': ['data-connectors', 'etl-pipeline', 'data-quality']
+            },
+            {
+                'name': 'Create Blank App',
                 'slug': 'blank',
-                'description': 'Start from an empty canvas',
-                'molecules': all_molecules,
-                'atoms': all_atoms
+                'description': 'Start from scratch with a clean canvas and build your custom analysis workflow',
+                'modules': []
             }
         ]
 
         created_count = 0
         updated_count = 0
 
-        for usecase_data in use_cases_data:
+        for app_data in apps_data:
             usecase, created = UseCase.objects.get_or_create(
-                slug=usecase_data['slug'],
+                slug=app_data['slug'],
                 defaults={
-                    'name': usecase_data['name'],
-                    'description': usecase_data['description'],
-                    'molecules': usecase_data['molecules'],
-                    'atoms': usecase_data['atoms']
+                    'name': app_data['name'],
+                    'description': app_data['description'],
+                    'modules': app_data['modules']
                 }
             )
             
             if created:
                 created_count += 1
                 self.stdout.write(
-                    self.style.SUCCESS(f'Created: {usecase.name}')
+                    self.style.SUCCESS(f'✅ Created: {usecase.name}')
                 )
             else:
                 # Update existing record
-                usecase.name = usecase_data['name']
-                usecase.description = usecase_data['description']
-                usecase.molecules = usecase_data['molecules']
-                usecase.atoms = usecase_data['atoms']
+                usecase.name = app_data['name']
+                usecase.description = app_data['description']
+                usecase.modules = app_data['modules']
                 usecase.save()
                 updated_count += 1
                 self.stdout.write(
-                    self.style.WARNING(f'Updated: {usecase.name}')
+                    self.style.WARNING(f'🔄 Updated: {usecase.name}')
                 )
 
         self.stdout.write(
             self.style.SUCCESS(
-                f'Fallback completed: {len(use_cases_data)} use cases. '
+                f'✅ Successfully processed {len(apps_data)} use cases. '
                 f'Created: {created_count}, Updated: {updated_count}'
             )
         )

@@ -22,19 +22,19 @@ class UseCaseViewSet(viewsets.ModelViewSet):
         API endpoint that serves apps in the format expected by the frontend.
         This replaces the hardcoded apps array in Apps.tsx
         """
-        apps = UseCase.objects.all()
+        apps = UseCase.objects.all().order_by('name')
         
         frontend_apps = []
         for app in apps:
             frontend_apps.append({
-                'id': app.slug,
-                'title': app.name,
-                'description': app.description,
-                'molecules': app.molecules,
-                'atoms': app.atoms,
+                'id': app.id,
+                'name': app.name,
                 'slug': app.slug,
-                'created_at': app.created_at.isoformat() if app.created_at else None,
-                'updated_at': app.updated_at.isoformat() if app.updated_at else None
+                'description': app.description,
+                'modules': app.modules or [],
+                'molecules': app.molecules or [],
+                'molecule_atoms': app.molecule_atoms or {},
+                'atoms_in_molecules': app.atoms_in_molecules or []
             })
         
         return Response({
@@ -43,34 +43,47 @@ class UseCaseViewSet(viewsets.ModelViewSet):
             'total': len(frontend_apps)
         })
     
-    @action(detail=False, methods=['get'])
-    def molecules_and_atoms(self, request):
+    @action(detail=False, methods=['get'], url_path='molecules-by-slug/(?P<slug>[^/.]+)')
+    def molecules_by_slug(self, request, slug=None):
         """
-        API endpoint that serves molecules and atoms for all apps.
-        This replaces the hardcoded molecules.ts file.
+        Get molecules for a specific app by slug.
+        Used by the workflow area to display app-specific molecules.
         """
-        # Get molecules and atoms from any use case (they should all be the same)
-        usecase = UseCase.objects.first()
-        if not usecase:
+        try:
+            app = UseCase.objects.get(slug=slug)
+            
+            # Transform molecule_atoms dict to array format for frontend
+            molecules_list = []
+            if app.molecule_atoms:
+                for mol_id, mol_data in app.molecule_atoms.items():
+                    molecules_list.append({
+                        'id': mol_data.get('id', mol_id),
+                        'type': mol_data.get('title', ''),
+                        'title': mol_data.get('title', ''),
+                        'subtitle': mol_data.get('subtitle', ''),
+                        'tag': mol_data.get('tag', ''),
+                        'atoms': mol_data.get('atoms', [])
+                    })
+            
+            return Response({
+                'success': True,
+                'app_name': app.name,
+                'app_slug': app.slug,
+                'molecules': molecules_list,
+                'total': len(molecules_list)
+            })
+        except UseCase.DoesNotExist:
             return Response({
                 'success': False,
-                'error': 'No use cases found'
+                'error': f'App with slug "{slug}" not found'
             }, status=status.HTTP_404_NOT_FOUND)
-        
-        return Response({
-            'success': True,
-            'molecules': usecase.molecules,
-            'atoms': usecase.atoms,
-            'total_molecules': len(usecase.molecules),
-            'total_atoms': len(usecase.atoms)
-        })
 
 
 def apps_api(request):
     """
     Simple API endpoint for apps (for backward compatibility)
     """
-    apps = UseCase.objects.all()
+    apps = UseCase.objects.all().order_by('name')
     
     apps_data = []
     for app in apps:
@@ -79,8 +92,10 @@ def apps_api(request):
             'slug': app.slug,
             'name': app.name,
             'description': app.description,
-            'molecules': app.molecules,
-            'atoms': app.atoms
+            'modules': app.modules or [],
+            'molecules': app.molecules or [],
+            'molecule_atoms': app.molecule_atoms or {},
+            'atoms_in_molecules': app.atoms_in_molecules or []
         })
     
     return JsonResponse({

@@ -1,6 +1,5 @@
 from django.core.management.base import BaseCommand
 from apps.usecase.models import UseCase
-from apps.usecase.sync_utils import MoleculeAtomSync
 
 
 class Command(BaseCommand):
@@ -10,30 +9,13 @@ class Command(BaseCommand):
         parser.add_argument('--name', required=True, help='App name')
         parser.add_argument('--slug', required=True, help='App slug (URL-friendly)')
         parser.add_argument('--description', required=True, help='App description')
-        parser.add_argument('--molecules-only', action='store_true', help='Only add molecules, skip atoms')
+        parser.add_argument('--modules', nargs='*', default=[], help='List of module IDs for this app')
+        parser.add_argument('--molecules', nargs='*', default=[], help='List of molecule IDs for this app')
 
     def handle(self, *args, **options):
         """
         Add a new app to the database.
         """
-        # Initialize sync utility to get molecules and atoms
-        sync_util = MoleculeAtomSync()
-        
-        try:
-            # Get molecules and atoms
-            molecules = sync_util.get_molecules_from_frontend()
-            atoms = sync_util.get_all_atoms_from_molecules(molecules)
-            
-            self.stdout.write(f"📦 Found {len(molecules)} molecules and {len(atoms)} atoms")
-            
-        except Exception as e:
-            self.stdout.write(
-                self.style.WARNING(f"⚠️ Could not get molecules/atoms: {e}. Using fallback data.")
-            )
-            # Fallback to hardcoded data
-            molecules = sync_util._get_fallback_molecules()
-            atoms = sync_util.get_all_atoms_from_molecules(molecules)
-        
         # Check if app already exists
         if UseCase.objects.filter(slug=options['slug']).exists():
             self.stdout.write(
@@ -42,16 +24,16 @@ class Command(BaseCommand):
             return
         
         # Create new app
-        app_data = {
-            'name': options['name'],
-            'slug': options['slug'],
-            'description': options['description'],
-            'molecules': molecules,
-            'atoms': atoms if not options['molecules_only'] else []
-        }
-        
         try:
-            usecase = UseCase.objects.create(**app_data)
+            usecase = UseCase.objects.create(
+                name=options['name'],
+                slug=options['slug'],
+                description=options['description'],
+                modules=options['modules'],
+                molecules=options['molecules'],
+                molecule_atoms={},  # Will be populated separately
+                atoms_in_molecules=[]  # Will be populated separately
+            )
             
             self.stdout.write(
                 self.style.SUCCESS(
@@ -62,8 +44,10 @@ class Command(BaseCommand):
             self.stdout.write(f"  • Name: {usecase.name}")
             self.stdout.write(f"  • Slug: {usecase.slug}")
             self.stdout.write(f"  • Description: {usecase.description}")
-            self.stdout.write(f"  • Molecules: {len(usecase.molecules)}")
-            self.stdout.write(f"  • Atoms: {len(usecase.atoms)}")
+            self.stdout.write(f"  • Modules: {usecase.modules}")
+            self.stdout.write(f"  • Molecules: {usecase.molecules}")
+            self.stdout.write(f"  • Molecule atoms: {usecase.molecule_atoms}")
+            self.stdout.write(f"  • Atoms in molecules: {usecase.atoms_in_molecules}")
             self.stdout.write(f"  • ID: {usecase.id}")
             
         except Exception as e:
