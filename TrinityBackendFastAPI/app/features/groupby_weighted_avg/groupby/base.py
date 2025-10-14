@@ -2,6 +2,7 @@
 from typing import List
 
 import pandas as pd
+import numpy as np
 
 def perform_groupby(df, identifiers, aggregations):
     agg_dict = {}
@@ -45,12 +46,22 @@ def perform_groupby(df, identifiers, aggregations):
             row = dict(zip(identifiers, keys if isinstance(keys, tuple) else (keys,)))
             for measure, weight_col in weighted_means:
                 wm_col = measure
-                weight_vals = group[weight_col]
-                measure_vals = group[measure]
-                row[wm_col] = (
-                    (measure_vals * weight_vals).sum() / weight_vals.sum()
-                    if weight_vals.sum() != 0 else None
-                )
+                weight_vals = group[weight_col].fillna(0)  # Replace NaN weights with 0
+                measure_vals = group[measure].fillna(0)   # Replace NaN measures with 0
+                
+                # Calculate weighted mean with proper handling
+                weight_sum = weight_vals.sum()
+                if weight_sum != 0 and not np.isnan(weight_sum) and not np.isinf(weight_sum):
+                    weighted_sum = (measure_vals * weight_vals).sum()
+                    result = weighted_sum / weight_sum
+                    
+                    # Handle invalid results (NaN, Inf, -Inf)
+                    if np.isnan(result) or np.isinf(result):
+                        row[wm_col] = None
+                    else:
+                        row[wm_col] = float(result)  # Ensure it's a regular float
+                else:
+                    row[wm_col] = None
             grouped_weights.append(row)
         grouped_weights_df = pd.DataFrame(grouped_weights)
 
@@ -67,5 +78,9 @@ def perform_groupby(df, identifiers, aggregations):
             new_name = params.get("rename_to")
             if new_name and measure in grouped.columns:
                 grouped.rename(columns={measure: new_name}, inplace=True)
+
+    # Final cleanup: Replace any remaining NaN, Inf, -Inf with None for JSON serialization
+    # This ensures all values are JSON-compliant
+    grouped = grouped.replace([np.nan, np.inf, -np.inf], None)
 
     return grouped

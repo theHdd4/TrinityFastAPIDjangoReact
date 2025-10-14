@@ -162,6 +162,8 @@ interface Props {
   onSave?: () => void; // Callback for save action
   sortOrder?: 'asc' | 'desc' | null; // Current sort order
   onSortChange?: (order: 'asc' | 'desc' | null) => void; // Callback when sorting changes
+  sortColumn?: string; // Column to sort by
+  onSortColumnChange?: (column: string) => void; // Callback when sort column changes
   showLegend?: boolean; // External control for legend visibility
   showAxisLabels?: boolean; // External control for axis labels visibility
   showDataLabels?: boolean; // External control for data labels visibility
@@ -486,6 +488,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   onSave,
   sortOrder,
   onSortChange, // Callback when sorting changes
+  sortColumn: propSortColumn, // Column to sort by
+  onSortColumnChange, // Callback when sort column changes
   showLegend: propShowLegend, // External control for legend visibility
   showAxisLabels: propShowAxisLabels, // External control for axis labels visibility
   showDataLabels: propShowDataLabels, // External control for data labels visibility
@@ -513,6 +517,22 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [showAxisLabelSubmenu, setShowAxisLabelSubmenu] = useState(false);
   const [colorSubmenuPos, setColorSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [sortSubmenuPos, setSortSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [internalSortColumn, setInternalSortColumn] = useState<string>('');
+  // Use prop sortColumn if provided, otherwise use internal state
+  const sortColumn = propSortColumn !== undefined ? propSortColumn : internalSortColumn;
+  const setSortColumn = (column: string) => {
+    console.log('🔍 CHART: setSortColumn called', { column, hasPropCallback: !!onSortColumnChange });
+    if (onSortColumnChange) {
+      onSortColumnChange(column);
+    } else {
+      setInternalSortColumn(column);
+    }
+  };
+  
+  // Debug log when sortColumn changes
+  useEffect(() => {
+    console.log('🔍 CHART: sortColumn changed', { sortColumn, propSortColumn, internalSortColumn, sortOrder });
+  }, [sortColumn, propSortColumn, internalSortColumn, sortOrder]);
   const [chartTypeSubmenuPos, setChartTypeSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [axisLabelSubmenuPos, setAxisLabelSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
@@ -667,14 +687,17 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [detectedLegendField, setDetectedLegendField] = useState<string | null>(null);
 
   // Helper function to sort data based on sortOrder
-  const sortData = (data: any[], sortOrder: 'asc' | 'desc' | null, yKey: string): any[] => {
-    if (!sortOrder || !data || data.length === 0) {
+  const sortData = (data: any[], sortOrder: 'asc' | 'desc' | null, sortKey: string): any[] => {
+    if (!sortOrder || !data || data.length === 0 || !sortKey) {
+      console.log('🔍 SORT: Skipping sort', { sortOrder, dataLength: data?.length, sortKey });
       return data;
     }
 
-    return [...data].sort((a, b) => {
-      const aValue = a[yKey];
-      const bValue = b[yKey];
+    console.log('🔍 SORT: Sorting data', { sortKey, sortOrder, dataLength: data.length, firstItem: data[0] });
+    
+    const sorted = [...data].sort((a, b) => {
+      const aValue = a[sortKey];
+      const bValue = b[sortKey];
       
       if (aValue === null || aValue === undefined) return 1;
       if (bValue === null || bValue === undefined) return -1;
@@ -685,6 +708,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
         return aValue > bValue ? -1 : aValue < bValue ? 1 : 0;
       }
     });
+    
+    console.log('🔍 SORT: Sorted result', { first: sorted[0], last: sorted[sorted.length - 1] });
+    return sorted;
   };
 
   // Use data directly for rendering.
@@ -757,12 +783,34 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
     // Apply sorting if sortOrder is specified and we have data
     if (sortOrder && processedData.length > 0) {
-      const yKeyForSorting = yField || 'value';
-      processedData = sortData(processedData, sortOrder, yKeyForSorting);
+      // Determine the sort key, checking if it exists in the processed data (case-insensitive)
+      let sortKey = sortColumn || yField || 'value';
+      
+      // Verify the sortKey exists in the data (case-insensitive match)
+      if (processedData[0]) {
+        const dataKeys = Object.keys(processedData[0]);
+        
+        // Try exact match first
+        if (processedData[0][sortKey] === undefined) {
+          // Try case-insensitive match
+          const matchedKey = dataKeys.find(k => k.toLowerCase() === sortKey.toLowerCase());
+          if (matchedKey) {
+            sortKey = matchedKey;
+          } else {
+            // Fallback to first available non-system key
+            const availableKeys = dataKeys.filter(k => 
+              k !== 'series' && k !== 'group' && k !== 'legend' && !k.endsWith('_series')
+            );
+            sortKey = availableKeys[0] || sortKey;
+          }
+        }
+      }
+      
+      processedData = sortData(processedData, sortOrder, sortKey);
     }
 
     return processedData;
-  }, [data, type, legendField, sortOrder, yField]);
+  }, [data, type, legendField, sortOrder, yField, sortColumn]);
 
   // Simple chart render key
   const chartRenderKey = useMemo(() => {
@@ -789,8 +837,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
     }
     
     // When axis labels are shown, add space for both X and Y axis labels
-    // Increased bottom margin to accommodate tilted X-axis labels
-    return { top: 20, right: 20, left: 45, bottom: 60 };
+    // Increased bottom margin to accommodate full X-axis labels and prevent overlap with legends
+    return { top: 20, right: 20, left: 60, bottom: 100 };
   };
 
   // Calculate dynamic margins for pie charts (no axis labels, but may have legend)
@@ -948,26 +996,69 @@ const RechartsChartRenderer: React.FC<Props> = ({
           Object.keys(firstRow).find(k => !legendColumns.includes(k)) ||
           Object.keys(firstRow)[0];
 
+        let pivotedData = chartDataForRendering;
+        
+        // Apply sorting to pivoted data if sortOrder is set
+        if (sortOrder && sortColumn && pivotedData.length > 0) {
+          let sortKey = sortColumn;
+          
+          // Case-insensitive key matching
+          if (pivotedData[0]) {
+            const dataKeys = Object.keys(pivotedData[0]);
+            const matchedKey = dataKeys.find(k => k.toLowerCase() === sortKey.toLowerCase());
+            if (matchedKey) {
+              sortKey = matchedKey;
+            }
+          }
+          
+          if (pivotedData[0] && pivotedData[0][sortKey] !== undefined) {
+            pivotedData = sortData(pivotedData, sortOrder, sortKey);
+          }
+        }
+
         return {
-          pivoted: chartDataForRendering,
+          pivoted: pivotedData,
           uniqueValues: legendColumns,
           actualXKey
         };
       }
       // Data needs pivoting, use the existing function
-      return pivotDataByLegend(chartDataForRendering, xField, yField, legendField);
+      let pivotResult = pivotDataByLegend(chartDataForRendering, xField, yField, legendField);
+      
+      // Apply sorting to pivoted data if sortOrder is set
+      if (sortOrder && sortColumn && pivotResult.pivoted.length > 0) {
+        let sortKey = sortColumn;
+        
+        // Case-insensitive key matching
+        if (pivotResult.pivoted[0]) {
+          const dataKeys = Object.keys(pivotResult.pivoted[0]);
+          const matchedKey = dataKeys.find(k => k.toLowerCase() === sortKey.toLowerCase());
+          if (matchedKey) {
+            sortKey = matchedKey;
+          }
+        }
+        
+        if (pivotResult.pivoted[0] && pivotResult.pivoted[0][sortKey] !== undefined) {
+          const sortedPivoted = sortData(pivotResult.pivoted, sortOrder, sortKey);
+          return {
+            ...pivotResult,
+            pivoted: sortedPivoted
+          };
+        }
+      }
+      
+      return pivotResult;
     }
     return { pivoted: [], uniqueValues: [], actualXKey: xField };
-  }, [type, chartDataForRendering, xField, yField, legendField]);
+  }, [type, chartDataForRendering, xField, yField, legendField, sortOrder, sortColumn]);
 
   // Styling for axis ticks & labels
   const axisTickStyle = { fontFamily: FONT_FAMILY, fontSize: 12, fill: '#475569' } as const;
   const xAxisTickStyle = { fontFamily: FONT_FAMILY, fontSize: 12, fill: '#475569', angle: -45, textAnchor: 'end' } as const;
   
-  // Custom tick formatter for X-axis to show only first 3 characters with ".."
+  // Custom tick formatter for X-axis to show full value
   const xAxisTickFormatter = (value: any) => {
-    const str = String(value);
-    return str.length > 3 ? str.substring(0, 3) + '..' : str;
+    return String(value);
   };
   const axisLabelStyle = {
     fontFamily: FONT_FAMILY,
@@ -1416,19 +1507,78 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const SortSubmenu = () => {
     if (!showSortSubmenu) return null;
 
+    // Get columns that are actually used in the graph (exclude pivoted legend values)
+    const getUsedColumns = () => {
+      const usedColumns = new Set<string>();
+      
+      // Add X-axis field from chart configuration
+      if (xField) {
+        usedColumns.add(xField);
+      }
+      
+      // Add Y-axis field(s) from chart configuration
+      if (yField) {
+        usedColumns.add(yField);
+      }
+      if (yFields && yFields.length > 0) {
+        yFields.forEach(field => {
+          usedColumns.add(field);
+        });
+      }
+      
+      // Add legend field from chart configuration (original column, not pivoted values)
+      if (legendField) {
+        usedColumns.add(legendField);
+      }
+      
+      return Array.from(usedColumns);
+    };
+
+    const usedColumns = getUsedColumns();
+
     const submenu = (
       <div
         className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 sort-submenu"
         style={{
           left: sortSubmenuPos.x,
           top: sortSubmenuPos.y,
-          minWidth: '160px'
+          minWidth: '200px'
         }}
       >
         <div className="px-2 py-2 text-sm font-semibold text-gray-700 border-b border-gray-200 mb-2">
           Sort
         </div>
         <div className="flex flex-col">
+          {/* Column Selection - Show as clickable options */}
+          <div className="px-2 py-2 border-b border-gray-100">
+            <div className="text-xs text-gray-500 mb-2">Sort by column:</div>
+            <div className="space-y-1">
+              {usedColumns.map((column) => (
+                <button
+                  key={column}
+                  className={`w-full px-3 py-1 text-sm text-left hover:bg-gray-50 flex items-center gap-2 rounded ${
+                    sortColumn === column ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
+                  }`}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setSortColumn(column);
+                    // If no sort order is set yet, default to ascending
+                    if (!sortOrder) {
+                      handleSortChange('asc');
+                    }
+                  }}
+                >
+                  {sortColumn === column && (
+                    <svg className="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                  )}
+                  <span>{column}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          
           <button
             className="px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
             onMouseDown={(e) => {
@@ -1447,6 +1597,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
             className="px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
             onMouseDown={(e) => {
               e.preventDefault();
+              // If no column is selected, use the first available column
+              if (!sortColumn && usedColumns.length > 0) {
+                setSortColumn(usedColumns[0]);
+              }
               handleSortChange('asc');
             }}
           >
@@ -1461,6 +1615,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
             className="px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
             onMouseDown={(e) => {
               e.preventDefault();
+              // If no column is selected, use the first available column
+              if (!sortColumn && usedColumns.length > 0) {
+                setSortColumn(usedColumns[0]);
+              }
               handleSortChange('desc');
             }}
           >
@@ -1939,10 +2097,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
           return (
             <BarChart data={pivotedLineData} margin={getChartMargins()}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
-              <XAxis
+              <XAxis 
                 dataKey={xKeyForBar}
                 type="category"
-                label={currentShowAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 15 } : undefined}
+                label={currentShowAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
                 tick={xAxisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
@@ -2017,7 +2175,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis 
               dataKey={xKey} 
-                label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 15 } : undefined}
+                label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
               tick={xAxisTickStyle}
               tickLine={false}
               tickFormatter={xAxisTickFormatter}
@@ -2165,7 +2323,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForLine}
-                label={currentShowAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 15 } : undefined}
+                label={currentShowAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
                 tick={xAxisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
@@ -2251,7 +2409,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKey}
-                label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 15 } : undefined}
+                label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
                 tick={xAxisTickStyle}
                 tickLine={false}
                 tickFormatter={isDateAxis ? (value) => formatDateTick(new Date(value)) : xAxisTickFormatter}
@@ -2418,7 +2576,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForArea}
-                label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 15 } : undefined}
+                label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
                 tick={xAxisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
@@ -2565,7 +2723,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKeyForScatter}
-              label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
+              label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
               tick={xAxisTickStyle}
               tickLine={false}
               allowDuplicatedCategory={false}
@@ -2985,14 +3143,14 @@ const RechartsChartRenderer: React.FC<Props> = ({
         style={{ height: height ? `${height}px` : '100%', width: width ? `${width}px` : '100%' }}
       >
         <div 
-          className={`w-full h-full transition-all duration-500 ease-in-out ${enableScroll ? 'overflow-x-auto overflow-y-hidden chart-scroll-container' : 'overflow-hidden'}`}
+          className="w-full h-full transition-all duration-500 ease-in-out overflow-y-auto overflow-x-hidden chart-scroll-container"
           style={{ 
             paddingBottom: type === 'pie_chart' ? '10px' : '10px',
             paddingTop: type === 'pie_chart' ? '8px' : '16px',
             maxWidth: '100%',
             width: '100%',
-            scrollbarWidth: enableScroll ? 'thin' : 'none',
-            scrollbarColor: enableScroll ? '#cbd5e1 #f1f5f9' : 'transparent'
+            scrollbarWidth: 'thin',
+            scrollbarColor: '#cbd5e1 #f1f5f9'
           }}
           onContextMenu={handleContextMenu}
           ref={chartRef}
@@ -3000,24 +3158,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
           <div 
             className={`w-full h-full p-4 ${type === 'pie_chart' ? 'flex items-center justify-center' : ''}`}
             style={{ 
-              minWidth: enableScroll ? (() => {
-                // Calculate width based on chart type and data length
-                const baseWidth = 800; // Minimum width
-                let calculatedWidth = baseWidth;
-                
-                if (type === 'line_chart' || type === 'bar_chart' || type === 'area_chart' || type === 'scatter_chart') {
-                  // For line, bar, area and scatter charts, allocate more width per data point
-                  calculatedWidth = Math.max(chartDataForRendering.length * 60, baseWidth);
-                } else if (type === 'pie_chart') {
-                  // For pie charts, use fixed width as they don't need horizontal scrolling
-                  calculatedWidth = baseWidth;
-                }
-                
-                return `${calculatedWidth}px`;
-              })() : '100%',
+              minHeight: '300px',
               maxWidth: '100%',
               width: '100%',
-              overflow: 'hidden',
+              overflow: 'visible',
               display: type === 'pie_chart' ? 'flex' : 'block',
               alignItems: type === 'pie_chart' ? 'center' : 'stretch',
               justifyContent: type === 'pie_chart' ? 'center' : 'flex-start'

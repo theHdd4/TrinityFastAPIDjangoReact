@@ -101,6 +101,7 @@ SHARED_APPS = [
     # tenant model lives in public schema
     "apps.tenants",
     "apps.accounts",                    # custom user (public)
+    "apps.signups",                     # landing page signups (public)
 
     # Django contrib (shared)
     "django.contrib.contenttypes",

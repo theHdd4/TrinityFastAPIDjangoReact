@@ -1,12 +1,12 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Plus, Minus, X, Divide, Circle, BarChart3, Calculator, Settings, TrendingDown, Activity } from 'lucide-react';
+import { Plus, Minus, X, Divide, Circle, BarChart3, Calculator, Settings, TrendingDown, Activity, Calendar } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 
 interface Operation {
   id: string;
-  type: 'add' | 'subtract' | 'multiply' | 'divide' | 'dummy' | 'rpi' | 'residual' | 'stl_outlier' | 'detrend' | 'deseasonalize' | 'detrend_deseasonalize';
+  type: 'add' | 'subtract' | 'multiply' | 'divide' | 'dummy' | 'rpi' | 'residual' | 'stl_outlier' | 'detrend' | 'deseasonalize' | 'detrend_deseasonalize' | 'datetime';
   name: string;
   newColumnName: string;
   columns: string[];
@@ -33,11 +33,12 @@ const operationTypes = [
   { type: 'log', name: 'Log', icon: Activity, description: 'Natural logarithm of column(s)' },
   { type: 'sqrt', name: 'Square Root', icon: Activity, description: 'Square root of column(s)' },
   { type: 'exp', name: 'Exponential', icon: Activity, description: 'Exponential of column(s)' },
-  { type: 'marketshare', name: 'Market Share', icon: BarChart3, description: 'Calculate market share for brands' },
-  { type: 'kalman_filter', name: 'Kalman Filter', icon: Activity, description: 'Apply Kalman filter to volume' },
+  // { type: 'marketshare', name: 'Market Share', icon: BarChart3, description: 'Calculate market share for brands' },
+  // { type: 'kalman_filter', name: 'Kalman Filter', icon: Activity, description: 'Apply Kalman filter to volume' },
   { type: 'standardize_zscore', name: 'Standardize (Z-Score)', icon: Activity, description: 'Standardize column(s) using Z-Score' },
   { type: 'standardize_minmax', name: 'Standardize (Min-Max)', icon: Activity, description: 'Standardize column(s) using Min-Max scaling' },
   { type: 'logistic', name: 'Logistic', icon: Activity, description: 'Apply logistic transformation (requires gr, co, mp parameters)' },
+  { type: 'datetime', name: 'DateTime Extract', icon: Calendar, description: 'Extract datetime components (year, month, week, day) from date column' },
 ];
 
 const getDefaultColumns = (type: string) => {

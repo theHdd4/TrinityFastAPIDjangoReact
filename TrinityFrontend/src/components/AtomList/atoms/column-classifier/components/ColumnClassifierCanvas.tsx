@@ -607,32 +607,34 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
           {/* Unified Apply Classification Box */}
           <div className="w-full">
             <Card className="bg-white/80 backdrop-blur-sm overflow-hidden border-2 border-gray-200 rounded-xl">
-               <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-3">
-                 <h4 className="text-base font-semibold text-gray-900 flex items-center gap-1">
-                   <span className="text-green-600">(1/2)</span> 
-                   <span>Below are column names extracted from the data. Classify them into identifiers</span>
-                   <TooltipProvider delayDuration={100}>
-                     <Tooltip>
-                       <TooltipTrigger asChild>
-                         <Info className="w-3.5 h-3.5 text-green-500 cursor-help" />
-                       </TooltipTrigger>
-                       <TooltipContent side="bottom" align="start">
-                         <p className="text-xs max-w-xs">Identifiers are unique keys or IDs that distinguish records, such as customer IDs, markets, product codes, or transaction numbers.</p>
-                       </TooltipContent>
-                     </Tooltip>
-                   </TooltipProvider>
-                   <span>or measures</span>
-                   <TooltipProvider delayDuration={100}>
-                     <Tooltip>
-                       <TooltipTrigger asChild>
-                         <Info className="w-3.5 h-3.5 text-green-500 cursor-help" />
-                       </TooltipTrigger>
-                       <TooltipContent side="bottom" align="start">
-                         <p className="text-xs max-w-xs">Measures are values, numeric or categorical, that represent readings, measurements or calculations, such as sales amounts, number of customers or inventory levels</p>
-                       </TooltipContent>
-                     </Tooltip>
-                   </TooltipProvider>
-                 </h4>
+               <div className="flex items-start gap-3 border-b border-slate-200 px-5 py-3">
+                 <div className="flex items-center gap-3 flex-wrap">
+                   <span className="text-green-600 font-semibold text-base flex-shrink-0">(1/2)</span> 
+                   <div className="flex items-center gap-1 flex-wrap">
+                     <span className="text-base font-semibold text-gray-900">Below are column names extracted from the data. Classify them into identifiers</span>
+                     <TooltipProvider delayDuration={100}>
+                       <Tooltip>
+                         <TooltipTrigger asChild>
+                           <Info className="w-3.5 h-3.5 text-green-500 cursor-help flex-shrink-0" />
+                         </TooltipTrigger>
+                         <TooltipContent side="bottom" align="start">
+                           <p className="text-xs max-w-xs">Identifiers are unique keys or IDs that distinguish records, such as customer IDs, markets, product codes, or transaction numbers.</p>
+                         </TooltipContent>
+                       </Tooltip>
+                     </TooltipProvider>
+                     <span className="text-base font-semibold text-gray-900">or measures</span>
+                     <TooltipProvider delayDuration={100}>
+                       <Tooltip>
+                         <TooltipTrigger asChild>
+                           <Info className="w-3.5 h-3.5 text-green-500 cursor-help flex-shrink-0" />
+                         </TooltipTrigger>
+                         <TooltipContent side="bottom" align="start">
+                           <p className="text-xs max-w-xs">Measures are values, numeric or categorical, that represent readings, measurements or calculations, such as sales amounts, number of customers or inventory levels</p>
+                         </TooltipContent>
+                       </Tooltip>
+                     </TooltipProvider>
+                   </div>
+                 </div>
                </div>
               <div className="p-3">
                 <div className="relative rounded-lg bg-white/50 p-4">
