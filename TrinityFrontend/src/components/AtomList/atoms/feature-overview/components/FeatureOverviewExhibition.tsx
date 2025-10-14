@@ -235,6 +235,7 @@ const buildTrendChartRendererConfig = (
     data: normalised.data,
     xField: normalised.xField,
     yField: normalised.yField,
+    height: 300,
   };
 
   if (normalised.legendField) {

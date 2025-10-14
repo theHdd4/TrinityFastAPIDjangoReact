@@ -89,9 +89,25 @@ export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 export const ensureRecordArray = (value: unknown): Array<Record<string, unknown>> => {
-  return ensureArray<unknown>(value)
+  const directArray = ensureArray<unknown>(value)
     .filter(isRecord)
     .map(entry => ({ ...entry } as Record<string, unknown>));
+
+  if (directArray.length > 0) {
+    return directArray;
+  }
+
+  if (isRecord(value)) {
+    const fromValues = Object.values(value)
+      .filter(isRecord)
+      .map(entry => ({ ...entry } as Record<string, unknown>));
+
+    if (fromValues.length > 0) {
+      return fromValues;
+    }
+  }
+
+  return [];
 };
 
 const asString = (value: unknown): string | undefined => {
