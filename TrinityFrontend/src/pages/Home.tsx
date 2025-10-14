@@ -186,7 +186,7 @@ const Home = () => {
     setSubmitMessage(null);
 
     try {
-      const response = await fetch(`${SIGNUPS_API}/signups/`, {
+      const response = await fetch(`${SIGNUPS_API}/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

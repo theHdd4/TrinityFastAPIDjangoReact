@@ -181,7 +181,7 @@ export const submitSignup = async (data: {
   email: string;
   institution_company: string;
 }) => {
-  const response = await fetch(`${SIGNUPS_API}/signups/`, {
+  const response = await fetch(`${SIGNUPS_API}/`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
