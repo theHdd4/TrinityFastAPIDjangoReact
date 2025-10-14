@@ -1,0 +1,56 @@
+# ConfigMap for common environment variables
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trinity-config
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  HOST_IP: {{ .Values.global.hostIP | quote }}
+  FRONTEND_PORT: "8080"
+  CORS_ALLOWED_ORIGINS: {{ .Values.web.environment.CORS_ALLOWED_ORIGINS | quote }}
+  CSRF_TRUSTED_ORIGINS: {{ .Values.web.environment.CSRF_TRUSTED_ORIGINS | quote }}
+  MONGO_URI: {{ .Values.web.environment.MONGO_URI | quote }}
+  MINIO_ENDPOINT: {{ .Values.web.environment.MINIO_ENDPOINT | quote }}
+  FASTAPI_CORS_ORIGINS: {{ .Values.fastapi.environment.FASTAPI_CORS_ORIGINS | quote }}
+  CLASSIFY_MONGO_URI: {{ .Values.fastapi.environment.CLASSIFY_MONGO_URI | quote }}
+  FLIGHT_HOST: {{ .Values.fastapi.environment.FLIGHT_HOST | quote }}
+  FLIGHT_PORT: {{ .Values.fastapi.environment.FLIGHT_PORT | quote }}
+  OLLAMA_IP: {{ .Values.trinityAI.environment.OLLAMA_IP | quote }}
+  REDIS_HOST: "redis"
+  POSTGRES_HOST: "postgres"
+  MONGODB_HOST: "mongodb"
+  MINIO_HOST: "minio"
+  # Database connection strings
+  DATABASE_URL: "postgresql://{{ .Values.postgres.username }}:{{ .Values.postgres.password }}@postgres:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}"
+  MONGO_CONNECTION_STRING: "mongodb://{{ .Values.mongodb.rootUsername }}:{{ .Values.mongodb.rootPassword }}@mongodb:{{ .Values.mongodb.port }}/?authSource=admin"
+  REDIS_URL: "redis://redis:{{ .Values.redis.port }}/0"
+---
+# Secret for sensitive data
+apiVersion: v1
+kind: Secret
+metadata:
+  name: trinity-secrets
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+type: Opaque
+data:
+  # Database credentials (base64 encoded)
+  POSTGRES_USER: {{ .Values.postgres.username | b64enc }}
+  POSTGRES_PASSWORD: {{ .Values.postgres.password | b64enc }}
+  POSTGRES_DB: {{ .Values.postgres.database | b64enc }}
+  MONGO_ROOT_USERNAME: {{ .Values.mongodb.rootUsername | b64enc }}
+  MONGO_ROOT_PASSWORD: {{ .Values.mongodb.rootPassword | b64enc }}
+  # MinIO credentials
+  MINIO_ACCESS_KEY: {{ .Values.minio.rootUser | b64enc }}
+  MINIO_SECRET_KEY: {{ .Values.minio.rootPassword | b64enc }}
+  # PgAdmin credentials
+  PGADMIN_DEFAULT_EMAIL: {{ .Values.pgadmin.email | b64enc }}
+  PGADMIN_DEFAULT_PASSWORD: {{ .Values.pgadmin.password | b64enc }}
+  # Mongo Express credentials
+  MONGO_EXPRESS_USERNAME: {{ .Values.mongoExpress.basicAuthUsername | b64enc }}
+  MONGO_EXPRESS_PASSWORD: {{ .Values.mongoExpress.basicAuthPassword | b64enc }}

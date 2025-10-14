@@ -1,0 +1,76 @@
+{{- if .Values.celery.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trinity-celery
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: trinity-celery
+    component: worker
+spec:
+  replicas: {{ .Values.celery.replicas }}
+  selector:
+    matchLabels:
+      app: trinity-celery
+  template:
+    metadata:
+      labels:
+        app: trinity-celery
+    spec:
+      initContainers:
+      - name: wait-for-redis
+        image: redis:7
+        command: ['sh', '-c', 'until redis-cli -h redis -p 6379 ping; do echo waiting for redis; sleep 2; done;']
+      - name: wait-for-postgres
+        image: postgres:15
+        command: ['sh', '-c', 'until pg_isready -h postgresql -p 5432 -U {{ .Values.postgresql.username }}; do echo waiting for postgres; sleep 2; done;']
+      - name: wait-for-mongo
+        image: mongo:6
+        command: ['sh', '-c', 'until mongosh --host mongodb --port 27017 --eval "db.adminCommand(\"ping\")" --quiet; do echo waiting for mongo; sleep 2; done;']
+      containers:
+      - name: celery
+        image: {{ .Values.global.imageRegistry }}/{{ .Values.images.django.repository }}:{{ .Values.images.django.tag }}
+        imagePullPolicy: {{ .Values.images.django.pullPolicy }}
+        command: ["celery", "-A", "config.celery", "worker", "--loglevel=info"]
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://{{ .Values.postgresql.username }}:{{ .Values.postgresql.password }}@postgresql:5432/{{ .Values.postgresql.database }}"
+        - name: MONGO_URI
+          value: "mongodb://{{ .Values.mongodb.rootUsername }}:{{ .Values.mongodb.rootPassword }}@mongodb:27017/trinity_prod?authSource=admin"
+        - name: MINIO_ENDPOINT
+          value: "minio:9000"
+        - name: MINIO_ACCESS_KEY
+          value: {{ .Values.minio.accessKey }}
+        - name: MINIO_SECRET_KEY
+          value: {{ .Values.minio.secretKey }}
+        - name: REDIS_URL
+          value: "redis://redis:6379/0"
+        resources:
+          requests:
+            memory: {{ .Values.celery.resources.requests.memory }}
+            cpu: {{ .Values.celery.resources.requests.cpu }}
+          limits:
+            memory: {{ .Values.celery.resources.limits.memory }}
+            cpu: {{ .Values.celery.resources.limits.cpu }}
+        livenessProbe:
+          exec:
+            command:
+            - celery
+            - -A
+            - config.celery
+            - inspect
+            - ping
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command:
+            - celery
+            - -A
+            - config.celery
+            - inspect
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+{{- end }}
+

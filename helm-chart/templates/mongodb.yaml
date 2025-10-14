@@ -1,0 +1,111 @@
+{{- if .Values.mongodb.enabled }}
+# MongoDB Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: mongodb
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+      - name: mongodb
+        image: {{ .Values.images.mongo.repository }}:{{ .Values.images.mongo.tag }}
+        imagePullPolicy: {{ .Values.images.mongo.pullPolicy }}
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          value: {{ .Values.mongodb.rootUsername }}
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          value: {{ .Values.mongodb.rootPassword }}
+        ports:
+        - containerPort: {{ .Values.mongodb.port }}
+          name: mongodb
+        volumeMounts:
+        - name: mongodb-storage
+          mountPath: /data/db
+        resources:
+          requests:
+            memory: {{ .Values.resources.mongodb.requests.memory }}
+            cpu: {{ .Values.resources.mongodb.requests.cpu }}
+          limits:
+            memory: {{ .Values.resources.mongodb.limits.memory }}
+            cpu: {{ .Values.resources.mongodb.limits.cpu }}
+        {{- if .Values.healthChecks.enabled }}
+        readinessProbe:
+          exec:
+            command:
+            - mongosh
+            - --eval
+            - "db.adminCommand('ping')"
+          initialDelaySeconds: {{ .Values.healthChecks.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthChecks.periodSeconds }}
+          timeoutSeconds: {{ .Values.healthChecks.timeoutSeconds }}
+          failureThreshold: {{ .Values.healthChecks.failureThreshold }}
+        livenessProbe:
+          exec:
+            command:
+            - mongosh
+            - --eval
+            - "db.adminCommand('ping')"
+          initialDelaySeconds: {{ .Values.healthChecks.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthChecks.periodSeconds }}
+          timeoutSeconds: {{ .Values.healthChecks.timeoutSeconds }}
+          failureThreshold: {{ .Values.healthChecks.failureThreshold }}
+        {{- end }}
+      volumes:
+      - name: mongodb-storage
+        persistentVolumeClaim:
+          claimName: mongodb-pvc
+---
+# MongoDB Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: mongodb
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  ports:
+  - port: {{ .Values.mongodb.port }}
+    targetPort: {{ .Values.mongodb.port }}
+    protocol: TCP
+    name: mongodb
+  selector:
+    app: mongodb
+---
+# MongoDB NodePort Service for external access
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-nodeport
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: mongodb
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: NodePort
+  ports:
+  - port: {{ .Values.mongodb.port }}
+    targetPort: {{ .Values.mongodb.port }}
+    nodePort: 30017  # localhost:30017 -> mongodb:27017
+    protocol: TCP
+    name: mongodb
+  selector:
+    app: mongodb
+{{- end }}

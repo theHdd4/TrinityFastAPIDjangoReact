@@ -1,0 +1,136 @@
+{{- if .Values.minio.enabled }}
+# MinIO Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: minio
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+      - name: minio
+        image: {{ .Values.images.minio.repository }}:{{ .Values.images.minio.tag }}
+        imagePullPolicy: {{ .Values.images.minio.pullPolicy }}
+        env:
+        - name: MINIO_ROOT_USER
+          value: {{ .Values.minio.rootUser }}
+        - name: MINIO_ROOT_PASSWORD
+          value: {{ .Values.minio.rootPassword }}
+        command:
+        - minio
+        - server
+        - /data
+        - --console-address
+        - ":{{ .Values.minio.consolePort }}"
+        ports:
+        - containerPort: {{ .Values.minio.apiPort }}
+          name: minio-api
+        - containerPort: {{ .Values.minio.consolePort }}
+          name: minio-console
+        volumeMounts:
+        - name: minio-storage
+          mountPath: /data
+        resources:
+          requests:
+            memory: {{ .Values.resources.minio.requests.memory }}
+            cpu: {{ .Values.resources.minio.requests.cpu }}
+          limits:
+            memory: {{ .Values.resources.minio.limits.memory }}
+            cpu: {{ .Values.resources.minio.limits.cpu }}
+        {{- if .Values.healthChecks.enabled }}
+        readinessProbe:
+          httpGet:
+            path: /minio/health/ready
+            port: {{ .Values.minio.apiPort }}
+          initialDelaySeconds: {{ .Values.healthChecks.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthChecks.periodSeconds }}
+          timeoutSeconds: {{ .Values.healthChecks.timeoutSeconds }}
+          failureThreshold: {{ .Values.healthChecks.failureThreshold }}
+        livenessProbe:
+          httpGet:
+            path: /minio/health/live
+            port: {{ .Values.minio.apiPort }}
+          initialDelaySeconds: {{ .Values.healthChecks.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthChecks.periodSeconds }}
+          timeoutSeconds: {{ .Values.healthChecks.timeoutSeconds }}
+          failureThreshold: {{ .Values.healthChecks.failureThreshold }}
+        {{- end }}
+      volumes:
+      - name: minio-storage
+        persistentVolumeClaim:
+          claimName: minio-pvc
+---
+# MinIO API Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: minio
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  ports:
+  - port: {{ .Values.minio.apiPort }}
+    targetPort: {{ .Values.minio.apiPort }}
+    protocol: TCP
+    name: minio-api
+  selector:
+    app: minio
+---
+# MinIO API NodePort Service for external access
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-api-nodeport
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: minio
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: NodePort
+  ports:
+  - port: {{ .Values.minio.apiPort }}
+    targetPort: {{ .Values.minio.apiPort }}
+    nodePort: 30900  # localhost:30900 -> minio:9000
+    protocol: TCP
+    name: minio-api
+  selector:
+    app: minio
+---
+# MinIO Console NodePort Service for external access
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-console-nodeport
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: minio
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: NodePort
+  ports:
+  - port: {{ .Values.minio.consolePort }}
+    targetPort: {{ .Values.minio.consolePort }}
+    nodePort: 30901  # localhost:30901 -> minio:9001
+    protocol: TCP
+    name: minio-console
+  selector:
+    app: minio
+{{- end }}

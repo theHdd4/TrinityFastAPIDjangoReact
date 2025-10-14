@@ -7,8 +7,6 @@ const hostIp = import.meta.env.VITE_HOST_IP;
 const isDevStack =
   (typeof window !== 'undefined' && window.location.port === '8081') ||
   import.meta.env.VITE_FRONTEND_PORT === '8081' ||
-  (typeof window !== 'undefined' && window.location.hostname === '172.19.128.1') ||
-  (typeof window !== 'undefined' && window.location.port === '8080') ||
   import.meta.env.VITE_ENVIRONMENT === 'development';
 
 const djangoPort =

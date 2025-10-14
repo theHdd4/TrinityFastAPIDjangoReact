@@ -1,0 +1,79 @@
+{{- if .Values.flight.enabled }}
+# Flight Server Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.flight.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: {{ .Values.flight.name }}
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.flight.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.flight.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.flight.name }}
+    spec:
+      containers:
+      - name: {{ .Values.flight.name }}
+        image: trinity-fastapi:latest
+        imagePullPolicy: Never
+        {{- if .Values.flight.command }}
+        command: {{ .Values.flight.command | toJson }}
+        {{- else }}
+        command: ["python", "app/flight_server.py"]
+        {{- end }}
+        ports:
+        - containerPort: {{ .Values.flight.port }}
+          name: grpc
+        env:
+        - name: FLIGHT_PORT
+          value: "{{ .Values.flight.port }}"
+---
+# Flight Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.flight.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: {{ .Values.flight.name }}
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  ports:
+  - port: {{ .Values.flight.port }}
+    targetPort: {{ .Values.flight.port }}
+    protocol: TCP
+    name: grpc
+  selector:
+    app: {{ .Values.flight.name }}
+---
+# Flight NodePort Service for external access
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.flight.name }}-nodeport
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: {{ .Values.flight.name }}
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: NodePort
+  ports:
+  - port: {{ .Values.flight.port }}
+    targetPort: {{ .Values.flight.port }}
+    nodePort: {{ .Values.flight.nodePort }}
+    protocol: TCP
+    name: grpc
+  selector:
+    app: {{ .Values.flight.name }}
+{{- end }}
+

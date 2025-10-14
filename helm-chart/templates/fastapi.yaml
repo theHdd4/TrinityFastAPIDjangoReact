@@ -1,0 +1,180 @@
+{{- if .Values.fastapi.enabled }}
+# FastAPI Backend Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.fastapi.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: {{ .Values.fastapi.name }}
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.fastapi.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.fastapi.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.fastapi.name }}
+    spec:
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:15
+        command: ['sh', '-c', 'until pg_isready -h postgres -p 5432; do echo waiting for postgres; sleep 2; done;']
+      - name: wait-for-mongodb
+        image: mongo:6
+        command: ['sh', '-c', 'until mongosh --host mongodb:27017 --eval "print(\"MongoDB is ready\")"; do echo waiting for mongodb; sleep 2; done;']
+      - name: wait-for-redis
+        image: redis:7
+        command: ['sh', '-c', 'until redis-cli -h redis -p 6379 ping; do echo waiting for redis; sleep 2; done;']
+      containers:
+      - name: {{ .Values.fastapi.name }}
+        image: trinity-fastapi:latest
+        imagePullPolicy: Never
+        command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "{{ .Values.fastapi.port }}"]
+        ports:
+        - containerPort: {{ .Values.fastapi.port }}
+          name: http
+        env:
+        - name: MINIO_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: MINIO_ENDPOINT
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: trinity-secrets
+              key: MINIO_ACCESS_KEY
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: trinity-secrets
+              key: MINIO_SECRET_KEY
+        - name: FLIGHT_HOST
+          value: {{ .Values.flight.name | quote }}
+        - name: FLIGHT_PORT
+          value: {{ .Values.flight.port | quote }}
+        - name: HOST_IP
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: HOST_IP
+        - name: FASTAPI_CORS_ORIGINS
+          value: {{ .Values.fastapi.environment.FASTAPI_CORS_ORIGINS | quote }}
+        - name: MONGO_URI
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: MONGO_URI
+        - name: CLASSIFY_MONGO_URI
+          value: {{ .Values.fastapi.environment.CLASSIFY_MONGO_URI | quote }}
+        # Redis Configuration
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          value: "{{ .Values.redis.port }}"
+        - name: REDIS_DB
+          value: "0"
+        # PostgreSQL Configuration
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          value: "{{ .Values.postgres.port }}"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: trinity-secrets
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-secrets
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: trinity-secrets
+              key: POSTGRES_DB
+        # MongoDB Configuration
+        - name: MONGODB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: MONGODB_HOST
+        resources:
+          requests:
+            memory: {{ .Values.resources.fastapi.requests.memory }}
+            cpu: {{ .Values.resources.fastapi.requests.cpu }}
+          limits:
+            memory: {{ .Values.resources.fastapi.limits.memory }}
+            cpu: {{ .Values.resources.fastapi.limits.cpu }}
+        {{- if .Values.healthChecks.enabled }}
+        readinessProbe:
+          httpGet:
+            path: /docs
+            port: {{ .Values.fastapi.port }}
+          initialDelaySeconds: {{ .Values.healthChecks.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthChecks.periodSeconds }}
+          timeoutSeconds: {{ .Values.healthChecks.timeoutSeconds }}
+          failureThreshold: {{ .Values.healthChecks.failureThreshold }}
+        livenessProbe:
+          httpGet:
+            path: /docs
+            port: {{ .Values.fastapi.port }}
+          initialDelaySeconds: {{ .Values.healthChecks.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthChecks.periodSeconds }}
+          timeoutSeconds: {{ .Values.healthChecks.timeoutSeconds }}
+          failureThreshold: {{ .Values.healthChecks.failureThreshold }}
+        {{- end }}
+---
+# FastAPI Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.fastapi.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: {{ .Values.fastapi.name }}
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  ports:
+  - port: {{ .Values.fastapi.port }}
+    targetPort: {{ .Values.fastapi.port }}
+    protocol: TCP
+    name: http
+  selector:
+    app: {{ .Values.fastapi.name }}
+---
+# FastAPI NodePort Service for external access
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.fastapi.name }}-nodeport
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: {{ .Values.fastapi.name }}
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: NodePort
+  ports:
+  - port: {{ .Values.fastapi.port }}
+    targetPort: {{ .Values.fastapi.port }}
+    nodePort: {{ .Values.fastapi.nodePort }}
+    protocol: TCP
+    name: http
+  selector:
+    app: {{ .Values.fastapi.name }}
+{{- end }}
+

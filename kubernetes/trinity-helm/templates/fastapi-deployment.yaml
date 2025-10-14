@@ -1,0 +1,92 @@
+{{- if .Values.fastapi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trinity-fastapi
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: trinity-fastapi
+    component: api
+spec:
+  replicas: {{ .Values.fastapi.replicas }}
+  selector:
+    matchLabels:
+      app: trinity-fastapi
+  template:
+    metadata:
+      labels:
+        app: trinity-fastapi
+    spec:
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:15
+        command: ['sh', '-c', 'until pg_isready -h postgresql -p 5432 -U {{ .Values.postgresql.username }}; do echo waiting for postgres; sleep 2; done;']
+      - name: wait-for-mongo
+        image: mongo:6
+        command: ['sh', '-c', 'until mongosh --host mongodb --port 27017 --eval "db.adminCommand(\"ping\")" --quiet; do echo waiting for mongo; sleep 2; done;']
+      - name: wait-for-redis
+        image: redis:7
+        command: ['sh', '-c', 'until redis-cli -h redis -p 6379 ping; do echo waiting for redis; sleep 2; done;']
+      containers:
+      - name: fastapi
+        image: {{ .Values.global.imageRegistry }}/{{ .Values.images.fastapi.repository }}:{{ .Values.images.fastapi.tag }}
+        imagePullPolicy: {{ .Values.images.fastapi.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.fastapi.port }}
+        command: ["uvicorn", "apps.orchestration.fastapi_app:app", "--host", "0.0.0.0", "--port", "8001"]
+        env:
+        - name: HOST_IP
+          value: {{ .Values.fastapi.env.HOST_IP }}
+        - name: FASTAPI_CORS_ORIGINS
+          value: {{ .Values.fastapi.env.FASTAPI_CORS_ORIGINS }}
+        - name: MONGO_URI
+          value: "mongodb://{{ .Values.mongodb.rootUsername }}:{{ .Values.mongodb.rootPassword }}@mongodb:27017/trinity_prod?authSource=admin"
+        - name: CLASSIFY_MONGO_URI
+          value: "mongodb://{{ .Values.mongodb.rootUsername }}:{{ .Values.mongodb.rootPassword }}@mongodb:27017/?authSource=admin"
+        - name: MINIO_ENDPOINT
+          value: "minio:9000"
+        - name: MINIO_ACCESS_KEY
+          value: {{ .Values.minio.accessKey }}
+        - name: MINIO_SECRET_KEY
+          value: {{ .Values.minio.secretKey }}
+        - name: FLIGHT_HOST
+          value: "trinity-flight"
+        - name: FLIGHT_PORT
+          value: "8815"
+        resources:
+          requests:
+            memory: {{ .Values.fastapi.resources.requests.memory }}
+            cpu: {{ .Values.fastapi.resources.requests.cpu }}
+          limits:
+            memory: {{ .Values.fastapi.resources.limits.memory }}
+            cpu: {{ .Values.fastapi.resources.limits.cpu }}
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: {{ .Values.fastapi.port }}
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: {{ .Values.fastapi.port }}
+          initialDelaySeconds: 30
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trinity-fastapi
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: trinity-fastapi
+spec:
+  type: {{ .Values.services.type }}
+  ports:
+  - port: {{ .Values.services.ports.fastapi }}
+    targetPort: {{ .Values.fastapi.port }}
+    protocol: TCP
+  selector:
+    app: trinity-fastapi
+{{- end }}
+

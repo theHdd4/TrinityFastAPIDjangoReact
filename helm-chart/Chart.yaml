@@ -1,0 +1,17 @@
+apiVersion: v2
+name: trinity
+description: Trinity AI-powered data analysis platform with FastAPI, Django, and React
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - trinity
+  - ai
+  - data-analysis
+  - fastapi
+  - django
+  - react
+home: https://github.com/quantmatrix/trinity
+maintainers:
+  - name: Trinity Team
+    email: support@quantmatrixai.com

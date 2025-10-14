@@ -1,0 +1,66 @@
+{{- if .Values.ingress.enabled }}
+# Trinity Ingress - Path-based routing for all services
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: trinity-ingress
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+  - host: {{ .Values.ingress.host }}
+    http:
+      paths:
+      # Django Admin - /admin routes to Django backend
+      - path: /admin(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: {{ .Values.web.name }}
+            port:
+              number: {{ .Values.web.port }}
+      
+      # FastAPI - /api routes to FastAPI backend
+      - path: /api(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: {{ .Values.fastapi.name }}
+            port:
+              number: {{ .Values.fastapi.port }}
+      
+      # Trinity AI - /trinityai routes to AI service
+      - path: /trinityai(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: {{ .Values.trinityAI.name }}
+            port:
+              number: {{ .Values.trinityAI.port }}
+      
+      # MinIO Console - /minio-console routes to MinIO console
+      - path: /minio-console(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: minio
+            port:
+              number: {{ .Values.minio.consolePort }}
+      
+      # Frontend - Root path (must be last for catch-all)
+      - path: /()(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: {{ .Values.frontend.name }}
+            port:
+              number: {{ .Values.frontend.port }}
+{{- end }}
+

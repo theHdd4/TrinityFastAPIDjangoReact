@@ -1,0 +1,113 @@
+{{- if .Values.trinityAI.enabled }}
+# Trinity AI Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.trinityAI.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: {{ .Values.trinityAI.name }}
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.trinityAI.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.trinityAI.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.trinityAI.name }}
+    spec:
+      initContainers:
+      - name: wait-for-mongodb
+        image: mongo:6
+        command: ['sh', '-c', 'until mongosh --host mongodb:27017 --eval "print(\"MongoDB is ready\")"; do echo waiting for mongodb; sleep 2; done;']
+      containers:
+      - name: {{ .Values.trinityAI.name }}
+        image: trinity-ai:latest
+        imagePullPolicy: Never
+        command: ["uvicorn", "main_api:app", "--host", "0.0.0.0", "--port", "{{ .Values.trinityAI.port }}"]
+        ports:
+        - containerPort: {{ .Values.trinityAI.port }}
+          name: http
+        env:
+        - name: OLLAMA_IP
+          value: {{ .Values.trinityAI.environment.OLLAMA_IP | quote }}
+        - name: MONGO_URI
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: MONGO_URI
+        - name: CLASSIFY_MONGO_URI
+          value: {{ .Values.trinityAI.environment.CLASSIFY_MONGO_URI | quote }}
+        resources:
+          requests:
+            memory: {{ .Values.resources.trinityAI.requests.memory }}
+            cpu: {{ .Values.resources.trinityAI.requests.cpu }}
+          limits:
+            memory: {{ .Values.resources.trinityAI.limits.memory }}
+            cpu: {{ .Values.resources.trinityAI.limits.cpu }}
+        {{- if .Values.healthChecks.enabled }}
+        readinessProbe:
+          httpGet:
+            path: /
+            port: {{ .Values.trinityAI.port }}
+          initialDelaySeconds: {{ .Values.healthChecks.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthChecks.periodSeconds }}
+          timeoutSeconds: {{ .Values.healthChecks.timeoutSeconds }}
+          failureThreshold: {{ .Values.healthChecks.failureThreshold }}
+        livenessProbe:
+          httpGet:
+            path: /
+            port: {{ .Values.trinityAI.port }}
+          initialDelaySeconds: {{ .Values.healthChecks.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthChecks.periodSeconds }}
+          timeoutSeconds: {{ .Values.healthChecks.timeoutSeconds }}
+          failureThreshold: {{ .Values.healthChecks.failureThreshold }}
+        {{- end }}
+---
+# Trinity AI Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.trinityAI.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: {{ .Values.trinityAI.name }}
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  ports:
+  - port: {{ .Values.trinityAI.port }}
+    targetPort: {{ .Values.trinityAI.port }}
+    protocol: TCP
+    name: http
+  selector:
+    app: {{ .Values.trinityAI.name }}
+---
+# Trinity AI NodePort Service for external access
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.trinityAI.name }}-nodeport
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: {{ .Values.trinityAI.name }}
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: NodePort
+  ports:
+  - port: {{ .Values.trinityAI.port }}
+    targetPort: {{ .Values.trinityAI.port }}
+    nodePort: {{ .Values.trinityAI.nodePort }}
+    protocol: TCP
+    name: http
+  selector:
+    app: {{ .Values.trinityAI.name }}
+{{- end }}
+
+
+

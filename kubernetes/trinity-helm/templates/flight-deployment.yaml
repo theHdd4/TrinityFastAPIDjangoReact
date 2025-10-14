@@ -1,0 +1,73 @@
+{{- if .Values.flight.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trinity-flight
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: trinity-flight
+    component: flight
+spec:
+  replicas: {{ .Values.flight.replicas }}
+  selector:
+    matchLabels:
+      app: trinity-flight
+  template:
+    metadata:
+      labels:
+        app: trinity-flight
+    spec:
+      containers:
+      - name: flight
+        image: {{ .Values.global.imageRegistry }}/{{ .Values.images.fastapi.repository }}:{{ .Values.images.fastapi.tag }}
+        imagePullPolicy: {{ .Values.images.fastapi.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.flight.port }}
+          protocol: TCP
+        command: ["python", "app/flight_server.py"]
+        env:
+        - name: DATABASE_URL
+          value: "postgresql://{{ .Values.postgresql.username }}:{{ .Values.postgresql.password }}@postgresql:5432/{{ .Values.postgresql.database }}"
+        - name: MONGO_URI
+          value: "mongodb://{{ .Values.mongodb.rootUsername }}:{{ .Values.mongodb.rootPassword }}@mongodb:27017/trinity_prod?authSource=admin"
+        - name: MINIO_ENDPOINT
+          value: "minio:9000"
+        - name: MINIO_ACCESS_KEY
+          value: {{ .Values.minio.accessKey }}
+        - name: MINIO_SECRET_KEY
+          value: {{ .Values.minio.secretKey }}
+        resources:
+          requests:
+            memory: {{ .Values.flight.resources.requests.memory }}
+            cpu: {{ .Values.flight.resources.requests.cpu }}
+          limits:
+            memory: {{ .Values.flight.resources.limits.memory }}
+            cpu: {{ .Values.flight.resources.limits.cpu }}
+        livenessProbe:
+          tcpSocket:
+            port: {{ .Values.flight.port }}
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: {{ .Values.flight.port }}
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trinity-flight
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: trinity-flight
+spec:
+  type: {{ .Values.services.type }}
+  ports:
+  - port: {{ .Values.services.ports.flight }}
+    targetPort: {{ .Values.flight.port }}
+    protocol: TCP
+  selector:
+    app: trinity-flight
+{{- end }}
+

@@ -1,0 +1,28 @@
+# Cloudflare Tunnel Configuration for Trinity Staging
+# Replace <TUNNEL_ID> with your actual staging tunnel ID from Cloudflare dashboard
+
+tunnel: <TUNNEL_ID>
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  # Route all trinity-stag.quantmatrixai.com traffic to Kubernetes NGINX Ingress
+  # The Ingress controller will handle path-based routing (/admin, /api, /trinityai, /)
+  - hostname: trinity-stag.quantmatrixai.com
+    service: http://127.0.0.1:80
+  
+  # Catch-all rule (required)
+  - service: http_status:404
+
+# Note: Before starting this tunnel:
+# 1. Ensure NGINX Ingress is exposed on localhost:80:
+#    kubectl port-forward -n ingress-nginx service/ingress-nginx-controller 80:80 --address 127.0.0.1
+#
+# 2. Copy your tunnel credentials file here:
+#    cloudflared-stag/tunnelCreds/<TUNNEL_ID>.json
+#
+# 3. Update the tunnel ID and credentials file path above
+#
+# 4. Start the tunnel:
+#    cd cloudflared-stag
+#    docker-compose up -d
+

@@ -1,0 +1,75 @@
+{{- if .Values.ai.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trinity-ai
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: trinity-ai
+    component: ai
+spec:
+  replicas: {{ .Values.ai.replicas }}
+  selector:
+    matchLabels:
+      app: trinity-ai
+  template:
+    metadata:
+      labels:
+        app: trinity-ai
+    spec:
+      containers:
+      - name: ai
+        image: {{ .Values.global.imageRegistry }}/{{ .Values.images.ai.repository }}:{{ .Values.images.ai.tag }}
+        imagePullPolicy: {{ .Values.images.ai.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.ai.port }}
+        env:
+        - name: OLLAMA_IP
+          value: {{ .Values.ai.env.OLLAMA_IP }}
+        - name: DATABASE_URL
+          value: "postgresql://{{ .Values.postgresql.username }}:{{ .Values.postgresql.password }}@postgresql:5432/{{ .Values.postgresql.database }}"
+        - name: MONGO_URI
+          value: "mongodb://{{ .Values.mongodb.rootUsername }}:{{ .Values.mongodb.rootPassword }}@mongodb:27017/trinity_prod?authSource=admin"
+        - name: MINIO_ENDPOINT
+          value: "minio:9000"
+        - name: MINIO_ACCESS_KEY
+          value: {{ .Values.minio.accessKey }}
+        - name: MINIO_SECRET_KEY
+          value: {{ .Values.minio.secretKey }}
+        resources:
+          requests:
+            memory: {{ .Values.ai.resources.requests.memory }}
+            cpu: {{ .Values.ai.resources.requests.cpu }}
+          limits:
+            memory: {{ .Values.ai.resources.limits.memory }}
+            cpu: {{ .Values.ai.resources.limits.cpu }}
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: {{ .Values.ai.port }}
+          initialDelaySeconds: 120
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: {{ .Values.ai.port }}
+          initialDelaySeconds: 60
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trinity-ai
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: trinity-ai
+spec:
+  type: {{ .Values.services.type }}
+  ports:
+  - port: {{ .Values.services.ports.ai }}
+    targetPort: {{ .Values.ai.port }}
+    protocol: TCP
+  selector:
+    app: trinity-ai
+{{- end }}
+

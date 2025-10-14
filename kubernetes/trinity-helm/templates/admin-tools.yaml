@@ -1,0 +1,116 @@
+{{- if .Values.pgadmin.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgadmin
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: pgadmin
+    component: admin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pgadmin
+  template:
+    metadata:
+      labels:
+        app: pgadmin
+    spec:
+      containers:
+      - name: pgadmin
+        image: dpage/pgadmin4:latest
+        ports:
+        - containerPort: 80
+        env:
+        - name: PGADMIN_DEFAULT_EMAIL
+          value: {{ .Values.pgadmin.email }}
+        - name: PGADMIN_DEFAULT_PASSWORD
+          value: {{ .Values.pgadmin.password }}
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgadmin
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: pgadmin
+spec:
+  type: {{ .Values.services.type }}
+  ports:
+  - port: {{ .Values.services.ports.pgadmin }}
+    targetPort: 80
+    protocol: TCP
+  selector:
+    app: pgadmin
+{{- end }}
+
+{{- if .Values.mongoExpress.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongo-express
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: mongo-express
+    component: admin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo-express
+  template:
+    metadata:
+      labels:
+        app: mongo-express
+    spec:
+      containers:
+      - name: mongo-express
+        image: mongo-express:latest
+        ports:
+        - containerPort: 8081
+        env:
+        - name: ME_CONFIG_MONGODB_ADMINUSERNAME
+          value: {{ .Values.mongodb.rootUsername }}
+        - name: ME_CONFIG_MONGODB_ADMINPASSWORD
+          value: {{ .Values.mongodb.rootPassword }}
+        - name: ME_CONFIG_MONGODB_SERVER
+          value: mongodb
+        - name: ME_CONFIG_BASICAUTH_USERNAME
+          value: {{ .Values.mongoExpress.username }}
+        - name: ME_CONFIG_BASICAUTH_PASSWORD
+          value: {{ .Values.mongoExpress.password }}
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo-express
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: mongo-express
+spec:
+  type: {{ .Values.services.type }}
+  ports:
+  - port: {{ .Values.services.ports.mongoExpress }}
+    targetPort: 8081
+    protocol: TCP
+  selector:
+    app: mongo-express
+{{- end }}
+

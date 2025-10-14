@@ -1,0 +1,250 @@
+# Trinity Kubernetes Configuration
+global:
+  namespace: trinity
+  environment: dev
+  hostIP: "10.2.3.55"  # Your WiFi IPv4 address for network access
+  storageClass: "standard"  # Minikube default storage class (use "local-path" for k3s)
+  projectPath: "D:/Kubernetes/TrinityFastAPIDjangoReact"  # Windows project path
+  
+# Image configurations
+images:
+  postgres:
+    repository: postgres
+    tag: "15"
+    pullPolicy: IfNotPresent
+  mongo:
+    repository: mongo
+    tag: "6"
+    pullPolicy: IfNotPresent
+  redis:
+    repository: redis
+    tag: "7"
+    pullPolicy: IfNotPresent
+  minio:
+    repository: minio/minio
+    tag: "RELEASE.2025-04-22T22-12-26Z"
+    pullPolicy: IfNotPresent
+  pgadmin:
+    repository: dpage/pgadmin4
+    tag: latest
+    pullPolicy: IfNotPresent
+  mongoExpress:
+    repository: mongo-express
+    tag: latest
+    pullPolicy: IfNotPresent
+
+# Database configurations
+postgres:
+  enabled: true
+  database: trinity_db
+  username: trinity_user
+  password: trinity_pass
+  port: 5432
+  storage: 5Gi
+
+mongodb:
+  enabled: true
+  rootUsername: root
+  rootPassword: rootpass
+  port: 27017
+  storage: 5Gi
+
+redis:
+  enabled: true
+  port: 6379
+  storage: 2Gi
+
+# Object storage
+minio:
+  enabled: true
+  rootUser: minio
+  rootPassword: minio123
+  apiPort: 9000
+  consolePort: 9001
+  storage: 10Gi
+
+# Application services
+web:
+  enabled: true
+  name: web
+  image:
+    build:
+      context: "./TrinityBackendDjango"
+      dockerfile: "Dockerfile"
+  port: 8000
+  nodePort: 30000  # localhost:30000 -> web:8000
+  replicas: 2  # Fault tolerance: 2 replicas for high availability
+  environment:
+    HOST_IP: "127.0.0.1"
+    FRONTEND_PORT: "8080"
+    CORS_ALLOWED_ORIGINS: "http://10.2.3.55:8080,http://127.0.0.1:8080,http://localhost:8080"
+    CSRF_TRUSTED_ORIGINS: "http://10.2.3.55:8080,http://127.0.0.1:8080,http://localhost:8080"
+    MONGO_URI: "mongodb://root:rootpass@mongodb:27017/trinity_dev?authSource=admin"
+    MINIO_ENDPOINT: "minio:9000"
+    MINIO_ACCESS_KEY: "minio"
+    MINIO_SECRET_KEY: "minio123"
+
+fastapi:
+  enabled: true
+  name: fastapi
+  image:
+    build:
+      context: "./TrinityBackendDjango"
+      dockerfile: "Dockerfile"
+  port: 8001
+  nodePort: 30001  # localhost:30001 -> fastapi:8001
+  replicas: 2  # Fault tolerance: 2 replicas for high availability
+  command: ["uvicorn", "apps.orchestration.fastapi_app:app", "--host", "0.0.0.0", "--port", "8001"]
+  environment:
+    MINIO_ENDPOINT: "minio:9000"
+    MINIO_ACCESS_KEY: "minio"
+    MINIO_SECRET_KEY: "minio123"
+    FLIGHT_HOST: "flight"
+    FLIGHT_PORT: "8815"
+    HOST_IP: "127.0.0.1"
+    FASTAPI_CORS_ORIGINS: "http://10.2.3.55:8080,http://127.0.0.1:8080,http://localhost:8080"
+    MONGO_URI: "mongodb://root:rootpass@mongodb:27017/trinity_dev?authSource=admin"
+    CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongodb:27017/?authSource=admin"
+
+trinityAI:
+  enabled: true
+  name: trinity-ai
+  image:
+    build:
+      context: "./TrinityAI"
+      dockerfile: "Dockerfile"
+  port: 8002
+  nodePort: 30002  # localhost:30002 -> trinity-ai:8002
+  replicas: 1  # Single replica (resource intensive), can increase to 2 if resources allow
+  environment:
+    OLLAMA_IP: "127.0.0.1"
+    MONGO_URI: "mongodb://root:rootpass@mongodb:27017/trinity_dev?authSource=admin"
+    CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongodb:27017/?authSource=admin"
+
+flight:
+  enabled: true
+  name: flight
+  image:
+    build:
+      context: "./TrinityBackendFastAPI"
+      dockerfile: "Dockerfile"
+  port: 8815
+  nodePort: 30815  # localhost:30815 -> flight:8815
+  replicas: 1
+  command: ["python", "app/flight_server.py"]
+
+celery:
+  enabled: true
+  name: celery
+  image:
+    build:
+      context: "./TrinityBackendDjango"
+      dockerfile: "Dockerfile"
+  replicas: 2  # Fault tolerance: 2 worker replicas for background tasks
+  command: ["celery", "-A", "config.celery", "worker", "--loglevel=info"]
+  environment:
+    MONGO_URI: "mongodb://root:rootpass@mongodb:27017/trinity_dev?authSource=admin"
+    MINIO_ENDPOINT: "minio:9000"
+    MINIO_ACCESS_KEY: "minio"
+    MINIO_SECRET_KEY: "minio123"
+
+frontend:
+  enabled: true
+  name: frontend
+  image:
+    build:
+      context: "./TrinityFrontend"
+      dockerfile: "Dockerfile"
+  port: 80
+  nodePort: 30080  # localhost:30080 -> frontend:80 (main app access)
+  replicas: 2  # Fault tolerance: 2 replicas for high availability
+
+# Management tools
+pgadmin:
+  enabled: true
+  name: pgadmin
+  port: 80
+  nodePort: 30050  # localhost:30050 -> pgadmin:80
+  email: admin@example.com
+  password: admin
+
+mongoExpress:
+  enabled: true
+  name: mongo-express
+  port: 8081
+  nodePort: 30082  # localhost:30082 -> mongo-express:8081
+  basicAuthUsername: admin
+  basicAuthPassword: admin
+
+# Resource limits
+resources:
+  postgres:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  mongodb:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  redis:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+  minio:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  web:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  fastapi:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  trinityAI:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  frontend:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+
+# Health checks
+healthChecks:
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Ingress configuration for domain-based routing
+ingress:
+  enabled: true
+  className: nginx  # Use NGINX Ingress Controller (built into Minikube)
+  host: localhost   # Default for local testing, override with values-staging.yaml for domain

@@ -1,0 +1,240 @@
+# Trinity Helm Chart Values
+# This file contains the default values for the Trinity application
+
+# Global configuration
+global:
+  namespace: trinity-dev
+  domain: trinity.quantmatrixai.com
+  imageRegistry: localhost:5000
+  imageTag: v1.0.0
+
+# Image configurations
+images:
+  django:
+    repository: trinity-django
+    tag: v1.0.0
+    pullPolicy: IfNotPresent
+  fastapi:
+    repository: trinity-fastapi
+    tag: v1.0.0
+    pullPolicy: IfNotPresent
+  ai:
+    repository: trinity-ai
+    tag: v1.0.0
+    pullPolicy: IfNotPresent
+  frontend:
+    repository: trinity-frontend
+    tag: v1.0.0
+    pullPolicy: IfNotPresent
+
+# Database configurations
+postgresql:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "15"
+  database: trinity_db
+  username: trinity_user
+  password: trinity_pass
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: local-path
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+
+mongodb:
+  enabled: true
+  image:
+    repository: mongo
+    tag: "6"
+  rootUsername: root
+  rootPassword: rootpass
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: local-path
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: "7"
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: local-path
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+minio:
+  enabled: true
+  image:
+    repository: minio/minio
+    tag: "RELEASE.2025-04-22T22-12-26Z"
+  accessKey: minio
+  secretKey: minio123
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: local-path
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+
+# Application services
+django:
+  enabled: true
+  replicas: 2
+  port: 8000
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+  env:
+    HOST_IP: "10.2.4.48"
+    FRONTEND_PORT: "8080"
+    CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8080,http://10.2.4.48:8080,http://172.17.48.1:8080,https://trinity.quantmatrixai.com"
+    CSRF_TRUSTED_ORIGINS: "http://127.0.0.1:8080,http://10.2.4.48:8080,http://172.17.48.1:8080,https://trinity.quantmatrixai.com"
+
+fastapi:
+  enabled: true
+  replicas: 2
+  port: 8001
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "2000m"
+  env:
+    HOST_IP: "10.2.4.48"
+    FASTAPI_CORS_ORIGINS: "http://127.0.0.1:8080,http://10.2.4.48:8080,http://172.17.48.1:8080,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com"
+
+flight:
+  enabled: true
+  replicas: 1
+  port: 8815
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+celery:
+  enabled: true
+  replicas: 2
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "1Gi"
+      cpu: "1000m"
+
+ai:
+  enabled: true
+  replicas: 1
+  port: 8002
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "8Gi"
+      cpu: "4000m"
+  env:
+    OLLAMA_IP: "10.2.4.48"
+
+frontend:
+  enabled: true
+  replicas: 2
+  port: 80
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+# Admin tools
+pgadmin:
+  enabled: true
+  port: 80
+  email: admin@example.com
+  password: admin
+
+mongoExpress:
+  enabled: true
+  port: 8081
+  username: admin
+  password: admin
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+  hosts:
+    - host: trinity.quantmatrixai.com
+      paths:
+        - path: /admin
+          pathType: Prefix
+          service: django
+        - path: /api
+          pathType: Prefix
+          service: fastapi
+        - path: /trinityai
+          pathType: Prefix
+          service: ai
+        - path: /
+          pathType: Prefix
+          service: frontend
+  tls: []
+
+# Service configuration
+services:
+  type: ClusterIP
+  ports:
+    django: 8000
+    fastapi: 8001
+    flight: 8815
+    ai: 8002
+    frontend: 80
+    postgresql: 5432
+    mongodb: 27017
+    redis: 6379
+    minio: 9000
+    minioConsole: 9001
+    pgadmin: 80
+    mongoExpress: 8081
+

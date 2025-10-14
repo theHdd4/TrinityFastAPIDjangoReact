@@ -1,0 +1,190 @@
+{{- if .Values.web.enabled }}
+# Django Web Backend Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.web.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: {{ .Values.web.name }}
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.web.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.web.name }}
+    spec:
+      # Note: In a real deployment, you would need to build and push images to a registry
+      # For now, this assumes local images or a build process
+      initContainers:
+      - name: wait-for-postgres
+        image: postgres:15
+        command: ['sh', '-c', 'until pg_isready -h postgres -p 5432; do echo waiting for postgres; sleep 2; done;']
+      - name: wait-for-mongodb
+        image: mongo:6
+        command: ['sh', '-c', 'until mongosh --host mongodb:27017 --eval "print(\"MongoDB is ready\")"; do echo waiting for mongodb; sleep 2; done;']
+      - name: wait-for-redis
+        image: redis:7
+        command: ['sh', '-c', 'until redis-cli -h redis -p 6379 ping; do echo waiting for redis; sleep 2; done;']
+      containers:
+      - name: {{ .Values.web.name }}
+        image: trinity-web:latest
+        imagePullPolicy: Never
+        command: ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:{{ .Values.web.port }}", "--workers", "3"]
+        ports:
+        - containerPort: {{ .Values.web.port }}
+          name: http
+        env:
+        - name: HOST_IP
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: HOST_IP
+        - name: FRONTEND_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: FRONTEND_PORT
+        - name: CORS_ALLOWED_ORIGINS
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: CORS_ALLOWED_ORIGINS
+        - name: CSRF_TRUSTED_ORIGINS
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: CSRF_TRUSTED_ORIGINS
+        - name: MONGO_URI
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: MONGO_URI
+        - name: MINIO_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: MINIO_ENDPOINT
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: trinity-secrets
+              key: MINIO_ACCESS_KEY
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: trinity-secrets
+              key: MINIO_SECRET_KEY
+        # PostgreSQL Configuration
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          value: "{{ .Values.postgres.port }}"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: trinity-secrets
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-secrets
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: trinity-secrets
+              key: POSTGRES_DB
+        # Volume mounts disabled for testing - would be different in production
+        # volumeMounts:
+        # - name: web-code
+        #   mountPath: /code
+        # - name: fastapi-code
+        #   mountPath: /code/TrinityBackendFastAPI
+        resources:
+          requests:
+            memory: {{ .Values.resources.web.requests.memory }}
+            cpu: {{ .Values.resources.web.requests.cpu }}
+          limits:
+            memory: {{ .Values.resources.web.limits.memory }}
+            cpu: {{ .Values.resources.web.limits.cpu }}
+        {{- if .Values.healthChecks.enabled }}
+        readinessProbe:
+          httpGet:
+            path: /admin/
+            port: {{ .Values.web.port }}
+          initialDelaySeconds: {{ .Values.healthChecks.initialDelaySeconds }}
+          periodSeconds: {{ .Values.healthChecks.periodSeconds }}
+          timeoutSeconds: {{ .Values.healthChecks.timeoutSeconds }}
+          failureThreshold: {{ .Values.healthChecks.failureThreshold }}
+        livenessProbe:
+          httpGet:
+            path: /admin/
+            port: {{ .Values.web.port }}
+          initialDelaySeconds: 60
+          periodSeconds: {{ .Values.healthChecks.periodSeconds }}
+          timeoutSeconds: {{ .Values.healthChecks.timeoutSeconds }}
+          failureThreshold: {{ .Values.healthChecks.failureThreshold }}
+        {{- end }}
+      # Volumes disabled for testing
+      # volumes:
+      # # For development - mount local code  
+      # # In production, code would be baked into the image
+      # - name: web-code
+      #   hostPath:
+      #     path: {{ .Values.global.projectPath | default "D:/Kubernetes/TrinityFastAPIDjangoReact" }}/TrinityBackendDjango
+      #     type: DirectoryOrCreate
+      # - name: fastapi-code
+      #   hostPath:
+      #     path: {{ .Values.global.projectPath | default "D:/Kubernetes/TrinityFastAPIDjangoReact" }}/TrinityBackendFastAPI
+      #     type: DirectoryOrCreate
+---
+# Django Web Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.web.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: {{ .Values.web.name }}
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  ports:
+  - port: {{ .Values.web.port }}
+    targetPort: {{ .Values.web.port }}
+    protocol: TCP
+    name: http
+  selector:
+    app: {{ .Values.web.name }}
+---
+# Django Web NodePort Service for external access
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.web.name }}-nodeport
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: {{ .Values.web.name }}
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: NodePort
+  ports:
+  - port: {{ .Values.web.port }}
+    targetPort: {{ .Values.web.port }}
+    nodePort: {{ .Values.web.nodePort }}  # localhost:30000 -> web:8000
+    protocol: TCP
+    name: http
+  selector:
+    app: {{ .Values.web.name }}
+{{- end }}

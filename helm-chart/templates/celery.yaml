@@ -1,0 +1,83 @@
+{{- if .Values.celery.enabled }}
+# Celery Worker Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.celery.name }}
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    app: {{ .Values.celery.name }}
+    app.kubernetes.io/name: trinity
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.celery.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.celery.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.celery.name }}
+    spec:
+      initContainers:
+      - name: wait-for-redis
+        image: redis:7
+        command: ['sh', '-c', 'until redis-cli -h redis -p 6379 ping; do echo waiting for redis; sleep 2; done;']
+      - name: wait-for-mongodb
+        image: mongo:6
+        command: ['sh', '-c', 'until mongosh --host mongodb:27017 --eval "print(\"MongoDB is ready\")"; do echo waiting for mongodb; sleep 2; done;']
+      containers:
+      - name: {{ .Values.celery.name }}
+        image: trinity-web:latest
+        imagePullPolicy: Never
+        {{- if .Values.celery.command }}
+        command: {{ .Values.celery.command | toJson }}
+        {{- else }}
+        command: ["celery", "-A", "config.celery", "worker", "--loglevel=info"]
+        {{- end }}
+        env:
+        - name: MONGO_URI
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: MONGO_URI
+        - name: MINIO_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-config
+              key: MINIO_ENDPOINT
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: trinity-secrets
+              key: MINIO_ACCESS_KEY
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: trinity-secrets
+              key: MINIO_SECRET_KEY
+        resources:
+          requests:
+            memory: {{ .Values.resources.web.requests.memory }}
+            cpu: {{ .Values.resources.web.requests.cpu }}
+          limits:
+            memory: {{ .Values.resources.web.limits.memory }}
+            cpu: {{ .Values.resources.web.limits.cpu }}
+        {{- if .Values.healthChecks.enabled }}
+        livenessProbe:
+          exec:
+            command:
+              - celery
+              - -A
+              - config.celery
+              - inspect
+              - ping
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        {{- end }}
+{{- end }}
+
+
+
