@@ -32,6 +32,11 @@ import {
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 import { createTextBoxSlideObject } from './components/operationsPalette/textBox/constants';
+import {
+  buildChartRendererPropsFromManifest,
+  buildTableDataFromManifest,
+  clonePlain,
+} from '@/components/AtomList/atoms/feature-overview/utils/exhibitionManifest';
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
 const SLIDESHOW_ANIMATION_MS = 450;
@@ -811,7 +816,7 @@ const ExhibitionMode = () => {
         });
 
         if (response && response.manifest) {
-          const manifestClone = JSON.parse(JSON.stringify(response.manifest));
+          const manifestClone = clonePlain(response.manifest);
           const nextMetadata: Record<string, any> = {
             ...(component.metadata || {}),
             visualizationManifest: manifestClone,
@@ -827,6 +832,84 @@ const ExhibitionMode = () => {
 
           if (response.manifest_id) {
             nextMetadata.manifestId = response.manifest_id;
+          }
+
+          const manifestChartProps = buildChartRendererPropsFromManifest(manifestClone);
+          if (manifestChartProps) {
+            if (nextMetadata.chartRendererProps == null) {
+              nextMetadata.chartRendererProps = clonePlain(manifestChartProps);
+            }
+
+            const existingChartData = nextMetadata.chartData;
+            const hasExistingChartData = Array.isArray(existingChartData)
+              ? existingChartData.length > 0
+              : Boolean(existingChartData);
+
+            if (!hasExistingChartData) {
+              nextMetadata.chartData = clonePlain(manifestChartProps.data);
+            }
+          }
+
+          const manifestTable = buildTableDataFromManifest(manifestClone);
+          if (manifestTable && nextMetadata.tableData == null) {
+            nextMetadata.tableData = clonePlain(manifestTable);
+          }
+
+          if (!nextMetadata.statisticalDetails) {
+            const summarySnapshot = manifestClone?.data?.summary
+              ? clonePlain(manifestClone.data.summary)
+              : undefined;
+            const timeseriesSnapshot = Array.isArray(manifestClone?.data?.timeseries)
+              ? clonePlain(manifestClone.data.timeseries)
+              : undefined;
+            const fullSnapshot = manifestClone?.data?.statisticalFull
+              ? clonePlain(manifestClone.data.statisticalFull)
+              : undefined;
+
+            if (summarySnapshot || timeseriesSnapshot || fullSnapshot) {
+              nextMetadata.statisticalDetails = {
+                summary: summarySnapshot,
+                timeseries: timeseriesSnapshot,
+                full: fullSnapshot,
+              };
+            }
+          }
+
+          if (!nextMetadata.skuRow && manifestClone?.data?.skuRow) {
+            nextMetadata.skuRow = clonePlain(manifestClone.data.skuRow);
+          }
+
+          if (!nextMetadata.featureContext && manifestClone?.featureContext) {
+            nextMetadata.featureContext = clonePlain(manifestClone.featureContext);
+          }
+
+          if (!nextMetadata.metric && manifestClone?.metric) {
+            nextMetadata.metric = manifestClone.metric;
+          }
+
+          if (!nextMetadata.label && manifestClone?.label) {
+            nextMetadata.label = manifestClone.label;
+          }
+
+          if (!nextMetadata.capturedAt && manifestClone?.capturedAt) {
+            nextMetadata.capturedAt = manifestClone.capturedAt;
+          }
+
+          if (!nextMetadata.chartState && manifestClone?.chart) {
+            nextMetadata.chartState = {
+              chartType: manifestClone.chart.type,
+              theme: manifestClone.chart.theme,
+              showDataLabels: manifestClone.chart.showDataLabels,
+              showAxisLabels: manifestClone.chart.showAxisLabels,
+              showGrid: manifestClone.chart.showGrid,
+              showLegend: manifestClone.chart.showLegend,
+              xAxisField: manifestClone.chart.xField,
+              yAxisField: manifestClone.chart.yField,
+              legendField: manifestClone.chart.legendField,
+              colorPalette: Array.isArray(manifestClone.chart.colorPalette)
+                ? [...manifestClone.chart.colorPalette]
+                : manifestClone.chart.colorPalette,
+            };
           }
 
           return {
