@@ -6,6 +6,8 @@ import {
   ExhibitionComponentPayload,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
+import type { SlideTextBox } from '../components/operationsPalette/textBox/types';
+import { DEFAULT_TEXT_BOX_TEXT, FONT_OPTIONS } from '../components/operationsPalette/textBox/constants';
 
 export type CardColor = 'default' | 'blue' | 'purple' | 'green' | 'orange';
 export type CardWidth = 'M' | 'L';
@@ -88,6 +90,7 @@ export interface LayoutCard {
   title?: string;
   lastEditedAt?: string;
   presentationSettings?: PresentationSettings;
+  textBoxes?: SlideTextBox[];
 }
 
 interface ExhibitionStore {
@@ -347,6 +350,64 @@ const contextsMatch = (a: ProjectContext | null, b: ProjectContext | null): bool
   );
 };
 
+const ensureNumber = (value: unknown, fallback: number): number =>
+  typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+
+const ensureBoolean = (value: unknown, fallback = false): boolean =>
+  typeof value === 'boolean' ? value : fallback;
+
+const ensureAlign = (value: unknown): SlideTextBox['align'] => {
+  if (value === 'center' || value === 'right') {
+    return value;
+  }
+  return 'left';
+};
+
+const ensureFontFamily = (value: unknown): string =>
+  typeof value === 'string' && value.trim().length > 0 ? value : FONT_OPTIONS[0];
+
+const ensureColor = (value: unknown, fallback: string): string =>
+  typeof value === 'string' && value.trim().length > 0 ? value : fallback;
+
+const ensureText = (value: unknown, fallback: string): string =>
+  typeof value === 'string' ? value : fallback;
+
+const normaliseTextBoxList = (boxes: unknown, slideId: string): SlideTextBox[] => {
+  if (!Array.isArray(boxes)) {
+    return [];
+  }
+
+  return boxes
+    .map((box, index) => {
+      if (!isRecord(box)) {
+        return null;
+      }
+
+      const partial = box as Partial<SlideTextBox>;
+      const fallbackId = `${slideId}-textbox-${index + 1}-${Math.random().toString(36).slice(2, 8)}`;
+      const id = isNonEmptyString(partial.id) ? partial.id.trim() : fallbackId;
+
+      const normalised: SlideTextBox = {
+        id,
+        slideId,
+        text: ensureText(partial.text, DEFAULT_TEXT_BOX_TEXT),
+        x: ensureNumber(partial.x, 100),
+        y: ensureNumber(partial.y, 100),
+        fontSize: ensureNumber(partial.fontSize, 16),
+        fontFamily: ensureFontFamily(partial.fontFamily),
+        bold: ensureBoolean(partial.bold),
+        italic: ensureBoolean(partial.italic),
+        underline: ensureBoolean(partial.underline),
+        strikethrough: ensureBoolean(partial.strikethrough),
+        align: ensureAlign(partial.align),
+        color: ensureColor(partial.color, '#000000'),
+      };
+
+      return normalised;
+    })
+    .filter((box): box is SlideTextBox => box !== null);
+};
+
 const withPresentationDefaults = (card: Partial<LayoutCard>): LayoutCard => {
   const atoms = normaliseAtomList(card.atoms);
   const catalogueAtoms = mergeCatalogueAtoms(normaliseAtomList(card.catalogueAtoms), atoms);
@@ -381,6 +442,7 @@ const withPresentationDefaults = (card: Partial<LayoutCard>): LayoutCard => {
     title: resolvedTitle,
     lastEditedAt: resolvedLastEditedAt,
     presentationSettings: ensurePresentationSettings(card.presentationSettings),
+    textBoxes: normaliseTextBoxList(card.textBoxes, id),
   };
 };
 

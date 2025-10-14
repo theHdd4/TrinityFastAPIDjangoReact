@@ -57,7 +57,6 @@ interface SlideCanvasProps {
   isActive?: boolean;
   onTitleChange?: (title: string, cardId: string) => void;
   presenterName?: string | null;
-  textBoxes?: SlideTextBox[];
   onTextBoxChange?: (boxId: string, updates: Partial<SlideTextBox>) => void;
   onTextBoxTextChange?: (boxId: string, text: string) => void;
   onTextBoxPositionChange?: (boxId: string, position: TextBoxPosition) => void;
@@ -78,7 +77,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   isActive = false,
   onTitleChange,
   presenterName,
-  textBoxes = [],
   onTextBoxChange,
   onTextBoxTextChange,
   onTextBoxPositionChange,
@@ -106,6 +104,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     [],
   );
 
+  const textBoxes = card.textBoxes ?? [];
   const cardWidthClass = settings.cardWidth === 'M' ? 'max-w-4xl' : 'max-w-6xl';
   const hasTextBoxes = textBoxes.length > 0;
 

@@ -14,18 +14,23 @@ export const FONT_OPTIONS = [
 export const createDefaultTextBox = (
   id: string,
   overrides: Partial<SlideTextBox> = {},
-): SlideTextBox => ({
-  id,
-  text: DEFAULT_TEXT_BOX_TEXT,
-  x: 100,
-  y: 100,
-  fontSize: 16,
-  fontFamily: FONT_OPTIONS[0],
-  bold: false,
-  italic: false,
-  underline: false,
-  strikethrough: false,
-  align: 'left',
-  color: '#000000',
-  ...overrides,
-});
+): SlideTextBox => {
+  const { slideId, ...restOverrides } = overrides;
+
+  return {
+    id,
+    slideId,
+    text: DEFAULT_TEXT_BOX_TEXT,
+    x: 100,
+    y: 100,
+    fontSize: 16,
+    fontFamily: FONT_OPTIONS[0],
+    bold: false,
+    italic: false,
+    underline: false,
+    strikethrough: false,
+    align: 'left',
+    color: '#000000',
+    ...restOverrides,
+  };
+};

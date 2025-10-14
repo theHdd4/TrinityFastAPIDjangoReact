@@ -5,6 +5,7 @@ export interface SlideTextBox {
   text: string;
   x: number;
   y: number;
+  slideId?: string;
   fontSize: number;
   fontFamily: string;
   bold: boolean;
