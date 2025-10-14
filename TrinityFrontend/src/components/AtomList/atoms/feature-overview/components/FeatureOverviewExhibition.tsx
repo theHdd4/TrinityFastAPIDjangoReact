@@ -401,7 +401,7 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
 
         {selectionCount === 0 ? (
           <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-            No combinations selected yet. Use the Exhibition column in the statistical summary to stage combinations here.
+            No combinations selected yet. Right-click a statistical summary row or trend analysis chart in the laboratory to stage it for exhibition.
           </div>
         ) : (
           <div className="space-y-3">
