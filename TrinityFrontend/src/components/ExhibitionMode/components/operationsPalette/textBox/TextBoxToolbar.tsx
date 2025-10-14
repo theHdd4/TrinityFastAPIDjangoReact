@@ -265,7 +265,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           <div className="flex items-center justify-between gap-2">
             <input
               type="color"
-              value={color}
+              value={color || '#111827'}
               onChange={event => onColorChange(event.target.value)}
               className="h-10 w-full cursor-pointer rounded-lg border border-border"
             />

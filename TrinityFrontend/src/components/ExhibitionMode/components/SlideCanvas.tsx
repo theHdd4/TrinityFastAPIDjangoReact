@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   User,
   Calendar,
@@ -141,6 +141,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     ...DEFAULT_PRESENTATION_SETTINGS,
     ...card.presentationSettings,
   }));
+  const [activeTextToolbar, setActiveTextToolbar] = useState<ReactNode | null>(null);
   const accentImageInputRef = useRef<HTMLInputElement | null>(null);
   const formatPanelRef = useRef<HTMLDivElement | null>(null);
   const formatToggleRef = useRef<HTMLButtonElement | null>(null);
@@ -224,6 +225,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       setShowFormatPanel(false);
     }
   }, [canEdit]);
+
+  useEffect(() => {
+    setActiveTextToolbar(null);
+  }, [card.id, canEdit]);
 
   useEffect(() => {
     if (!showFormatPanel) {
@@ -521,7 +526,13 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         )}
 
         <div className="space-y-4">
-          <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+            {canEdit && activeTextToolbar && (
+              <div className="relative mb-4 flex w-full justify-center">
+                <div className="z-30 drop-shadow-xl">{activeTextToolbar}</div>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-2 text-foreground">
               <User className="h-4 w-4" />
               <span className="font-semibold">Exhibition presenter:</span>
@@ -565,6 +576,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                 onGroupObjects={handleGroupObjects}
                 onTitleCommit={handleTitleCommit}
                 onRemoveObject={objectId => removeSlideObject(card.id, objectId)}
+                onTextToolbarChange={setActiveTextToolbar}
               />
 
               <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
@@ -983,17 +995,18 @@ interface CanvasStageProps {
   onGroupObjects: (objectIds: string[], groupId: string | null) => void;
   onTitleCommit?: (text: string) => void;
   onRemoveObject?: (objectId: string) => void;
+  onTextToolbarChange?: (toolbar: ReactNode | null) => void;
 }
 
 const MIN_OBJECT_WIDTH = 220;
 const MIN_OBJECT_HEIGHT = 120;
 
-const layoutOverlayGradients: Record<CardColor, string> = {
-  default: 'from-purple-500/35 via-pink-500/22 to-orange-400/25',
-  blue: 'from-sky-500/35 via-cyan-400/22 to-teal-400/25',
-  purple: 'from-violet-500/35 via-purple-500/24 to-fuchsia-400/25',
-  green: 'from-emerald-500/32 via-teal-400/22 to-lime-400/24',
-  orange: 'from-orange-500/34 via-amber-400/24 to-yellow-400/24',
+const layoutOverlayBackgrounds: Record<CardColor, string> = {
+  default: 'from-purple-500 via-pink-500 to-orange-400',
+  blue: 'from-blue-500 via-cyan-500 to-teal-400',
+  purple: 'from-violet-500 via-purple-500 to-fuchsia-400',
+  green: 'from-emerald-500 via-green-500 to-lime-400',
+  orange: 'from-orange-500 via-amber-500 to-yellow-400',
 };
 
 const LayoutOverlay: React.FC<{ layout: CardLayout; color: CardColor }> = ({ layout, color }) => {
@@ -1001,25 +1014,25 @@ const LayoutOverlay: React.FC<{ layout: CardLayout; color: CardColor }> = ({ lay
     return null;
   }
 
-  const gradient = layoutOverlayGradients[color] ?? layoutOverlayGradients.default;
+  const gradient = layoutOverlayBackgrounds[color] ?? layoutOverlayBackgrounds.default;
   const baseClass = cn(
-    'pointer-events-none absolute rounded-[28px] bg-gradient-to-br backdrop-blur-sm',
-    'shadow-[0_36px_80px_-34px_rgba(79,70,229,0.55)] ring-1 ring-white/20',
+    'pointer-events-none absolute bg-gradient-to-br transition-all duration-300 ease-out',
+    'shadow-[0_32px_72px_-32px_rgba(76,29,149,0.45)]',
     gradient,
   );
 
   switch (layout) {
     case 'top':
-      return <div className={cn(baseClass, 'inset-x-8 top-6 h-[140px]')} />;
+      return <div className={cn(baseClass, 'left-0 right-0 top-0 h-[190px] rounded-t-[28px]')} />;
     case 'bottom':
-      return <div className={cn(baseClass, 'inset-x-8 bottom-6 h-[160px]')} />;
+      return <div className={cn(baseClass, 'bottom-0 left-0 right-0 h-[200px] rounded-b-[28px]')} />;
     case 'left':
-      return <div className={cn(baseClass, 'left-6 top-10 bottom-10 w-[240px]')} />;
+      return <div className={cn(baseClass, 'bottom-0 left-0 top-0 w-[32%] min-w-[260px] rounded-l-[28px]')} />;
     case 'right':
-      return <div className={cn(baseClass, 'right-6 top-10 bottom-10 w-[240px]')} />;
+      return <div className={cn(baseClass, 'bottom-0 right-0 top-0 w-[32%] min-w-[260px] rounded-r-[28px]')} />;
     case 'full':
     default:
-      return <div className={cn(baseClass, 'inset-6')} />;
+      return <div className={cn(baseClass, 'inset-0 rounded-[28px]')} />;
   }
 };
 
@@ -1043,6 +1056,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       onGroupObjects,
       onTitleCommit,
       onRemoveObject,
+      onTextToolbarChange,
     },
     forwardedRef,
   ) => {
@@ -1063,6 +1077,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     const [activeInteraction, setActiveInteraction] = useState<ActiveInteraction | null>(null);
     const [editingTextState, setEditingTextState] = useState<EditingTextState | null>(null);
     const editingTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const [activeTextToolbar, setActiveTextToolbar] = useState<{ id: string; node: ReactNode } | null>(null);
 
     const focusCanvas = useCallback(() => {
       const node = internalRef.current;
@@ -1075,6 +1090,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
     useEffect(() => {
       setSelectedIds(prev => prev.filter(id => objectsMap.has(id)));
+      setActiveTextToolbar(prev => {
+        if (!prev) {
+          return prev;
+        }
+        return objectsMap.has(prev.id) ? prev : null;
+      });
     }, [objectsMap]);
 
     useEffect(() => {
@@ -1095,6 +1116,46 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         area.select();
       }
     }, [editingTextState]);
+
+    useEffect(() => {
+      setActiveTextToolbar(prev => {
+        if (!prev) {
+          return prev;
+        }
+        return selectedIds.includes(prev.id) ? prev : null;
+      });
+    }, [selectedIds]);
+
+    useEffect(() => {
+      if (!canEdit) {
+        setActiveTextToolbar(null);
+      }
+    }, [canEdit]);
+
+    useEffect(() => {
+      onTextToolbarChange?.(activeTextToolbar?.node ?? null);
+    }, [activeTextToolbar, onTextToolbarChange]);
+
+    useEffect(() => {
+      return () => {
+        onTextToolbarChange?.(null);
+      };
+    }, [onTextToolbarChange]);
+
+    const handleTextToolbarStateChange = useCallback(
+      (objectId: string, node: ReactNode | null) => {
+        setActiveTextToolbar(prev => {
+          if (node) {
+            return { id: objectId, node };
+          }
+          if (prev?.id === objectId) {
+            return null;
+          }
+          return prev;
+        });
+      },
+      [],
+    );
 
     const commitEditingText = useCallback(() => {
       setEditingTextState(prev => {
@@ -1726,9 +1787,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 >
                   {isTextBoxObject ? (
                     <SlideTextBoxObject
+                      id={object.id}
                       canEdit={canEdit}
                       props={object.props as Record<string, unknown> | undefined}
                       isEditing={Boolean(isEditingTextBox)}
+                      isSelected={isSelected}
                       editingValue={
                         isEditingTextBox ? editingTextState.value : textBoxFormatting?.text ?? DEFAULT_TEXT_BOX_TEXT
                       }
@@ -1750,6 +1813,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       }}
                       onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
                       onInteract={onInteract}
+                      onToolbarStateChange={handleTextToolbarStateChange}
                     />
                   ) : (
                     <div

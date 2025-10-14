@@ -550,6 +550,50 @@ const RechartsChartRenderer: React.FC<Props> = ({
       return '';
     }
   });
+  const titleEditableRef = useRef<HTMLDivElement | null>(null);
+  const [isTitleFocused, setIsTitleFocused] = useState(false);
+
+  const resolvedTitle = useMemo(() => {
+    const trimmedCustom = customTitle?.trim?.() ?? '';
+    if (trimmedCustom.length > 0) {
+      return trimmedCustom;
+    }
+    return typeof title === 'string' ? title : '';
+  }, [customTitle, title]);
+
+  useEffect(() => {
+    if (!titleEditableRef.current || isTitleFocused) {
+      return;
+    }
+    titleEditableRef.current.textContent = resolvedTitle;
+  }, [resolvedTitle, isTitleFocused]);
+
+  const handleTitleFocus = useCallback(() => {
+    setIsTitleFocused(true);
+  }, []);
+
+  const handleTitleInput = useCallback(() => {
+    if (!titleEditableRef.current) {
+      return;
+    }
+    setCustomTitle(titleEditableRef.current.textContent ?? '');
+  }, [setCustomTitle]);
+
+  const handleTitleBlur = useCallback(() => {
+    setIsTitleFocused(false);
+    if (!titleEditableRef.current) {
+      return;
+    }
+    const nextValue = (titleEditableRef.current.textContent ?? '').trim();
+    setCustomTitle(nextValue);
+  }, [setCustomTitle]);
+
+  const handleTitleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      titleEditableRef.current?.blur();
+    }
+  }, []);
 
   // Save custom labels to localStorage whenever they change
   useEffect(() => {
@@ -2974,11 +3018,28 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   return (
     <div className="w-full h-full flex flex-col">
-      {(customTitle || title) && (
-        <div className="text-center mb-3">
-          <h3 className="text-lg font-bold text-gray-900">{customTitle || title}</h3>
+      <div className="mb-6 flex justify-center">
+        <div className="relative w-full max-w-3xl">
+          {(((isTitleFocused ? titleEditableRef.current?.textContent : resolvedTitle) ?? '').trim().length === 0) && (
+            <span className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl font-semibold text-gray-400">
+              Add chart title
+            </span>
+          )}
+          <div
+            ref={titleEditableRef}
+            contentEditable
+            suppressContentEditableWarning
+            className="w-full rounded-2xl border border-transparent bg-white/90 px-6 py-3 text-center text-[36px] font-bold leading-snug text-gray-900 shadow-[0_26px_60px_-30px_rgba(124,58,237,0.35)] outline-none transition-all focus:border-purple-400 focus:ring-4 focus:ring-purple-300/40"
+            onFocus={handleTitleFocus}
+            onBlur={handleTitleBlur}
+            onInput={handleTitleInput}
+            onKeyDown={handleTitleKeyDown}
+            role="textbox"
+            aria-label="Chart title"
+            spellCheck={true}
+          />
         </div>
-      )}
+      </div>
 
       <div
         className="w-full h-full relative flex-1 min-w-0"

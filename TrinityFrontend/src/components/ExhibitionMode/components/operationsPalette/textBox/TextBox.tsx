@@ -1,18 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
 import TextBoxToolbar from './TextBoxToolbar';
 import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from './constants';
 import type { TextBoxFormatting } from './types';
 
 interface SlideTextBoxObjectProps {
+  id: string;
   canEdit: boolean;
   props: Record<string, unknown> | undefined;
   isEditing: boolean;
+  isSelected: boolean;
   editingValue: string;
   onBeginEditing: () => void;
   onCommitEditing: () => void;
@@ -21,14 +18,17 @@ interface SlideTextBoxObjectProps {
   onUpdateFormatting: (updates: Partial<TextBoxFormatting>) => void;
   onDelete?: () => void;
   onInteract: () => void;
+  onToolbarStateChange: (objectId: string, toolbar: React.ReactNode | null) => void;
 }
 
 const clampFontSize = (value: number) => Math.min(Math.max(value, 8), 200);
 
 export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
+  id,
   canEdit,
   props,
   isEditing,
+  isSelected,
   editingValue,
   onBeginEditing,
   onCommitEditing,
@@ -37,9 +37,9 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   onUpdateFormatting,
   onDelete,
   onInteract,
+  onToolbarStateChange,
 }) => {
   const textRef = useRef<HTMLDivElement | null>(null);
-  const [contextOpen, setContextOpen] = useState(false);
   const formatting = useMemo(() => extractTextBoxFormatting(props), [props]);
   const [localFormatting, setLocalFormatting] = useState<TextBoxFormatting>(formatting);
 
@@ -137,16 +137,6 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     updateFormatting({ fontSize: clampFontSize(localFormatting.fontSize - 2) });
   }, [localFormatting.fontSize, updateFormatting]);
 
-  const handleContextOpenChange = useCallback(
-    (open: boolean) => {
-      setContextOpen(open);
-      if (open) {
-        onInteract();
-      }
-    },
-    [onInteract],
-  );
-
   const handleDoubleClick = () => {
     if (!canEdit) {
       return;
@@ -166,33 +156,69 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     }
   };
 
-  const toolbar = (
-    <TextBoxToolbar
-      fontFamily={localFormatting.fontFamily}
-      onFontFamilyChange={handleFontFamily}
-      fontSize={localFormatting.fontSize}
-      onIncreaseFontSize={handleIncreaseFontSize}
-      onDecreaseFontSize={handleDecreaseFontSize}
-      bold={localFormatting.bold}
-      italic={localFormatting.italic}
-      underline={localFormatting.underline}
-      strikethrough={localFormatting.strikethrough}
-      onToggleBold={() => handleToggle('bold')}
-      onToggleItalic={() => handleToggle('italic')}
-      onToggleUnderline={() => handleToggle('underline')}
-      onToggleStrikethrough={() => handleToggle('strikethrough')}
-      align={localFormatting.align}
-      onAlign={handleAlign}
-      onBulletedList={() => runCommand('insertUnorderedList')}
-      onNumberedList={() => runCommand('insertOrderedList')}
-      color={localFormatting.color}
-      onColorChange={handleColor}
-      onRequestEffects={() => {}}
-      onRequestAnimate={() => {}}
-      onRequestPosition={() => {}}
-      onDelete={onDelete}
-    />
+  const toolbar = useMemo(
+    () => (
+      <TextBoxToolbar
+        fontFamily={localFormatting.fontFamily}
+        onFontFamilyChange={handleFontFamily}
+        fontSize={localFormatting.fontSize}
+        onIncreaseFontSize={handleIncreaseFontSize}
+        onDecreaseFontSize={handleDecreaseFontSize}
+        bold={localFormatting.bold}
+        italic={localFormatting.italic}
+        underline={localFormatting.underline}
+        strikethrough={localFormatting.strikethrough}
+        onToggleBold={() => handleToggle('bold')}
+        onToggleItalic={() => handleToggle('italic')}
+        onToggleUnderline={() => handleToggle('underline')}
+        onToggleStrikethrough={() => handleToggle('strikethrough')}
+        align={localFormatting.align}
+        onAlign={handleAlign}
+        onBulletedList={() => runCommand('insertUnorderedList')}
+        onNumberedList={() => runCommand('insertOrderedList')}
+        color={localFormatting.color}
+        onColorChange={handleColor}
+        onRequestEffects={() => {}}
+        onRequestAnimate={() => {}}
+        onRequestPosition={() => {}}
+        onDelete={onDelete}
+      />
+    ),
+    [
+      handleAlign,
+      handleColor,
+      handleDecreaseFontSize,
+      handleFontFamily,
+      handleIncreaseFontSize,
+      handleToggle,
+      localFormatting.align,
+      localFormatting.bold,
+      localFormatting.color,
+      localFormatting.fontFamily,
+      localFormatting.fontSize,
+      localFormatting.italic,
+      localFormatting.strikethrough,
+      localFormatting.underline,
+      onDelete,
+      runCommand,
+    ],
   );
+
+  useEffect(() => {
+    if (!canEdit) {
+      onToolbarStateChange(id, null);
+      return () => {
+        onToolbarStateChange(id, null);
+      };
+    }
+
+    const shouldShow = isSelected || isEditing;
+    onToolbarStateChange(id, shouldShow ? toolbar : null);
+
+    return () => {
+      onToolbarStateChange(id, null);
+    };
+  }, [canEdit, id, isEditing, isSelected, onToolbarStateChange, toolbar]);
 
   const content = (
     <div
@@ -205,6 +231,11 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
       onPointerDown={event => {
         if (isEditing) {
           event.stopPropagation();
+        }
+      }}
+      onContextMenu={event => {
+        if (canEdit) {
+          event.preventDefault();
         }
       }}
     >
@@ -239,23 +270,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     </div>
   );
 
-  if (!canEdit) {
-    return content;
-  }
-
-  return (
-    <ContextMenu open={contextOpen} onOpenChange={handleContextOpenChange}>
-      <ContextMenuTrigger asChild>{content}</ContextMenuTrigger>
-      <ContextMenuContent
-        align="start"
-        sideOffset={6}
-        collisionPadding={12}
-        className="z-[3500] overflow-visible rounded-full border border-border/70 bg-background/95 p-0 shadow-[0_24px_48px_-18px_rgba(124,58,237,0.45)] backdrop-blur-lg"
-      >
-        {toolbar}
-      </ContextMenuContent>
-    </ContextMenu>
-  );
+  return content;
 };
 
 export default SlideTextBoxObject;
