@@ -17,6 +17,36 @@ const customScrollbarStyles = `
   .custom-scrollbar-orange::-webkit-scrollbar-thumb:hover {
     background: #111827;
   }
+  .custom-scrollbar-purple::-webkit-scrollbar {
+    height: 8px;
+  }
+  .custom-scrollbar-purple::-webkit-scrollbar-track {
+    background: #e5e7eb;
+    border-radius: 4px;
+  }
+  .custom-scrollbar-purple::-webkit-scrollbar-thumb {
+    background: #8b5cf6;
+    border-radius: 4px;
+    transition: background 0.2s ease;
+  }
+  .custom-scrollbar-purple::-webkit-scrollbar-thumb:hover {
+    background: #7c3aed;
+  }
+  .custom-scrollbar-green::-webkit-scrollbar {
+    height: 8px;
+  }
+  .custom-scrollbar-green::-webkit-scrollbar-track {
+    background: #e5e7eb;
+    border-radius: 4px;
+  }
+  .custom-scrollbar-green::-webkit-scrollbar-thumb {
+    background: #10b981;
+    border-radius: 4px;
+    transition: background 0.2s ease;
+  }
+  .custom-scrollbar-green::-webkit-scrollbar-thumb:hover {
+    background: #059669;
+  }
 `;
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -262,6 +292,16 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   const [isLoadingBetaData, setIsLoadingBetaData] = useState(false);
   const [elasticityData, setElasticityData] = useState<{[key: string]: any}>({});
   const [isLoadingElasticityData, setIsLoadingElasticityData] = useState(false);
+  const [roiData, setRoiData] = useState<{[key: string]: any}>({});
+  const [isLoadingRoiData, setIsLoadingRoiData] = useState(false);
+  const [sCurveData, setSCurveData] = useState<{[key: string]: any}>({});
+  const [isLoadingSCurveData, setIsLoadingSCurveData] = useState(false);
+  
+  // State for application type
+  const [applicationType, setApplicationType] = useState<string>(() => {
+    return data.applicationType || 'general';
+  });
+  const [isLoadingApplicationType, setIsLoadingApplicationType] = useState(false);
   const [averagesData, setAveragesData] = useState<{[key: string]: any}>({});
   const [isLoadingAveragesData, setIsLoadingAveragesData] = useState(false);
   
@@ -294,7 +334,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     'actual-vs-predicted': true,
     beta: true,
     elasticity: true,
-    averages: true
+    roi: true,
+    averages: true,
+    's-curve': true
   });
   const [selectedIdentifierValues, setSelectedIdentifierValues] = useState<{[key: string]: string[]}>({});
   
@@ -314,6 +356,10 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   const [elasticityChartTypes, setElasticityChartTypes] = useState<{[key: string]: string}>({});
   const [elasticityChartThemes, setElasticityChartThemes] = useState<{[key: string]: string}>({});
   
+  // State for ROI chart types and themes
+  const [roiChartTypes, setRoiChartTypes] = useState<{[key: string]: string}>({});
+  const [roiChartThemes, setRoiChartThemes] = useState<{[key: string]: string}>({});
+  
   // State for averages chart types and themes
   const [averagesChartTypes, setAveragesChartTypes] = useState<{[key: string]: string}>({});
   const [averagesChartThemes, setAveragesChartThemes] = useState<{[key: string]: string}>({});
@@ -327,11 +373,13 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   const [actualVsPredictedChartDataLabels, setActualVsPredictedChartDataLabels] = useState<{[key: string]: boolean}>({});
   const [betaCoefficientsChartDataLabels, setBetaCoefficientsChartDataLabels] = useState<{[key: string]: boolean}>({});
   const [elasticityChartDataLabels, setElasticityChartDataLabels] = useState<{[key: string]: boolean}>({});
+  const [roiChartDataLabels, setRoiChartDataLabels] = useState<{[key: string]: boolean}>({});
   const [averagesChartDataLabels, setAveragesChartDataLabels] = useState<{[key: string]: boolean}>({});
   const [waterfallChartDataLabels, setWaterfallChartDataLabels] = useState<{[key: string]: boolean}>({});
   
   // State for sort order for each chart type
   const [contributionChartSortOrder, setContributionChartSortOrder] = useState<{[key: string]: 'asc' | 'desc' | null}>({});
+  const [roiChartSortOrder, setRoiChartSortOrder] = useState<{[key: string]: 'asc' | 'desc' | null}>({});
   const [actualVsPredictedChartSortOrder, setActualVsPredictedChartSortOrder] = useState<{[key: string]: 'asc' | 'desc' | null}>({});
   const [betaCoefficientsChartSortOrder, setBetaCoefficientsChartSortOrder] = useState<{[key: string]: 'asc' | 'desc' | null}>({});
   const [elasticityChartSortOrder, setElasticityChartSortOrder] = useState<{[key: string]: 'asc' | 'desc' | null}>({});
@@ -562,6 +610,150 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     fetchElasticityData();
   }, [data.selectedDataframe, selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
+
+  // Fetch ROI data when dataset and combinations are selected
+  useEffect(() => {
+    const fetchRoiData = async () => {
+      if (data.selectedDataframe && selectedCombinations.length > 0) {
+        setIsLoadingRoiData(true);
+        try {
+          // Get environment variables like column classifier
+          const envStr = localStorage.getItem('env');
+          const env = envStr ? JSON.parse(envStr) : {};
+          const clientName = env.CLIENT_NAME || '';
+          const appName = env.APP_NAME || '';
+          const projectName = env.PROJECT_NAME || '';
+          
+          const roiDataMap: {[key: string]: any} = {};
+          
+          for (const combination of selectedCombinations) {
+            const response = await fetch(
+              `${EVALUATE_API}/roi?` + 
+              `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
+              `&combination_id=${encodeURIComponent(combination)}` +
+              `&client_name=${encodeURIComponent(clientName)}` +
+              `&app_name=${encodeURIComponent(appName)}` +
+              `&project_name=${encodeURIComponent(projectName)}`
+            );
+            
+            if (response.ok) {
+              const result = await response.json();
+              roiDataMap[combination] = result;
+            } else {
+              console.warn(`Failed to fetch ROI data for combination: ${combination}`);
+              roiDataMap[combination] = { roi_data: [] };
+            }
+          }
+          
+          setRoiData(roiDataMap);
+        } catch (error) {
+          console.error('Error fetching ROI data:', error);
+          setRoiData({});
+        } finally {
+          setIsLoadingRoiData(false);
+        }
+      } else {
+        setRoiData({});
+      }
+    };
+    
+    fetchRoiData();
+  }, [data.selectedDataframe, selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
+
+  // Fetch S-curve data when dataset and combinations are selected
+  useEffect(() => {
+    const fetchSCurveData = async () => {
+      if (data.selectedDataframe && selectedCombinations.length > 0) {
+        setIsLoadingSCurveData(true);
+        try {
+          // Get environment variables like column classifier
+          const envStr = localStorage.getItem('env');
+          const env = envStr ? JSON.parse(envStr) : {};
+          const clientName = env.CLIENT_NAME || '';
+          const appName = env.APP_NAME || '';
+          const projectName = env.PROJECT_NAME || '';
+          
+          const response = await fetch(
+            `${EVALUATE_API}/s-curve?` + 
+            `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
+            `&client_name=${encodeURIComponent(clientName)}` +
+            `&app_name=${encodeURIComponent(appName)}` +
+            `&project_name=${encodeURIComponent(projectName)}`
+          );
+          
+          if (response.ok) {
+            const result = await response.json();
+            console.log('🔍 S-curve data received:', result);
+            console.log('🔍 S-curve keys:', result.s_curves ? Object.keys(result.s_curves) : 'No s_curves');
+            setSCurveData(result);
+          } else {
+            console.warn('Failed to fetch S-curve data');
+            setSCurveData({});
+          }
+        } catch (error) {
+          console.error('Error fetching S-curve data:', error);
+          setSCurveData({});
+        } finally {
+          setIsLoadingSCurveData(false);
+        }
+      } else {
+        setSCurveData({});
+      }
+    };
+    
+    fetchSCurveData();
+  }, [data.selectedDataframe, selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
+
+  // Function to fetch application type
+  const fetchApplicationType = async () => {
+    try {
+      setIsLoadingApplicationType(true);
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+
+      const baseUrl = `${EVALUATE_API}/application-type`;
+      
+      const params = new URLSearchParams({
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || ''
+      });
+
+      const response = await fetch(`${baseUrl}?${params}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to fetch application type');
+      }
+      
+      const result = await response.json();
+      
+      if (result && result.application_type) {
+        setApplicationType(result.application_type);
+        onDataChange({ applicationType: result.application_type });
+        console.log('🔍 Application type received:', result.application_type);
+      }
+      
+    } catch (error) {
+      console.error('Error fetching application type:', error);
+      setApplicationType('general');
+      onDataChange({ applicationType: 'general' });
+    } finally {
+      setIsLoadingApplicationType(false);
+    }
+  };
+
+  // Fetch application type when component mounts
+  useEffect(() => {
+    if (atomId) {
+      fetchApplicationType();
+    }
+  }, [atomId]);
 
   // Fetch averages data when dataset and combinations are selected
   useEffect(() => {
@@ -842,6 +1034,22 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     }));
   };
 
+  // Handle ROI chart type change
+  const handleRoiChartTypeChange = (combinationName: string, newType: string) => {
+    setRoiChartTypes(prev => ({
+      ...prev,
+      [combinationName]: newType
+    }));
+  };
+
+  // Handle ROI chart theme change
+  const handleRoiChartThemeChange = (combinationName: string, newTheme: string) => {
+    setRoiChartThemes(prev => ({
+      ...prev,
+      [combinationName]: newTheme
+    }));
+  };
+
   // Handle averages chart type change
   const handleAveragesChartTypeChange = (combinationName: string, newType: string) => {
     setAveragesChartTypes(prev => ({
@@ -903,6 +1111,13 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     }));
   };
 
+  const handleRoiChartDataLabelsChange = (combinationName: string, showDataLabels: boolean) => {
+    setRoiChartDataLabels(prev => ({
+      ...prev,
+      [combinationName]: showDataLabels
+    }));
+  };
+
   const handleAveragesChartDataLabelsChange = (combinationName: string, showDataLabels: boolean) => {
     setAveragesChartDataLabels(prev => ({
       ...prev,
@@ -946,6 +1161,13 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     }));
   };
 
+  const handleRoiChartSortOrderChange = (combinationName: string, sortOrder: 'asc' | 'desc' | null) => {
+    setRoiChartSortOrder(prev => ({
+      ...prev,
+      [combinationName]: sortOrder
+    }));
+  };
+
   const handleAveragesChartSortOrderChange = (combinationName: string, sortOrder: 'asc' | 'desc' | null) => {
     setAveragesChartSortOrder(prev => ({
       ...prev,
@@ -966,8 +1188,11 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     { id: '2', name: 'Contribution Chart', type: 'contribution', selected: true },
     { id: '3', name: 'Actual vs Predicted', type: 'actual-vs-predicted', selected: true },
     { id: '4', name: 'Elasticity', type: 'elasticity', selected: true },
-    { id: '5', name: 'Beta', type: 'beta', selected: true },
-    { id: '6', name: 'Averages', type: 'averages', selected: true },
+    { id: '5', name: 'ROI', type: 'roi', selected: true },
+    { id: '6', name: 'Beta', type: 'beta', selected: true },
+    { id: '7', name: 'Averages', type: 'averages', selected: true },
+    // Only include S-curve for MMM applications
+    ...(applicationType === 'mmm' ? [{ id: '8', name: 'S-Curve Analysis', type: 's-curve', selected: true }] : [])
   ];
   const graphs = data.graphs || defaultGraphs;
   const selectedGraphs = graphs.filter(graph => graph.selected);
@@ -1177,6 +1402,87 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     return (
       <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
         <h5 className="text-sm font-medium text-orange-800 mb-3">
+          {combinationName} 
+        </h5>
+        <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
+          <RechartsChartRenderer {...rendererProps} />
+        </div>
+        
+        {/* Comment Section */}
+        {renderCommentSection(chartId)}
+      </div>
+    );
+  };
+
+  const renderROIChart = (combinationName: string) => {
+    const chartId = `roi-${combinationName}`;
+    
+    // Get ROI data for this combination
+    const combinationRoiDataResult = roiData[combinationName] || {};
+    const combinationRoiData = combinationRoiDataResult.roi_data || [];
+    
+    if (isLoadingRoiData) {
+      return (
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-purple-100/50 hover:shadow-md transition-all duration-200 min-w-[600px]">
+          <h5 className="text-sm font-medium text-purple-800 mb-3">{combinationName}</h5>
+          <div className="h-[150px] flex items-center justify-center">
+            <p className="text-xs text-purple-600 text-center">Loading ROI data...</p>
+          </div>
+        </div>
+      );
+    }
+    
+    if (!combinationRoiData || combinationRoiData.length === 0) {
+      return (
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-purple-100/50 hover:shadow-md transition-all duration-200 min-w-[600px]">
+          <h5 className="text-sm font-medium text-purple-800 mb-3">{combinationName}</h5>
+          <div className="h-[150px] flex items-center justify-center">
+            <p className="text-xs text-purple-600 text-center">No ROI data available</p>
+          </div>
+        </div>
+      );
+    }
+    
+    // Transform ROI data for the chart
+    const roiChartData = combinationRoiData.map((roi, index) => ({
+      name: roi.name,
+      value: roi.value
+    }));
+    
+    // Get chart type and theme for this combination (default to bar_chart)
+    const chartType = roiChartTypes[combinationName] || 'bar_chart';
+    const chartTheme = roiChartThemes[combinationName] || 'default';
+    const showDataLabels = roiChartDataLabels[combinationName] !== undefined ? roiChartDataLabels[combinationName] : false;
+    const sortOrder = roiChartSortOrder[combinationName] || null;
+    const isExpanded = !collapsedGraphs.roi;
+    
+    // Prepare props for RechartsChartRenderer
+    const rendererProps = {
+      key: `roi-chart-${combinationName}-${chartType}-${chartTheme}`,
+      type: chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
+      data: roiChartData,
+      xField: 'name',
+      yField: 'value',
+      xKey: 'name',
+      yKey: 'value',
+      xAxisLabel: 'Variable',
+      yAxisLabel: 'ROI',
+      theme: chartTheme,
+      enableScroll: false,
+      width: isExpanded ? 400 : 500,
+      height: isExpanded ? 350 : 400,
+      showDataLabels: showDataLabels,
+      showLegend: chartType === 'pie_chart',
+      sortOrder: sortOrder,
+      onThemeChange: (newTheme: string) => handleRoiChartThemeChange(combinationName, newTheme),
+      onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleRoiChartTypeChange(combinationName, newType),
+      onDataLabelsToggle: (newShowDataLabels: boolean) => handleRoiChartDataLabelsChange(combinationName, newShowDataLabels),
+      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleRoiChartSortOrderChange(combinationName, newSortOrder)
+    };
+    
+    return (
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-purple-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
+        <h5 className="text-sm font-medium text-purple-800 mb-3">
           {combinationName} 
         </h5>
         <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
@@ -1422,6 +1728,126 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
         <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
         <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
           <RechartsChartRenderer {...rendererProps} />
+        </div>
+        
+        {/* Comment Section */}
+        {renderCommentSection(chartId)}
+      </div>
+    );
+  };
+
+  // Render S-Curve Chart
+  const renderSCurveChart = (combinationName: string) => {
+    const chartId = `s-curve-${combinationName}`;
+    
+    if (isLoadingSCurveData) {
+      return (
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[800px]">
+          <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
+          <div className="h-[150px] flex items-center justify-center">
+            <p className="text-xs text-orange-600 text-center">Loading S-curve data...</p>
+          </div>
+        </div>
+      );
+    }
+    
+    // Check if we have overall S-curve data
+    if (!sCurveData || !sCurveData.success || !sCurveData.s_curves) {
+      return (
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[800px]">
+          <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
+          <div className="h-[150px] flex items-center justify-center">
+            <p className="text-xs text-orange-600 text-center">No S-curve data available</p>
+          </div>
+        </div>
+      );
+    }
+    
+    // Find all s-curve keys that match this combination
+    // Backend returns keys like "Combination_Model", we need to match by combination prefix
+    const matchingKeys = Object.keys(sCurveData.s_curves).filter(key => 
+      key.startsWith(combinationName + '_')
+    );
+    
+    if (matchingKeys.length === 0) {
+      return (
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[800px]">
+          <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
+          <div className="h-[150px] flex items-center justify-center">
+            <p className="text-xs text-orange-600 text-center">No S-curve data for this combination</p>
+          </div>
+        </div>
+      );
+    }
+    
+    // Get the first matching combination-model pair
+    const firstMatchingKey = matchingKeys[0];
+    const combinationSCurveData = sCurveData.s_curves[firstMatchingKey];
+    
+    // Check if this combination has s_curves data
+    if (!combinationSCurveData || !combinationSCurveData.success || !combinationSCurveData.s_curves) {
+      return (
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[800px]">
+          <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
+          <div className="h-[150px] flex items-center justify-center">
+            <p className="text-xs text-orange-600 text-center">No S-curve variables available</p>
+          </div>
+        </div>
+      );
+    }
+    
+    // Get the first 2 variables for display (similar to select models)
+    const sCurves = combinationSCurveData.s_curves;
+    const variables = Object.keys(sCurves).slice(0, 2);
+    
+    if (variables.length === 0) {
+      return (
+        <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[800px]">
+          <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
+          <div className="h-[150px] flex items-center justify-center">
+            <p className="text-xs text-orange-600 text-center">No S-curve variables available</p>
+          </div>
+        </div>
+      );
+    }
+    
+    const isExpanded = !collapsedGraphs['s-curve'];
+    
+    return (
+      <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[800px]">
+        <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
+        <div className="grid grid-cols-2 gap-6">
+          {variables.map((variable, index) => {
+            const curveData = sCurves[variable];
+            const chartData = curveData.percent_changes.map((change: number, idx: number) => ({
+              percentage: change,
+              volume: curveData.total_volumes[idx] || 0
+            }));
+            
+            return (
+              <div key={`${variable}-${index}`} className="border border-gray-200 rounded-lg p-4 min-w-[350px]">
+                <div className="w-full h-[400px]">
+                  <RechartsChartRenderer
+                    type="line_chart"
+                    data={chartData}
+                    xField="percentage"
+                    yField="volume"
+                    xAxisLabel="Percentage Change (%)"
+                    yAxisLabel="Volume"
+                    theme="default"
+                    enableScroll={false}
+                    width="100%"
+                    height="100%"
+                    showDataLabels={false}
+                    showLegend={false}
+                  />
+                </div>
+                <div className="mt-2 text-center">
+                  <p className="text-xs text-gray-600 font-medium">{variable}</p>
+                </div>
+              </div>
+            );
+          })}
         </div>
         
         {/* Comment Section */}
@@ -2187,6 +2613,59 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           </div>
         )}
 
+        {/* ROI Charts Section */}
+        {selectedGraphs.some(g => g.type === 'roi') && data.selectedDataframe && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-medium">ROI Chart</h3>
+              <div className="flex items-center gap-2">
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      aria-label="Expand ROI charts"
+                    >
+                      <Maximize2 className="h-4 w-4" />
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+                    <div className="space-y-6">
+                      <h2 className="text-xl font-semibold">ROI Charts - Expanded View</h2>
+                      <div className="grid grid-cols-2 gap-6">
+                        {filteredCombinations.map(combination => 
+                          <div key={combination} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                            {renderROIChart(combination)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => toggleGraphCollapse('roi')}
+                >
+                  {collapsedGraphs.roi ? (
+                    <ChevronDown className="h-4 w-4" />
+                ) : (
+                    <ChevronUp className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+            {!collapsedGraphs.roi && (
+              <div className="flex gap-4 overflow-x-auto pb-4 min-h-0 custom-scrollbar-purple">
+                {filteredCombinations.map(combination => 
+                  renderROIChart(combination)
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Actual vs Predicted Charts Section */}
         {selectedGraphs.some(g => g.type === 'actual-vs-predicted') && data.selectedDataframe && (
           <div className="space-y-4">
@@ -2393,6 +2872,59 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
               <div className="flex gap-4 overflow-x-auto pb-4 min-h-0 custom-scrollbar-orange">
                 {filteredCombinations.map(combination => 
                   renderAveragesChart(combination)
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* S-Curve Charts Section - Only for MMM applications */}
+        {applicationType === 'mmm' && selectedGraphs.some(g => g.type === 's-curve') && data.selectedDataframe && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-medium">S-Curve Analysis</h3>
+              <div className="flex items-center gap-2">
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      aria-label="Expand S-curve charts"
+                    >
+                      <Maximize2 className="h-4 w-4" />
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+                    <div className="space-y-6">
+                      <h2 className="text-xl font-semibold">S-Curve Charts - Expanded View</h2>
+                      <div className="flex flex-col gap-6">
+                        {filteredCombinations.map(combination => 
+                          <div key={combination} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
+                            {renderSCurveChart(combination)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => toggleGraphCollapse('s-curve')}
+                >
+                  {collapsedGraphs['s-curve'] ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronUp className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+            {!collapsedGraphs['s-curve'] && (
+              <div className="flex gap-4 overflow-x-auto pb-4 min-h-0 custom-scrollbar">
+                {filteredCombinations.map(combination => 
+                  renderSCurveChart(combination)
                 )}
               </div>
             )}

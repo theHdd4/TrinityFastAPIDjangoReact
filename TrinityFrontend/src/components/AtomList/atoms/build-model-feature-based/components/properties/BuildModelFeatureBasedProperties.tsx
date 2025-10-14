@@ -5,7 +5,6 @@ import { Upload, Settings } from 'lucide-react';
 
 import BuildModelFeatureBasedInput from '../BuildModelFeatureBasedInput';
 import BuildModelFeatureBasedSettingsTab from '../BuildModelFeatureBasedSettingsTab';
-import BuildModelFeatureBasedExhibition from '../BuildModelFeatureBasedExhibition';
 
 import { BuildModelFeatureBasedData, BuildModelFeatureBasedSettings as SettingsType } from '../../BuildModelFeatureBasedAtom';
 
@@ -86,7 +85,11 @@ const BuildModelFeatureBasedProperties: React.FC<Props> = (props) => {
       availableFiles: [],
       availableColumns: ['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6', 'Feature 7', 'Feature 8'],
       scopes: ['Scope 1', 'Scope 2', 'Scope 3', 'Scope 4', 'Scope 5'],
-      outputFileName: ''
+      outputFileName: '',
+      modelType: 'general' as const,
+      variableConfigs: {},
+      variableConstraints: [],
+      priceColumn: ''
     };
 
     const defaultSettings = {

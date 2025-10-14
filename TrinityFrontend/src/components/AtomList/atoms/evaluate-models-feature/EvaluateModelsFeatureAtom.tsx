@@ -11,7 +11,7 @@ export interface IdentifierConfig {
 export interface GraphConfig {
   id: string;
   name: string;
-  type: 'waterfall' | 'contribution' | 'actual-vs-predicted' | 'elasticity' | 'beta' | 'averages';
+  type: 'waterfall' | 'contribution' | 'actual-vs-predicted' | 'elasticity' | 'roi' | 'beta' | 'averages' | 's-curve';
   selected: boolean;
 }
 
@@ -61,8 +61,10 @@ const EvaluateModelsFeatureAtom: React.FC<EvaluateModelsFeatureAtomProps> = ({
       { id: '2', name: 'Contribution Chart', type: 'contribution', selected: true },
       { id: '3', name: 'Actual vs Predicted', type: 'actual-vs-predicted', selected: true },
       { id: '4', name: 'Elasticity', type: 'elasticity', selected: true },
-      { id: '5', name: 'Beta', type: 'beta', selected: true },
-      { id: '6', name: 'Averages', type: 'averages', selected: true },
+      { id: '5', name: 'ROI', type: 'roi', selected: true },
+      { id: '6', name: 'Beta', type: 'beta', selected: true },
+      { id: '7', name: 'Averages', type: 'averages', selected: true },
+      { id: '8', name: 'S-Curves', type: 's-curve', selected: true },
     ],
     availableColumns: ['Column 1', 'Column 2', 'Column 3', 'Column 4'],
     modelResults: [],
@@ -91,8 +93,10 @@ const EvaluateModelsFeatureAtom: React.FC<EvaluateModelsFeatureAtomProps> = ({
         { id: '2', name: 'Contribution Chart', type: 'contribution', selected: true },
         { id: '3', name: 'Actual vs Predicted', type: 'actual-vs-predicted', selected: true },
         { id: '4', name: 'Elasticity', type: 'elasticity', selected: true },
-        { id: '5', name: 'Beta', type: 'beta', selected: true },
-        { id: '6', name: 'Averages', type: 'averages', selected: true },
+        { id: '5', name: 'ROI', type: 'roi', selected: true },
+        { id: '6', name: 'Beta', type: 'beta', selected: true },
+        { id: '7', name: 'Averages', type: 'averages', selected: true },
+        { id: '8', name: 'S-Curves', type: 's-curve', selected: true },
       ];
       
       // If we have stored graph data, merge it with defaults to preserve selection state

@@ -18,7 +18,8 @@ import {
 import {
   Upload, Download, Search, Filter, ArrowUpDown, Pin, Palette, Trash2, Plus, 
   GripVertical, RotateCcw, FileText, Check, AlertCircle, Info, Edit2,
-  ChevronDown, ChevronUp, X, PlusCircle, MinusCircle, Save
+  ChevronDown, ChevronUp, X, PlusCircle, MinusCircle, Save, Replace,
+  AlignLeft, AlignCenter, AlignRight
 } from 'lucide-react';
 import { DataFrameData, DataFrameSettings } from '../DataFrameOperationsAtom';
 import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
@@ -41,6 +42,9 @@ import {
   applyFormula as apiApplyFormula,
   loadDataframeByKey,
   describeColumn as apiDescribeColumn,
+  transformColumnCase as apiTransformColumnCase,
+  findAndReplace as apiFindAndReplace,
+  countMatches as apiCountMatches,
 } from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
 import '@/templates/tables/table.css';
@@ -482,7 +486,14 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [forceRefresh, setForceRefresh] = useState(0);
   const [isProcessingOperation, setIsProcessingOperation] = useState(false);
   const operationQueueRef = useRef<Array<() => Promise<void>>>([]);
+  const [cellAlignment, setCellAlignment] = useState<'left' | 'center' | 'right'>('left');
+  const [columnAlignments, setColumnAlignments] = useState<Record<string, 'left' | 'center' | 'right'>>({});
   const headersKey = useMemo(() => (data?.headers || []).join('|'), [data?.headers]);
+
+  // Helper function to get alignment for a column
+  const getColumnAlignment = (column: string): 'left' | 'center' | 'right' => {
+    return columnAlignments[column] || cellAlignment;
+  };
 
   // Function to process operations sequentially
   const processOperationQueue = useCallback(async () => {
@@ -557,6 +568,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [isFormulaBarFrozen, setIsFormulaBarFrozen] = useState(false); // Track if formula bar should be frozen after application
   const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter' | 'operation' | 'round'>(null);
   const [convertSubmenuOpen, setConvertSubmenuOpen] = useState(false);
+  const [caseSubmenuOpen, setCaseSubmenuOpen] = useState(false);
   const [roundDecimalPlaces, setRoundDecimalPlaces] = useState(2);
   const [unhideSubmenuOpen, setUnhideSubmenuOpen] = useState(false);
   const [selectedHiddenColumns, setSelectedHiddenColumns] = useState<string[]>([]);
@@ -896,6 +908,18 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
   const [historyPanelMinimized, setHistoryPanelMinimized] = useState(false);
   const [historyPanelPosition, setHistoryPanelPosition] = useState({ x: 0, y: 0 });
+  
+  // Find and Replace state
+  const [findReplaceModalOpen, setFindReplaceModalOpen] = useState(false);
+  const [findText, setFindText] = useState('');
+  const [replaceText, setReplaceText] = useState('');
+  const [replaceAll, setReplaceAll] = useState(false);
+  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [findReplaceLoading, setFindReplaceLoading] = useState(false);
+  const [matchCount, setMatchCount] = useState(0);
+  const [matchCountLoading, setMatchCountLoading] = useState(false);
+  const [matchesByColumn, setMatchesByColumn] = useState<Record<string, number>>({});
+  const [highlightedText, setHighlightedText] = useState('');
   const [historyOperations, setHistoryOperations] = useState<Array<{
     id: string;
     type: string;
@@ -1629,24 +1653,89 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   saveToUndoStack(data);
   
   try {
+    console.log('[DataFrameOperations] Renaming column:', { oldHeader, newHeader, currentHeaders: data.headers });
+    
     const resp = await apiRenameColumn(fileId, oldHeader, newHeader);
     
-    // Preserve deleted columns by filtering out columns that were previously deleted
+    console.log('[DataFrameOperations] Backend response after rename:', {
+      headers: resp.headers,
+      oldHeader,
+      newHeader
+    });
+    
+    // Create updated column order by replacing old name with new name BEFORE filtering
+    const updatedColumnOrder = columnOrder.map(col => col === oldHeader ? newHeader : col);
+    
+    console.log('[DataFrameOperations] Column order mapping:', {
+      oldColumnOrder: columnOrder,
+      updatedColumnOrder,
+      oldHeader,
+      newHeader
+    });
+    
+    // Update the columnOrder state
+    setColumnOrder(updatedColumnOrder);
+    
+    // Now manually preserve the column order instead of using filterBackendResponse
+    // which relies on the OLD columnOrder state (React state updates are async)
     const currentHiddenColumns = data.hiddenColumns || [];
     const currentDeletedColumns = data.deletedColumns || [];
-    const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+    
+    // Filter out hidden and deleted columns from backend response
+    const columnsToFilter = [...currentHiddenColumns, ...currentDeletedColumns];
+    const availableHeaders = resp.headers.filter((header: string) => !columnsToFilter.includes(header));
+    
+    // Use the UPDATED column order (not the state which is async)
+    let orderedHeaders: string[];
+    if (updatedColumnOrder.length === 0) {
+      orderedHeaders = availableHeaders;
+    } else {
+      // Preserve order using the updated column order
+      orderedHeaders = updatedColumnOrder.filter((header: string) => availableHeaders.includes(header));
+      // Add any new columns that aren't in our tracked order
+      const newColumns = availableHeaders.filter((header: string) => !updatedColumnOrder.includes(header));
+      orderedHeaders = [...orderedHeaders, ...newColumns];
+    }
+    
+    console.log('[DataFrameOperations] Final ordered headers:', {
+      availableHeaders,
+      orderedHeaders,
+      updatedColumnOrder
+    });
+    
+    // Filter rows to match ordered headers
+    const filteredRows = resp.rows.map((row: any) => {
+      const filteredRow: any = {};
+      orderedHeaders.forEach((header: string) => {
+        if (row.hasOwnProperty(header)) {
+          filteredRow[header] = row[header];
+        }
+      });
+      return filteredRow;
+    });
+    
+    // Normalize column types
+    const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
+    const filteredColumnTypes: any = {};
+    orderedHeaders.forEach((header: string) => {
+      if (columnTypes[header]) {
+        filteredColumnTypes[header] = columnTypes[header];
+      }
+    });
     
     onDataChange({
-      headers: filtered.headers,
-      rows: filtered.rows,
+      headers: orderedHeaders,
+      rows: filteredRows,
       fileName: data.fileName,
-      columnTypes: filtered.columnTypes,
-      pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+      columnTypes: filteredColumnTypes,
+      pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)).map(p => p === oldHeader ? newHeader : p),
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
-         hiddenColumns: currentHiddenColumns,
-         deletedColumns: currentDeletedColumns,
-       });
+      hiddenColumns: currentHiddenColumns,
+      deletedColumns: currentDeletedColumns,
+    });
+    
+    // Update formulas for the renamed column
     setColumnFormulas(prev => {
       if (!Object.prototype.hasOwnProperty.call(prev, oldHeader)) {
         return prev;
@@ -1659,6 +1748,12 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     
     // Add to history
     addToHistory('Rename Column', `Renamed column "${oldHeader}" to "${newHeader}"`);
+    
+    toast({
+      title: "Column Renamed",
+      description: `Column "${oldHeader}" renamed to "${newHeader}"`,
+    });
+    
   } catch (err) {
     handleApiError('Rename column failed', err);
     addToHistory('Rename Column', `Failed to rename column "${oldHeader}"`, 'error');
@@ -2234,49 +2329,68 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     return frontendIndex;
   }, [data]);
 
-  // 1. Fix column insert/delete logic
+  // Simple and direct insert column implementation
   const handleInsertColumn = async (colIdx: number) => {
-    resetSaveSuccess();
     if (!data || !fileId) return;
+    
+    console.log('[DataFrameOperations] Insert column called with colIdx:', colIdx);
+    console.log('[DataFrameOperations] Current headers:', data.headers);
     
     // Save current state before making changes
     saveToUndoStack(data);
     
-    // Map frontend index to backend index
-    const backendIndex = getBackendColumnIndex(colIdx);
+    // Get the column name at the clicked position
+    const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+    const clickedColumn = visibleHeaders[colIdx];
     
-    const newColKey = getNextColKey(data.headers);
+    // Find the position of this column in the original headers array
+    const insertPosition = data.headers.indexOf(clickedColumn) + 1;
+    
+    console.log('[DataFrameOperations] Insert details:', {
+      colIdx,
+      clickedColumn,
+      insertPosition,
+      totalColumns: data.headers.length
+    });
+    
+    // Generate a unique column name
+    const newColumnName = getNextColKey(data.headers);
+    
+    setInsertLoading(true);
     try {
-      const resp = await apiInsertColumn(fileId, backendIndex, newColKey, '');
+      // Call the backend API with the exact position
+      const resp = await apiInsertColumn(fileId, insertPosition, newColumnName, '');
       
-       // Preserve deleted columns by filtering out columns that were previously deleted
-       const currentHiddenColumns = data.hiddenColumns || [];
-       const currentDeletedColumns = data.deletedColumns || [];
-       const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
-      
+      // Update the data with the response
       onDataChange({
-        headers: filtered.headers,
-        rows: filtered.rows,
+        headers: resp.headers,
+        rows: resp.rows,
         fileName: data.fileName,
-        columnTypes: filtered.columnTypes,
-        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+        columnTypes: resp.columnTypes,
+        pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-         hiddenColumns: currentHiddenColumns,
-         deletedColumns: currentDeletedColumns,
-       });
+        hiddenColumns: data.hiddenColumns,
+        deletedColumns: data.deletedColumns,
+      });
       
-      // Auto-select the newly inserted column for formula operations
-      if (filtered.headers.includes(newColKey)) {
-        setSelectedColumn(newColKey);
-        console.log('[DataFrameOperations] Auto-selected newly inserted column:', newColKey);
-      }
+      // Auto-select the newly inserted column
+      setSelectedColumn(newColumnName);
       
       // Add to history
-      addToHistory('Insert Column', `Inserted column "${newColKey}" at position ${colIdx + 1}`);
+      addToHistory('Insert Column', `Inserted column "${newColumnName}" after "${clickedColumn}"`);
+      
+      toast({
+        title: "Column Inserted",
+        description: `New column "${newColumnName}" inserted after "${clickedColumn}"`,
+      });
+      
     } catch (err) {
+      console.error('[DataFrameOperations] Insert column error:', err);
       handleApiError('Insert column failed', err);
-      addToHistory('Insert Column', `Failed to insert column at position ${colIdx + 1}`, 'error');
+      addToHistory('Insert Column', `Failed to insert column after "${clickedColumn}"`, 'error');
+    } finally {
+      setInsertLoading(false);
     }
   };
 
@@ -2352,46 +2466,75 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     }
   };
 
+  // Completely rewritten duplicate column functionality
   const handleDuplicateColumn = async (colIdx: number) => {
-    resetSaveSuccess();
     if (!data || !fileId) return;
+    
+    console.log('[DataFrameOperations] Duplicate column called with colIdx:', colIdx);
+    console.log('[DataFrameOperations] Current headers:', data.headers);
+    console.log('[DataFrameOperations] Hidden columns:', data.hiddenColumns);
     
     // Save current state before making changes
     saveToUndoStack(data);
     
     setDuplicateLoading(true);
-    const col = data.headers[colIdx];
-    let newName = `${col}_copy`;
-    while (data.headers.includes(newName)) {
-      newName += '_copy';
+    
+    // Get the actual column name from visible headers
+    const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+    const originalColumn = visibleHeaders[colIdx];
+    
+    // Find the position of the original column in the full headers array
+    const originalPosition = data.headers.indexOf(originalColumn);
+    
+    console.log('[DataFrameOperations] Duplicate details:', {
+      colIdx,
+      originalColumn,
+      originalPosition,
+      totalColumns: data.headers.length,
+      visibleHeaders,
+      allHeaders: data.headers
+    });
+    
+    // Generate unique name for the duplicated column
+    let newColumnName = `${originalColumn}_copy`;
+    while (data.headers.includes(newColumnName)) {
+      newColumnName += '_copy';
     }
+    
     try {
-      const resp = await apiDuplicateColumn(fileId, col, newName);
+      // Call the backend API to duplicate the column
+      const resp = await apiDuplicateColumn(fileId, originalColumn, newColumnName);
       
-       // Preserve deleted columns by filtering out columns that were previously deleted
-       const currentHiddenColumns = data.hiddenColumns || [];
-       const currentDeletedColumns = data.deletedColumns || [];
-       const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+      console.log('[DataFrameOperations] Duplicate response:', resp);
       
+      // Update the data with the response
       onDataChange({
-        headers: filtered.headers,
-        rows: filtered.rows,
+        headers: resp.headers,
+        rows: resp.rows,
         fileName: data.fileName,
-        columnTypes: filtered.columnTypes,
-        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+        columnTypes: resp.columnTypes,
+        pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
-         hiddenColumns: currentHiddenColumns,
-         deletedColumns: currentDeletedColumns,
-       });
-      // Remember the source for this duplicated column
-      setDuplicateMap(prev => ({ ...prev, [newName]: prev[col] || col }));
+        hiddenColumns: data.hiddenColumns,
+        deletedColumns: data.deletedColumns,
+      });
+      
+      // Auto-select the newly duplicated column
+      setSelectedColumn(newColumnName);
       
       // Add to history
-      addToHistory('Duplicate Column', `Duplicated column "${col}" as "${newName}"`);
+      addToHistory('Duplicate Column', `Duplicated "${originalColumn}" as "${newColumnName}"`);
+      
+      toast({
+        title: "Column Duplicated",
+        description: `"${originalColumn}" duplicated as "${newColumnName}"`,
+      });
+      
     } catch (err) {
+      console.error('[DataFrameOperations] Duplicate column error:', err);
       handleApiError('Duplicate column failed', err);
-      addToHistory('Duplicate Column', `Failed to duplicate column "${col}"`, 'error');
+      addToHistory('Duplicate Column', `Failed to duplicate "${originalColumn}"`, 'error');
     } finally {
       setDuplicateLoading(false);
     }
@@ -2627,6 +2770,151 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       addToHistory('Round Columns', `Failed to round ${columns.length} columns`, 'error');
     } finally {
       setConvertLoading(false);
+    }
+  };
+
+  const handleTransformColumnCase = async (columns: string[], caseType: 'lower' | 'upper' | 'camel' | 'pascal' | 'lower_camel' | 'snake' | 'screaming_snake' | 'kebab' | 'train' | 'flat') => {
+    if (!data || !settings.fileId || columns.length === 0) return;
+    
+    const fileId = settings.fileId;
+    
+    setConvertLoading(true);
+    try {
+      console.log('[DataFrameOperations] Transform column case:', columns, 'to', caseType);
+      
+      // Process each column sequentially
+      let currentData = data;
+      for (const col of columns) {
+        // Check if column exists
+        if (!data.headers.includes(col)) {
+          throw new Error(`Column "${col}" does not exist`);
+        }
+        
+        const resp = await apiTransformColumnCase(fileId, col, caseType);
+        
+        // Preserve deleted columns by filtering out columns that were previously deleted
+        const currentHiddenColumns = currentData.hiddenColumns || [];
+        const currentDeletedColumns = currentData.deletedColumns || [];
+        const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+        
+        currentData = {
+          headers: filtered.headers,
+          rows: filtered.rows,
+          fileName: currentData.fileName,
+          columnTypes: filtered.columnTypes,
+          pinnedColumns: currentData.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+          frozenColumns: currentData.frozenColumns,
+          cellColors: currentData.cellColors,
+          hiddenColumns: currentHiddenColumns,
+          deletedColumns: currentDeletedColumns,
+        };
+      }
+      
+      onDataChange(currentData);
+      const caseTypeLabel = caseType === 'lower' ? 'lowercase' : caseType === 'upper' ? 'uppercase' : 'camelCase';
+      addToHistory('Transform Column Case', `${columns.length} columns transformed to ${caseTypeLabel}: ${columns.join(', ')}`);
+      
+      toast({
+        title: "Columns Case Transformed",
+        description: `${columns.length} columns transformed to ${caseTypeLabel}`,
+      });
+      
+      // Clear selection
+      setMultiSelectedColumns(new Set());
+    } catch (err) {
+      console.error('[DataFrameOperations] Transform column case error:', err);
+      handleApiError('Transform column case failed', err);
+      addToHistory('Transform Column Case', `Failed to transform ${columns.length} columns`, 'error');
+    } finally {
+      setConvertLoading(false);
+    }
+  };
+
+  const highlightText = (text: string, searchText: string, caseSensitive: boolean = false) => {
+    if (!searchText || !text) return text;
+    
+    const flags = caseSensitive ? 'g' : 'gi';
+    const regex = new RegExp(searchText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+    
+    return text.replace(regex, (match) => {
+      return `<mark style="background-color: #FFE066; padding: 1px 2px; border-radius: 2px;">${match}</mark>`;
+    });
+  };
+
+  const handleCountMatches = async (searchText: string, caseSensitive: boolean) => {
+    if (!data || !settings.fileId || !searchText.trim()) {
+      setMatchCount(0);
+      setMatchesByColumn({});
+      setHighlightedText('');
+      return;
+    }
+    
+    const fileId = settings.fileId;
+    
+    setMatchCountLoading(true);
+    try {
+      const resp = await apiCountMatches(fileId, searchText, caseSensitive);
+      setMatchCount(resp.total_matches);
+      setMatchesByColumn(resp.matches_by_column);
+      setHighlightedText(searchText);
+    } catch (err) {
+      console.error('[DataFrameOperations] Count matches error:', err);
+      setMatchCount(0);
+      setMatchesByColumn({});
+      setHighlightedText('');
+    } finally {
+      setMatchCountLoading(false);
+    }
+  };
+
+  const handleFindAndReplace = async () => {
+    if (!data || !settings.fileId || !findText.trim()) {
+      return;
+    }
+    
+    const fileId = settings.fileId;
+    
+    setFindReplaceLoading(true);
+    try {
+      console.log('[DataFrameOperations] Find and replace:', { findText, replaceText, replaceAll, caseSensitive });
+      
+      const resp = await apiFindAndReplace(fileId, findText, replaceText, replaceAll, caseSensitive);
+      
+      // Preserve deleted columns by filtering out columns that were previously deleted
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const currentDeletedColumns = data.deletedColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+      
+      onDataChange({
+        headers: filtered.headers,
+        rows: filtered.rows,
+        fileName: data.fileName,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+        hiddenColumns: currentHiddenColumns,
+        deletedColumns: currentDeletedColumns,
+      });
+      
+      const actionText = replaceAll ? 'Replaced all' : 'Replaced';
+      addToHistory('Find and Replace', `${actionText} "${findText}" with "${replaceText}"`);
+      
+      toast({
+        title: "Find and Replace Complete",
+        description: `${actionText} occurrences of "${findText}"`,
+      });
+      
+      // Close modal after successful operation
+      setFindReplaceModalOpen(false);
+      setFindText('');
+      setReplaceText('');
+    } catch (err) {
+      console.error('[DataFrameOperations] Find and replace error:', err);
+      handleApiError('Find and replace failed', err);
+      addToHistory('Find and Replace', `Failed to replace "${findText}"`, 'error');
+    } finally {
+      setFindReplaceLoading(false);
     }
   };
 
@@ -3051,6 +3339,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       }
       
       if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'f') {
+          e.preventDefault();
+          setFindReplaceModalOpen(true);
+          return;
+        }
         if (e.key === 'a' && data?.headers) {
           e.preventDefault();
           setMultiSelectedColumns(new Set(data.headers));
@@ -3076,6 +3369,21 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [data?.headers, data?.rows, permanentlyDeletedRows, processedData.filteredRows, handleUndo, handleRedo]);
+
+  // Debounced search effect
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (findText.trim()) {
+        handleCountMatches(findText, caseSensitive);
+      } else {
+        setMatchCount(0);
+        setMatchesByColumn({});
+        setHighlightedText('');
+      }
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [findText, caseSensitive]);
 
   return (
     <>
@@ -3103,7 +3411,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
         )}
         {/* Controls section */}
-            <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3">
+            <div 
+              className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3"
+              onClick={(e) => {
+                // Deselect column when clicking in controls area (but not on buttons/inputs)
+                if (selectedColumn && e.target === e.currentTarget) {
+                  setSelectedColumn(null);
+                }
+              }}
+            >
           <div className="flex items-center space-x-4">
               <div className="relative">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -3115,6 +3431,91 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   className="pl-9 w-64"
                 />
               </div>
+              
+              {/* Alignment Control */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    title={`Text Alignment${selectedColumn ? ` (${selectedColumn})` : ' (All Columns)'}`}
+                  >
+                    {(() => {
+                      const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
+                      if (currentAlignment === 'left') return <AlignLeft className="h-4 w-4" />;
+                      if (currentAlignment === 'center') return <AlignCenter className="h-4 w-4" />;
+                      if (currentAlignment === 'right') return <AlignRight className="h-4 w-4" />;
+                      return <AlignLeft className="h-4 w-4" />;
+                    })()}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-48 p-2">
+                  <div className="space-y-1">
+                    <div className="text-xs font-medium text-gray-700 mb-2">
+                      Text Alignment{selectedColumn ? ` - ${selectedColumn}` : ' - All Columns'}
+                    </div>
+                    <Button
+                      variant={(() => {
+                        const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
+                        return currentAlignment === 'left' ? 'default' : 'ghost';
+                      })()}
+                      size="sm"
+                      className="w-full justify-start h-8"
+                      onClick={() => {
+                        if (selectedColumn) {
+                          setColumnAlignments(prev => ({ ...prev, [selectedColumn]: 'left' }));
+                        } else {
+                          setCellAlignment('left');
+                          setColumnAlignments({}); // Reset column-specific alignments
+                        }
+                      }}
+                    >
+                      <AlignLeft className="h-4 w-4 mr-2" />
+                      Left Align
+                    </Button>
+                    <Button
+                      variant={(() => {
+                        const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
+                        return currentAlignment === 'center' ? 'default' : 'ghost';
+                      })()}
+                      size="sm"
+                      className="w-full justify-start h-8"
+                      onClick={() => {
+                        if (selectedColumn) {
+                          setColumnAlignments(prev => ({ ...prev, [selectedColumn]: 'center' }));
+                        } else {
+                          setCellAlignment('center');
+                          setColumnAlignments({}); // Reset column-specific alignments
+                        }
+                      }}
+                    >
+                      <AlignCenter className="h-4 w-4 mr-2" />
+                      Center Align
+                    </Button>
+                    <Button
+                      variant={(() => {
+                        const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
+                        return currentAlignment === 'right' ? 'default' : 'ghost';
+                      })()}
+                      size="sm"
+                      className="w-full justify-start h-8"
+                      onClick={() => {
+                        if (selectedColumn) {
+                          setColumnAlignments(prev => ({ ...prev, [selectedColumn]: 'right' }));
+                        } else {
+                          setCellAlignment('right');
+                          setColumnAlignments({}); // Reset column-specific alignments
+                        }
+                      }}
+                    >
+                      <AlignRight className="h-4 w-4 mr-2" />
+                      Right Align
+                    </Button>
+                  </div>
+                </PopoverContent>
+              </Popover>
+              
               <div className="flex items-center space-x-3">
                 <Button
                   variant="outline"
@@ -3162,9 +3563,25 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
 
           {/* Table section - Excel-like appearance */}
-          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+          <div 
+            className="flex-1 flex flex-col overflow-hidden min-h-0"
+            onClick={(e) => {
+              // Deselect column when clicking in empty area above the table
+              if (selectedColumn && e.target === e.currentTarget) {
+                setSelectedColumn(null);
+              }
+            }}
+          >
             {data && (
-              <div className="flex items-center border-b border-slate-200 min-h-0">
+              <div 
+                className="flex items-center border-b border-slate-200 min-h-0"
+                onClick={(e) => {
+                  // Deselect column when clicking in formula bar area
+                  if (selectedColumn && e.target === e.currentTarget) {
+                    setSelectedColumn(null);
+                  }
+                }}
+              >
                 <div className="flex-1 min-w-0">
                   <div className="relative w-full" style={{ position: 'relative', zIndex: 1 }}>
                     <FormularBar
@@ -3192,6 +3609,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     )}
                   </div>
                 </div>
+                <button
+                  onClick={() => setFindReplaceModalOpen(true)}
+                  className="p-2 mx-1 hover:bg-blue-50 rounded-md transition-colors"
+                  title="Find and Replace (Ctrl+F)"
+                >
+                  <Search className="w-6 h-6 text-blue-600" />
+                </button>
                 <button
                   onClick={() => setHistoryPanelOpen(true)}
                   className="p-2 mx-1 hover:bg-purple-50 rounded-md transition-colors"
@@ -3297,7 +3721,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     <TableHead
                       key={header + '-' + colIdx}
                       data-col={header}
-                       className={`table-header-cell text-center bg-white border-r border-gray-200 relative sticky top-0 z-10 ${
+                       className={`table-header-cell bg-white border-r border-gray-200 relative sticky top-0 z-10 ${
                          selectedColumn === header ? 'border-2 border-blue-500 bg-blue-100' : ''
                        } ${
                          multiSelectedColumns.has(header) ? 'bg-blue-100 border-blue-500' : ''
@@ -3338,7 +3762,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           borderRight: colIdx === data.frozenColumns - 1 ? '2px solid #22c55e' : '1px solid #d1d5db',
                           borderTop: '1px solid #d1d5db',
                           borderBottom: '1px solid #d1d5db'
-                        } : {})
+                        } : {}),
+                        textAlign: `${getColumnAlignment(header)} !important`
                       }}
                       draggable
                       onDragStart={() => handleDragStart(header)}
@@ -3378,8 +3803,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       {editingHeader === colIdx ? (
                         <input
                           type="text"
-                          className="h-7 text-xs outline-none border-none bg-white px-0 font-bold text-black truncate text-center w-full"
-                          style={{ width: '100%', boxSizing: 'border-box', background: 'inherit', textAlign: 'center', padding: 0, margin: 0 }}
+                          className="h-7 text-xs outline-none border-none bg-white px-0 font-bold text-black truncate w-full"
+                          style={{ width: '100%', boxSizing: 'border-box', background: 'inherit', textAlign: `${getColumnAlignment(header)} !important`, padding: 0, margin: 0 }}
                           value={editingHeaderValue}
                           autoFocus
                           onChange={e => setEditingHeaderValue(e.target.value)}
@@ -3391,19 +3816,21 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         />
                       ) : (
                          <div
-                           className="flex items-center justify-center cursor-pointer w-full h-full overflow-hidden"
+                           className="flex items-center cursor-pointer w-full h-full overflow-hidden"
+                           style={{
+                             justifyContent: getColumnAlignment(header) === 'left' ? 'flex-start' : 
+                                           getColumnAlignment(header) === 'center' ? 'center' : 'flex-end',
+                             width: '100%', 
+                             height: '100%',
+                             textOverflow: 'ellipsis',
+                             whiteSpace: 'nowrap'
+                           }}
                            onDoubleClick={() => {
                              // Always allow header editing regardless of enableEditing setting
                              setEditingHeader(colIdx);
                              setEditingHeaderValue(header);
                            }}
                            title={`Click to select • Ctrl+Click for multi-select • Double-click to edit • Delete key to delete selected\nHeader: ${headerDisplayNames[header] ?? header}`}
-                           style={{ 
-                             width: '100%', 
-                             height: '100%',
-                             textOverflow: 'ellipsis',
-                             whiteSpace: 'nowrap'
-                           }}
                          >
                            <span className="flex items-center gap-1 font-bold text-black overflow-hidden" style={{ maxWidth: '100%' }}>
                              <span className="truncate">{headerDisplayNames[header] ?? header}</span>
@@ -3498,7 +3925,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           <TableCell
                             key={colIdx}
                             data-col={column}
-                            className={`table-cell text-center font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-500 bg-blue-50' : selectedColumn === column ? 'border border-blue-500 bg-blue-50' : ''} ${isRowSelected ? 'bg-blue-100' : ''} ${data.frozenColumns && colIdx < data.frozenColumns ? 'frozen-column' : ''}`}
+                            className={`table-cell font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-500 bg-blue-50' : selectedColumn === column ? 'border border-blue-500 bg-blue-50' : ''} ${isRowSelected ? 'bg-blue-100' : ''} ${data.frozenColumns && colIdx < data.frozenColumns ? 'frozen-column' : ''}`}
                             style={{
                               ...(settings.columnWidths?.[column] ? { 
                                 width: settings.columnWidths[column], 
@@ -3531,7 +3958,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                                 borderRight: colIdx === data.frozenColumns - 1 ? '2px solid #22c55e' : '1px solid #d1d5db',
                                 borderTop: '1px solid #d1d5db',
                                 borderBottom: '1px solid #d1d5db'
-                              } : {})
+                              } : {}),
+                              textAlign: `${getColumnAlignment(column)} !important`
                             }}
                             onClick={() => handleCellClick(rowIndex, column)}
                             onDoubleClick={() => {
@@ -3561,7 +3989,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                                 maxWidth: '100%',
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap',
-                                wordBreak: 'break-all'
+                                wordBreak: 'break-all',
+                                justifyContent: getColumnAlignment(column) === 'left' ? 'flex-start' : 
+                                              getColumnAlignment(column) === 'center' ? 'center' : 'flex-end'
                               }}
                               onDoubleClick={() => {
                                 // Always allow cell editing regardless of enableEditing setting
@@ -3570,7 +4000,21 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                               }}
                               title={`Double-click to edit cell\nValue: ${safeToString(row[column])}`}
                             >
-                              {safeToString(row[column]) !== '' ? highlightMatch(safeToString(row[column]), settings.searchTerm || '') : null}
+                              {(() => {
+                                const cellValue = safeToString(row[column]);
+                                if (cellValue === '') return null;
+                                
+                                // Use find and replace highlighting if active
+                                if (highlightedText && findReplaceModalOpen) {
+                                  const highlightedValue = highlightText(cellValue, highlightedText, caseSensitive);
+                                  if (highlightedValue !== cellValue) {
+                                    return <span dangerouslySetInnerHTML={{ __html: highlightedValue }} />;
+                                  }
+                                }
+                                
+                                // Fall back to existing search highlighting
+                                return highlightMatch(cellValue, settings.searchTerm || '');
+                              })()}
                             </div>
                           )}
                         </TableCell>
@@ -3835,6 +4279,51 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Category</button>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Decimal</button>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Object</button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+          {/* Letter Case - dropdown like Convert to */}
+          <div 
+            className="relative"
+            onMouseEnter={() => setCaseSubmenuOpen(true)}
+            onMouseLeave={() => setCaseSubmenuOpen(false)}
+          >
+            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100">
+              Letter Case <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
+            </button>
+            {caseSubmenuOpen && (
+              <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md min-w-[180px] max-h-[400px] overflow-y-auto z-50" style={{ scrollbarWidth: 'thin' }}>
+                {multiSelectedColumns.size > 1 ? (
+                  <>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'lower'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Lowercase (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'upper'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Uppercase (All)</button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'pascal'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Pascal Case (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'lower_camel'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Lower Camel Case (All)</button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'snake'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Snake Case (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'screaming_snake'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>SCREAMING_SNAKE_CASE (All)</button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'kebab'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Kebab Case (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'train'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Train Case (All)</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase(Array.from(multiSelectedColumns), 'flat'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Flat Case (All)</button>
+                  </>
+                ) : (
+                  <>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'lower'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Lowercase</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'upper'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Uppercase</button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'pascal'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Pascal Case</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'lower_camel'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Lower Camel Case</button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'snake'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Snake Case</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'screaming_snake'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>SCREAMING_SNAKE_CASE</button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'kebab'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Kebab Case</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'train'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Train Case</button>
+                    <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleTransformColumnCase([contextMenu.col], 'flat'); setContextMenu(null); setOpenDropdown(null); setCaseSubmenuOpen(false); }}>Flat Case</button>
                   </>
                 )}
               </div>
@@ -4278,6 +4767,159 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               >
                 Delete {rowDeleteConfirmModal.rowsToDelete.length} Row{rowDeleteConfirmModal.rowsToDelete.length > 1 ? 's' : ''}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Find and Replace Modal */}
+      {findReplaceModalOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setFindReplaceModalOpen(false)}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <div className="flex items-center space-x-2">
+                <Search className="w-5 h-5 text-blue-600" />
+                <h3 className="text-lg font-semibold text-gray-900">Find and Replace</h3>
+              </div>
+              <button
+                onClick={() => setFindReplaceModalOpen(false)}
+                className="p-1 hover:bg-gray-100 rounded-md transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            
+            <div className="p-4 space-y-4">
+              {/* Find Text Input */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Find
+                </label>
+                <Input
+                  value={findText}
+                  onChange={(e) => setFindText(e.target.value)}
+                  placeholder="Enter text to find..."
+                  className="w-full"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && findText.trim()) {
+                      handleFindAndReplace();
+                    }
+                  }}
+                />
+                {/* Match Count Display */}
+                {findText.trim() && (
+                  <div className="mt-2 text-sm">
+                    {matchCountLoading ? (
+                      <div className="flex items-center text-gray-500">
+                        <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mr-2"></div>
+                        Searching...
+                      </div>
+                    ) : (
+                      <div className="text-gray-600">
+                        <span className="font-medium text-blue-600">{matchCount}</span> match{matchCount !== 1 ? 'es' : ''} found
+                        {matchCount > 0 && (
+                          <div className="text-xs text-gray-500 mt-1">
+                            {Object.entries(matchesByColumn)
+                              .filter(([_, count]) => (count as number) > 0)
+                              .slice(0, 3)
+                              .map(([col, count]) => `${col}: ${count}`)
+                              .join(', ')}
+                            {Object.keys(matchesByColumn).filter(col => (matchesByColumn[col] as number) > 0).length > 3 && '...'}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              
+              {/* Replace Text Input */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Replace with
+                </label>
+                <Input
+                  value={replaceText}
+                  onChange={(e) => setReplaceText(e.target.value)}
+                  placeholder="Enter replacement text..."
+                  className="w-full"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && findText.trim()) {
+                      handleFindAndReplace();
+                    }
+                  }}
+                />
+              </div>
+              
+              {/* Options */}
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="caseSensitive"
+                    checked={caseSensitive}
+                    onChange={(e) => setCaseSensitive(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="caseSensitive" className="text-sm text-gray-700">
+                    Case sensitive
+                  </label>
+                </div>
+                
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="replaceAll"
+                    checked={replaceAll}
+                    onChange={(e) => setReplaceAll(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <label htmlFor="replaceAll" className="text-sm text-gray-700">
+                    Replace all occurrences
+                  </label>
+                </div>
+              </div>
+              
+              {/* Action Buttons */}
+              <div className="flex space-x-3 pt-4">
+                <Button
+                  onClick={handleFindAndReplace}
+                  disabled={!findText.trim() || findReplaceLoading}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {findReplaceLoading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div>
+                      Processing...
+                    </>
+                  ) : (
+                    <>
+                      <Replace className="w-4 h-4 mr-2" />
+                      {replaceAll ? 'Replace All' : 'Replace'}
+                    </>
+                  )}
+                </Button>
+                <Button
+                  onClick={() => setFindReplaceModalOpen(false)}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+              </div>
+              
+              {/* Help Text */}
+              <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md">
+                <p><strong>Shortcut:</strong> Press Ctrl+F to open this dialog</p>
+                <p><strong>Tip:</strong> Leave "Replace with" empty to delete found text</p>
+              </div>
             </div>
           </div>
         </div>

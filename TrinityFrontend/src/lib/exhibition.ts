@@ -1,27 +1,25 @@
 import { EXHIBITION_API } from '@/lib/api';
 
-export interface ExhibitionSkuPayload {
+export interface ExhibitionComponentPayload {
   id: string;
-  title: string;
-  details?: Record<string, any>;
+  atomId?: string;
+  title?: string;
+  category?: string;
+  color?: string;
+  metadata?: Record<string, any>;
 }
 
-export interface ExhibitionFeatureOverviewPayload {
-  atomId: string;
-  cardId: string;
-  components: {
-    skuStatistics: boolean;
-    trendAnalysis: boolean;
-  };
-  skus: ExhibitionSkuPayload[];
+export interface ExhibitionAtomPayload {
+  id: string;
+  atom_name: string;
+  exhibited_components: ExhibitionComponentPayload[];
 }
 
 export interface ExhibitionConfigurationPayload {
   client_name: string;
   app_name: string;
   project_name: string;
-  cards: any[];
-  feature_overview?: ExhibitionFeatureOverviewPayload[];
+  atoms: ExhibitionAtomPayload[];
 }
 
 export interface ExhibitionConfigurationResponse extends ExhibitionConfigurationPayload {

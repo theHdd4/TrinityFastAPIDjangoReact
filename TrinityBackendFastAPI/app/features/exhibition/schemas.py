@@ -6,36 +6,36 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
-class ExhibitionSku(BaseModel):
-    id: str = Field(..., description="Unique identifier for the SKU")
-    title: str = Field(..., description="Display name for the SKU")
-    details: Optional[Dict[str, Any]] = Field(
+class ExhibitionComponent(BaseModel):
+    """Represents a component exhibited from a specific atom."""
+
+    id: str = Field(..., description="Identifier of the exhibited component")
+    atomId: Optional[str] = Field(None, description="Source atom identifier for the component")
+    title: Optional[str] = Field(None, description="Display label for the exhibited component")
+    category: Optional[str] = Field(None, description="Category of the exhibited component")
+    color: Optional[str] = Field(None, description="Accent colour associated with the component")
+    metadata: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="Additional metadata captured for the SKU",
+        description="Additional metadata captured for the exhibited component",
     )
 
 
-class ExhibitionComponents(BaseModel):
-    skuStatistics: bool = Field(False, description="Include SKU statistics summary")
-    trendAnalysis: bool = Field(False, description="Include trend analysis visuals")
+class ExhibitionAtomEntry(BaseModel):
+    """Grouping of exhibited components for a single atom."""
 
-
-class ExhibitionFeatureOverview(BaseModel):
-    atomId: str = Field(..., description="Identifier of the Feature Overview atom")
-    cardId: str = Field(..., description="Identifier of the parent card")
-    components: ExhibitionComponents = Field(
-        default_factory=ExhibitionComponents,
-        description="Which sections should render in exhibition mode",
+    id: str = Field(..., min_length=1, description="Stable identifier for the exhibited atom entry")
+    atom_name: str = Field(..., min_length=1, description="Human friendly name of the atom")
+    exhibited_components: List[ExhibitionComponent] = Field(
+        default_factory=list,
+        description="Components from the atom that should appear in the exhibition catalogue",
     )
-    skus: List[ExhibitionSku] = Field(default_factory=list)
 
 
 class ExhibitionConfigurationBase(BaseModel):
     client_name: str = Field(..., min_length=1)
     app_name: str = Field(..., min_length=1)
     project_name: str = Field(..., min_length=1)
-    cards: List[Dict[str, Any]] = Field(default_factory=list)
-    feature_overview: Optional[List[ExhibitionFeatureOverview]] = None
+    atoms: List[ExhibitionAtomEntry] = Field(default_factory=list)
 
 
 class ExhibitionConfigurationIn(ExhibitionConfigurationBase):
@@ -43,7 +43,7 @@ class ExhibitionConfigurationIn(ExhibitionConfigurationBase):
 
 
 class ExhibitionConfigurationOut(ExhibitionConfigurationBase):
-    updated_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = Field(default=None, description="Timestamp of the last update")
 
     class Config:
         orm_mode = True

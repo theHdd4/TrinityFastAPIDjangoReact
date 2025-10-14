@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Download, FileText, Grid3x3, Presentation, Save, Share2, Undo2 } from 'lucide-react';
 import Header from '@/components/Header';
@@ -12,7 +12,7 @@ import {
 } from './store/exhibitionStore';
 import { ExhibitionCatalogue } from './components/ExhibitionCatalogue';
 import { SlideCanvas } from './components/SlideCanvas';
-import { OperationsPalette } from './components/OperationsPalette';
+import { OperationsPalette } from './components/operationsPalette';
 import { SlideNavigation } from './components/SlideNavigation';
 import { SlideThumbnails } from './components/SlideThumbnails';
 import { SlideNotes } from './components/SlideNotes';
@@ -21,18 +21,62 @@ import { ExportDialog } from './components/ExportDialog';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { saveExhibitionConfiguration } from '@/lib/exhibition';
-import { getActiveProjectContext } from '@/utils/projectEnv';
+import {
+  saveExhibitionConfiguration,
+  type ExhibitionAtomPayload,
+  type ExhibitionComponentPayload,
+} from '@/lib/exhibition';
+import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
+import { createDefaultTextBox } from './components/operationsPalette/textBox/constants';
+import type { SlideTextBox, TextBoxPosition } from './components/operationsPalette/textBox/types';
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
 const SLIDESHOW_ANIMATION_MS = 450;
 
+const contextsEqual = (a: ProjectContext | null, b: ProjectContext | null): boolean => {
+  if (!a && !b) {
+    return true;
+  }
+  if (!a || !b) {
+    return false;
+  }
+
+  return (
+    a.client_name === b.client_name &&
+    a.app_name === b.app_name &&
+    a.project_name === b.project_name
+  );
+};
+
 const ExhibitionMode = () => {
-  const { exhibitedCards, cards, loadSavedConfiguration, updateCard, addBlankSlide, setCards } =
-    useExhibitionStore();
+  const {
+    exhibitedCards,
+    cards,
+    catalogueCards,
+    loadSavedConfiguration,
+    updateCard,
+    addBlankSlide,
+    setCards,
+    lastLoadedContext,
+  } = useExhibitionStore();
   const { toast } = useToast();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('exhibition:edit');
+  const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
+
+  const presenterDisplayName = useMemo(() => {
+    const username = typeof user?.username === 'string' ? user.username.trim() : '';
+    if (username.length > 0) {
+      return username;
+    }
+
+    const email = typeof user?.email === 'string' ? user.email.trim() : '';
+    if (email.length > 0) {
+      return email;
+    }
+
+    return 'Unknown Presenter';
+  }, [user]);
 
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -64,6 +108,7 @@ const ExhibitionMode = () => {
   const [isSlideshowActive, setIsSlideshowActive] = useState(false);
   const [slideshowTransform, setSlideshowTransform] = useState('translateX(0px) scale(1)');
   const [slideshowOpacity, setSlideshowOpacity] = useState(1);
+  const [textBoxesByCard, setTextBoxesByCard] = useState<Record<string, SlideTextBox[]>>({});
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const verticalSlideRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -72,6 +117,7 @@ const ExhibitionMode = () => {
   const lastSerializedCardsRef = useRef<string | null>(null);
   const autoAdvanceTimerRef = useRef<number | null>(null);
   const transitionTimerRef = useRef<number | null>(null);
+  const hasRequestedInitialLoadRef = useRef(false);
 
   const clearAutoAdvanceTimer = useCallback(() => {
     if (autoAdvanceTimerRef.current !== null) {
@@ -91,6 +137,88 @@ const ExhibitionMode = () => {
     clearAutoAdvanceTimer();
     clearTransitionTimer();
   }, [clearAutoAdvanceTimer, clearTransitionTimer]);
+
+  const generateTextBoxId = useCallback(() => {
+    if (typeof crypto !== 'undefined' && typeof (crypto as Crypto).randomUUID === 'function') {
+      return (crypto as Crypto).randomUUID();
+    }
+    return `textbox-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }, []);
+
+  const updateTextBoxState = useCallback(
+    (cardId: string, boxId: string, updates: Partial<SlideTextBox>) => {
+      setTextBoxesByCard(prev => {
+        const existing = prev[cardId];
+        if (!existing) {
+          return prev;
+        }
+
+        let hasChanged = false;
+        const next = existing.map(box => {
+          if (box.id !== boxId) {
+            return box;
+          }
+
+          const updated = { ...box, ...updates };
+          hasChanged = Object.entries(updates).some(([key, value]) => (box as Record<string, unknown>)[key] !== value);
+          return updated;
+        });
+
+        if (!hasChanged) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          [cardId]: next,
+        };
+      });
+    },
+    [],
+  );
+
+  const handleTextBoxTextChange = useCallback(
+    (cardId: string, boxId: string, text: string) => {
+      updateTextBoxState(cardId, boxId, { text });
+    },
+    [updateTextBoxState],
+  );
+
+  const handleTextBoxPositionChange = useCallback(
+    (cardId: string, boxId: string, position: TextBoxPosition) => {
+      updateTextBoxState(cardId, boxId, { x: position.x, y: position.y });
+    },
+    [updateTextBoxState],
+  );
+
+  const handleTextBoxRemove = useCallback((cardId: string, boxId: string) => {
+    setTextBoxesByCard(prev => {
+      const existing = prev[cardId];
+      if (!existing) {
+        return prev;
+      }
+
+      const filtered = existing.filter(box => box.id !== boxId);
+      if (filtered.length === existing.length) {
+        return prev;
+      }
+
+      const next = { ...prev };
+      if (filtered.length > 0) {
+        next[cardId] = filtered;
+      } else {
+        delete next[cardId];
+      }
+      return next;
+    });
+  }, []);
+
+  const handleTextBoxStyleChange = useCallback(
+    (cardId: string, boxId: string, updates: Partial<SlideTextBox>) => {
+      updateTextBoxState(cardId, boxId, updates);
+    },
+    [updateTextBoxState],
+  );
 
   const getTransitionStates = useCallback(
     (transition: SlideshowTransition, direction: 'forward' | 'backward') => {
@@ -118,6 +246,14 @@ const ExhibitionMode = () => {
     },
     [],
   );
+
+  const slideIndexByCardId = useMemo(() => {
+    const lookup: Record<string, number> = {};
+    exhibitedCards.forEach((card, index) => {
+      lookup[card.id] = index;
+    });
+    return lookup;
+  }, [exhibitedCards]);
 
   const runSlideTransition = useCallback(
     (targetIndex: number, direction: 'forward' | 'backward' = 'forward') => {
@@ -285,6 +421,13 @@ const ExhibitionMode = () => {
     [currentSlide, exhibitedCards, updateCard]
   );
 
+  const handleTitleChange = useCallback(
+    (title: string, cardId: string) => {
+      updateCard(cardId, { title });
+    },
+    [updateCard],
+  );
+
   const handleSlideshowSettingsChange = useCallback(
     (partial: { slideshowDuration?: number; slideshowTransition?: SlideshowTransition }) => {
       const targetCard = exhibitedCards[currentSlide];
@@ -339,10 +482,53 @@ const ExhibitionMode = () => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (cards.length === 0) {
-      void loadSavedConfiguration();
+    if (typeof window === 'undefined') {
+      return;
     }
-  }, [cards.length, loadSavedConfiguration]);
+
+    const syncContext = () => {
+      setProjectContext(prev => {
+        const next = getActiveProjectContext();
+        if (contextsEqual(prev, next)) {
+          return prev;
+        }
+        return next;
+      });
+    };
+
+    syncContext();
+
+    window.addEventListener('storage', syncContext);
+    window.addEventListener('focus', syncContext);
+
+    return () => {
+      window.removeEventListener('storage', syncContext);
+      window.removeEventListener('focus', syncContext);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasRequestedInitialLoadRef.current) {
+      hasRequestedInitialLoadRef.current = true;
+      if (projectContext) {
+        void loadSavedConfiguration(projectContext);
+      } else {
+        void loadSavedConfiguration(null);
+      }
+      return;
+    }
+
+    if (projectContext) {
+      if (!lastLoadedContext || !contextsEqual(projectContext, lastLoadedContext)) {
+        void loadSavedConfiguration(projectContext);
+      }
+      return;
+    }
+
+    if (!projectContext && lastLoadedContext) {
+      void loadSavedConfiguration(null);
+    }
+  }, [projectContext, lastLoadedContext, loadSavedConfiguration]);
 
   useEffect(() => {
     const serialized = JSON.stringify(cards);
@@ -520,6 +706,51 @@ const ExhibitionMode = () => {
     }
   }, []);
 
+  const mapAtomToPayload = useCallback((atom: DroppedAtom): ExhibitionComponentPayload => {
+    return {
+      id: atom.id,
+      atomId: atom.atomId,
+      title: atom.title,
+      category: atom.category,
+      color: atom.color,
+      metadata: atom.metadata ?? undefined,
+    };
+  }, []);
+
+  const mapCardToAtomEntry = useCallback(
+    (card: LayoutCard): ExhibitionAtomPayload | null => {
+      const componentsSource = Array.isArray(card.catalogueAtoms) && card.catalogueAtoms.length > 0
+        ? card.catalogueAtoms
+        : card.atoms;
+
+      const exhibitedComponents = Array.isArray(componentsSource)
+        ? componentsSource
+            .map(mapAtomToPayload)
+            .filter(component => typeof component.id === 'string' && component.id.trim().length > 0)
+        : [];
+
+      if (exhibitedComponents.length === 0) {
+        return null;
+      }
+
+      const resolvedName =
+        (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0
+          ? card.moleculeTitle.trim()
+          : undefined) ||
+        (typeof card.moleculeId === 'string' && card.moleculeId.trim().length > 0
+          ? card.moleculeId.trim()
+          : undefined) ||
+        card.id;
+
+      return {
+        id: card.id,
+        atom_name: resolvedName,
+        exhibited_components: exhibitedComponents,
+      };
+    },
+    [mapAtomToPayload],
+  );
+
   const handleSave = useCallback(async () => {
     if (!canEdit) {
       toast({
@@ -548,11 +779,15 @@ const ExhibitionMode = () => {
 
     try {
       const cardsToPersist = JSON.parse(JSON.stringify(cards)) as LayoutCard[];
+      const atomsToPersist = cardsToPersist
+        .map(mapCardToAtomEntry)
+        .filter((entry): entry is ExhibitionAtomPayload => entry !== null);
+
       await saveExhibitionConfiguration({
         client_name: context.client_name,
         app_name: context.app_name,
         project_name: context.project_name,
-        cards: cardsToPersist,
+        atoms: atomsToPersist,
       });
       persistCardsLocally(cardsToPersist);
       toast({ title: 'Exhibition saved', description: 'Your exhibition updates have been saved.' });
@@ -567,7 +802,7 @@ const ExhibitionMode = () => {
     } finally {
       setIsSaving(false);
     }
-  }, [canEdit, cards, isSaving, persistCardsLocally, toast]);
+  }, [canEdit, cards, isSaving, mapCardToAtomEntry, persistCardsLocally, toast]);
 
   const handleShare = useCallback(async () => {
     if (typeof window === 'undefined' || typeof navigator === 'undefined') {
@@ -811,7 +1046,53 @@ const ExhibitionMode = () => {
     </div>
   );
 
-  if (exhibitedCards.length === 0) {
+  const currentCard = exhibitedCards[currentSlide] ?? null;
+  const currentPresentationSettings: PresentationSettings = {
+    ...DEFAULT_PRESENTATION_SETTINGS,
+    ...currentCard?.presentationSettings,
+  };
+
+  const handleCreateTextBox = useCallback(() => {
+    const targetCard = exhibitedCards[currentSlide];
+    if (!targetCard) {
+      return;
+    }
+
+    setTextBoxesByCard(prev => {
+      const existing = prev[targetCard.id] ?? [];
+      const offset = existing.length * 32;
+      const newBox = createDefaultTextBox(generateTextBoxId(), {
+        x: 120 + offset,
+        y: 120 + offset,
+      });
+
+      return {
+        ...prev,
+        [targetCard.id]: [...existing, newBox],
+      };
+    });
+  }, [currentSlide, exhibitedCards, generateTextBoxId]);
+  const slideWrapperStyle: React.CSSProperties | undefined = isSlideshowActive
+    ? {
+        opacity: slideshowOpacity,
+        transform: slideshowTransform,
+        transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
+      }
+    : undefined;
+
+  const emptyCanvas = (
+    <div className="flex-1 flex items-center justify-center bg-muted/10">
+      <div className="max-w-md text-center space-y-3 px-6">
+        <h3 className="text-2xl font-semibold text-foreground">Create your first slide</h3>
+        <p className="text-muted-foreground">
+          Use the <span className="font-medium text-foreground">+</span> button below to create a slide, then drag exhibited
+          components from the catalogue to start building your presentation.
+        </p>
+      </div>
+    </div>
+  );
+
+  if (exhibitedCards.length === 0 && catalogueCards.length === 0) {
     return (
       <div className="h-screen bg-background flex flex-col">
         <Header />
@@ -824,7 +1105,7 @@ const ExhibitionMode = () => {
             </div>
             <h3 className="text-2xl font-semibold text-foreground mb-3">No Slides to Present</h3>
             <p className="text-muted-foreground mb-6">
-              Go to Laboratory mode and toggle "Exhibit the Card" on the cards you want to display here, then click Save.
+              Go to Laboratory mode, exhibit the components you want to showcase so they appear in the catalogue, then click Save.
             </p>
             <div className="p-4 bg-muted/50 rounded-lg border border-border">
               <p className="text-sm text-muted-foreground">
@@ -836,19 +1117,6 @@ const ExhibitionMode = () => {
       </div>
     );
   }
-
-  const currentCard = exhibitedCards[currentSlide];
-  const currentPresentationSettings: PresentationSettings = {
-    ...DEFAULT_PRESENTATION_SETTINGS,
-    ...currentCard?.presentationSettings,
-  };
-  const slideWrapperStyle: React.CSSProperties | undefined = isSlideshowActive
-    ? {
-        opacity: slideshowOpacity,
-        transform: slideshowTransform,
-        transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
-      }
-    : undefined;
 
   return (
     <div
@@ -906,9 +1174,10 @@ const ExhibitionMode = () => {
 
             {isCatalogueOpen && (
               <ExhibitionCatalogue
-                cards={exhibitedCards}
+                cards={catalogueCards}
                 currentSlide={currentSlide}
                 onSlideSelect={handleSlideSelection}
+                slideIndexByCardId={slideIndexByCardId}
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
                 enableDragging={canEdit}
@@ -936,21 +1205,32 @@ const ExhibitionMode = () => {
               className={cn('flex-1 flex flex-col', isSlideshowActive && 'justify-center')}
               style={slideWrapperStyle}
             >
-              <SlideCanvas
-                card={currentCard}
-                slideNumber={currentSlide + 1}
-                totalSlides={exhibitedCards.length}
-                onDrop={handleDrop}
-                draggedAtom={draggedAtom}
-                canEdit={canEdit}
-                onPresentationChange={handlePresentationChange}
-                onRemoveAtom={handleRemoveAtom}
-                onShowNotes={() => setShowNotes(true)}
-                viewMode="horizontal"
-                isActive
-              />
+              {currentCard ? (
+                <SlideCanvas
+                  card={currentCard}
+                  slideNumber={currentSlide + 1}
+                  totalSlides={exhibitedCards.length}
+                  onDrop={handleDrop}
+                  draggedAtom={draggedAtom}
+                  canEdit={canEdit}
+                  onPresentationChange={handlePresentationChange}
+                  onRemoveAtom={handleRemoveAtom}
+                  onShowNotes={() => setShowNotes(true)}
+                  viewMode="horizontal"
+                  isActive
+                  onTitleChange={handleTitleChange}
+                  presenterName={presenterDisplayName}
+                  textBoxes={textBoxesByCard[currentCard.id] ?? []}
+                  onTextBoxChange={(boxId, updates) => handleTextBoxStyleChange(currentCard.id, boxId, updates)}
+                  onTextBoxTextChange={(boxId, text) => handleTextBoxTextChange(currentCard.id, boxId, text)}
+                  onTextBoxPositionChange={(boxId, position) => handleTextBoxPositionChange(currentCard.id, boxId, position)}
+                  onTextBoxRemove={boxId => handleTextBoxRemove(currentCard.id, boxId)}
+                />
+              ) : (
+                emptyCanvas
+              )}
             </div>
-          ) : (
+          ) : exhibitedCards.length > 0 ? (
             <div className="flex-1 overflow-y-auto bg-muted/10 px-6 py-6 space-y-6">
               {exhibitedCards.map((card, index) => (
                 <div
@@ -971,10 +1251,19 @@ const ExhibitionMode = () => {
                     onShowNotes={() => setShowNotes(true)}
                     viewMode="vertical"
                     isActive={currentSlide === index}
+                    onTitleChange={handleTitleChange}
+                    presenterName={presenterDisplayName}
+                    textBoxes={textBoxesByCard[card.id] ?? []}
+                    onTextBoxChange={(boxId, updates) => handleTextBoxStyleChange(card.id, boxId, updates)}
+                    onTextBoxTextChange={(boxId, text) => handleTextBoxTextChange(card.id, boxId, text)}
+                    onTextBoxPositionChange={(boxId, position) => handleTextBoxPositionChange(card.id, boxId, position)}
+                    onTextBoxRemove={boxId => handleTextBoxRemove(card.id, boxId)}
                   />
                 </div>
               ))}
             </div>
+          ) : (
+            emptyCanvas
           )}
         </div>
 
@@ -992,44 +1281,44 @@ const ExhibitionMode = () => {
             onFullscreen={toggleFullscreen}
             onExport={() => setIsExportOpen(true)}
             onGridView={() => setShowGridView(true)}
+            onCreateTextBox={handleCreateTextBox}
+            canEdit={canEdit}
           />
         )}
       </div>
 
-      {exhibitedCards.length > 0 && (
-        <SlideNavigation
-          currentSlide={currentSlide}
-          totalSlides={exhibitedCards.length}
-          onPrevious={() => goToSlide(currentSlide - 1, 'backward')}
-          onNext={() => goToSlide(currentSlide + 1, 'forward')}
-          onGridView={() => {
-            if (isSlideshowActive) {
-              handleStopSlideshow();
-            }
-            setShowGridView(true);
-          }}
-          onFullscreen={toggleFullscreen}
-          onExport={() => {
-            if (isSlideshowActive) {
-              handleStopSlideshow();
-            }
-            setIsExportOpen(true);
-          }}
-          isFullscreen={isFullscreen}
-          onAddSlide={handleAddSlide}
-          onToggleViewMode={handleToggleViewMode}
-          viewMode={viewMode}
-          canEdit={canEdit}
-          onSlideshowStart={handleStartSlideshow}
-          onSlideshowStop={handleStopSlideshow}
-          isSlideshowActive={isSlideshowActive}
-          slideshowSettings={{
-            slideshowDuration: currentPresentationSettings.slideshowDuration,
-            slideshowTransition: currentPresentationSettings.slideshowTransition,
-          }}
-          onSlideshowSettingsChange={handleSlideshowSettingsChange}
-        />
-      )}
+      <SlideNavigation
+        currentSlide={currentSlide}
+        totalSlides={exhibitedCards.length}
+        onPrevious={() => goToSlide(currentSlide - 1, 'backward')}
+        onNext={() => goToSlide(currentSlide + 1, 'forward')}
+        onGridView={() => {
+          if (isSlideshowActive) {
+            handleStopSlideshow();
+          }
+          setShowGridView(true);
+        }}
+        onFullscreen={toggleFullscreen}
+        onExport={() => {
+          if (isSlideshowActive) {
+            handleStopSlideshow();
+          }
+          setIsExportOpen(true);
+        }}
+        isFullscreen={isFullscreen}
+        onAddSlide={handleAddSlide}
+        onToggleViewMode={handleToggleViewMode}
+        viewMode={viewMode}
+        canEdit={canEdit}
+        onSlideshowStart={handleStartSlideshow}
+        onSlideshowStop={handleStopSlideshow}
+        isSlideshowActive={isSlideshowActive}
+        slideshowSettings={{
+          slideshowDuration: currentPresentationSettings.slideshowDuration,
+          slideshowTransition: currentPresentationSettings.slideshowTransition,
+        }}
+        onSlideshowSettingsChange={handleSlideshowSettingsChange}
+      />
 
       {showGridView && (
         <GridView

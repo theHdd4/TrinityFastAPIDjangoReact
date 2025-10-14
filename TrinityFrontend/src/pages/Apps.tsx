@@ -162,7 +162,7 @@ const Apps = () => {
     },
     {
       id: 'blank',
-      title: 'Create Blank App',
+      title: 'Custom Workspace',
       description:
         'Start from scratch with a clean canvas and build your custom analysis workflow',
       icon: Plus,

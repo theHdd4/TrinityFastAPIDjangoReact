@@ -832,8 +832,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   // Calculate dynamic margins based on axis labels visibility
   const getChartMargins = () => {
     if (!currentShowAxisLabels) {
-      // When axis labels are hidden, reduce margins to expand chart in all directions
-      return { top: 20, right: 20, left: 20, bottom: 20 };
+      // When axis labels are hidden, still need space for full category names
+      return { top: 20, right: 20, left: 20, bottom: 80 };
     }
     
     // When axis labels are shown, add space for both X and Y axis labels

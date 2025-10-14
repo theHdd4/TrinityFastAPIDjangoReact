@@ -26,7 +26,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import TextBoxDisplay from '@/components/AtomList/atoms/text-box/TextBoxDisplay';
 import {
   CardLayout,
   CardColor,
@@ -35,6 +34,9 @@ import {
   PresentationSettings,
   DEFAULT_PRESENTATION_SETTINGS,
 } from '../store/exhibitionStore';
+import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
+import { ExhibitionTextBox } from './operationsPalette/textBox/TextBox';
+import type { SlideTextBox, TextBoxPosition } from './operationsPalette/textBox/types';
 
 interface SlideCanvasProps {
   card: LayoutCard;
@@ -53,6 +55,13 @@ interface SlideCanvasProps {
   onShowNotes?: () => void;
   viewMode?: 'horizontal' | 'vertical';
   isActive?: boolean;
+  onTitleChange?: (title: string, cardId: string) => void;
+  presenterName?: string | null;
+  textBoxes?: SlideTextBox[];
+  onTextBoxChange?: (boxId: string, updates: Partial<SlideTextBox>) => void;
+  onTextBoxTextChange?: (boxId: string, text: string) => void;
+  onTextBoxPositionChange?: (boxId: string, position: TextBoxPosition) => void;
+  onTextBoxRemove?: (boxId: string) => void;
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -67,6 +76,13 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   onShowNotes,
   viewMode = 'horizontal',
   isActive = false,
+  onTitleChange,
+  presenterName,
+  textBoxes = [],
+  onTextBoxChange,
+  onTextBoxTextChange,
+  onTextBoxPositionChange,
+  onTextBoxRemove,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -91,6 +107,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   );
 
   const cardWidthClass = settings.cardWidth === 'M' ? 'max-w-4xl' : 'max-w-6xl';
+  const hasTextBoxes = textBoxes.length > 0;
 
   useEffect(() => {
     setSettings({
@@ -136,6 +153,14 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       document.removeEventListener('touchstart', handlePointerDown);
     };
   }, [showFormatPanel]);
+
+  useEffect(() => {
+    if (card.atoms.length > 0 || textBoxes.length > 0) {
+      setHasInteracted(true);
+    } else {
+      setHasInteracted(false);
+    }
+  }, [card.id, card.atoms.length, textBoxes.length]);
 
   const updateSettings = (partial: Partial<PresentationSettings>) => {
     setSettings(prev => {
@@ -215,7 +240,95 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
   }, [settings.cardLayout]);
 
-  const showOverview = layoutConfig.showOverview && card.atoms.length > 0;
+  const showOverview = layoutConfig.showOverview && card.atoms.length > 1;
+
+  const resolvedTitle = useMemo(() => {
+    if (typeof card.title === 'string' && card.title.trim().length > 0) {
+      return card.title.trim();
+    }
+    if (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0) {
+      return card.moleculeTitle.trim();
+    }
+    if (card.atoms.length > 0) {
+      return card.atoms[0].title;
+    }
+    return 'Untitled Slide';
+  }, [card]);
+
+  const [titleDraft, setTitleDraft] = useState(resolvedTitle);
+
+  useEffect(() => {
+    setTitleDraft(resolvedTitle);
+  }, [resolvedTitle]);
+
+  const presenterLabel = useMemo(() => {
+    if (typeof presenterName === 'string' && presenterName.trim().length > 0) {
+      return presenterName.trim();
+    }
+    return 'Unknown Presenter';
+  }, [presenterName]);
+
+  const formattedLastEdited = useMemo(() => {
+    if (typeof card.lastEditedAt !== 'string') {
+      return 'Not available';
+    }
+    const timestamp = new Date(card.lastEditedAt);
+    if (Number.isNaN(timestamp.getTime())) {
+      return 'Not available';
+    }
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(timestamp);
+    } catch {
+      return timestamp.toLocaleString();
+    }
+  }, [card.lastEditedAt]);
+
+  const [hasInteracted, setHasInteracted] = useState(() => card.atoms.length > 0 || textBoxes.length > 0);
+
+  const handleTitleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) {
+      return;
+    }
+    setTitleDraft(event.target.value);
+  };
+
+  const commitTitle = () => {
+    if (!canEdit) {
+      return;
+    }
+
+    const trimmed = titleDraft.trim();
+    const nextTitle = trimmed.length > 0 ? trimmed : 'Untitled Slide';
+    const currentTitle =
+      typeof card.title === 'string' && card.title.trim().length > 0
+        ? card.title.trim()
+        : resolvedTitle;
+
+    if (nextTitle !== currentTitle) {
+      onTitleChange?.(nextTitle, card.id);
+    }
+
+    setTitleDraft(nextTitle);
+  };
+
+  const handleTitleBlur = () => {
+    commitTitle();
+  };
+
+  const handleTitleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commitTitle();
+      event.currentTarget.blur();
+    }
+  };
+
+  const handleCanvasInteraction = () => {
+    setHasInteracted(true);
+  };
 
   const accentLayout = useMemo(() => {
     switch (settings.cardLayout) {
@@ -295,6 +408,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       /* ignore */
     }
     setIsDragOver(true);
+    handleCanvasInteraction();
   };
 
   const handleDragLeave = () => {
@@ -307,6 +421,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
     e.preventDefault();
     setIsDragOver(false);
+    handleCanvasInteraction();
     onDrop(draggedAtom.atom, draggedAtom.cardId, card.id, draggedAtom.origin);
   };
 
@@ -332,22 +447,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     };
 
     reader.readAsDataURL(file);
-  };
-
-  const getSlideTitle = () => {
-    if (card.moleculeTitle) {
-      return card.atoms.length > 0 ? `${card.moleculeTitle}` : card.moleculeTitle;
-    }
-    return card.atoms.length > 0 ? card.atoms[0].title : 'Untitled Slide';
-  };
-
-  const getSlideDescription = () => {
-    if (card.atoms.length > 0) {
-      return `Explore ${card.atoms.length} ${
-        card.atoms.length === 1 ? 'component' : 'components'
-      } with our comprehensive analysis and insights. Stay organized and focused on key findings and activities.`;
-    }
-    return 'Add components from the catalogue to build your presentation slide.';
   };
 
   const cardColorClasses = {
@@ -448,23 +547,37 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           </div>
         )}
 
-        <div className="relative">
-          <div
-            className={cn(
-              'relative flex h-[520px] overflow-hidden bg-card shadow-2xl transition-all duration-300',
-              settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border',
-              accentLayout.container,
-              isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
-              !canEdit && 'opacity-90'
-            )}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-          >
-            {accentOverlay}
+        <div className="space-y-4">
+          <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-2 text-foreground">
+              <User className="h-4 w-4" />
+              <span className="font-semibold">Exhibition presenter:</span>
+              <span>{presenterLabel}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-foreground" />
+              <span className="font-semibold text-foreground">Last edited:</span>
+              <span>{formattedLastEdited}</span>
+            </div>
+          </div>
 
-            {isDragOver && canEdit && draggedAtom && (
-              <div
+          <div className="relative">
+            <div
+              className={cn(
+                'relative flex h-[520px] overflow-hidden bg-card shadow-2xl transition-all duration-300',
+                settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border',
+                accentLayout.container,
+                isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
+                !canEdit && 'opacity-90'
+              )}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              {accentOverlay}
+
+              {isDragOver && canEdit && draggedAtom && (
+                <div
                 className={cn(
                   'absolute inset-0 z-20 flex items-center justify-center border-2 border-dashed border-primary/60 bg-primary/10 text-primary font-semibold uppercase tracking-wide pointer-events-none',
                   settings.fullBleed ? 'rounded-none' : 'rounded-2xl'
@@ -511,36 +624,92 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
               <div className={cn('flex flex-1 flex-col gap-6 overflow-hidden', layoutConfig.wrapper)}>
                 <div
                   className={cn(
-                    'p-8 flex flex-col flex-1 overflow-y-auto',
+                    'p-8 flex flex-col flex-1 overflow-hidden',
                     alignmentClasses[settings.contentAlignment],
                     'min-h-[300px]',
                     layoutConfig.contentClass
                   )}
+                  onMouseDown={handleCanvasInteraction}
+                  onFocus={handleCanvasInteraction}
+                  tabIndex={canEdit ? 0 : -1}
                 >
-                  <h1 className="text-4xl font-bold text-foreground mb-4">{getSlideTitle()}</h1>
+                  <div className="flex w-full max-w-4xl flex-col gap-4">
+                    <input
+                      type="text"
+                      value={titleDraft}
+                      onChange={handleTitleInputChange}
+                      onBlur={handleTitleBlur}
+                      onKeyDown={handleTitleKeyDown}
+                      placeholder="Untitled slide"
+                      readOnly={!canEdit}
+                      className={cn(
+                        'w-full bg-transparent text-4xl font-bold text-foreground focus:outline-none focus:ring-0 focus:border-b focus:border-primary/40',
+                        !canEdit && 'cursor-default text-foreground'
+                      )}
+                      aria-label="Slide title"
+                      aria-readonly={!canEdit}
+                    />
 
-                  <p className="text-muted-foreground mb-6 leading-relaxed max-w-3xl">
-                    {getSlideDescription()}
-                  </p>
+                  <div className="relative flex-1 min-h-[260px]">
+                      {!hasInteracted && card.atoms.length === 0 && !hasTextBoxes ? (
+                        <div className="flex h-full w-full items-center justify-center rounded-2xl border-2 border-dashed border-border bg-muted/20 px-6 text-center text-sm text-muted-foreground">
+                          Add components from the catalogue to build your presentation slide.
+                        </div>
+                      ) : card.atoms.length > 0 ? (
+                        <div className="flex h-full w-full min-w-0 flex-col gap-4">
+                          {card.atoms.map(atom => (
+                            <div
+                              key={atom.id}
+                              className="group relative box-border flex-1 min-w-0 max-w-full overflow-hidden rounded-3xl border-2 border-border bg-background/95 p-6 shadow-xl transition-all duration-300 hover:shadow-2xl"
+                            >
+                              <div className="flex items-center gap-3 mb-4">
+                                <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
+                                <h3 className="text-2xl font-semibold text-foreground group-hover:text-primary transition-colors">
+                                  {atom.title}
+                                </h3>
+                              </div>
+                              <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-wide text-primary mb-4">
+                                {atom.category}
+                              </div>
+                              <div className="text-base leading-relaxed text-muted-foreground space-y-4">
+                                <ExhibitedAtomRenderer atom={atom} />
+                              </div>
 
-                  <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
-                        <User className="w-4 h-4 text-primary-foreground" />
-                      </div>
-                      <span className="font-medium">Exhibition Presenter</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Calendar className="w-4 h-4" />
-                      <span>Last edited recently</span>
+                              {canEdit && (
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="absolute top-3 right-3 h-9 w-9 text-muted-foreground hover:text-destructive"
+                                  onClick={() => handleAtomRemove(atom.id)}
+                                  type="button"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : hasTextBoxes ? (
+                        <div className="h-full w-full" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center rounded-2xl border-2 border-dashed border-border bg-muted/10 px-6 text-center text-sm text-muted-foreground">
+                          Click to start building this slide.
+                        </div>
+                      )}
+                      {textBoxes.map(textBox => (
+                        <ExhibitionTextBox
+                          key={textBox.id}
+                          data={textBox}
+                          isEditable={canEdit}
+                          onChange={(id, updates) => onTextBoxChange?.(id, updates)}
+                          onTextChange={(id, updatedText) => onTextBoxTextChange?.(id, updatedText)}
+                          onPositionChange={(id, nextPosition) => onTextBoxPositionChange?.(id, nextPosition)}
+                          onDelete={id => onTextBoxRemove?.(id)}
+                          onInteract={handleCanvasInteraction}
+                        />
+                      ))}
                     </div>
                   </div>
-
-                  {card.atoms.length === 0 && canEdit && (
-                    <div className="mt-6 rounded-xl border-2 border-dashed border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
-                      Drag atoms from the catalogue to start building this slide.
-                    </div>
-                  )}
                 </div>
 
                 {showOverview && (
@@ -569,13 +738,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                               {atom.category}
                             </div>
                             <div className="text-sm text-muted-foreground space-y-3">
-                              {atom.atomId === 'text-box' ? (
-                                <div className="p-3 bg-muted/40 rounded-lg border border-border">
-                                  <TextBoxDisplay textId={atom.id} />
-                                </div>
-                              ) : (
-                                <p>Component visualization and analysis results</p>
-                              )}
+                              <ExhibitedAtomRenderer atom={atom} variant="compact" />
                             </div>
 
                             {canEdit && (
@@ -598,7 +761,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
               </div>
             </div>
 
-            {accentAfter}
+              {accentAfter}
+            </div>
           </div>
 
           {showFormatPanel && (

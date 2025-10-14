@@ -32,8 +32,7 @@ async def save_configuration(
     payload["client_name"] = payload["client_name"].strip()
     payload["app_name"] = payload["app_name"].strip()
     payload["project_name"] = payload["project_name"].strip()
-    payload["cards"] = payload.get("cards") or []
-    payload["feature_overview"] = payload.get("feature_overview") or []
+    payload["atoms"] = payload.get("atoms") or []
 
     if not payload["client_name"] or not payload["app_name"] or not payload["project_name"]:
         raise HTTPException(
