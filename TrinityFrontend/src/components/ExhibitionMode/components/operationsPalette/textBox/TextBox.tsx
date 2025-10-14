@@ -40,6 +40,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   onToolbarStateChange,
 }) => {
   const textRef = useRef<HTMLDivElement | null>(null);
+  const selectionRangeRef = useRef<Range | null>(null);
   const formatting = useMemo(() => extractTextBoxFormatting(props), [props]);
   const [localFormatting, setLocalFormatting] = useState<TextBoxFormatting>(formatting);
 
@@ -78,18 +79,63 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     onCommitEditing();
   }, [isEditing, onCommitEditing]);
 
-  const runCommand = useCallback(
-    (command: string) => {
-      if (!canEdit) {
+  useEffect(() => {
+    if (!isEditing || typeof document === 'undefined') {
+      selectionRangeRef.current = null;
+      return;
+    }
+
+    const handleSelectionChange = () => {
+      const selection = document.getSelection();
+      if (!selection || selection.rangeCount === 0) {
         return;
       }
-      if (typeof document !== 'undefined' && document.queryCommandSupported?.(command)) {
+
+      const anchorNode = selection.anchorNode;
+      if (!anchorNode || !textRef.current) {
+        return;
+      }
+
+      if (textRef.current.contains(anchorNode)) {
+        selectionRangeRef.current = selection.getRangeAt(0);
+      }
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, [isEditing]);
+
+  const restoreSelection = useCallback(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    const selection = document.getSelection();
+    if (!selection || !selectionRangeRef.current) {
+      return;
+    }
+
+    selection.removeAllRanges();
+    selection.addRange(selectionRangeRef.current);
+  }, []);
+
+  const runCommand = useCallback(
+    (command: string) => {
+      if (!canEdit || typeof document === 'undefined') {
+        return;
+      }
+
+      if (document.queryCommandSupported?.(command)) {
         textRef.current?.focus();
+        restoreSelection();
         document.execCommand(command, false);
         handleInput();
       }
     },
-    [canEdit, handleInput],
+    [canEdit, handleInput, restoreSelection],
   );
 
   const updateFormatting = useCallback(
@@ -110,9 +156,15 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
 
   const handleAlign = useCallback(
     (align: TextBoxFormatting['align']) => {
+      if (isEditing) {
+        const command =
+          align === 'center' ? 'justifyCenter' : align === 'right' ? 'justifyRight' : 'justifyLeft';
+        runCommand(command);
+      }
+
       updateFormatting({ align });
     },
-    [updateFormatting],
+    [isEditing, runCommand, updateFormatting],
   );
 
   const handleFontFamily = useCallback(

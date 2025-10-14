@@ -73,6 +73,10 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
   onRequestPosition,
   onDelete,
 }) => {
+  const handleToolbarMouseDown = (event: React.MouseEvent) => {
+    event.preventDefault();
+  };
+
   const iconButtonClasses = (active?: boolean) =>
     cn(
       'h-8 w-8 rounded-full border border-transparent text-foreground transition-colors',
@@ -93,6 +97,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
             size="sm"
             type="button"
             className="relative h-8 min-w-[140px] justify-between rounded-full border border-border/50 px-3 text-xs font-medium text-foreground hover:bg-muted/40"
+            onMouseDown={handleToolbarMouseDown}
           >
             <span className="truncate" style={{ fontFamily }}>
               {fontFamily}
@@ -115,6 +120,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
                 onClick={() => onFontFamilyChange(option)}
                 style={{ fontFamily: option }}
                 type="button"
+                onMouseDown={handleToolbarMouseDown}
               >
                 {option}
               </Button>
@@ -131,6 +137,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         className="h-8 w-8 rounded-full border border-border/60 bg-background/80 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
         onClick={onDecreaseFontSize}
         type="button"
+        onMouseDown={handleToolbarMouseDown}
       >
         <Minus className="h-4 w-4" />
       </Button>
@@ -141,6 +148,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         className="h-8 w-8 rounded-full border border-border/60 bg-background/80 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
         onClick={onIncreaseFontSize}
         type="button"
+        onMouseDown={handleToolbarMouseDown}
       >
         <Plus className="h-4 w-4" />
       </Button>
@@ -154,6 +162,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           className={iconButtonClasses(bold)}
           onClick={onToggleBold}
           type="button"
+          onMouseDown={handleToolbarMouseDown}
         >
           <Bold className="h-4 w-4" />
         </Button>
@@ -163,6 +172,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           className={iconButtonClasses(italic)}
           onClick={onToggleItalic}
           type="button"
+          onMouseDown={handleToolbarMouseDown}
         >
           <Italic className="h-4 w-4" />
         </Button>
@@ -172,6 +182,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           className={iconButtonClasses(underline)}
           onClick={onToggleUnderline}
           type="button"
+          onMouseDown={handleToolbarMouseDown}
         >
           <Underline className="h-4 w-4" />
         </Button>
@@ -181,6 +192,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           className={iconButtonClasses(strikethrough)}
           onClick={onToggleStrikethrough}
           type="button"
+          onMouseDown={handleToolbarMouseDown}
         >
           <Strikethrough className="h-4 w-4" />
         </Button>
@@ -195,6 +207,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           className={iconButtonClasses(align === 'left')}
           onClick={() => onAlign('left')}
           type="button"
+          onMouseDown={handleToolbarMouseDown}
         >
           <AlignLeft className="h-4 w-4" />
         </Button>
@@ -204,6 +217,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           className={iconButtonClasses(align === 'center')}
           onClick={() => onAlign('center')}
           type="button"
+          onMouseDown={handleToolbarMouseDown}
         >
           <AlignCenter className="h-4 w-4" />
         </Button>
@@ -213,6 +227,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           className={iconButtonClasses(align === 'right')}
           onClick={() => onAlign('right')}
           type="button"
+          onMouseDown={handleToolbarMouseDown}
         >
           <AlignRight className="h-4 w-4" />
         </Button>
@@ -226,6 +241,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         className="h-8 w-8 rounded-full text-muted-foreground hover:bg-muted/40 hover:text-foreground"
         onClick={() => onBulletedList?.()}
         type="button"
+        onMouseDown={handleToolbarMouseDown}
       >
         <List className="h-4 w-4" />
       </Button>
@@ -235,6 +251,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         className="h-8 w-8 rounded-full text-muted-foreground hover:bg-muted/40 hover:text-foreground"
         onClick={() => onNumberedList?.()}
         type="button"
+        onMouseDown={handleToolbarMouseDown}
       >
         <ListOrdered className="h-4 w-4" />
       </Button>
@@ -248,6 +265,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
             size="icon"
             type="button"
             className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
+            onMouseDown={handleToolbarMouseDown}
           >
             <span
               className="h-5 w-5 rounded-full border border-white/70 shadow-inner"
@@ -282,6 +300,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           type="button"
           onClick={onRequestEffects}
           className={controlChipClasses}
+          onMouseDown={handleToolbarMouseDown}
         >
           Effects
         </Button>
@@ -291,6 +310,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           type="button"
           onClick={onRequestAnimate}
           className={cn(controlChipClasses, 'gap-1 text-purple-500 hover:text-purple-400')}
+          onMouseDown={handleToolbarMouseDown}
         >
           <Sparkles className="h-4 w-4" />
           Animate
@@ -301,6 +321,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           type="button"
           onClick={onRequestPosition}
           className={cn(controlChipClasses, 'gap-1')}
+          onMouseDown={handleToolbarMouseDown}
         >
           <Move className="h-4 w-4" />
           Position
@@ -316,6 +337,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
             type="button"
             onClick={onDelete}
             className="h-8 w-8 rounded-full text-destructive hover:bg-destructive/10"
+            onMouseDown={handleToolbarMouseDown}
           >
             <Trash2 className="h-4 w-4" />
           </Button>
