@@ -316,6 +316,278 @@ const normaliseSkuStatisticsSettings = (value: unknown): FeatureOverviewSkuStati
   return result;
 };
 
+const normaliseManifestDimensions = (value: unknown) => {
+  const dimensions = ensureArray<unknown>(value)
+    .map(entry => {
+      const record = toRecord(entry);
+      if (!record) {
+        return null;
+      }
+
+      const name =
+        asString(record.name) ??
+        asString(record.dimension) ??
+        asString(record.label);
+      const dimensionValue =
+        asString(record.value) ?? asString(record.id) ?? asString(record.key);
+
+      if (!name && !dimensionValue) {
+        return null;
+      }
+
+      const result: FeatureOverviewDimension = {};
+      if (name) {
+        result.name = name;
+      }
+      if (dimensionValue) {
+        result.value = dimensionValue;
+      }
+
+      return result;
+    })
+    .filter((entry): entry is FeatureOverviewDimension => Boolean(entry));
+
+  return dimensions.length > 0 ? dimensions : undefined;
+};
+
+const normaliseManifestChartType = (value: unknown): ChartRendererType | null => {
+  const type = asString(value);
+  if (!type) {
+    return null;
+  }
+
+  const lowered = type.toLowerCase();
+  if (lowered.includes('line')) return 'line_chart';
+  if (lowered.includes('area')) return 'area_chart';
+  if (lowered.includes('scatter')) return 'scatter_chart';
+  if (lowered.includes('pie')) return 'pie_chart';
+  if (lowered.includes('bar') || lowered.includes('column')) return 'bar_chart';
+  return null;
+};
+
+const mergeStatisticalDetails = (
+  target: FeatureOverviewStatistics | undefined,
+  updates: FeatureOverviewStatistics,
+): FeatureOverviewStatistics => {
+  const next: FeatureOverviewStatistics = target ? { ...target } : {};
+
+  if (updates.summary && (!next.summary || Object.keys(next.summary).length === 0)) {
+    next.summary = { ...updates.summary };
+  }
+
+  if (updates.timeseries && updates.timeseries.length > 0 && (!next.timeseries || next.timeseries.length === 0)) {
+    next.timeseries = updates.timeseries.map(entry => ({ ...entry }));
+  }
+
+  if (updates.full && (!next.full || Object.keys(next.full).length === 0)) {
+    next.full = { ...updates.full };
+  }
+
+  return next;
+};
+
+const applyVisualizationManifest = (
+  result: FeatureOverviewMetadata,
+  manifestSource: unknown,
+) => {
+  const manifest = toRecord(manifestSource);
+  if (!manifest) {
+    return;
+  }
+
+  const manifestMetric = asString(manifest.metric);
+  if (manifestMetric && !result.metric) {
+    result.metric = manifestMetric;
+  }
+
+  const manifestLabel = asString(manifest.label);
+  if (manifestLabel && !result.label) {
+    result.label = manifestLabel;
+  }
+
+  const manifestCapturedAt = asString(manifest.capturedAt ?? manifest['captured_at']);
+  if (manifestCapturedAt && !result.capturedAt) {
+    result.capturedAt = manifestCapturedAt;
+  }
+
+  const manifestDimensions = normaliseManifestDimensions(manifest.dimensions);
+  if (manifestDimensions && (!result.dimensions || result.dimensions.length === 0)) {
+    result.dimensions = manifestDimensions;
+  }
+
+  const manifestData = toRecord(manifest.data);
+  const manifestSummary = manifestData ? toRecord(manifestData.summary) : null;
+  const manifestTimeseries = manifestData ? ensureRecordArray(manifestData.timeseries) : [];
+  const manifestFull = manifestData
+    ? toRecord(manifestData.statisticalFull ?? manifestData.full)
+    : null;
+  const manifestSkuRow = manifestData ? toRecord(manifestData.skuRow ?? manifestData['sku_row']) : null;
+  const manifestCombination = manifestData ? toRecord(manifestData.combination) : null;
+
+  const manifestStats: FeatureOverviewStatistics = {};
+  if (manifestSummary) {
+    manifestStats.summary = { ...manifestSummary };
+  }
+  if (manifestTimeseries.length > 0) {
+    manifestStats.timeseries = manifestTimeseries.map(entry => ({ ...entry }));
+  }
+  if (manifestFull) {
+    manifestStats.full = { ...manifestFull };
+  }
+
+  if (Object.keys(manifestStats).length > 0) {
+    result.statisticalDetails = mergeStatisticalDetails(result.statisticalDetails, manifestStats);
+  }
+
+  if (!result.skuRow && manifestSkuRow) {
+    result.skuRow = { ...manifestSkuRow };
+  }
+
+  if (!result.combination && manifestCombination) {
+    result.combination = { ...manifestCombination };
+  }
+
+  if (!result.featureContext) {
+    const manifestContext = normaliseFeatureContext(manifest.featureContext ?? manifest['feature_context']);
+    if (manifestContext) {
+      result.featureContext = manifestContext;
+    }
+  }
+
+  const manifestComponentType = manifest.componentType ?? manifest['component_type'];
+  if (!result.viewType && manifestComponentType) {
+    result.viewType = normaliseViewType(manifestComponentType);
+  }
+
+  const manifestChart = toRecord(manifest.chart);
+  if (manifestChart) {
+    const manifestChartState = normaliseChartState(manifestChart) ?? {};
+    const manifestChartType = asString(manifestChart.type ?? manifestChart['chart_type']);
+    if (manifestChartType) {
+      manifestChartState.chartType = manifestChartType;
+    }
+
+    result.chartState = {
+      ...manifestChartState,
+      ...(result.chartState ?? {}),
+    };
+
+    const rendererType = normaliseManifestChartType(
+      manifestChart.type ?? manifestChart['chart_type'] ?? manifestChart['chartType'],
+    );
+    const rendererDataCandidates = ensureRecordArray(manifestChart.data);
+    const rendererData = rendererDataCandidates.length > 0
+      ? rendererDataCandidates
+      : manifestTimeseries.map(entry => ({ ...entry }));
+
+    if (rendererType && rendererData.length > 0) {
+      const heightCandidate = manifestChart.height;
+      const height =
+        typeof heightCandidate === 'number' && Number.isFinite(heightCandidate) && heightCandidate > 0
+          ? heightCandidate
+          : DEFAULT_TREND_CHART_HEIGHT.full;
+
+      const rendererConfig: ChartRendererConfig = {
+        type: rendererType,
+        data: rendererData,
+        height,
+      };
+
+      const xFieldCandidate = asString(manifestChart.xField ?? manifestChart['x_field']);
+      if (xFieldCandidate) {
+        rendererConfig.xField = xFieldCandidate;
+      }
+
+      const yFieldCandidate = asString(manifestChart.yField ?? manifestChart['y_field']);
+      if (yFieldCandidate) {
+        rendererConfig.yField = yFieldCandidate;
+      }
+
+      const yFieldsCandidate = ensureArray<string>(manifestChart.yFields ?? manifestChart['y_fields']).filter(
+        (field): field is string => typeof field === 'string' && field.trim().length > 0,
+      );
+      if (yFieldsCandidate.length > 0) {
+        rendererConfig.yFields = yFieldsCandidate;
+      }
+
+      const yAxisLabelsCandidate = ensureArray<string>(
+        manifestChart.yAxisLabels ?? manifestChart['y_axis_labels'],
+      ).filter((label): label is string => typeof label === 'string' && label.trim().length > 0);
+      if (yAxisLabelsCandidate.length > 0) {
+        rendererConfig.yAxisLabels = yAxisLabelsCandidate;
+      }
+
+      const legendFieldCandidate = asString(manifestChart.legendField ?? manifestChart['legend_field']);
+      if (legendFieldCandidate) {
+        rendererConfig.legendField = legendFieldCandidate;
+      }
+
+      const colorsCandidate = ensureArray<string>(
+        manifestChart.colorPalette ?? manifestChart['color_palette'],
+      ).filter((color): color is string => typeof color === 'string' && color.trim().length > 0);
+      if (colorsCandidate.length > 0) {
+        rendererConfig.colors = colorsCandidate;
+      }
+
+      const themeCandidate = asString(manifestChart.theme);
+      if (themeCandidate) {
+        rendererConfig.theme = themeCandidate;
+      }
+
+      const xAxisLabelCandidate = asString(manifestChart.xAxisLabel ?? manifestChart['x_axis_label']);
+      if (xAxisLabelCandidate) {
+        rendererConfig.xAxisLabel = xAxisLabelCandidate;
+      }
+
+      const yAxisLabelCandidate = asString(manifestChart.yAxisLabel ?? manifestChart['y_axis_label']);
+      if (yAxisLabelCandidate) {
+        rendererConfig.yAxisLabel = yAxisLabelCandidate;
+      }
+
+      const showLegendCandidate = asBoolean(manifestChart.showLegend ?? manifestChart['show_legend']);
+      if (showLegendCandidate !== undefined) {
+        rendererConfig.showLegend = showLegendCandidate;
+      }
+
+      const showAxisLabelsCandidate = asBoolean(manifestChart.showAxisLabels ?? manifestChart['show_axis_labels']);
+      if (showAxisLabelsCandidate !== undefined) {
+        rendererConfig.showAxisLabels = showAxisLabelsCandidate;
+      }
+
+      const showDataLabelsCandidate = asBoolean(manifestChart.showDataLabels ?? manifestChart['show_data_labels']);
+      if (showDataLabelsCandidate !== undefined) {
+        rendererConfig.showDataLabels = showDataLabelsCandidate;
+      }
+
+      const showGridCandidate = asBoolean(manifestChart.showGrid ?? manifestChart['show_grid']);
+      if (showGridCandidate !== undefined) {
+        rendererConfig.showGrid = showGridCandidate;
+      }
+
+      const sortOrderCandidate = asString(manifestChart.sortOrder ?? manifestChart['sort_order']);
+      if (sortOrderCandidate === 'asc' || sortOrderCandidate === 'desc') {
+        rendererConfig.sortOrder = sortOrderCandidate;
+      }
+
+      if (!result.chartRendererProps) {
+        result.chartRendererProps = rendererConfig;
+      }
+
+      if (!result.chartRendererConfig) {
+        result.chartRendererConfig = rendererConfig;
+      }
+
+      if (!result.chartConfig) {
+        result.chartConfig = rendererConfig;
+      }
+
+      if (!result.chart_config) {
+        result.chart_config = rendererConfig;
+      }
+    }
+  }
+};
+
 const normaliseChartState = (value: unknown): FeatureOverviewChartState | undefined => {
   const record = toRecord(value);
   if (!record) {
@@ -1171,11 +1443,19 @@ export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverview
     result.chart_config = parsePossibleJson(selectionNested['chart_config']);
   }
 
+  applyVisualizationManifest(result, base['visualizationManifest'] ?? base['visualization_manifest']);
+  if (selectionNested) {
+    applyVisualizationManifest(
+      result,
+      selectionNested['visualizationManifest'] ?? selectionNested['visualization_manifest'],
+    );
+  }
+
   const baseViewType = normaliseViewType(base['viewType'] ?? base['view_type']);
   const selectionViewType = selectionNested
     ? normaliseViewType(selectionNested['viewType'] ?? selectionNested['view_type'])
     : undefined;
-  result.viewType = baseViewType ?? selectionViewType;
+  result.viewType = baseViewType ?? selectionViewType ?? result.viewType;
 
   return result;
 };
