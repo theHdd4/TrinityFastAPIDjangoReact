@@ -76,7 +76,7 @@ type ActiveInteraction =
 
 interface EditingTextState {
   id: string;
-  type: 'title' | 'text-box';
+  type: 'text-box';
   value: string;
   original: string;
 }
@@ -95,7 +95,6 @@ const isAtomObject = (
   return Boolean(candidate && typeof candidate.id === 'string');
 };
 
-const STRUCTURAL_OBJECT_TYPES = new Set(['title', 'accent-image']);
 const UNTITLED_SLIDE_TEXT = 'Untitled Slide';
 
 interface SlideCanvasProps {
@@ -156,10 +155,20 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const groupSlideObjects = useExhibitionStore(state => state.groupSlideObjects);
   const removeSlideObject = useExhibitionStore(state => state.removeSlideObject);
 
+  const titleObjectId = useMemo(() => buildSlideTitleObjectId(card.id), [card.id]);
   const atomObjects = useMemo(() => slideObjects.filter(isAtomObject), [slideObjects]);
   const nonStructuralObjects = useMemo(
-    () => slideObjects.filter(object => !STRUCTURAL_OBJECT_TYPES.has(object.type)),
-    [slideObjects],
+    () =>
+      slideObjects.filter(object => {
+        if (object.type === 'accent-image') {
+          return false;
+        }
+        if (object.type === 'text-box' && object.id === titleObjectId) {
+          return false;
+        }
+        return true;
+      }),
+    [slideObjects, titleObjectId],
   );
 
   const handleBulkUpdate = useCallback(
@@ -486,14 +495,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const cardColorClasses = {
-    default: 'from-purple-500 via-pink-500 to-orange-400',
-    blue: 'from-blue-500 via-cyan-500 to-teal-400',
-    purple: 'from-violet-500 via-purple-500 to-fuchsia-400',
-    green: 'from-emerald-500 via-green-500 to-lime-400',
-    orange: 'from-orange-500 via-amber-500 to-yellow-400',
-  };
-
   const containerClasses =
     viewMode === 'horizontal'
       ? 'flex-1 h-full bg-muted/20 overflow-auto'
@@ -565,6 +566,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                 showEmptyState={!hasInteracted && nonStructuralObjects.length === 0}
                 layout={settings.cardLayout}
                 cardColor={settings.cardColor}
+                accentImage={settings.accentImage ?? null}
+                accentImageName={settings.accentImageName ?? null}
+                titleObjectId={titleObjectId}
                 onCanvasDragLeave={handleDragLeave}
                 onCanvasDragOver={handleDragOver}
                 onCanvasDrop={handleDrop}
@@ -984,6 +988,9 @@ interface CanvasStageProps {
   showEmptyState: boolean;
   layout: CardLayout;
   cardColor: CardColor;
+  accentImage?: string | null;
+  accentImageName?: string | null;
+  titleObjectId?: string | null;
   onCanvasDragOver: (event: React.DragEvent) => void;
   onCanvasDragLeave: () => void;
   onCanvasDrop: (event: React.DragEvent) => void;
@@ -1009,30 +1016,64 @@ const layoutOverlayBackgrounds: Record<CardColor, string> = {
   orange: 'from-orange-500 via-amber-500 to-yellow-400',
 };
 
-const LayoutOverlay: React.FC<{ layout: CardLayout; color: CardColor }> = ({ layout, color }) => {
+const LayoutOverlay: React.FC<{
+  layout: CardLayout;
+  color: CardColor;
+  accentImage?: string | null;
+  accentImageName?: string | null;
+}> = ({ layout, color, accentImage, accentImageName }) => {
   if (layout === 'none') {
     return null;
   }
 
   const gradient = layoutOverlayBackgrounds[color] ?? layoutOverlayBackgrounds.default;
-  const baseClass = cn(
-    'pointer-events-none absolute bg-gradient-to-br transition-all duration-300 ease-out',
+  const sharedClass = cn(
+    'pointer-events-none absolute overflow-hidden transition-all duration-300 ease-out',
     'shadow-[0_32px_72px_-32px_rgba(76,29,149,0.45)]',
-    gradient,
+  );
+
+  const content = accentImage ? (
+    <img
+      src={accentImage}
+      alt={accentImageName ?? 'Accent image'}
+      className="h-full w-full object-cover"
+    />
+  ) : (
+    <div className={cn('h-full w-full bg-gradient-to-br', gradient)} />
   );
 
   switch (layout) {
     case 'top':
-      return <div className={cn(baseClass, 'left-0 right-0 top-0 h-[190px] rounded-t-[28px]')} />;
+      return (
+        <div className={cn(sharedClass, 'left-0 right-0 top-0 h-[210px] rounded-t-[28px]')}>
+          {content}
+        </div>
+      );
     case 'bottom':
-      return <div className={cn(baseClass, 'bottom-0 left-0 right-0 h-[200px] rounded-b-[28px]')} />;
+      return (
+        <div className={cn(sharedClass, 'bottom-0 left-0 right-0 h-[220px] rounded-b-[28px]')}>
+          {content}
+        </div>
+      );
     case 'left':
-      return <div className={cn(baseClass, 'bottom-0 left-0 top-0 w-[32%] min-w-[260px] rounded-l-[28px]')} />;
+      return (
+        <div className={cn(sharedClass, 'bottom-0 left-0 top-0 w-[34%] min-w-[280px] rounded-l-[28px]')}>
+          {content}
+        </div>
+      );
     case 'right':
-      return <div className={cn(baseClass, 'bottom-0 right-0 top-0 w-[32%] min-w-[260px] rounded-r-[28px]')} />;
+      return (
+        <div className={cn(sharedClass, 'bottom-0 right-0 top-0 w-[34%] min-w-[280px] rounded-r-[28px]')}>
+          {content}
+        </div>
+      );
     case 'full':
     default:
-      return <div className={cn(baseClass, 'inset-0 rounded-[28px]')} />;
+      return (
+        <div className={cn(sharedClass, 'inset-0 rounded-[28px]')}>
+          {content}
+        </div>
+      );
   }
 };
 
@@ -1045,6 +1086,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       showEmptyState,
       layout,
       cardColor,
+      accentImage,
+      accentImageName,
+      titleObjectId,
       onCanvasDragOver,
       onCanvasDragLeave,
       onCanvasDrop,
@@ -1076,7 +1120,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [activeInteraction, setActiveInteraction] = useState<ActiveInteraction | null>(null);
     const [editingTextState, setEditingTextState] = useState<EditingTextState | null>(null);
-    const editingTextareaRef = useRef<HTMLTextAreaElement | null>(null);
     const [activeTextToolbar, setActiveTextToolbar] = useState<{ id: string; node: ReactNode } | null>(null);
 
     const focusCanvas = useCallback(() => {
@@ -1109,13 +1152,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       }
     }, [editingTextState, objectsMap]);
 
-    useEffect(() => {
-      if (editingTextState?.type === 'title' && editingTextareaRef.current) {
-        const area = editingTextareaRef.current;
-        area.focus({ preventScroll: true });
-        area.select();
-      }
-    }, [editingTextState]);
 
     useEffect(() => {
       setActiveTextToolbar(prev => {
@@ -1164,60 +1200,39 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }
 
         const object = objectsMap.get(prev.id);
-        if (!object) {
+        if (!object || object.type !== 'text-box') {
           return null;
         }
 
-        if (prev.type === 'title') {
-          if (object.type !== 'title') {
-            return null;
-          }
+        const raw = prev.value ?? '';
+        const contentWithoutTags = raw.replace(/<[^>]*>/g, '').trim();
+        const isTitleTextBox = Boolean(titleObjectId && object.id === titleObjectId);
+        const fallbackText = isTitleTextBox ? UNTITLED_SLIDE_TEXT : DEFAULT_TEXT_BOX_TEXT;
+        const resolved = contentWithoutTags.length > 0 ? raw : fallbackText;
+        const existingFormatting = extractTextBoxFormatting(object.props as Record<string, unknown> | undefined);
 
-          const raw = prev.value ?? '';
-          const trimmed = raw.trim();
-          const resolved = trimmed.length > 0 ? trimmed : UNTITLED_SLIDE_TEXT;
-          const existing = typeof object.props?.text === 'string' ? object.props.text : '';
-
-          if (resolved !== existing) {
-            onInteract();
-            const nextProps = { ...(object.props || {}), text: resolved };
-            onBulkUpdate({
-              [object.id]: {
-                props: nextProps,
-              },
-            });
-            onTitleCommit?.(resolved);
-          }
-
-          return null;
+        if (resolved !== existingFormatting.text) {
+          onInteract();
+          const nextProps = { ...(object.props || {}), text: resolved };
+          onBulkUpdate({
+            [object.id]: {
+              props: nextProps,
+            },
+          });
         }
 
-        if (prev.type === 'text-box') {
-          if (object.type !== 'text-box') {
-            return null;
+        if (isTitleTextBox) {
+          const existingPlain =
+            existingFormatting.text.replace(/<[^>]*>/g, '').trim() || UNTITLED_SLIDE_TEXT;
+          const plain = contentWithoutTags.length > 0 ? contentWithoutTags : UNTITLED_SLIDE_TEXT;
+          if (plain !== existingPlain) {
+            onTitleCommit?.(plain);
           }
-
-          const raw = prev.value ?? '';
-          const contentWithoutTags = raw.replace(/<[^>]*>/g, '').trim();
-          const resolved = contentWithoutTags.length > 0 ? raw : DEFAULT_TEXT_BOX_TEXT;
-          const existingFormatting = extractTextBoxFormatting(object.props as Record<string, unknown> | undefined);
-
-          if (resolved !== existingFormatting.text) {
-            onInteract();
-            const nextProps = { ...(object.props || {}), text: resolved };
-            onBulkUpdate({
-              [object.id]: {
-                props: nextProps,
-              },
-            });
-          }
-
-          return null;
         }
 
         return null;
       });
-    }, [objectsMap, onBulkUpdate, onInteract, onTitleCommit]);
+    }, [objectsMap, onBulkUpdate, onInteract, onTitleCommit, titleObjectId]);
 
     useEffect(() => {
       if (!canEdit && editingTextState) {
@@ -1228,29 +1243,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     const cancelEditingText = useCallback(() => {
       setEditingTextState(null);
     }, []);
-
-    const beginEditingTitle = useCallback(
-      (objectId: string) => {
-        if (!canEdit) {
-          return;
-        }
-        const object = objectsMap.get(objectId);
-        if (!object || object.type !== 'title') {
-          return;
-        }
-        const currentText = typeof object.props?.text === 'string' ? object.props.text : '';
-        onInteract();
-        focusCanvas();
-        setSelectedIds([objectId]);
-        setEditingTextState({
-          id: objectId,
-          type: 'title',
-          value: currentText,
-          original: currentText,
-        });
-      },
-      [canEdit, focusCanvas, objectsMap, onInteract],
-    );
 
     const beginEditingTextBox = useCallback(
       (objectId: string) => {
@@ -1297,15 +1289,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         if (!object) {
           return;
         }
-        if (object.type === 'title') {
-          event.stopPropagation();
-          beginEditingTitle(objectId);
-        } else if (object.type === 'text-box') {
+        if (object.type === 'text-box') {
           event.stopPropagation();
           beginEditingTextBox(objectId);
         }
       },
-      [beginEditingTextBox, beginEditingTitle, canEdit, objectsMap],
+      [beginEditingTextBox, canEdit, objectsMap],
     );
 
     const clampPosition = useCallback((x: number, y: number, width: number, height: number) => {
@@ -1659,16 +1648,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         return <ExhibitedAtomRenderer atom={object.props.atom} />;
       }
 
-      if (object.type === 'title') {
-        const rawText = typeof object.props?.text === 'string' ? object.props.text : '';
-        const text = rawText.trim().length > 0 ? rawText : UNTITLED_SLIDE_TEXT;
-        return (
-          <div className="flex h-full w-full items-center justify-start px-6">
-            <h2 className="text-4xl font-bold leading-tight text-foreground">{text}</h2>
-          </div>
-        );
-      }
-
       if (object.type === 'accent-image') {
         const src = typeof object.props?.src === 'string' ? object.props.src : null;
         const name =
@@ -1718,8 +1697,13 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         onDragLeave={onCanvasDragLeave}
         onDrop={onCanvasDrop}
       >
-        <div className="pointer-events-none absolute inset-0 z-0">
-          <LayoutOverlay layout={layout} color={cardColor} />
+        <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+          <LayoutOverlay
+            layout={layout}
+            color={cardColor}
+            accentImage={accentImage}
+            accentImageName={accentImageName}
+          />
         </div>
 
         {showEmptyState && (
@@ -1733,17 +1717,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const isSelected = selectedIds.includes(object.id);
             const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
             const isAccentImageObject = object.type === 'accent-image';
-            const isTitleObject = object.type === 'title';
             const isTextBoxObject = object.type === 'text-box';
-          const isEditingTitle =
-            isTitleObject && editingTextState?.id === object.id && editingTextState.type === 'title';
-          const isEditingTextBox =
-            isTextBoxObject &&
-            editingTextState?.id === object.id &&
-            editingTextState.type === 'text-box';
-          const textBoxFormatting = isTextBoxObject
-            ? extractTextBoxFormatting(object.props as Record<string, unknown> | undefined)
-            : null;
+            const isEditingTextBox =
+              isTextBoxObject &&
+              editingTextState?.id === object.id &&
+              editingTextState.type === 'text-box';
+            const textBoxFormatting = isTextBoxObject
+              ? extractTextBoxFormatting(object.props as Record<string, unknown> | undefined)
+              : null;
 
           return (
             <div
@@ -1781,7 +1762,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 <div
                   className={cn(
                     'relative flex-1 overflow-hidden',
-                    isAccentImageObject || isTitleObject ? undefined : 'p-4',
+                    isAccentImageObject ? undefined : 'p-4',
                     isTextBoxObject && 'overflow-visible p-0',
                   )}
                 >
@@ -1819,37 +1800,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     <div
                       className={cn(
                         'h-full w-full overflow-hidden',
-                        isAccentImageObject
-                          ? undefined
-                          : isTitleObject
-                          ? 'bg-transparent'
-                          : 'rounded-2xl bg-background/90 p-3',
+                        isAccentImageObject ? undefined : 'rounded-2xl bg-background/90 p-3',
                       )}
                     >
-                      {isEditingTitle ? (
-                        <textarea
-                          ref={editingTextareaRef}
-                          value={editingTextState.value}
-                          onChange={event => handleEditingValueChange(event.target.value)}
-                          onBlur={commitEditingText}
-                          onKeyDown={event => {
-                            if (event.key === 'Enter' && !event.shiftKey) {
-                              event.preventDefault();
-                              commitEditingText();
-                            }
-                            if (event.key === 'Escape') {
-                              event.preventDefault();
-                              cancelEditingText();
-                            }
-                          }}
-                          placeholder={UNTITLED_SLIDE_TEXT}
-                          className="h-full w-full resize-none bg-transparent px-6 py-4 text-4xl font-bold leading-tight text-foreground outline-none focus:outline-none focus:ring-0"
-                          spellCheck={false}
-                          onPointerDown={event => event.stopPropagation()}
-                        />
-                      ) : (
-                        renderObjectContent(object)
-                      )}
+                      {renderObjectContent(object)}
                     </div>
                   )}
                 </div>
@@ -1867,7 +1821,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 )}
               </div>
 
-              {canEdit && isSelected && !isEditingTitle && !isEditingTextBox &&
+              {canEdit && isSelected && !isEditingTextBox &&
                 handleDefinitions.map(definition => (
                   <span
                     key={definition.handle}

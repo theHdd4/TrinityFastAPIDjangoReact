@@ -85,7 +85,6 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
 
   return (
     <div className="relative flex items-center gap-2 rounded-full border border-border/70 bg-background/95 px-4 py-3 text-sm shadow-[0_24px_48px_-22px_rgba(124,58,237,0.45)] backdrop-blur-lg">
-      <div className="pointer-events-none absolute inset-x-6 top-[6px] h-[3px] rounded-full bg-gradient-to-r from-fuchsia-500 via-purple-500 to-emerald-500 opacity-80" />
 
       <Popover>
         <PopoverTrigger asChild>
