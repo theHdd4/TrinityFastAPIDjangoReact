@@ -7,6 +7,8 @@ export interface ExhibitionComponentPayload {
   category?: string;
   color?: string;
   metadata?: Record<string, any>;
+  manifest?: Record<string, any>;
+  manifest_id?: string;
 }
 
 export interface ExhibitionAtomPayload {
@@ -23,6 +25,20 @@ export interface ExhibitionConfigurationPayload {
 }
 
 export interface ExhibitionConfigurationResponse extends ExhibitionConfigurationPayload {
+  updated_at?: string;
+}
+
+export interface ExhibitionManifestQuery extends ExhibitionConfigurationQuery {
+  component_id: string;
+}
+
+export interface ExhibitionManifestResponse {
+  component_id: string;
+  manifest?: Record<string, any> | null;
+  manifest_id?: string | null;
+  metadata?: Record<string, any> | null;
+  atom_id?: string | null;
+  atom_name?: string | null;
   updated_at?: string;
 }
 
@@ -69,4 +85,25 @@ export async function fetchExhibitionConfiguration(
   }
 
   return response.json() as Promise<ExhibitionConfigurationResponse>;
+}
+
+export async function fetchExhibitionManifest(
+  params: ExhibitionManifestQuery,
+): Promise<ExhibitionManifestResponse | null> {
+  const search = new URLSearchParams(params as Record<string, string>);
+  const response = await fetch(`${EXHIBITION_API}/manifest?${search.toString()}`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || 'Failed to fetch exhibition manifest');
+  }
+
+  return response.json() as Promise<ExhibitionManifestResponse>;
 }

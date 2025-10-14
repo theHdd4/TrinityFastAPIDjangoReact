@@ -15,6 +15,7 @@ import {
 import type {
   FeatureOverviewExhibitionComponentType,
   FeatureOverviewExhibitionSelection,
+  FeatureOverviewVisualizationManifest,
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
@@ -94,6 +95,118 @@ const humanizeLabel = (value?: string | null): string => {
     return '';
   }
   return value.replace(/_/g, ' ');
+};
+
+const clonePlain = <T,>(value: T): T => {
+  if (value === undefined || value === null) {
+    return value;
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch {
+    return value;
+  }
+};
+
+const normaliseManifestChartType = (type?: string | null):
+  | 'bar_chart'
+  | 'line_chart'
+  | 'pie_chart'
+  | 'area_chart'
+  | 'scatter_chart'
+  | undefined => {
+  if (!type) {
+    return undefined;
+  }
+
+  const value = type.toLowerCase();
+  if (value.includes('line')) return 'line_chart';
+  if (value.includes('area')) return 'area_chart';
+  if (value.includes('scatter')) return 'scatter_chart';
+  if (value.includes('pie')) return 'pie_chart';
+  if (value.includes('bar') || value.includes('column')) return 'bar_chart';
+  return undefined;
+};
+
+interface ManifestChartRendererProps {
+  type: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart';
+  data: Array<Record<string, any>>;
+  height: number;
+  xField?: string;
+  yField?: string;
+  yFields?: string[];
+  colors?: string[];
+  legendField?: string;
+  theme?: string;
+  showLegend?: boolean;
+  showAxisLabels?: boolean;
+  showDataLabels?: boolean;
+  showGrid?: boolean;
+}
+
+const buildChartRendererPropsFromManifest = (
+  manifest?: FeatureOverviewVisualizationManifest,
+): ManifestChartRendererProps | undefined => {
+  if (!manifest || !manifest.chart) {
+    return undefined;
+  }
+
+  const chartType = normaliseManifestChartType(manifest.chart.type);
+  if (!chartType) {
+    return undefined;
+  }
+
+  const manifestData = Array.isArray(manifest.data?.timeseries)
+    ? clonePlain(manifest.data?.timeseries)
+    : manifest.data?.summary
+      ? [clonePlain(manifest.data.summary)]
+      : [];
+
+  const yFields = Array.isArray(manifest.chart.yFields)
+    ? manifest.chart.yFields.filter((field): field is string => typeof field === 'string' && field.length > 0)
+    : undefined;
+
+  return {
+    type: chartType,
+    data: manifestData,
+    height: 320,
+    xField: manifest.chart.xField,
+    yField: manifest.chart.yField,
+    yFields,
+    colors: manifest.chart.colorPalette,
+    legendField: manifest.chart.legendField,
+    theme: manifest.chart.theme,
+    showLegend: manifest.chart.showLegend,
+    showAxisLabels: manifest.chart.showAxisLabels,
+    showDataLabels: manifest.chart.showDataLabels,
+    showGrid: manifest.chart.showGrid,
+  };
+};
+
+const buildTableDataFromManifest = (
+  manifest?: FeatureOverviewVisualizationManifest,
+): { headers: string[]; rows: Array<Record<string, any>> } | undefined => {
+  if (!manifest || !manifest.table) {
+    return undefined;
+  }
+
+  const rows = Array.isArray(manifest.table.rows)
+    ? manifest.table.rows.map(row => ({ ...row }))
+    : [];
+
+  if (rows.length === 0) {
+    return undefined;
+  }
+
+  const columns = Array.isArray(manifest.table.columns) && manifest.table.columns.length > 0
+    ? [...manifest.table.columns]
+    : Object.keys(rows[0]);
+
+  return {
+    headers: columns,
+    rows,
+  };
 };
 
 const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
@@ -230,6 +343,13 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
           .join(' / ');
         const title = selection.label || (dimensionSummary ? `${selection.metric} · ${dimensionSummary}` : selection.metric);
 
+        const manifest = selection.visualizationManifest
+          ? clonePlain(selection.visualizationManifest)
+          : undefined;
+        const manifestId = selection.manifestId || manifest?.id || selection.key;
+        const manifestChartProps = buildChartRendererPropsFromManifest(manifest);
+        const manifestTableData = buildTableDataFromManifest(manifest);
+
         const baseChartState = selection.chartState;
         const fallbackTheme = baseChartState?.theme || 'default';
         const fallbackXAxis = selection.featureContext?.xAxis || baseChartState?.xAxisField || 'date';
@@ -273,6 +393,10 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
           selection,
           componentType,
           sourceAtomTitle: resolvedAtomTitle,
+          manifest,
+          manifestId,
+          manifestChartProps,
+          manifestTableData,
         };
       });
 
@@ -305,6 +429,10 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
           selection: baseSelection,
           componentType,
           sourceAtomTitle: originatingAtomTitle,
+          manifest,
+          manifestId,
+          manifestChartProps,
+          manifestTableData,
         }) => {
           const baseMetadata = {
             metric: baseSelection.metric,
@@ -327,6 +455,33 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
             },
           };
 
+          if (manifest) {
+            baseMetadata.visualizationManifest = manifest;
+          }
+
+          if (manifestId) {
+            baseMetadata.manifestId = manifestId;
+          }
+
+          if (manifestChartProps) {
+            baseMetadata.chartRendererProps = clonePlain(manifestChartProps);
+            baseMetadata.chartData = clonePlain(manifestChartProps.data);
+          } else if (manifest?.data?.timeseries) {
+            baseMetadata.chartData = clonePlain(manifest.data.timeseries);
+          }
+
+          if (manifestTableData) {
+            baseMetadata.tableData = manifestTableData;
+          } else if (manifest?.table?.rows && manifest.table.rows.length > 0) {
+            baseMetadata.tableData = {
+              headers:
+                manifest.table.columns && manifest.table.columns.length > 0
+                  ? [...manifest.table.columns]
+                  : Object.keys(manifest.table.rows[0] ?? {}),
+              rows: manifest.table.rows.map(row => ({ ...row })),
+            };
+          }
+
           const componentLabel =
             componentType === 'trend_analysis' ? 'Trend Analysis' : 'Statistical Summary';
 
@@ -345,6 +500,8 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                     ? ('trend_analysis' as const)
                     : ('statistical_summary' as const),
               },
+              manifest,
+              manifest_id: manifestId,
             },
           ];
         },

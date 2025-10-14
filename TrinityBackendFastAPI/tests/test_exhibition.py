@@ -39,7 +39,9 @@ async def test_exhibition_storage_roundtrip() -> None:
                             "title": "Alpha",
                             "category": "Feature",
                             "color": "bg-amber-500",
-                            "metadata": {"revenue": 1200},
+                            "metadata": {"revenue": 1200, "visualizationManifest": {"id": "sku-1::manifest"}},
+                            "manifest": {"id": "sku-1::manifest", "metric": "Revenue"},
+                            "manifest_id": "sku-1::manifest",
                         },
                         {
                             "id": "sku-2",
@@ -71,6 +73,7 @@ async def test_exhibition_storage_roundtrip() -> None:
         fetched = await storage.get_configuration("Quant Matrix", "Insights", "Q3 Launch")
         assert fetched is not None
         assert fetched["atoms"][0]["exhibited_components"][1]["id"] == "sku-2"
+        assert fetched["atoms"][0]["exhibited_components"][0]["manifest_id"] == "sku-1::manifest"
 
 
 @pytest.mark.anyio("asyncio")
@@ -111,3 +114,39 @@ async def test_exhibition_storage_returns_none_for_unknown_configuration() -> No
         storage = ExhibitionStorage(Path(tmpdir) / "config.json")
         result = await storage.get_configuration("Unknown", "App", "Project")
         assert result is None
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exhibition_storage_returns_manifest_payload() -> None:
+    with TemporaryDirectory() as tmpdir:
+        storage_path = Path(tmpdir) / "config.json"
+        storage = ExhibitionStorage(storage_path)
+
+        payload = {
+            "client_name": "Quant Matrix",
+            "app_name": "Insights",
+            "project_name": "Q3 Launch",
+            "atoms": [
+                {
+                    "id": "feature-overview",
+                    "atom_name": "Feature Overview",
+                    "exhibited_components": [
+                        {
+                            "id": "sku-3",
+                            "atomId": "feature-overview",
+                            "title": "Gamma",
+                            "manifest": {"id": "sku-3::manifest", "metric": "Margin"},
+                            "manifest_id": "sku-3::manifest",
+                        }
+                    ],
+                }
+            ],
+        }
+
+        await storage.save_configuration(payload)
+
+        manifest = await storage.get_manifest("Quant Matrix", "Insights", "Q3 Launch", "sku-3")
+        assert manifest is not None
+        assert manifest["component_id"] == "sku-3"
+        assert manifest["manifest"]["metric"] == "Margin"
+        assert manifest["manifest_id"] == "sku-3::manifest"

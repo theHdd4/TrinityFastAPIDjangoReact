@@ -28,6 +28,9 @@ import {
   useLaboratoryStore,
   type FeatureOverviewExhibitionSelection,
   type FeatureOverviewExhibitionComponentType,
+  type FeatureOverviewExhibitionSelectionChartState,
+  type FeatureOverviewExhibitionSelectionContext,
+  type FeatureOverviewVisualizationManifest,
 } from "@/components/LaboratoryMode/store/laboratoryStore";
 import { useToast } from "@/hooks/use-toast";
 import { csvParse } from "d3-dsv";
@@ -1095,6 +1098,87 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     [dimensionCols],
   );
 
+  const buildVisualizationManifest = React.useCallback(
+    (
+      descriptor: ReturnType<typeof createSelectionDescriptor>,
+      options: {
+        componentType: FeatureOverviewExhibitionComponentType;
+        metric: string;
+        chartState?: FeatureOverviewExhibitionSelectionChartState;
+        metricSnapshot?: any;
+        row?: Record<string, any>;
+        featureContext?: FeatureOverviewExhibitionSelectionContext;
+        capturedAt: string;
+      },
+    ): FeatureOverviewVisualizationManifest => {
+      const { componentType, metric, chartState, metricSnapshot, row, featureContext, capturedAt } = options;
+      const manifestId = `${descriptor.key}::manifest`;
+
+      const summarySnapshot = metricSnapshot?.summary ? cloneDeep(metricSnapshot.summary) : undefined;
+      const timeseriesSnapshot = Array.isArray(metricSnapshot?.timeseries)
+        ? cloneDeep(metricSnapshot?.timeseries)
+        : undefined;
+      const fullSnapshot = metricSnapshot ? cloneDeep(metricSnapshot) : undefined;
+      const skuSnapshot = row ? cloneDeep(row) : undefined;
+      const combinationSnapshot = descriptor?.combination ? { ...descriptor.combination } : {};
+
+      const yFieldCandidates = new Set<string>();
+      if (chartState?.yAxisField) {
+        yFieldCandidates.add(chartState.yAxisField);
+      }
+      if (metric) {
+        yFieldCandidates.add(metric);
+      }
+
+      const chart =
+        componentType === "trend_analysis" && chartState
+          ? {
+              type: chartState.chartType,
+              theme: chartState.theme,
+              showLegend: chartState.showLegend,
+              showAxisLabels: chartState.showAxisLabels,
+              showDataLabels: chartState.showDataLabels,
+              showGrid: chartState.showGrid,
+              xField: chartState.xAxisField,
+              yField: chartState.yAxisField ?? metric,
+              yFields: Array.from(yFieldCandidates).filter(Boolean),
+              colorPalette: chartState.colorPalette,
+            }
+          : undefined;
+
+      const table =
+        componentType === "statistical_summary" && skuSnapshot
+          ? {
+              columns: Object.keys(skuSnapshot),
+              rows: [cloneDeep(skuSnapshot)],
+            }
+          : undefined;
+
+      return {
+        id: manifestId,
+        version: "1.0.0",
+        componentType,
+        metric,
+        label: descriptor?.label,
+        dimensions: Array.isArray(descriptor?.dimensions)
+          ? descriptor.dimensions.map((entry) => ({ name: entry.name, value: entry.value }))
+          : [],
+        capturedAt,
+        data: {
+          summary: summarySnapshot,
+          timeseries: timeseriesSnapshot,
+          skuRow: skuSnapshot,
+          combination: combinationSnapshot,
+          statisticalFull: fullSnapshot,
+        },
+        chart,
+        table,
+        featureContext: featureContext ? cloneDeep(featureContext) : undefined,
+      };
+    },
+    [createSelectionDescriptor],
+  );
+
   const updateExhibitionSelection = React.useCallback(
     (
       row: any,
@@ -1119,6 +1203,23 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           {},
         );
 
+        const capturedAt = new Date().toISOString();
+        const chartStateSnapshot:
+          | FeatureOverviewExhibitionSelectionChartState
+          | undefined =
+          componentType === "trend_analysis"
+            ? {
+                chartType,
+                theme: chartTheme,
+                showDataLabels,
+                showAxisLabels,
+                showGrid,
+                showLegend,
+                xAxisField,
+                yAxisField: metric,
+              }
+            : undefined;
+
         const selectionSnapshot: FeatureOverviewExhibitionSelection = {
           key: descriptor.key,
           metric,
@@ -1141,19 +1242,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                 full: metricSnapshot,
               }
             : undefined,
-          chartState:
-            componentType === "trend_analysis"
-              ? {
-                  chartType,
-                  theme: chartTheme,
-                  showDataLabels,
-                  showAxisLabels,
-                  showGrid,
-                  showLegend,
-                  xAxisField,
-                  yAxisField: metric,
-                }
-              : undefined,
+          chartState: chartStateSnapshot,
           featureContext: {
             dataSource: dataSourceName,
             availableMetrics: [...availableMetrics],
@@ -1161,8 +1250,21 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
             dimensionMap: dimensionContext,
           },
           skuRow: row ? cloneDeep(row) : undefined,
-          capturedAt: new Date().toISOString(),
+          capturedAt,
         };
+
+        const visualizationManifest = buildVisualizationManifest(descriptor, {
+          componentType,
+          metric,
+          chartState: chartStateSnapshot,
+          metricSnapshot,
+          row,
+          featureContext: selectionSnapshot.featureContext,
+          capturedAt,
+        });
+
+        selectionSnapshot.manifestId = visualizationManifest.id;
+        selectionSnapshot.visualizationManifest = visualizationManifest;
 
         const nextSelections = [...exhibitionSelections];
         if (existingIndex >= 0) {
