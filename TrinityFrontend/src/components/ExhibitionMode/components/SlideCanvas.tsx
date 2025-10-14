@@ -1549,7 +1549,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       <div
         ref={setRef}
         className={cn(
-          'relative h-full w-full rounded-3xl border-2 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+          'relative z-10 h-full w-full rounded-3xl border-2 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
           canEdit ? 'bg-background/95' : 'bg-background/80',
           showEmptyState ? 'border-dashed border-border/70' : 'border-border/60',
           isDragOver ? 'border-primary/60 ring-2 ring-primary/20 shadow-xl scale-[0.99]' : undefined,
@@ -1608,20 +1608,20 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 )}
                 <div
                   className={cn(
-                    'relative flex-1 overflow-hidden',
+                    'relative z-10 flex-1 overflow-hidden',
                     isAccentImageObject || isTitleObject ? undefined : 'p-4',
                   )}
                 >
                   <div
                     className={cn(
-                      'h-full w-full overflow-hidden',
-                    isAccentImageObject
-                      ? undefined
-                      : isTitleObject
-                      ? 'bg-transparent'
-                      : 'rounded-2xl bg-background/90 p-3',
-                  )}
-                >
+                      'relative z-20 h-full w-full overflow-hidden pointer-events-auto',
+                      isAccentImageObject
+                        ? undefined
+                        : isTitleObject
+                          ? 'bg-transparent'
+                          : 'rounded-2xl bg-background/90 p-3',
+                    )}
+                  >
                     {isEditingTitle ? (
                       <textarea
                         ref={editingTextareaRef}

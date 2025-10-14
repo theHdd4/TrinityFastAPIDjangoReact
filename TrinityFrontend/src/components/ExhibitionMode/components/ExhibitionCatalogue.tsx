@@ -147,6 +147,13 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
                           } catch {
                             /* ignore browsers without dataTransfer */
                           }
+                          console.info('[Exhibition] Dragging catalogue atom', {
+                            atomId: atom.id,
+                            title: atom.title,
+                            manifestId:
+                              atom.visualisationManifest?.manifestId ?? atom.manifestRef ?? atom.metadata?.manifestRef ?? null,
+                            sourceCardId: card.id,
+                          });
                           onDragStart(atom, card.id, 'catalogue');
                         }}
                         onDragEnd={() => enableDragging && onDragEnd?.()}

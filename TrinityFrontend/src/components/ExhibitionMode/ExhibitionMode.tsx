@@ -883,13 +883,77 @@ const ExhibitionMode = () => {
         return;
       }
 
-      const destinationAtoms = [...destinationCard.atoms, atom];
+      const manifestIdFromAtom = (() => {
+        const fromManifest = atom.visualisationManifest?.manifestId;
+        if (typeof fromManifest === 'string' && fromManifest.trim().length > 0) {
+          return fromManifest.trim();
+        }
+        if (typeof atom.manifestRef === 'string' && atom.manifestRef.trim().length > 0) {
+          return atom.manifestRef.trim();
+        }
+        return undefined;
+      })();
+
+      const storeState = useExhibitionStore.getState();
+      const manifestFromStore = manifestIdFromAtom
+        ? storeState.visualisationManifests[manifestIdFromAtom]
+        : undefined;
+      const manifest = manifestFromStore ?? atom.visualisationManifest ?? undefined;
+      const resolvedManifestId =
+        typeof manifest?.manifestId === 'string' && manifest.manifestId.trim().length > 0
+          ? manifest.manifestId.trim()
+          : manifestIdFromAtom;
+
+      const metadataBase: Record<string, any> | undefined =
+        atom.metadata && typeof atom.metadata === 'object'
+          ? { ...atom.metadata }
+          : resolvedManifestId
+            ? {}
+            : undefined;
+
+      if (metadataBase) {
+        if (manifest) {
+          metadataBase.visualisationManifest = manifest;
+          if (!metadataBase.manifestRef && !metadataBase.manifest_ref) {
+            metadataBase.manifestRef = manifest.manifestId;
+          }
+        } else if (resolvedManifestId && !metadataBase.manifestRef && !metadataBase.manifest_ref) {
+          metadataBase.manifestRef = resolvedManifestId;
+        }
+      }
+
+      const hydratedAtom: DroppedAtom = {
+        ...atom,
+        ...(resolvedManifestId ? { manifestRef: resolvedManifestId } : {}),
+        ...(manifest ? { visualisationManifest: manifest } : {}),
+        ...(metadataBase ? { metadata: metadataBase } : {}),
+      };
+
+      const destinationAtoms = [...destinationCard.atoms, hydratedAtom];
+
+      console.info('[Exhibition] Dropped atom onto slide', {
+        atomId: hydratedAtom.id,
+        title: hydratedAtom.title,
+        sourceCardId: sourceCard.id,
+        targetCardId: destinationCard.id,
+        origin,
+        manifestId: resolvedManifestId ?? null,
+        hasManifest: Boolean(manifest),
+        placement: placement
+          ? {
+              x: placement.x,
+              y: placement.y,
+              width: placement.width,
+              height: placement.height,
+            }
+          : null,
+      });
 
       updateCard(destinationCard.id, { atoms: destinationAtoms });
       addSlideObject(
         destinationCard.id,
-        createSlideObjectFromAtom(atom, {
-          id: atom.id,
+        createSlideObjectFromAtom(hydratedAtom, {
+          id: hydratedAtom.id,
           x: placement?.x ?? 96,
           y: placement?.y ?? 96,
           width: placement?.width ?? DEFAULT_CANVAS_OBJECT_WIDTH,
