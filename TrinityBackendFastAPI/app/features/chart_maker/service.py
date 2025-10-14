@@ -5,12 +5,33 @@ import uuid
 from typing import Dict, List, Optional, Any
 from fastapi import HTTPException
 import json
+from datetime import datetime, date
 from .schemas import (
     ChartRequest, RechartsConfig, RechartsDataKey, 
     RechartsAxisConfig, RechartsLegendConfig, RechartsTooltipConfig, 
     RechartsResponsiveConfig, ChartResponse, ChartTrace
 )
 from app.DataStorageRetrieval.arrow_client import download_dataframe
+
+# Helper function to convert date values to ISO format (YYYY-MM-DD)
+def convert_date_to_iso(value):
+    """Convert date/datetime values to ISO format string (YYYY-MM-DD) for proper sorting"""
+    if value is None or pd.isna(value):
+        return value
+    
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    elif isinstance(value, date):
+        return value.isoformat()
+    elif isinstance(value, pd.Timestamp):
+        return value.date().isoformat()
+    else:
+        # Try to parse if it's a string date
+        try:
+            parsed_date = pd.to_datetime(value)
+            return parsed_date.date().isoformat()
+        except:
+            return value
 
 
 class ChartMakerService:
@@ -168,6 +189,39 @@ class ChartMakerService:
             return None
         else:
             return data
+    
+    def _convert_dates_to_iso(self, data: List[Dict[str, Any]], x_column: str) -> List[Dict[str, Any]]:
+        """Convert date columns to ISO format (YYYY-MM-DD) for proper sorting in frontend"""
+        if not data:
+            return data
+        
+        # Check if we have date columns
+        date_columns = []
+        
+        # Check x_column
+        if x_column:
+            sample_value = data[0].get(x_column) if data else None
+            # Check if sample value is a date type or if column name suggests it's a date
+            if sample_value is not None and (
+                isinstance(sample_value, (datetime, date, pd.Timestamp)) or
+                x_column.lower().find('date') != -1
+            ):
+                date_columns.append(x_column)
+        
+        # Also check other columns that might be dates
+        for key in data[0].keys() if data else []:
+            if key not in date_columns and key.lower().find('date') != -1:
+                date_columns.append(key)
+        
+        # Convert date values in identified date columns
+        if date_columns:
+            print(f"🗓️ Converting date columns to ISO format: {date_columns}")
+            for item in data:
+                for col in date_columns:
+                    if col in item:
+                        item[col] = convert_date_to_iso(item[col])
+        
+        return data
 
     def generate_chart_config(self, request: ChartRequest) -> ChartResponse:
         """Generate recharts configuration from chart request"""
@@ -374,6 +428,9 @@ class ChartMakerService:
             
             result.append(row)
         
+        # Convert date columns to ISO format (YYYY-MM-DD) for proper sorting in frontend
+        result = self._convert_dates_to_iso(result, x_column)
+        
         return self._convert_numpy_types(result)
 
     def _process_chart_data(self, data: List[Dict[str, Any]], traces: List[ChartTrace]) -> List[Dict[str, Any]]:
@@ -445,6 +502,9 @@ class ChartMakerService:
             except (ValueError, TypeError):
                 # Fall back to string sorting
                 result.sort(key=lambda x: str(x[x_column]))
+            
+            # Convert date columns to ISO format (YYYY-MM-DD) for proper sorting in frontend
+            result = self._convert_dates_to_iso(result, x_column)
                 
             return self._convert_numpy_types(result)
         else:
@@ -477,6 +537,9 @@ class ChartMakerService:
                     else:
                         processed_row[new_key] = value
                 result.append(processed_row)
+            
+            # Convert date columns to ISO format (YYYY-MM-DD) for proper sorting in frontend
+            result = self._convert_dates_to_iso(result, x_column)
             return self._convert_numpy_types(result)
 
 

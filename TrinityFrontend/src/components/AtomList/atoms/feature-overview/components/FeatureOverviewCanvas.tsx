@@ -540,7 +540,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   // Chart type and theme state for chart type changes
   const [chartType, setChartType] = useState<string>('line_chart');
   const [chartTheme, setChartTheme] = useState<string>('default');
-
+  const [chartSortOrder, setChartSortOrder] = useState<'asc' | 'desc' | null>(null);
+  
   // Chart display options state
   const [showDataLabels, setShowDataLabels] = useState<boolean>(false);
   const [showAxisLabels, setShowAxisLabels] = useState<boolean>(true);
@@ -880,6 +881,11 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   // Handle chart theme change
   const handleChartThemeChange = (newTheme: string) => {
     setChartTheme(newTheme);
+  };
+
+  // Handle chart sort order change
+  const handleChartSortOrderChange = (order: 'asc' | 'desc' | null) => {
+    setChartSortOrder(order);
   };
 
   // Handle data labels toggle
@@ -2096,18 +2102,16 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                                                 title=""
                                                                 xAxisLabel={settings.xAxis || "Date"}
                                                                 yAxisLabel={m || "Value"}
-                                                              showDataLabels={showDataLabels}
-                                                              showAxisLabels={showAxisLabels}
-                                                              showGrid={showGrid}
-                                                              showLegend={showLegend}
-                                                              theme={chartTheme}
-                                                              onChartTypeChange={handleChartTypeChange}
-                                                              onThemeChange={handleChartThemeChange}
-                                                              onDataLabelsToggle={handleDataLabelsToggle}
-                                                              onAxisLabelsToggle={handleAxisLabelsToggle}
-                                                              onGridToggle={handleGridToggle}
-                                                              onLegendToggle={handleLegendToggle}
-                                                            />
+                                                                showDataLabels={showDataLabels}
+                                                                showAxisLabels={showAxisLabels}
+                                                                theme={chartTheme}
+                                                                onChartTypeChange={handleChartTypeChange}
+                                                                onThemeChange={handleChartThemeChange}
+                                                                onDataLabelsToggle={handleDataLabelsToggle}
+                                                                onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                                sortOrder={chartSortOrder}
+                                                                onSortChange={handleChartSortOrderChange}
+                                                              />
                                                             </div>
                                                           </div>
                                                         </DialogContent>
@@ -2143,8 +2147,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                                           onThemeChange={handleChartThemeChange}
                                                           onDataLabelsToggle={handleDataLabelsToggle}
                                                           onAxisLabelsToggle={handleAxisLabelsToggle}
-                                                          onGridToggle={handleGridToggle}
-                                                          onLegendToggle={handleLegendToggle}
+                                                          sortOrder={chartSortOrder}
+                                                          onSortChange={handleChartSortOrderChange}
                                                         />
                                                       </div>
                                                     </div>

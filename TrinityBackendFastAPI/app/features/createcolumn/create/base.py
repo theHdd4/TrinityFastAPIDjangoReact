@@ -46,7 +46,9 @@ def calculate_residuals(df, y_var, x_vars):
 
 def compute_rpi(df, pivot_keys):
 
-    if "PPU" not in df.columns:
+    # Find PPU column case-insensitively
+    ppu_col = next((c for c in df.columns if c.strip().lower() == 'ppu'), None)
+    if ppu_col is None:
         raise ValueError("PPU column not found. Ensure 'PPU' exists before RPI computation.")
 
     # if not columns:
@@ -58,7 +60,7 @@ def compute_rpi(df, pivot_keys):
     if not d_date:
         raise ValueError("Date column not found in data.")
 
-    pivot_df = df.pivot_table(index=[d_date, d_channel], columns=pivot_keys, values='PPU')
+    pivot_df = df.pivot_table(index=[d_date, d_channel], columns=pivot_keys, values=ppu_col)
 
     df = pd.concat([df.set_index([d_date, d_channel]), pivot_df], axis=1).reset_index()
 
@@ -88,12 +90,12 @@ def compute_rpi(df, pivot_keys):
         for c in df.columns
     ]
 
-    own_ppu = df["PPU"]
+    own_ppu = df[ppu_col]
     for col in df.columns:
-        if isinstance(col, str) and col.endswith('_RPI') and col != "PPU_RPI":
+        if isinstance(col, str) and col.endswith('_RPI') and col != f"{ppu_col}_RPI":
             df[col] = np.where(df[col] != 0, own_ppu / df[col], 0)
 
-    new_col = [c for c in df.columns if isinstance(c, str) and c.endswith("_RPI") and c != "PPU_RPI"]
+    new_col = [c for c in df.columns if isinstance(c, str) and c.endswith("_RPI") and c != f"{ppu_col}_RPI"]
     return df, new_col
 
 

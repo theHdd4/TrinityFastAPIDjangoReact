@@ -79,6 +79,10 @@ export const SUBSCRIPTIONS_API =
   normalizeUrl(import.meta.env.VITE_SUBSCRIPTIONS_API) ||
   `${backendOrigin}${djangoPrefix}/subscriptions`;
 
+export const SIGNUPS_API =
+  normalizeUrl(import.meta.env.VITE_SIGNUPS_API) ||
+  `${backendOrigin}${djangoPrefix}/signups`;
+
 export const VALIDATE_API =
   normalizeUrl(import.meta.env.VITE_VALIDATE_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/data-upload-validate`;
@@ -169,6 +173,29 @@ export const EXPLORE_API =
 export const EVALUATE_API =
   normalizeUrl(import.meta.env.VITE_EVALUATE_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/evaluate`;
+
+// Signup API function
+export const submitSignup = async (data: {
+  first_name: string;
+  last_name: string;
+  email: string;
+  institution_company: string;
+}) => {
+  const response = await fetch(`${SIGNUPS_API}/signups/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.email?.[0] || errorData.message || 'Signup failed');
+  }
+
+  return response.json();
+};
 
 // Growth Rates API functions
 export const calculateFiscalGrowth = async (params: {
