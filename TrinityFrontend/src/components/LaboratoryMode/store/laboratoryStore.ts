@@ -116,6 +116,10 @@ export interface FeatureOverviewExhibitionSelectionChartState {
   xAxisField: string;
   yAxisField: string;
   colorPalette?: string[];
+  legendField?: string;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  sortOrder?: 'asc' | 'desc' | null;
 }
 
 export interface FeatureOverviewExhibitionSelectionContext {

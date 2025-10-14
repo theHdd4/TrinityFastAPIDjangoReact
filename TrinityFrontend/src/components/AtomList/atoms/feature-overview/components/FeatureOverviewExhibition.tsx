@@ -67,6 +67,177 @@ const resolvePalette = (theme?: string, provided?: string[]): string[] | undefin
   return undefined;
 };
 
+const toNumeric = (value: unknown): number | null => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === 'string') {
+    const cleaned = value.trim();
+    if (!cleaned) {
+      return null;
+    }
+
+    const normalised = cleaned.replace(/[\s,]+/g, '');
+    const parsed = Number(normalised);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+};
+
+const normaliseTrendChartData = (
+  stats: FeatureOverviewExhibitionSelection['statisticalDetails'] | undefined,
+  chartState: FeatureOverviewExhibitionSelection['chartState'] | undefined,
+  metric: string,
+) => {
+  const xField = chartState?.xAxisField || 'date';
+  const yField = chartState?.yAxisField || metric || 'value';
+  const legendField = chartState?.legendField;
+
+  const timeseries = Array.isArray(stats?.timeseries) ? stats?.timeseries : [];
+
+  const sanitised = timeseries
+    .map((entry, index) => {
+      if (!entry || typeof entry !== 'object') {
+        return null;
+      }
+
+      const record = entry as Record<string, unknown>;
+
+      const resolvedX =
+        record[xField] ?? record.date ?? record.timestamp ?? record.time ?? index + 1;
+
+      const rawValue =
+        record[yField] ??
+        record.value ??
+        record.metricValue ??
+        record.metric_value ??
+        record.y;
+
+      const numericValue = toNumeric(rawValue);
+      if (numericValue == null) {
+        return null;
+      }
+
+      const point: Record<string, unknown> = {
+        [xField]: resolvedX,
+        [yField]: numericValue,
+      };
+
+      const resolvedLegend =
+        (legendField ? record[legendField] : null) ?? record.series ?? record.legend;
+
+      if (legendField && resolvedLegend != null) {
+        point[legendField] = resolvedLegend;
+      } else if (!legendField && typeof resolvedLegend === 'string') {
+        point.series = resolvedLegend;
+      }
+
+      return point;
+    })
+    .filter((entry): entry is Record<string, unknown> => entry !== null);
+
+  if (sanitised.length > 0) {
+    const resolvedLegendField = legendField || (sanitised.some(point => 'series' in point) ? 'series' : undefined);
+    return {
+      data: sanitised,
+      xField,
+      yField,
+      legendField: resolvedLegendField,
+    } as {
+      data: Array<Record<string, unknown>>;
+      xField: string;
+      yField: string;
+      legendField?: string;
+    };
+  }
+
+  const summary = stats?.summary && typeof stats.summary === 'object' ? stats.summary : undefined;
+  if (summary) {
+    const entries = Object.entries(summary)
+      .map(([key, value], index) => {
+        const numericValue = toNumeric(value);
+        if (numericValue == null) {
+          return null;
+        }
+        const label = key && key.trim().length > 0 ? key : index + 1;
+        return {
+          [xField]: label,
+          [yField]: numericValue,
+        } as Record<string, unknown>;
+      })
+      .filter((entry): entry is Record<string, unknown> => entry !== null);
+
+    if (entries.length > 0) {
+      return {
+        data: entries,
+        xField,
+        yField,
+        legendField,
+      } as {
+        data: Array<Record<string, unknown>>;
+        xField: string;
+        yField: string;
+        legendField?: string;
+      };
+    }
+  }
+
+  return null;
+};
+
+const buildTrendChartRendererConfig = (
+  stats: FeatureOverviewExhibitionSelection['statisticalDetails'] | undefined,
+  chartState: FeatureOverviewExhibitionSelection['chartState'] | undefined,
+  metric: string,
+) => {
+  const normalised = normaliseTrendChartData(stats, chartState, metric);
+  if (!normalised || normalised.data.length === 0) {
+    return null;
+  }
+
+  const trendConfig: Record<string, unknown> = {
+    type: chartState?.chartType || 'line_chart',
+    data: normalised.data,
+    xField: normalised.xField,
+    yField: normalised.yField,
+  };
+
+  if (normalised.legendField) {
+    trendConfig.legendField = normalised.legendField;
+  }
+  if (Array.isArray(chartState?.colorPalette) && chartState.colorPalette.length > 0) {
+    trendConfig.colors = chartState.colorPalette.filter(color => typeof color === 'string');
+  }
+  if (typeof chartState?.theme === 'string') {
+    trendConfig.theme = chartState.theme;
+  }
+  if (typeof chartState?.xAxisLabel === 'string' && chartState.xAxisLabel.trim().length > 0) {
+    trendConfig.xAxisLabel = chartState.xAxisLabel;
+  }
+  if (typeof chartState?.yAxisLabel === 'string' && chartState.yAxisLabel.trim().length > 0) {
+    trendConfig.yAxisLabel = chartState.yAxisLabel;
+  }
+  if (typeof chartState?.showLegend === 'boolean') {
+    trendConfig.showLegend = chartState.showLegend;
+  }
+  if (typeof chartState?.showAxisLabels === 'boolean') {
+    trendConfig.showAxisLabels = chartState.showAxisLabels;
+  }
+  if (typeof chartState?.showDataLabels === 'boolean') {
+    trendConfig.showDataLabels = chartState.showDataLabels;
+  }
+  if (typeof chartState?.showGrid === 'boolean') {
+    trendConfig.showGrid = chartState.showGrid;
+  }
+  if (chartState?.sortOrder === 'asc' || chartState?.sortOrder === 'desc' || chartState?.sortOrder === null) {
+    trendConfig.sortOrder = chartState.sortOrder ?? null;
+  }
+
+  return trendConfig;
+};
+
 const formatStatValue = (value: unknown): string => {
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) {
@@ -239,6 +410,10 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
           xAxisField: fallbackXAxis,
           yAxisField: fallbackYAxis,
           colorPalette: resolvePalette(fallbackTheme, baseChartState?.colorPalette),
+          legendField: baseChartState?.legendField,
+          xAxisLabel: baseChartState?.xAxisLabel,
+          yAxisLabel: baseChartState?.yAxisLabel,
+          sortOrder: baseChartState?.sortOrder,
         };
 
         const featureContextDetails = selection.featureContext
@@ -317,6 +492,12 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
             },
           };
 
+          const trendChartConfig = buildTrendChartRendererConfig(
+            statisticalDetails,
+            normalisedChartState,
+            baseSelection.metric,
+          );
+
           return [
             {
               id: `${id}-summary`,
@@ -338,6 +519,7 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
               metadata: {
                 ...baseMetadata,
                 viewType: 'trend_analysis' as const,
+                ...(trendChartConfig ? { chartRendererConfig: trendChartConfig } : {}),
               },
             },
           ];
