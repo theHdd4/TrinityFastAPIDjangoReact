@@ -4,7 +4,8 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import TableTemplate from '@/templates/tables/table';
-import type { DroppedAtom } from '../store/exhibitionStore';
+import type { VisualizationManifest } from '@/lib/exhibition';
+import { useExhibitionStore, type DroppedAtom } from '../store/exhibitionStore';
 import FeatureOverview from './atoms/FeatureOverview';
 
 interface ExhibitedAtomRendererProps {
@@ -126,6 +127,38 @@ const ensureArray = <T,>(value: unknown): T[] => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const resolveAtomManifestRef = (atom: DroppedAtom): string | undefined => {
+  if (typeof atom.manifestRef === 'string' && atom.manifestRef.trim().length > 0) {
+    return atom.manifestRef.trim();
+  }
+
+  if (isRecord(atom.metadata)) {
+    const direct = atom.metadata['manifestRef'] ?? atom.metadata['manifest_ref'];
+    if (typeof direct === 'string' && direct.trim().length > 0) {
+      return direct.trim();
+    }
+
+    const manifestFromMetadata = atom.metadata['visualisationManifest'] ?? atom.metadata['visualisation_manifest'];
+    if (
+      isRecord(manifestFromMetadata) &&
+      typeof manifestFromMetadata['manifestId'] === 'string' &&
+      manifestFromMetadata['manifestId'].trim().length > 0
+    ) {
+      return manifestFromMetadata['manifestId'].trim();
+    }
+  }
+
+  if (
+    atom.visualisationManifest &&
+    typeof atom.visualisationManifest.manifestId === 'string' &&
+    atom.visualisationManifest.manifestId.trim().length > 0
+  ) {
+    return atom.visualisationManifest.manifestId.trim();
+  }
+
+  return undefined;
+};
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined => (isRecord(value) ? value : undefined);
 
@@ -919,10 +952,44 @@ const DefaultExhibitedAtom: React.FC<
 };
 
 const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, variant = 'full' }) => {
-  const metadata = useMemo<AtomMetadata>(
-    () => (isRecord(atom.metadata) ? atom.metadata : undefined),
-    [atom.metadata],
+  const manifestRef = useMemo(
+    () => resolveAtomManifestRef(atom),
+    [atom.manifestRef, atom.metadata, atom.visualisationManifest],
   );
+
+  const manifestFromStore = useExhibitionStore(
+    useMemo(
+      () => state => (manifestRef ? state.visualisationManifests[manifestRef] : undefined),
+      [manifestRef],
+    ),
+  );
+
+  const manifest: VisualizationManifest | undefined = manifestFromStore ?? atom.visualisationManifest;
+
+  const metadata = useMemo<AtomMetadata>(() => {
+    if (!isRecord(atom.metadata)) {
+      if (manifest && atom.atomId === 'feature-overview') {
+        return {
+          visualisationManifest: manifest,
+          manifestRef: manifestRef ?? manifest.manifestId,
+        };
+      }
+      return undefined;
+    }
+
+    const base = { ...atom.metadata } as Record<string, unknown>;
+
+    if (manifest && atom.atomId === 'feature-overview') {
+      if (!base['visualisationManifest'] && !base['visualisation_manifest']) {
+        base['visualisationManifest'] = manifest;
+      }
+      if (!base['manifestRef'] && !base['manifest_ref']) {
+        base['manifestRef'] = manifestRef ?? manifest.manifestId;
+      }
+    }
+
+    return base;
+  }, [atom.metadata, atom.atomId, manifest, manifestRef]);
   const tableData = useMemo(() => extractTableData(metadata), [metadata]);
   const directChartConfig = useMemo(() => extractDirectChartRendererConfig(metadata, variant), [metadata, variant]);
   const chartSpec = useMemo(() => extractChartSpec(metadata), [metadata]);
@@ -943,7 +1010,7 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
   }
 
   if (atom.atomId === 'feature-overview') {
-    return <FeatureOverview metadata={atom.metadata} variant={variant} />;
+    return <FeatureOverview metadata={metadata} manifest={manifest} variant={variant} />;
   }
 
   const previewImage = typeof metadata?.['previewImage'] === 'string' ? (metadata['previewImage'] as string) : undefined;

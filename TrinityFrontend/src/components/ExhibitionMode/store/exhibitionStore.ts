@@ -4,6 +4,7 @@ import {
   fetchExhibitionConfiguration,
   ExhibitionAtomPayload,
   ExhibitionComponentPayload,
+  VisualizationManifest,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 
@@ -76,6 +77,8 @@ export interface DroppedAtom {
   category: string;
   color: string;
   metadata?: Record<string, any>;
+  manifestRef?: string;
+  visualisationManifest?: VisualizationManifest;
 }
 
 export interface SlideObject {
@@ -136,6 +139,7 @@ interface ExhibitionStore {
   catalogueEntries: ExhibitionAtomPayload[];
   lastLoadedContext: ProjectContext | null;
   slideObjectsByCardId: Record<string, SlideObject[]>;
+  visualisationManifests: Record<string, VisualizationManifest>;
   loadSavedConfiguration: (context?: ProjectContext | null) => Promise<void>;
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => void;
   addBlankSlide: (afterSlideIndex?: number) => LayoutCard | null;
@@ -177,6 +181,65 @@ const parseMetadataRecord = (value: unknown): Record<string, any> | undefined =>
   return undefined;
 };
 
+const deepCloneJson = <T,>(value: T): T => {
+  if (value == null) {
+    return value;
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch {
+    return value;
+  }
+};
+
+const parseManifestPayload = (value: unknown): VisualizationManifest | undefined => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const manifestIdCandidate = value['manifestId'] ?? value['manifest_id'];
+  const componentIdCandidate = value['componentId'] ?? value['component_id'];
+
+  const manifestId = isNonEmptyString(manifestIdCandidate) ? manifestIdCandidate.trim() : undefined;
+  const componentId = isNonEmptyString(componentIdCandidate) ? componentIdCandidate.trim() : undefined;
+
+  if (!manifestId || !componentId) {
+    return undefined;
+  }
+
+  const atomIdCandidate = value['atomId'] ?? value['atom_id'];
+  const createdAtCandidate = value['createdAt'] ?? value['created_at'];
+  const viewCandidate = value['view'];
+  const thumbnailCandidate = value['thumbnail'];
+  const vizSpecCandidate = value['vizSpec'] ?? value['viz_spec'];
+  const chartDataCandidate = value['chartData'] ?? value['chart_data'];
+  const skuDataCandidate = value['skuData'] ?? value['sku_data'];
+
+  const manifest: VisualizationManifest = {
+    manifestId,
+    componentId,
+    ...(isNonEmptyString(atomIdCandidate) ? { atomId: atomIdCandidate.trim() } : {}),
+    ...(isNonEmptyString(viewCandidate) ? { view: viewCandidate.trim() } : {}),
+    ...(isNonEmptyString(createdAtCandidate) ? { createdAt: createdAtCandidate.trim() } : {}),
+    ...(typeof thumbnailCandidate === 'string' ? { thumbnail: thumbnailCandidate } : {}),
+  };
+
+  if (vizSpecCandidate && typeof vizSpecCandidate === 'object') {
+    manifest.vizSpec = deepCloneJson(vizSpecCandidate as Record<string, any>);
+  }
+
+  if (chartDataCandidate && typeof chartDataCandidate === 'object') {
+    manifest.chartData = deepCloneJson(chartDataCandidate as Record<string, any>);
+  }
+
+  if (skuDataCandidate && typeof skuDataCandidate === 'object') {
+    manifest.skuData = deepCloneJson(skuDataCandidate as Record<string, any>);
+  }
+
+  return manifest;
+};
+
 const looksLikeFeatureOverviewMetadata = (metadata: Record<string, any> | undefined): boolean => {
   if (!metadata) {
     return false;
@@ -216,6 +279,19 @@ const looksLikeFeatureOverviewMetadata = (metadata: Record<string, any> | undefi
 
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
+
+const resolveManifestRef = (...candidates: unknown[]): string | undefined => {
+  for (const candidate of candidates) {
+    if (isNonEmptyString(candidate)) {
+      const trimmed = candidate.trim();
+      if (trimmed.length > 0) {
+        return trimmed;
+      }
+    }
+  }
+
+  return undefined;
+};
 
 const isValidDateString = (value: unknown): value is string => {
   if (typeof value !== 'string') {
@@ -508,13 +584,40 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     ? candidate.color.trim()
     : FALLBACK_COLOR;
 
-  const metadata = parseMetadataRecord(candidate.metadata);
+  let metadata = parseMetadataRecord(candidate.metadata);
+
+  const manifest =
+    parseManifestPayload(candidate.visualisationManifest) ??
+    parseManifestPayload(candidate.visualisation_manifest) ??
+    parseManifestPayload(metadata?.['visualisationManifest']) ??
+    parseManifestPayload(metadata?.['visualisation_manifest']);
+
+  const manifestRef = resolveManifestRef(
+    candidate.manifestRef,
+    candidate.manifest_ref,
+    metadata?.['manifestRef'],
+    metadata?.['manifest_ref'],
+    manifest?.manifestId,
+  );
+
+  if (manifest) {
+    if (!metadata) {
+      metadata = {};
+    }
+    metadata.visualisationManifest = manifest;
+    if (!metadata.manifestRef && !metadata.manifest_ref) {
+      metadata.manifestRef = manifest.manifestId;
+    }
+  }
 
   const id = resolvedId ?? resolvedAtomId ?? `atom-${Math.random().toString(36).slice(2, 10)}`;
   let atomId = resolvedAtomId ?? id;
 
+  const manifestView = typeof manifest?.view === 'string' ? manifest.view.toLowerCase() : '';
+  const manifestImpliesFeatureOverview = manifestView === 'statistical_summary' || manifestView === 'trend_analysis';
+
   if (
-    looksLikeFeatureOverviewMetadata(metadata) &&
+    (looksLikeFeatureOverviewMetadata(metadata) || manifestImpliesFeatureOverview) &&
     (!resolvedAtomId ||
       atomId === id ||
       atomId.toLowerCase().includes('feature-overview') ||
@@ -523,14 +626,24 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     atomId = 'feature-overview';
   }
 
-  return {
+  const normalised: DroppedAtom = {
     id,
     atomId,
     title,
     category,
     color,
-    metadata,
+    ...(metadata ? { metadata } : {}),
   };
+
+  if (manifestRef) {
+    normalised.manifestRef = manifestRef;
+  }
+
+  if (manifest) {
+    normalised.visualisationManifest = manifest;
+  }
+
+  return normalised;
 };
 
 const normaliseAtomList = (atoms: unknown): DroppedAtom[] => {
@@ -747,10 +860,12 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   catalogueEntries: [],
   lastLoadedContext: null,
   slideObjectsByCardId: {},
+  visualisationManifests: {},
 
   loadSavedConfiguration: async (explicitContext?: ProjectContext | null) => {
     let loadedCards: LayoutCard[] = [];
     let catalogueEntries: ExhibitionAtomPayload[] = [];
+    const manifestById: Record<string, VisualizationManifest> = {};
     const resolvedContext = normaliseProjectContext(explicitContext ?? getActiveProjectContext());
     const contextLabel = resolvedContext
       ? `${resolvedContext.client_name}/${resolvedContext.app_name}/${resolvedContext.project_name}`
@@ -764,6 +879,23 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         const remote = await fetchExhibitionConfiguration(resolvedContext);
         const remoteAtoms = remote && Array.isArray(remote.atoms) ? remote.atoms : [];
         catalogueEntries = remoteAtoms;
+
+        remoteAtoms.forEach(entry => {
+          const components = extractExhibitedComponents(entry as AtomEntryLike);
+          components.forEach(component => {
+            const manifest =
+              parseManifestPayload(component.visualisationManifest) ||
+              parseManifestPayload(component.visualisation_manifest) ||
+              (component.metadata
+                ? parseManifestPayload((component.metadata as Record<string, unknown>)['visualisationManifest']) ||
+                  parseManifestPayload((component.metadata as Record<string, unknown>)['visualisation_manifest'])
+                : undefined);
+
+            if (manifest) {
+              manifestById[manifest.manifestId] = manifest;
+            }
+          });
+        });
 
         if (remoteAtoms.length === 0) {
           console.info(
@@ -878,6 +1010,8 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         catalogueEntries,
         lastLoadedContext: resolvedContext,
         slideObjectsByCardId: nextSlideObjects,
+        visualisationManifests:
+          Object.keys(manifestById).length > 0 ? manifestById : state.visualisationManifests,
       };
     });
   },
@@ -1140,6 +1274,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       catalogueEntries: [],
       lastLoadedContext: null,
       slideObjectsByCardId: {},
+      visualisationManifests: {},
     });
   },
 }));

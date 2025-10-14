@@ -11,10 +11,12 @@ import {
   type ExhibitionAtomPayload,
   type ExhibitionComponentPayload,
   type ExhibitionConfigurationPayload,
+  type VisualizationManifest,
 } from '@/lib/exhibition';
 import type { FeatureOverviewExhibitionSelection } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
+import type { FeatureOverviewViewType } from '@/components/ExhibitionMode/components/atoms/FeatureOverview/types';
 
 interface FeatureOverviewExhibitionProps {
   atomId: string;
@@ -32,6 +34,11 @@ const INITIAL_VISIBILITY = {
 };
 
 type VisibilityKey = keyof typeof INITIAL_VISIBILITY;
+
+const MANIFEST_VERSION = 1;
+const DEFAULT_MANIFEST_HEIGHT = 320;
+const PLACEHOLDER_THUMBNAIL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=';
 
 const THEME_COLOR_MAP: Record<string, string[]> = {
   default: ['#6366f1', '#a5b4fc', '#e0e7ff', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D'],
@@ -65,6 +72,146 @@ const resolvePalette = (theme?: string, provided?: string[]): string[] | undefin
     return THEME_COLOR_MAP[theme];
   }
   return undefined;
+};
+
+type ChartRendererType = 'bar_chart' | 'line_chart' | 'area_chart' | 'pie_chart' | 'scatter_chart';
+
+const cloneRecords = (rows?: Array<Record<string, any>> | null): Array<Record<string, any>> =>
+  Array.isArray(rows) ? rows.map(row => ({ ...row })) : [];
+
+const cloneRecord = <T extends Record<string, any>>(value: T | undefined | null): T | undefined =>
+  value ? ({ ...value } as T) : undefined;
+
+const sanitiseChartType = (value?: string | null): ChartRendererType => {
+  if (!value) {
+    return 'line_chart';
+  }
+
+  const lowered = value.toLowerCase();
+  switch (lowered) {
+    case 'bar':
+    case 'bar_chart':
+    case 'bar-chart':
+      return 'bar_chart';
+    case 'area':
+    case 'area_chart':
+    case 'area-chart':
+      return 'area_chart';
+    case 'pie':
+    case 'pie_chart':
+    case 'pie-chart':
+      return 'pie_chart';
+    case 'scatter':
+    case 'scatter_chart':
+    case 'scatter-chart':
+      return 'scatter_chart';
+    default:
+      return 'line_chart';
+  }
+};
+
+const buildManifestChartConfig = (
+  selection: FeatureOverviewExhibitionSelection,
+  chartState: FeatureOverviewExhibitionSelection['chartState'] | undefined,
+  data: Array<Record<string, any>>,
+  title: string,
+): {
+  type: ChartRendererType;
+  data: Array<Record<string, any>>;
+  height: number;
+  xField?: string;
+  yField?: string;
+  yFields?: string[];
+  yAxisLabels?: string[];
+  legendField?: string;
+  colors?: string[];
+  theme?: string;
+  title?: string;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  showLegend?: boolean;
+  showAxisLabels?: boolean;
+  showDataLabels?: boolean;
+  showGrid?: boolean;
+  sortOrder?: 'asc' | 'desc' | null;
+} => {
+  const type = sanitiseChartType(chartState?.chartType);
+  const xField = chartState?.xAxisField || selection.featureContext?.xAxis || 'index';
+  const yField = chartState?.yAxisField || selection.metric || 'value';
+
+  return {
+    type,
+    data,
+    height: DEFAULT_MANIFEST_HEIGHT,
+    xField,
+    yField,
+    colors: chartState?.colorPalette ? [...chartState.colorPalette] : undefined,
+    theme: chartState?.theme,
+    title,
+    xAxisLabel: chartState?.xAxisField ?? xField,
+    yAxisLabel: chartState?.yAxisField ?? yField,
+    showLegend: chartState?.showLegend,
+    showAxisLabels: chartState?.showAxisLabels,
+    showDataLabels: chartState?.showDataLabels,
+    showGrid: chartState?.showGrid,
+    sortOrder: null,
+  };
+};
+
+const createVisualizationManifest = (
+  componentId: string,
+  viewType: FeatureOverviewViewType,
+  atomId: string,
+  title: string,
+  selection: FeatureOverviewExhibitionSelection,
+  chartState: FeatureOverviewExhibitionSelection['chartState'] | undefined,
+  statisticalDetails: FeatureOverviewExhibitionSelection['statisticalDetails'] | undefined,
+  skuStatisticsSettings: {
+    visibility: Record<string, boolean>;
+    tableRows?: Record<string, any>[];
+    tableColumns?: string[];
+  },
+): VisualizationManifest => {
+  const manifestId = `${componentId}::manifest`;
+  const timeseries = cloneRecords(statisticalDetails?.timeseries);
+  const summary = cloneRecord(statisticalDetails?.summary);
+  const fullRecord = cloneRecord(statisticalDetails?.full);
+  const chartConfig = buildManifestChartConfig(selection, chartState, timeseries, title);
+
+  const chartData: Record<string, unknown> = {};
+  if (summary) {
+    chartData.summary = summary;
+  }
+  if (timeseries.length > 0) {
+    chartData.timeseries = timeseries;
+  }
+  if (fullRecord) {
+    chartData.full = fullRecord;
+  }
+
+  chartData.skuStatisticsSettings = {
+    visibility: { ...skuStatisticsSettings.visibility },
+    tableRows: cloneRecords(skuStatisticsSettings.tableRows),
+    tableColumns: skuStatisticsSettings.tableColumns
+      ? [...skuStatisticsSettings.tableColumns]
+      : undefined,
+  };
+
+  return {
+    manifestId,
+    componentId,
+    atomId,
+    view: viewType,
+    createdAt: new Date().toISOString(),
+    thumbnail: PLACEHOLDER_THUMBNAIL,
+    vizSpec: {
+      renderer: 'recharts',
+      version: MANIFEST_VERSION,
+      config: chartConfig,
+    },
+    chartData,
+    skuData: selection.skuRow ? { ...selection.skuRow } : undefined,
+  };
 };
 
 const formatStatValue = (value: unknown): string => {
@@ -317,9 +464,34 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
             },
           };
 
+          const summaryComponentId = `${id}-summary`;
+          const trendComponentId = `${id}-trend`;
+
+          const summaryManifest = createVisualizationManifest(
+            summaryComponentId,
+            'statistical_summary',
+            atomId,
+            `${title} · Statistical Summary`,
+            baseSelection,
+            normalisedChartState,
+            statisticalDetails,
+            skuStatisticsSettings,
+          );
+
+          const trendManifest = createVisualizationManifest(
+            trendComponentId,
+            'trend_analysis',
+            atomId,
+            `${title} · Trend Analysis`,
+            baseSelection,
+            normalisedChartState,
+            statisticalDetails,
+            skuStatisticsSettings,
+          );
+
           return [
             {
-              id: `${id}-summary`,
+              id: summaryComponentId,
               atomId,
               title: `${title} · Statistical Summary`,
               category: 'Feature Overview',
@@ -327,10 +499,14 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
               metadata: {
                 ...baseMetadata,
                 viewType: 'statistical_summary' as const,
+                manifestRef: summaryManifest.manifestId,
+                visualisationManifest: summaryManifest,
               },
+              manifestRef: summaryManifest.manifestId,
+              visualisation_manifest: summaryManifest,
             },
             {
-              id: `${id}-trend`,
+              id: trendComponentId,
               atomId,
               title: `${title} · Trend Analysis`,
               category: 'Feature Overview',
@@ -338,7 +514,11 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
               metadata: {
                 ...baseMetadata,
                 viewType: 'trend_analysis' as const,
+                manifestRef: trendManifest.manifestId,
+                visualisationManifest: trendManifest,
               },
+              manifestRef: trendManifest.manifestId,
+              visualisation_manifest: trendManifest,
             },
           ];
         },

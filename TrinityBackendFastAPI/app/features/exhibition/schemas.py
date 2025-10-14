@@ -6,6 +6,45 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+class VisualizationManifest(BaseModel):
+    """Immutable snapshot of a laboratory visualisation used in exhibition mode."""
+
+    manifest_id: str = Field(..., min_length=1, alias="manifestId")
+    component_id: str = Field(..., min_length=1, alias="componentId")
+    atom_id: Optional[str] = Field(None, alias="atomId")
+    view: Optional[str] = Field(
+        default=None,
+        description="Logical view for the manifest (e.g. statistical_summary, trend_analysis)",
+    )
+    created_at: Optional[str] = Field(
+        default=None,
+        alias="createdAt",
+        description="ISO timestamp describing when the manifest was generated",
+    )
+    thumbnail: Optional[str] = Field(
+        default=None,
+        description="Base64 encoded preview thumbnail captured from laboratory mode",
+    )
+    viz_spec: Dict[str, Any] = Field(
+        default_factory=dict,
+        alias="vizSpec",
+        description="Renderer-ready specification used to recreate the visualisation",
+    )
+    chart_data: Dict[str, Any] = Field(
+        default_factory=dict,
+        alias="chartData",
+        description="Raw data buffers required by the renderer",
+    )
+    sku_data: Optional[Dict[str, Any]] = Field(
+        default=None,
+        alias="skuData",
+        description="Captured SKU level payload associated with this manifest",
+    )
+
+    class Config:
+        allow_population_by_field_name = True
+
+
 class ExhibitionComponent(BaseModel):
     """Represents a component exhibited from a specific atom."""
 
@@ -18,6 +57,19 @@ class ExhibitionComponent(BaseModel):
         default=None,
         description="Additional metadata captured for the exhibited component",
     )
+    manifest_ref: Optional[str] = Field(
+        default=None,
+        alias="manifestRef",
+        description="Identifier linking the component to a stored visualisation manifest",
+    )
+    visualisation_manifest: Optional[VisualizationManifest] = Field(
+        default=None,
+        alias="visualisationManifest",
+        description="Complete manifest payload used for read-only rendering in exhibition mode",
+    )
+
+    class Config:
+        allow_population_by_field_name = True
 
 
 class ExhibitionAtomEntry(BaseModel):

@@ -1,5 +1,17 @@
 import { EXHIBITION_API } from '@/lib/api';
 
+export interface VisualizationManifest {
+  manifestId: string;
+  componentId: string;
+  atomId?: string;
+  view?: string;
+  createdAt?: string;
+  thumbnail?: string | null;
+  vizSpec?: Record<string, any>;
+  chartData?: Record<string, any>;
+  skuData?: Record<string, any>;
+}
+
 export interface ExhibitionComponentPayload {
   id: string;
   atomId?: string;
@@ -7,6 +19,10 @@ export interface ExhibitionComponentPayload {
   category?: string;
   color?: string;
   metadata?: Record<string, any>;
+  manifestRef?: string;
+  manifest_ref?: string;
+  visualisationManifest?: VisualizationManifest;
+  visualisation_manifest?: VisualizationManifest;
 }
 
 export interface ExhibitionAtomPayload {

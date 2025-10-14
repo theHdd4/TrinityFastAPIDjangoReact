@@ -7,6 +7,9 @@ import {
   FeatureOverviewDimension,
   FeatureOverviewFeatureContext,
   FeatureOverviewMetadata,
+  FeatureOverviewChartRendererConfig,
+  FeatureOverviewVisualisationManifest,
+  FeatureOverviewVizSpec,
   FeatureOverviewSkuStatisticsSettings,
   FeatureOverviewStatistics,
   FeatureOverviewViewType,
@@ -316,6 +319,80 @@ const normaliseSkuStatisticsSettings = (value: unknown): FeatureOverviewSkuStati
   return result;
 };
 
+const parseVisualizationManifest = (
+  value: unknown,
+): FeatureOverviewVisualisationManifest | null => {
+  const record = toRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const manifestId = asString(record['manifestId'] ?? record['manifest_id']);
+  const componentId = asString(record['componentId'] ?? record['component_id']);
+  if (!manifestId || !componentId) {
+    return null;
+  }
+
+  const manifest: FeatureOverviewVisualisationManifest = {
+    manifestId,
+    componentId,
+  };
+
+  const atomId = asString(record['atomId'] ?? record['atom_id']);
+  if (atomId) {
+    manifest.atomId = atomId;
+  }
+
+  const view = asString(record['view']);
+  if (view) {
+    manifest.view = view;
+  }
+
+  const createdAt = asString(record['createdAt'] ?? record['created_at']);
+  if (createdAt) {
+    manifest.createdAt = createdAt;
+  }
+
+  const thumbnail = asString(record['thumbnail']);
+  if (thumbnail) {
+    manifest.thumbnail = thumbnail;
+  }
+
+  const vizSpecRecord = toRecord(record['vizSpec'] ?? record['viz_spec']);
+  if (vizSpecRecord) {
+    const renderer = asString(vizSpecRecord['renderer']) ?? 'recharts';
+    const versionCandidate = vizSpecRecord['version'];
+    const version =
+      typeof versionCandidate === 'number'
+        ? versionCandidate
+        : Number.isFinite(Number(versionCandidate))
+          ? Number(versionCandidate)
+          : 1;
+    const configRecord = toRecord(vizSpecRecord['config']);
+
+    if (configRecord) {
+      const clonedConfig = cloneJson(configRecord) as FeatureOverviewChartRendererConfig;
+      manifest.vizSpec = {
+        renderer: renderer === 'recharts' ? 'recharts' : 'recharts',
+        version,
+        config: clonedConfig,
+      };
+    }
+  }
+
+  const chartDataRecord = toRecord(record['chartData'] ?? record['chart_data']);
+  if (chartDataRecord) {
+    manifest.chartData = cloneJson(chartDataRecord);
+  }
+
+  const skuDataRecord = toRecord(record['skuData'] ?? record['sku_data']);
+  if (skuDataRecord) {
+    manifest.skuData = cloneJson(skuDataRecord);
+  }
+
+  return manifest;
+};
+
 const normaliseChartState = (value: unknown): FeatureOverviewChartState | undefined => {
   const record = toRecord(value);
   if (!record) {
@@ -444,28 +521,21 @@ export const formatCell = (value: unknown): string => {
   return String(value);
 };
 
-export type ChartRendererType = 'bar_chart' | 'line_chart' | 'area_chart' | 'pie_chart' | 'scatter_chart';
+const cloneJson = <T,>(value: T): T => {
+  if (value == null) {
+    return value;
+  }
 
-export interface ChartRendererConfig {
-  type: ChartRendererType;
-  data: Array<Record<string, unknown>>;
-  height: number;
-  xField?: string;
-  yField?: string;
-  yFields?: string[];
-  yAxisLabels?: string[];
-  legendField?: string;
-  colors?: string[];
-  theme?: string;
-  title?: string;
-  xAxisLabel?: string;
-  yAxisLabel?: string;
-  showLegend?: boolean;
-  showAxisLabels?: boolean;
-  showDataLabels?: boolean;
-  showGrid?: boolean;
-  sortOrder?: 'asc' | 'desc' | null;
-}
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch {
+    return value;
+  }
+};
+
+export type ChartRendererType = FeatureOverviewRendererType;
+
+export type ChartRendererConfig = FeatureOverviewChartRendererConfig;
 
 const DEFAULT_TREND_CHART_HEIGHT = {
   full: 300,
@@ -849,9 +919,41 @@ export const deriveChartConfig = (
   variant: 'full' | 'compact',
 ): ChartRendererConfig | null =>
   ensureRenderableChartConfig(
-    parseDirectChartRendererConfig(metadata, variant) ??
-      createChartRendererConfig(metadata, variant) ??
-      buildDefaultTrendChartConfig(variant),
+    (() => {
+      const manifestConfig = metadata.visualisationManifest?.vizSpec?.config;
+      if (manifestConfig) {
+        const clonedConfig: ChartRendererConfig = {
+          ...manifestConfig,
+          data: Array.isArray(manifestConfig.data)
+            ? manifestConfig.data.map(entry => ({ ...(entry as Record<string, unknown>) }))
+            : [],
+          height:
+            typeof manifestConfig.height === 'number' && Number.isFinite(manifestConfig.height)
+              ? manifestConfig.height
+              : DEFAULT_TREND_CHART_HEIGHT[variant],
+        };
+
+        if (manifestConfig.yFields) {
+          clonedConfig.yFields = [...manifestConfig.yFields];
+        }
+
+        if (manifestConfig.yAxisLabels) {
+          clonedConfig.yAxisLabels = [...manifestConfig.yAxisLabels];
+        }
+
+        if (manifestConfig.colors) {
+          clonedConfig.colors = [...manifestConfig.colors];
+        }
+
+        return clonedConfig;
+      }
+
+      return (
+        parseDirectChartRendererConfig(metadata, variant) ??
+        createChartRendererConfig(metadata, variant) ??
+        buildDefaultTrendChartConfig(variant)
+      );
+    })(),
   );
 
 export const extractSummaryEntries = (
@@ -975,16 +1077,30 @@ export const renderTable = (
   );
 };
 
-export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverviewMetadata | null => {
+export const parseFeatureOverviewMetadata = (
+  metadata: unknown,
+  manifestOverride?: FeatureOverviewVisualisationManifest | null,
+): FeatureOverviewMetadata | null => {
   const record = toRecord(metadata);
-  if (!record) {
+  const nested = record ? toRecord(record.metadata) : null;
+  const base: Record<string, unknown> = record
+    ? { ...record, ...(nested || {}) }
+    : nested
+      ? { ...nested }
+      : {};
+
+  const result: FeatureOverviewMetadata = {};
+  const manifest =
+    manifestOverride ??
+    parseVisualizationManifest(base['visualisationManifest'] ?? base['visualisation_manifest']);
+
+  if (!record && !manifest) {
     return null;
   }
 
-  const nested = toRecord(record.metadata);
-  const base = nested ? { ...record, ...nested } : record;
-
-  const result: FeatureOverviewMetadata = {};
+  if (manifest) {
+    result.visualisationManifest = manifest;
+  }
 
   const metric = asString(base['metric'] ?? base['dependent_variable']);
   if (metric) {
@@ -1175,7 +1291,60 @@ export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverview
   const selectionViewType = selectionNested
     ? normaliseViewType(selectionNested['viewType'] ?? selectionNested['view_type'])
     : undefined;
-  result.viewType = baseViewType ?? selectionViewType;
+  result.viewType = baseViewType ?? selectionViewType ?? (manifest?.view ? normaliseViewType(manifest.view) : undefined);
+
+  if (!result.chartState && manifest?.vizSpec?.config) {
+    const { config } = manifest.vizSpec;
+    result.chartState = {
+      chartType: config.type,
+      theme: config.theme,
+      showDataLabels: config.showDataLabels,
+      showAxisLabels: config.showAxisLabels,
+      showGrid: config.showGrid,
+      showLegend: config.showLegend,
+      xAxisField: config.xField,
+      yAxisField: config.yField,
+      colorPalette: Array.isArray(config.colors) ? [...config.colors] : undefined,
+      legendField: config.legendField,
+      xAxisLabel: config.xAxisLabel,
+      yAxisLabel: config.yAxisLabel,
+      sortOrder: config.sortOrder ?? null,
+    };
+  }
+
+  if (!result.statisticalDetails && manifest?.chartData) {
+    const stats: FeatureOverviewStatistics = {};
+    const summaryRecord = toRecord(manifest.chartData['summary']);
+    if (summaryRecord) {
+      stats.summary = { ...summaryRecord };
+    }
+    const timeseriesRecords = ensureRecordArray(manifest.chartData['timeseries']);
+    if (timeseriesRecords.length > 0) {
+      stats.timeseries = timeseriesRecords;
+    }
+    const fullRecord = toRecord(manifest.chartData['full']);
+    if (fullRecord) {
+      stats.full = { ...fullRecord };
+    }
+    if (Object.keys(stats).length > 0) {
+      result.statisticalDetails = stats;
+    }
+  }
+
+  if (!result.skuRow && manifest?.skuData) {
+    result.skuRow = { ...manifest.skuData };
+  }
+
+  if (!result.capturedAt && manifest?.createdAt) {
+    result.capturedAt = manifest.createdAt;
+  }
+
+  if (!result.skuStatisticsSettings && manifest?.chartData) {
+    const manifestSkuSettings = normaliseSkuStatisticsSettings(manifest.chartData['skuStatisticsSettings']);
+    if (manifestSkuSettings) {
+      result.skuStatisticsSettings = manifestSkuSettings;
+    }
+  }
 
   return result;
 };

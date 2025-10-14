@@ -4,8 +4,11 @@ import TrendAnalysis from './TrendAnalysis';
 import { DEFAULT_FEATURE_OVERVIEW_TREND_METADATA, parseFeatureOverviewMetadata } from './shared';
 import { FeatureOverviewComponentProps, FeatureOverviewProps } from './types';
 
-const FeatureOverview: React.FC<FeatureOverviewProps> = ({ metadata, variant = 'full' }) => {
-  const parsedMetadata = useMemo(() => parseFeatureOverviewMetadata(metadata), [metadata]);
+const FeatureOverview: React.FC<FeatureOverviewProps> = ({ metadata, manifest, variant = 'full' }) => {
+  const parsedMetadata = useMemo(
+    () => parseFeatureOverviewMetadata(metadata, manifest),
+    [metadata, manifest],
+  );
   const resolvedMetadata = parsedMetadata ?? DEFAULT_FEATURE_OVERVIEW_TREND_METADATA;
 
   const componentProps: FeatureOverviewComponentProps = {

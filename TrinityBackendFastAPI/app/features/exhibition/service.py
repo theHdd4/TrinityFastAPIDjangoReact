@@ -133,6 +133,14 @@ class ExhibitionStorage:
             if isinstance(metadata, dict):
                 sanitised_component["metadata"] = metadata
 
+            manifest_ref = component.get("manifest_ref") or component.get("manifestRef")
+            if isinstance(manifest_ref, str) and manifest_ref.strip():
+                sanitised_component["manifest_ref"] = manifest_ref.strip()
+
+            manifest_payload = component.get("visualisation_manifest") or component.get("visualisationManifest")
+            if isinstance(manifest_payload, dict):
+                sanitised_component["visualisation_manifest"] = manifest_payload
+
             sanitised.append(sanitised_component)
 
         return sanitised
