@@ -1,8 +1,40 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import { Button } from '@/components/ui/button';
+import { Separator } from '@/components/ui/separator';
+import {
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  List,
+  ListOrdered,
+  Palette,
+  Sparkles,
+  Move,
+  Trash2,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
-import TextBoxToolbar from './TextBoxToolbar';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import type { SlideTextBox, TextBoxPosition } from './types';
-import { DEFAULT_TEXT_BOX_TEXT } from './constants';
+import { DEFAULT_TEXT_BOX_TEXT, FONT_OPTIONS } from './constants';
 
 interface ExhibitionTextBoxProps {
   data: SlideTextBox;
@@ -14,7 +46,22 @@ interface ExhibitionTextBoxProps {
   onDelete?: (id: string) => void;
 }
 
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+type FormatState = {
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  strikethrough: boolean;
+};
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(Math.max(value, min), max);
+
+const initialFormatState: FormatState = {
+  bold: false,
+  italic: false,
+  underline: false,
+  strikethrough: false,
+};
 
 export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
   data,
@@ -29,28 +76,152 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
   const [text, setText] = useState<string>(data.text);
   const [fontSize, setFontSize] = useState<number>(data.fontSize);
   const [fontFamily, setFontFamily] = useState<string>(data.fontFamily);
-  const [bold, setBold] = useState<boolean>(data.bold);
-  const [italic, setItalic] = useState<boolean>(data.italic);
-  const [underline, setUnderline] = useState<boolean>(data.underline);
-  const [strikethrough, setStrikethrough] = useState<boolean>(data.strikethrough);
-  const [align, setAlign] = useState(data.align);
+  const [align, setAlign] = useState<SlideTextBox['align']>(data.align);
   const [color, setColor] = useState<string>(data.color);
   const [isEditing, setIsEditing] = useState(false);
   const [isActive, setIsActive] = useState(false);
   const [showToolbar, setShowToolbar] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [dragOrigin, setDragOrigin] = useState<TextBoxPosition>({ x: data.x, y: data.y });
-  const [position, setPosition] = useState<TextBoxPosition>({ x: data.x, y: data.y });
+  const [dragOrigin, setDragOrigin] = useState<TextBoxPosition>({
+    x: data.x,
+    y: data.y,
+  });
+  const [position, setPosition] = useState<TextBoxPosition>({
+    x: data.x,
+    y: data.y,
+  });
+  const [formatState, setFormatState] = useState<FormatState>({
+    bold: data.bold,
+    italic: data.italic,
+    underline: data.underline,
+    strikethrough: data.strikethrough,
+  });
 
-  const runCommand = (command: string) => {
-    if (!isEditable || typeof document === 'undefined') {
+  useEffect(() => {
+    setFormatState({
+      bold: data.bold,
+      italic: data.italic,
+      underline: data.underline,
+      strikethrough: data.strikethrough,
+    });
+  }, [data.bold, data.italic, data.strikethrough, data.underline]);
+
+  const isNodeWithinText = useCallback(
+    (node: Node | null): boolean => {
+      if (!node || !textRef.current) {
+        return false;
+      }
+
+      if (node === textRef.current) {
+        return true;
+      }
+
+      if (node instanceof Element) {
+        return textRef.current.contains(node);
+      }
+
+      return isNodeWithinText(node.parentNode);
+    },
+    [],
+  );
+
+  const getSelectionInfo = useCallback(() => {
+    if (typeof window === 'undefined' || !textRef.current) {
+      return {
+        selection: null as Selection | null,
+        isInside: false,
+        hasSelection: false,
+      };
+    }
+
+    const selection = window.getSelection();
+    if (!selection) {
+      return { selection: null, isInside: false, hasSelection: false };
+    }
+
+    const anchorInside = isNodeWithinText(selection.anchorNode);
+    const focusInside = isNodeWithinText(selection.focusNode);
+    const isInside = anchorInside && focusInside;
+
+    return {
+      selection,
+      isInside,
+      hasSelection: isInside && !selection.isCollapsed,
+    };
+  }, [isNodeWithinText]);
+
+  const readFormatState = useCallback((): FormatState => {
+    if (typeof document === 'undefined') {
+      return initialFormatState;
+    }
+
+    return {
+      bold: document.queryCommandState?.('bold') ?? false,
+      italic: document.queryCommandState?.('italic') ?? false,
+      underline: document.queryCommandState?.('underline') ?? false,
+      strikethrough: document.queryCommandState?.('strikeThrough') ?? false,
+    };
+  }, []);
+
+  const focusText = useCallback(() => {
+    if (!textRef.current) {
       return;
     }
-    if (document.queryCommandSupported?.(command)) {
-      textRef.current?.focus();
-      document.execCommand(command, false);
+
+    if (document.activeElement !== textRef.current) {
+      textRef.current.focus();
     }
-  };
+  }, []);
+
+  const refreshFormatState = useCallback(
+    (persistBase = false) => {
+      if (!isEditable) {
+        return;
+      }
+
+      const { selection, isInside } = getSelectionInfo();
+      if (!selection || !isInside) {
+        setFormatState(prev => ({ ...prev }));
+        return;
+      }
+
+      const next = readFormatState();
+      setFormatState(next);
+
+      if (persistBase && selection.isCollapsed) {
+        onChange(data.id, next);
+      }
+    },
+    [data.id, getSelectionInfo, isEditable, onChange, readFormatState],
+  );
+
+  const applyCommand = useCallback(
+    (command: string, value?: string, persistBase = false) => {
+      if (!isEditable || typeof document === 'undefined') {
+        return;
+      }
+
+      const { isInside, hasSelection } = getSelectionInfo();
+      if (!isInside) {
+        focusText();
+      } else {
+        focusText();
+      }
+
+      if (document.queryCommandSupported && !document.queryCommandSupported(command)) {
+        return;
+      }
+
+      if (value !== undefined) {
+        document.execCommand(command, false, value);
+      } else {
+        document.execCommand(command, false);
+      }
+
+      refreshFormatState(persistBase || (isInside && !hasSelection));
+    },
+    [focusText, getSelectionInfo, isEditable, refreshFormatState],
+  );
 
   useEffect(() => {
     setText(data.text);
@@ -63,22 +234,6 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
   useEffect(() => {
     setFontFamily(data.fontFamily);
   }, [data.fontFamily]);
-
-  useEffect(() => {
-    setBold(data.bold);
-  }, [data.bold]);
-
-  useEffect(() => {
-    setItalic(data.italic);
-  }, [data.italic]);
-
-  useEffect(() => {
-    setUnderline(data.underline);
-  }, [data.underline]);
-
-  useEffect(() => {
-    setStrikethrough(data.strikethrough);
-  }, [data.strikethrough]);
 
   useEffect(() => {
     setAlign(data.align);
@@ -102,9 +257,11 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
       if (!target) {
         return;
       }
+
       if (textRef.current && textRef.current.contains(target)) {
         return;
       }
+
       setIsActive(false);
       setShowToolbar(false);
     };
@@ -146,22 +303,47 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
     };
   }, [isDragging, dragOrigin, data.id, onPositionChange]);
 
+  useEffect(() => {
+    if (!isEditing) {
+      return;
+    }
+
+    const handleSelectionChange = () => {
+      refreshFormatState(false);
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, [isEditing, refreshFormatState]);
+
+  useEffect(() => {
+    if (textRef.current && textRef.current.innerHTML !== text) {
+      textRef.current.innerHTML = text;
+    }
+  }, [text]);
+
   const handleDoubleClick = () => {
     if (!isEditable) {
       return;
     }
+
     setIsEditing(true);
     setIsActive(true);
+    setShowToolbar(true);
     onInteract?.();
 
     requestAnimationFrame(() => {
-      textRef.current?.focus();
+      focusText();
+      refreshFormatState(false);
     });
   };
 
   const handleBlur = () => {
     setIsEditing(false);
     setShowToolbar(false);
+
     if (textRef.current) {
       const html = textRef.current.innerHTML.trim();
       setText(html);
@@ -179,12 +361,19 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
     if (!isEditable) {
       return;
     }
+
     if (isEditing) {
       return;
     }
-    if (event.target instanceof HTMLElement && textRef.current?.contains(event.target) && event.target !== event.currentTarget) {
+
+    if (
+      event.target instanceof HTMLElement &&
+      textRef.current?.contains(event.target) &&
+      event.target !== event.currentTarget
+    ) {
       return;
     }
+
     setIsActive(true);
     setIsDragging(true);
     setDragOrigin({
@@ -199,63 +388,16 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
     if (!isEditable) {
       return;
     }
+
     setIsActive(true);
     onInteract?.();
   };
 
-  const isNodeWithinText = useCallback(
-    (node: Node | null): boolean => {
-      if (!node || !textRef.current) {
-        return false;
-      }
-
-      if (node === textRef.current) {
-        return true;
-      }
-
-      if (node instanceof Element) {
-        return textRef.current.contains(node);
-      }
-
-      return isNodeWithinText(node.parentNode);
-    },
-    [],
-  );
-
-  const hasEditableSelection = useCallback(() => {
-    if (typeof window === 'undefined' || !textRef.current) {
-      return false;
-    }
-
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed) {
-      return false;
-    }
-
-    const { anchorNode, focusNode } = selection;
-
-    return isNodeWithinText(anchorNode) && isNodeWithinText(focusNode);
-  }, [isNodeWithinText]);
-
-  const handleContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
+  const increaseFontSize = () => {
     if (!isEditable) {
       return;
     }
 
-    const validSelection = hasEditableSelection();
-    if (!validSelection) {
-      setShowToolbar(false);
-      event.preventDefault();
-      return;
-    }
-
-    setIsActive(true);
-    setShowToolbar(true);
-    onInteract?.();
-    event.preventDefault();
-  };
-
-  const increaseFontSize = () => {
     setFontSize(prev => {
       const next = clamp(prev + 2, 8, 200);
       onChange(data.id, { fontSize: next });
@@ -264,6 +406,10 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
   };
 
   const decreaseFontSize = () => {
+    if (!isEditable) {
+      return;
+    }
+
     setFontSize(prev => {
       const next = clamp(prev - 2, 8, 200);
       onChange(data.id, { fontSize: next });
@@ -271,150 +417,307 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
     });
   };
 
-  const toggleBold = () => {
-    setBold(prev => {
-      const next = !prev;
-      onChange(data.id, { bold: next });
-      return next;
-    });
+  const handleFontFamilyChange = (font: string) => {
+    if (!isEditable) {
+      return;
+    }
+
+    setFontFamily(font);
+    onChange(data.id, { fontFamily: font });
   };
 
-  const toggleItalic = () => {
-    setItalic(prev => {
-      const next = !prev;
-      onChange(data.id, { italic: next });
-      return next;
-    });
-  };
+  const handleAlignChange = (nextAlign: SlideTextBox['align']) => {
+    if (!isEditable) {
+      return;
+    }
 
-  const toggleUnderline = () => {
-    setUnderline(prev => {
-      const next = !prev;
-      onChange(data.id, { underline: next });
-      return next;
-    });
-  };
-
-  const toggleStrikethrough = () => {
-    setStrikethrough(prev => {
-      const next = !prev;
-      onChange(data.id, { strikethrough: next });
-      return next;
-    });
-  };
-
-  const handleAlign = (nextAlign: typeof align) => {
     setAlign(nextAlign);
     onChange(data.id, { align: nextAlign });
-  };
 
-  const handleFontFamilyChange = (nextFont: string) => {
-    setFontFamily(nextFont);
-    onChange(data.id, { fontFamily: nextFont });
+    const commandMap: Record<SlideTextBox['align'], string> = {
+      left: 'justifyLeft',
+      center: 'justifyCenter',
+      right: 'justifyRight',
+    };
+
+    applyCommand(commandMap[nextAlign]);
   };
 
   const handleColorChange = (nextColor: string) => {
+    if (!isEditable) {
+      return;
+    }
+
     setColor(nextColor);
+    const { hasSelection, isInside } = getSelectionInfo();
+    if (isInside) {
+      applyCommand('foreColor', nextColor, !hasSelection);
+    }
+
     onChange(data.id, { color: nextColor });
   };
 
-  const handleDelete = () => {
-    onDelete?.(data.id);
-  };
-
-  useEffect(() => {
-    if (textRef.current && textRef.current.innerHTML !== text) {
-      textRef.current.innerHTML = text;
+  const handleContextMenuOpen = (open: boolean) => {
+    if (!isEditable) {
+      return;
     }
-  }, [text]);
+
+    if (open) {
+      setIsActive(true);
+      setShowToolbar(true);
+      setIsEditing(true);
+      onInteract?.();
+      requestAnimationFrame(() => {
+        focusText();
+        refreshFormatState(false);
+      });
+    }
+  };
 
   const containerStyles = useMemo(
     () => ({
       left: position.x,
       top: position.y,
-      zIndex: showToolbar || isActive ? 1000 : 20,
+      zIndex: showToolbar || isActive ? 2000 : 20,
     }),
     [position.x, position.y, isActive, showToolbar],
   );
 
-  const textDecoration = useMemo(() => {
-    const decorations: string[] = [];
-    if (underline) {
-      decorations.push('underline');
-    }
-    if (strikethrough) {
-      decorations.push('line-through');
-    }
-    return decorations.join(' ');
-  }, [underline, strikethrough]);
+  const toolbar = (
+    <div className="bg-background border border-border rounded-lg shadow-lg p-1 flex items-center gap-1 z-[2000]">
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="sm" className="h-8 px-2 text-xs">
+            {fontFamily}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-48 p-2">
+          <div className="space-y-1">
+            {FONT_OPTIONS.map(option => (
+              <Button
+                key={option}
+                variant="ghost"
+                size="sm"
+                className="w-full justify-start"
+                onClick={() => handleFontFamilyChange(option)}
+                style={{ fontFamily: option }}
+                type="button"
+              >
+                {option}
+              </Button>
+            ))}
+          </div>
+        </PopoverContent>
+      </Popover>
 
-  const toolbarProps = {
-    fontFamily,
-    onFontFamilyChange: handleFontFamilyChange,
-    fontSize,
-    onIncreaseFontSize: increaseFontSize,
-    onDecreaseFontSize: decreaseFontSize,
-    bold,
-    italic,
-    underline,
-    strikethrough,
-    onToggleBold: toggleBold,
-    onToggleItalic: toggleItalic,
-    onToggleUnderline: toggleUnderline,
-    onToggleStrikethrough: toggleStrikethrough,
-    align,
-    onAlign: handleAlign,
-    onBulletedList: () => runCommand('insertUnorderedList'),
-    onNumberedList: () => runCommand('insertOrderedList'),
-    color,
-    onColorChange: handleColorChange,
-    onRequestEffects: () => {},
-    onRequestAnimate: () => {},
-    onRequestPosition: () => {},
-    onDelete: handleDelete,
-  } as const;
+      <Separator orientation="vertical" className="h-6" />
+
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={decreaseFontSize}
+        type="button"
+      >
+        -
+      </Button>
+      <span className="text-sm font-medium w-8 text-center">{fontSize}</span>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={increaseFontSize}
+        type="button"
+      >
+        +
+      </Button>
+
+      <Separator orientation="vertical" className="h-6" />
+
+      <Button
+        variant={formatState.bold ? 'secondary' : 'ghost'}
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={() => applyCommand('bold', undefined, true)}
+        type="button"
+      >
+        <Bold className="h-4 w-4" />
+      </Button>
+      <Button
+        variant={formatState.italic ? 'secondary' : 'ghost'}
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={() => applyCommand('italic', undefined, true)}
+        type="button"
+      >
+        <Italic className="h-4 w-4" />
+      </Button>
+      <Button
+        variant={formatState.underline ? 'secondary' : 'ghost'}
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={() => applyCommand('underline', undefined, true)}
+        type="button"
+      >
+        <Underline className="h-4 w-4" />
+      </Button>
+      <Button
+        variant={formatState.strikethrough ? 'secondary' : 'ghost'}
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={() => applyCommand('strikeThrough', undefined, true)}
+        type="button"
+      >
+        <Strikethrough className="h-4 w-4" />
+      </Button>
+
+      <Separator orientation="vertical" className="h-6" />
+
+      <Button
+        variant={align === 'left' ? 'secondary' : 'ghost'}
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={() => handleAlignChange('left')}
+        type="button"
+      >
+        <AlignLeft className="h-4 w-4" />
+      </Button>
+      <Button
+        variant={align === 'center' ? 'secondary' : 'ghost'}
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={() => handleAlignChange('center')}
+        type="button"
+      >
+        <AlignCenter className="h-4 w-4" />
+      </Button>
+      <Button
+        variant={align === 'right' ? 'secondary' : 'ghost'}
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={() => handleAlignChange('right')}
+        type="button"
+      >
+        <AlignRight className="h-4 w-4" />
+      </Button>
+
+      <Separator orientation="vertical" className="h-6" />
+
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={() => applyCommand('insertUnorderedList')}
+        type="button"
+      >
+        <List className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 w-8 p-0"
+        onClick={() => applyCommand('insertOrderedList')}
+        type="button"
+      >
+        <ListOrdered className="h-4 w-4" />
+      </Button>
+
+      <Separator orientation="vertical" className="h-6" />
+
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+            <Palette className="h-4 w-4" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-2">
+          <input
+            type="color"
+            value={color}
+            onChange={event => handleColorChange(event.target.value)}
+            className="w-32 h-8 cursor-pointer"
+          />
+        </PopoverContent>
+      </Popover>
+
+      <Separator orientation="vertical" className="h-6" />
+
+      <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" type="button">
+        Effects
+      </Button>
+      <Button variant="ghost" size="sm" className="h-8 px-2 text-xs gap-1" type="button">
+        <Sparkles className="h-3 w-3 text-purple-500" />
+        Animate
+      </Button>
+
+      <Separator orientation="vertical" className="h-6" />
+
+      <Button variant="ghost" size="sm" className="h-8 px-2 text-xs gap-1" type="button">
+        <Move className="h-3 w-3" />
+        Position
+      </Button>
+
+      {onDelete && (
+        <>
+          <Separator orientation="vertical" className="h-6" />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0 text-destructive"
+            onClick={() => onDelete(data.id)}
+            type="button"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </>
+      )}
+    </div>
+  );
 
   return (
-    <div
-      className={cn('absolute group', isDragging && 'cursor-move opacity-60')}
-      style={containerStyles}
-      onMouseDown={handleMouseDown}
-      onClick={handleClick}
-      onContextMenu={handleContextMenu}
-    >
-      {showToolbar && isEditable && !isDragging && (
-        <TextBoxToolbar {...toolbarProps} />
-      )}
+    <ContextMenu onOpenChange={handleContextMenuOpen}>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn('absolute group', isDragging && 'cursor-move opacity-60')}
+          style={containerStyles}
+          onMouseDown={handleMouseDown}
+          onClick={handleClick}
+        >
+          {showToolbar && isEditable && !isDragging && (
+            <div className="absolute -top-14 left-0" style={{ zIndex: 2000 }}>
+              {toolbar}
+            </div>
+          )}
 
-      <div
-        ref={textRef}
-        className={cn(
-          'min-w-[200px] min-h-[40px] p-3 rounded border-2 transition-all outline-none bg-background/80 backdrop-blur',
-          isEditing
-            ? 'border-primary shadow-lg'
-            : isActive
-            ? 'border-primary/50 cursor-move'
-            : 'border-transparent hover:border-border cursor-move',
-          isDragging && 'pointer-events-none',
-        )}
-        contentEditable={isEditable && isEditing}
-        suppressContentEditableWarning
-        onDoubleClick={handleDoubleClick}
-        onBlur={handleBlur}
-        onInput={handleInput}
-        style={{
-          fontSize: `${fontSize}px`,
-          fontFamily,
-          fontWeight: bold ? 'bold' : 'normal',
-          fontStyle: italic ? 'italic' : 'normal',
-          textDecoration,
-          textAlign: align,
-          color,
-          userSelect: isEditable ? undefined : 'none',
-        }}
-        data-placeholder={DEFAULT_TEXT_BOX_TEXT}
-      />
-    </div>
+          <div
+            ref={textRef}
+            className={cn(
+              'min-w-[200px] min-h-[40px] p-3 rounded border-2 transition-all outline-none bg-background/90 backdrop-blur',
+              isEditing
+                ? 'border-primary shadow-lg'
+                : isActive
+                ? 'border-primary/50 cursor-move'
+                : 'border-transparent hover:border-border cursor-move',
+              isDragging && 'pointer-events-none',
+            )}
+            contentEditable={isEditable && isEditing}
+            suppressContentEditableWarning
+            onDoubleClick={handleDoubleClick}
+            onBlur={handleBlur}
+            onInput={handleInput}
+            style={{
+              fontSize: `${fontSize}px`,
+              fontFamily,
+              textAlign: align,
+              color,
+            }}
+            data-placeholder={DEFAULT_TEXT_BOX_TEXT}
+          />
+        </div>
+      </ContextMenuTrigger>
+
+      <ContextMenuContent className="hidden" />
+    </ContextMenu>
   );
 };
 
