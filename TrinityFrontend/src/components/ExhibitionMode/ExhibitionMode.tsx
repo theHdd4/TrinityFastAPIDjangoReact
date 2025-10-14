@@ -30,8 +30,7 @@ import {
   type ExhibitionComponentPayload,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
-import { createDefaultTextBox } from './components/operationsPalette/textBox/constants';
-import type { SlideTextBox, TextBoxPosition } from './components/operationsPalette/textBox/types';
+import { createTextBoxSlideObject } from './components/operationsPalette/textBox/constants';
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
 const SLIDESHOW_ANIMATION_MS = 450;
@@ -63,6 +62,7 @@ const ExhibitionMode = () => {
     lastLoadedContext,
     addSlideObject,
     removeSlideObject,
+    slideObjectsByCardId,
   } = useExhibitionStore();
   const { toast } = useToast();
   const { hasPermission, user } = useAuth();
@@ -113,7 +113,6 @@ const ExhibitionMode = () => {
   const [isSlideshowActive, setIsSlideshowActive] = useState(false);
   const [slideshowTransform, setSlideshowTransform] = useState('translateX(0px) scale(1)');
   const [slideshowOpacity, setSlideshowOpacity] = useState(1);
-  const [textBoxesByCard, setTextBoxesByCard] = useState<Record<string, SlideTextBox[]>>({});
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const verticalSlideRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -123,6 +122,13 @@ const ExhibitionMode = () => {
   const autoAdvanceTimerRef = useRef<number | null>(null);
   const transitionTimerRef = useRef<number | null>(null);
   const hasRequestedInitialLoadRef = useRef(false);
+
+  const generateTextBoxId = useCallback(() => {
+    if (typeof crypto !== 'undefined' && typeof (crypto as Crypto).randomUUID === 'function') {
+      return (crypto as Crypto).randomUUID();
+    }
+    return `textbox-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }, []);
 
   const clearAutoAdvanceTimer = useCallback(() => {
     if (autoAdvanceTimerRef.current !== null) {
@@ -143,87 +149,6 @@ const ExhibitionMode = () => {
     clearTransitionTimer();
   }, [clearAutoAdvanceTimer, clearTransitionTimer]);
 
-  const generateTextBoxId = useCallback(() => {
-    if (typeof crypto !== 'undefined' && typeof (crypto as Crypto).randomUUID === 'function') {
-      return (crypto as Crypto).randomUUID();
-    }
-    return `textbox-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  }, []);
-
-  const updateTextBoxState = useCallback(
-    (cardId: string, boxId: string, updates: Partial<SlideTextBox>) => {
-      setTextBoxesByCard(prev => {
-        const existing = prev[cardId];
-        if (!existing) {
-          return prev;
-        }
-
-        let hasChanged = false;
-        const next = existing.map(box => {
-          if (box.id !== boxId) {
-            return box;
-          }
-
-          const updated = { ...box, ...updates };
-          hasChanged = Object.entries(updates).some(([key, value]) => (box as Record<string, unknown>)[key] !== value);
-          return updated;
-        });
-
-        if (!hasChanged) {
-          return prev;
-        }
-
-        return {
-          ...prev,
-          [cardId]: next,
-        };
-      });
-    },
-    [],
-  );
-
-  const handleTextBoxTextChange = useCallback(
-    (cardId: string, boxId: string, text: string) => {
-      updateTextBoxState(cardId, boxId, { text });
-    },
-    [updateTextBoxState],
-  );
-
-  const handleTextBoxPositionChange = useCallback(
-    (cardId: string, boxId: string, position: TextBoxPosition) => {
-      updateTextBoxState(cardId, boxId, { x: position.x, y: position.y });
-    },
-    [updateTextBoxState],
-  );
-
-  const handleTextBoxRemove = useCallback((cardId: string, boxId: string) => {
-    setTextBoxesByCard(prev => {
-      const existing = prev[cardId];
-      if (!existing) {
-        return prev;
-      }
-
-      const filtered = existing.filter(box => box.id !== boxId);
-      if (filtered.length === existing.length) {
-        return prev;
-      }
-
-      const next = { ...prev };
-      if (filtered.length > 0) {
-        next[cardId] = filtered;
-      } else {
-        delete next[cardId];
-      }
-      return next;
-    });
-  }, []);
-
-  const handleTextBoxStyleChange = useCallback(
-    (cardId: string, boxId: string, updates: Partial<SlideTextBox>) => {
-      updateTextBoxState(cardId, boxId, updates);
-    },
-    [updateTextBoxState],
-  );
 
   const getTransitionStates = useCallback(
     (transition: SlideshowTransition, direction: 'forward' | 'backward') => {
@@ -1076,20 +1001,18 @@ const ExhibitionMode = () => {
       return;
     }
 
-    setTextBoxesByCard(prev => {
-      const existing = prev[targetCard.id] ?? [];
-      const offset = existing.length * 32;
-      const newBox = createDefaultTextBox(generateTextBoxId(), {
+    const existingObjects = slideObjectsByCardId[targetCard.id] ?? [];
+    const existingTextBoxes = existingObjects.filter(object => object.type === 'text-box').length;
+    const offset = existingTextBoxes * 32;
+
+    addSlideObject(
+      targetCard.id,
+      createTextBoxSlideObject(generateTextBoxId(), {
         x: 120 + offset,
         y: 120 + offset,
-      });
-
-      return {
-        ...prev,
-        [targetCard.id]: [...existing, newBox],
-      };
-    });
-  }, [currentSlide, exhibitedCards, generateTextBoxId]);
+      }),
+    );
+  }, [addSlideObject, currentSlide, exhibitedCards, generateTextBoxId, slideObjectsByCardId]);
   const slideWrapperStyle: React.CSSProperties | undefined = isSlideshowActive
     ? {
         opacity: slideshowOpacity,
@@ -1238,11 +1161,6 @@ const ExhibitionMode = () => {
                   isActive
                   onTitleChange={handleTitleChange}
                   presenterName={presenterDisplayName}
-                  textBoxes={textBoxesByCard[currentCard.id] ?? []}
-                  onTextBoxChange={(boxId, updates) => handleTextBoxStyleChange(currentCard.id, boxId, updates)}
-                  onTextBoxTextChange={(boxId, text) => handleTextBoxTextChange(currentCard.id, boxId, text)}
-                  onTextBoxPositionChange={(boxId, position) => handleTextBoxPositionChange(currentCard.id, boxId, position)}
-                  onTextBoxRemove={boxId => handleTextBoxRemove(currentCard.id, boxId)}
                 />
               ) : (
                 emptyCanvas
@@ -1271,11 +1189,6 @@ const ExhibitionMode = () => {
                     isActive={currentSlide === index}
                     onTitleChange={handleTitleChange}
                     presenterName={presenterDisplayName}
-                    textBoxes={textBoxesByCard[card.id] ?? []}
-                    onTextBoxChange={(boxId, updates) => handleTextBoxStyleChange(card.id, boxId, updates)}
-                    onTextBoxTextChange={(boxId, text) => handleTextBoxTextChange(card.id, boxId, text)}
-                    onTextBoxPositionChange={(boxId, position) => handleTextBoxPositionChange(card.id, boxId, position)}
-                    onTextBoxRemove={boxId => handleTextBoxRemove(card.id, boxId)}
                   />
                 </div>
               ))}

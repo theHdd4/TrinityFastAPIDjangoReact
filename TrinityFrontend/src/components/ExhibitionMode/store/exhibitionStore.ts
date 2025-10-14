@@ -345,6 +345,49 @@ const synchroniseSlideObjects = (
   const atomMap = new Map(atoms.map(atom => [atom.id, atom]));
   const used = new Set<string>();
   let next: SlideObject[] = [];
+  const titleId = buildSlideTitleObjectId(card.id);
+  const resolvedTitle = resolveCardTitle(card, atoms);
+
+  const ensureTitleProps = (props: Record<string, unknown> | undefined): Record<string, unknown> => {
+    const nextProps: Record<string, unknown> = { ...(props || {}) };
+    nextProps.text = resolvedTitle;
+    const fontSize = Number(nextProps.fontSize);
+    nextProps.fontSize = Number.isFinite(fontSize) && fontSize > 0 ? fontSize : 36;
+    nextProps.fontFamily =
+      typeof nextProps.fontFamily === 'string' && nextProps.fontFamily.trim().length > 0
+        ? nextProps.fontFamily
+        : 'Times New Roman';
+    nextProps.bold = typeof nextProps.bold === 'boolean' ? nextProps.bold : true;
+    nextProps.italic = Boolean(nextProps.italic);
+    nextProps.underline = Boolean(nextProps.underline);
+    nextProps.strikethrough = Boolean(nextProps.strikethrough);
+    nextProps.align =
+      nextProps.align === 'center' || nextProps.align === 'right' ? nextProps.align : 'left';
+    nextProps.color =
+      typeof nextProps.color === 'string' && nextProps.color.trim().length > 0
+        ? nextProps.color
+        : '#111827';
+    return nextProps;
+  };
+
+  const createTitleObject = (base?: SlideObject | null): SlideObject => {
+    const baseProps = base?.props as Record<string, unknown> | undefined;
+    const resolvedZIndex = typeof base?.zIndex === 'number' ? base.zIndex : next.length + 1;
+
+    return {
+      id: titleId,
+      type: 'text-box',
+      x: typeof base?.x === 'number' ? base.x : 64,
+      y: typeof base?.y === 'number' ? base.y : 48,
+      width: typeof base?.width === 'number' ? base.width : DEFAULT_TITLE_OBJECT_WIDTH,
+      height: typeof base?.height === 'number' ? base.height : DEFAULT_TITLE_OBJECT_HEIGHT,
+      zIndex: resolvedZIndex,
+      groupId: base?.groupId ?? null,
+      props: ensureTitleProps(baseProps),
+    };
+  };
+
+  let titleSource: SlideObject | null = null;
 
   if (Array.isArray(existing)) {
     existing.forEach(object => {
@@ -364,15 +407,9 @@ const synchroniseSlideObjects = (
           props: { ...(object.props || {}), atom },
         });
       } else if (object.type === 'title') {
-        next.push({
-          ...object,
-          id: buildSlideTitleObjectId(card.id),
-          type: 'title',
-          props: {
-            ...(object.props || {}),
-            text: resolveCardTitle(card, atoms),
-          },
-        });
+        titleSource = { ...object };
+      } else if (object.type === 'text-box' && object.id === titleId) {
+        titleSource = { ...object };
       } else if (object.type === 'accent-image') {
         const accentImage = card.presentationSettings?.accentImage;
         if (!accentImage) {
@@ -412,7 +449,6 @@ const synchroniseSlideObjects = (
   }
 
   const accentId = buildSlideAccentImageObjectId(card.id);
-  const titleId = buildSlideTitleObjectId(card.id);
 
   const accentImage = card.presentationSettings?.accentImage;
   if (accentImage) {
@@ -450,34 +486,14 @@ const synchroniseSlideObjects = (
     next = next.filter(object => object.id !== accentId && object.type !== 'accent-image');
   }
 
-  const resolvedTitle = resolveCardTitle(card, atoms);
-  const titleIndex = next.findIndex(object => object.id === titleId || object.type === 'title');
-  const titleObject: SlideObject = titleIndex !== -1
-    ? {
-        ...next[titleIndex],
-        id: titleId,
-        type: 'title',
-        props: {
-          ...(next[titleIndex].props || {}),
-          text: resolvedTitle,
-        },
-      }
-    : {
-        id: titleId,
-        type: 'title',
-        x: 64,
-        y: 48,
-        width: DEFAULT_TITLE_OBJECT_WIDTH,
-        height: DEFAULT_TITLE_OBJECT_HEIGHT,
-        zIndex: next.length + 1,
-        groupId: null,
-        props: {
-          text: resolvedTitle,
-        },
-      };
+  const titleObject = createTitleObject(titleSource);
 
-  next = next.filter(object => object.id !== titleId && object.type !== 'title');
-  next = [...next, titleObject];
+  next = next.filter(object => object.id !== titleId);
+  const finalTitleObject: SlideObject = {
+    ...titleObject,
+    zIndex: typeof titleObject.zIndex === 'number' ? titleObject.zIndex : next.length + 1,
+  };
+  next = [...next, finalTitleObject];
 
   return normaliseZIndices(next);
 };

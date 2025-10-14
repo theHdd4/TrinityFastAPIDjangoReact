@@ -1,10 +1,7 @@
 export type TextAlignOption = 'left' | 'center' | 'right';
 
-export interface SlideTextBox {
-  id: string;
+export interface TextBoxFormatting {
   text: string;
-  x: number;
-  y: number;
   fontSize: number;
   fontFamily: string;
   bold: boolean;
@@ -13,9 +10,4 @@ export interface SlideTextBox {
   strikethrough: boolean;
   align: TextAlignOption;
   color: string;
-}
-
-export interface TextBoxPosition {
-  x: number;
-  y: number;
 }
