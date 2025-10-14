@@ -27,6 +27,7 @@ import { logSessionState, addNavigationItem } from "@/lib/session";
 import {
   useLaboratoryStore,
   type FeatureOverviewExhibitionSelection,
+  type FeatureOverviewExhibitionComponentType,
 } from "@/components/LaboratoryMode/store/laboratoryStore";
 import { useToast } from "@/hooks/use-toast";
 import { csvParse } from "d3-dsv";
@@ -1059,7 +1060,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   }, [settings.exhibitionSelections]);
 
   const createSelectionDescriptor = React.useCallback(
-    (row: any, metric: string) => {
+    (row: any, metric: string, componentType: FeatureOverviewExhibitionComponentType) => {
       const dimensionEntries = dimensionCols
         .map((column) => {
           const rawValue = row?.[column.toLowerCase()];
@@ -1076,7 +1077,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       const keyParts = dimensionEntries
         .map((entry) => `${entry.name.toLowerCase()}=${entry.value}`)
         .sort((a, b) => a.localeCompare(b));
-      const key = `${(metric || "").toString().toLowerCase()}::${keyParts.join("|")}`;
+      const key = `${componentType}::${(metric || "").toString().toLowerCase()}::${keyParts.join("|")}`;
 
       const labelValues = dimensionEntries
         .map((entry) => entry.value)
@@ -1088,14 +1089,20 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         combination,
         dimensions: dimensionEntries,
         label,
+        componentType,
       };
     },
     [dimensionCols],
   );
 
   const updateExhibitionSelection = React.useCallback(
-    (row: any, metric: string, checked: boolean | "indeterminate") => {
-      const descriptor = createSelectionDescriptor(row, metric);
+    (
+      row: any,
+      metric: string,
+      componentType: FeatureOverviewExhibitionComponentType,
+      checked: boolean | "indeterminate",
+    ) => {
+      const descriptor = createSelectionDescriptor(row, metric, componentType);
       const existingIndex = exhibitionSelections.findIndex((entry) => entry.key === descriptor.key);
       const nextChecked = checked === true;
 
@@ -1115,29 +1122,38 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         const selectionSnapshot: FeatureOverviewExhibitionSelection = {
           key: descriptor.key,
           metric,
+          componentType,
           combination: descriptor.combination,
           dimensions: descriptor.dimensions,
           rowId: row?.id ?? undefined,
           label: descriptor.label,
           statisticalDetails: metricSnapshot
             ? {
-                summary: metricSnapshot.summary ? cloneDeep(metricSnapshot.summary) : undefined,
+                summary:
+                  componentType === "statistical_summary"
+                    ? metricSnapshot.summary
+                      ? cloneDeep(metricSnapshot.summary)
+                      : undefined
+                    : undefined,
                 timeseries: Array.isArray(metricSnapshot.timeseries)
                   ? cloneDeep(metricSnapshot.timeseries)
                   : undefined,
                 full: metricSnapshot,
               }
             : undefined,
-          chartState: {
-            chartType,
-            theme: chartTheme,
-            showDataLabels,
-            showAxisLabels,
-            showGrid,
-            showLegend,
-            xAxisField,
-            yAxisField: metric,
-          },
+          chartState:
+            componentType === "trend_analysis"
+              ? {
+                  chartType,
+                  theme: chartTheme,
+                  showDataLabels,
+                  showAxisLabels,
+                  showGrid,
+                  showLegend,
+                  xAxisField,
+                  yAxisField: metric,
+                }
+              : undefined,
           featureContext: {
             dataSource: dataSourceName,
             availableMetrics: [...availableMetrics],
@@ -1180,11 +1196,11 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   );
 
   const stageSelectionForExhibition = React.useCallback(
-    (row: any, metric: string) => {
-      const descriptor = createSelectionDescriptor(row, metric);
+    (row: any, metric: string, componentType: FeatureOverviewExhibitionComponentType) => {
+      const descriptor = createSelectionDescriptor(row, metric, componentType);
       const alreadySelected = exhibitionSelections.some((entry) => entry.key === descriptor.key);
 
-      updateExhibitionSelection(row, metric, true);
+      updateExhibitionSelection(row, metric, componentType, true);
       toast({
         title: alreadySelected ? "Exhibition staging updated" : "Component staged for exhibition",
         description:
@@ -2056,9 +2072,21 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                   </thead>
                                   <tbody>
                                     {(Array.isArray(settings.yAxes) ? settings.yAxes : []).map((m) => {
-                                      const descriptor = createSelectionDescriptor(row, m);
-                                      const isSelected = exhibitionSelections.some(
-                                        (entry) => entry.key === descriptor.key,
+                                      const summaryDescriptor = createSelectionDescriptor(
+                                        row,
+                                        m,
+                                        "statistical_summary",
+                                      );
+                                      const chartDescriptor = createSelectionDescriptor(
+                                        row,
+                                        m,
+                                        "trend_analysis",
+                                      );
+                                      const isSummarySelected = exhibitionSelections.some(
+                                        (entry) => entry.key === summaryDescriptor.key,
+                                      );
+                                      const isChartSelected = exhibitionSelections.some(
+                                        (entry) => entry.key === chartDescriptor.key,
                                       );
 
                                       return (
@@ -2067,13 +2095,13 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                             <ContextMenuTrigger asChild>
                                               <tr
                                                 className={`border-b last:border-0 hover:bg-gray-50 transition-colors ${
-                                                  isSelected ? "bg-amber-50/60" : ""
+                                                  isSummarySelected ? "bg-amber-50/60" : ""
                                                 }`}
                                               >
                                                 <td className="p-3 whitespace-nowrap sticky left-0 bg-white z-10 font-medium">
                                                   <div className="flex items-center gap-2">
                                                     <span>{m}</span>
-                                                    {isSelected && (
+                                                    {isSummarySelected && (
                                                       <Badge
                                                         variant="outline"
                                                         className="text-[10px] uppercase tracking-wide text-amber-700 border-amber-300 bg-amber-50"
@@ -2104,7 +2132,13 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                             </ContextMenuTrigger>
                                             <ContextMenuContent className="w-56 bg-white border border-gray-200 shadow-lg rounded-md p-1">
                                               <ContextMenuItem
-                                                onClick={() => stageSelectionForExhibition(row, m)}
+                                                onClick={() =>
+                                                  stageSelectionForExhibition(
+                                                    row,
+                                                    m,
+                                                    "statistical_summary",
+                                                  )
+                                                }
                                                 className="cursor-pointer"
                                               >
                                                 Exhibit this component
@@ -2118,7 +2152,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                                   <ContextMenuTrigger asChild>
                                                     <Card
                                                       className={`border ${
-                                                        isSelected ? "border-amber-400" : "border-gray-200"
+                                                        isChartSelected ? "border-amber-400" : "border-gray-200"
                                                       } shadow-lg bg-white/95 backdrop-blur-sm overflow-hidden transform transition-all duration-300 relative flex flex-col group hover:shadow-xl m-4`}
                                                     >
                                                       <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-between relative flex-shrink-0">
@@ -2205,9 +2239,15 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                                       </div>
                                                     </Card>
                                                   </ContextMenuTrigger>
-                                                  <ContextMenuContent className="w-56 bg-white border border-gray-200 shadow-lg rounded-md p-1">
-                                                    <ContextMenuItem
-                                                      onClick={() => stageSelectionForExhibition(row, m)}
+                                                 <ContextMenuContent className="w-56 bg-white border border-gray-200 shadow-lg rounded-md p-1">
+                                                   <ContextMenuItem
+                                                      onClick={() =>
+                                                        stageSelectionForExhibition(
+                                                          row,
+                                                          m,
+                                                          "trend_analysis",
+                                                        )
+                                                      }
                                                       className="cursor-pointer"
                                                     >
                                                       Exhibit this component

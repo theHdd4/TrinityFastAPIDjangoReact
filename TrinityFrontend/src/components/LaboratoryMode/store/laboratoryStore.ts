@@ -100,6 +100,10 @@ export interface FeatureOverviewExhibitionSelectionDimension {
   value: string;
 }
 
+export type FeatureOverviewExhibitionComponentType =
+  | 'statistical_summary'
+  | 'trend_analysis';
+
 export interface FeatureOverviewExhibitionSelectionStatistics {
   summary?: Record<string, any>;
   timeseries?: Array<Record<string, any>>;
@@ -128,6 +132,7 @@ export interface FeatureOverviewExhibitionSelectionContext {
 export interface FeatureOverviewExhibitionSelection {
   key: string;
   metric: string;
+  componentType?: FeatureOverviewExhibitionComponentType;
   combination: Record<string, string>;
   dimensions: FeatureOverviewExhibitionSelectionDimension[];
   rowId?: string | number;
