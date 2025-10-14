@@ -1391,7 +1391,7 @@ const Home = () => {
                   Powered by <span className="text-accent">Agentic AI co-pilot</span>
                 </h3>
                 <p className="text-lg text-muted-foreground leading-relaxed">
-                  Reduces analytical workload by up to 70%, automatically guiding model building, explaining results, and suggesting next steps. Your intelligent assistant for data science.
+                  Powered by Parameter-Efficient Fine-Tuning (PEFT), Iterative Distillation, and adaptive Data Augmentation, our AI reduces analytical workload by up to 70% - dynamically guiding model development, interpreting outcomes, and refining predictions via Test-Time Scaling (TTS). Your intelligent co-pilot for end-to-end data science.
                 </p>
               </div>
             </div>
