@@ -35,7 +35,7 @@ import {
   DEFAULT_PRESENTATION_SETTINGS,
 } from '../store/exhibitionStore';
 import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
-import { ExhibitionTextBox } from './operationsPalette/textBox/TextBox';
+import { TextBox } from './operationsPalette/textBox/TextBox';
 import type { SlideTextBox, TextBoxPosition } from './operationsPalette/textBox/types';
 
 interface SlideCanvasProps {
@@ -697,13 +697,26 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                         </div>
                       )}
                       {textBoxes.map(textBox => (
-                        <ExhibitionTextBox
+                        <TextBox
                           key={textBox.id}
-                          data={textBox}
+                          id={textBox.id}
+                          initialText={textBox.text}
+                          initialX={textBox.x}
+                          initialY={textBox.y}
+                          initialFontSize={textBox.fontSize}
+                          initialFontFamily={textBox.fontFamily}
+                          initialBold={textBox.bold}
+                          initialItalic={textBox.italic}
+                          initialUnderline={textBox.underline}
+                          initialStrikethrough={textBox.strikethrough}
+                          initialAlign={textBox.align}
+                          initialColor={textBox.color}
                           isEditable={canEdit}
-                          onChange={(id, updates) => onTextBoxChange?.(id, updates)}
-                          onTextChange={(id, updatedText) => onTextBoxTextChange?.(id, updatedText)}
-                          onPositionChange={(id, nextPosition) => onTextBoxPositionChange?.(id, nextPosition)}
+                          onUpdate={(id, updatedText) => onTextBoxTextChange?.(id, updatedText)}
+                          onStyleChange={(id, updates) => onTextBoxChange?.(id, updates)}
+                          onPositionChange={(id, nextPosition) =>
+                            onTextBoxPositionChange?.(id, nextPosition)
+                          }
                           onDelete={id => onTextBoxRemove?.(id)}
                           onInteract={handleCanvasInteraction}
                         />

@@ -46,6 +46,27 @@ interface ExhibitionTextBoxProps {
   onDelete?: (id: string) => void;
 }
 
+export interface TextBoxProps {
+  id: string;
+  initialText?: string;
+  initialX?: number;
+  initialY?: number;
+  initialFontSize?: number;
+  initialFontFamily?: string;
+  initialBold?: boolean;
+  initialItalic?: boolean;
+  initialUnderline?: boolean;
+  initialStrikethrough?: boolean;
+  initialAlign?: SlideTextBox['align'];
+  initialColor?: string;
+  isEditable?: boolean;
+  onUpdate?: (id: string, text: string) => void;
+  onStyleChange?: (id: string, updates: Partial<SlideTextBox>) => void;
+  onPositionChange?: (id: string, position: TextBoxPosition) => void;
+  onDelete?: (id: string) => void;
+  onInteract?: () => void;
+}
+
 type FormatState = {
   bold: boolean;
   italic: boolean;
@@ -718,6 +739,119 @@ export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
 
       <ContextMenuContent className="hidden" />
     </ContextMenu>
+  );
+};
+
+export const TextBox: React.FC<TextBoxProps> = ({
+  id,
+  initialText = DEFAULT_TEXT_BOX_TEXT,
+  initialX = 100,
+  initialY = 100,
+  initialFontSize = 16,
+  initialFontFamily = FONT_OPTIONS[0],
+  initialBold = false,
+  initialItalic = false,
+  initialUnderline = false,
+  initialStrikethrough = false,
+  initialAlign = 'left',
+  initialColor = '#000000',
+  isEditable = true,
+  onUpdate,
+  onStyleChange,
+  onPositionChange,
+  onDelete,
+  onInteract,
+}) => {
+  const [boxData, setBoxData] = useState<SlideTextBox>(() => ({
+    id,
+    text: initialText,
+    x: initialX,
+    y: initialY,
+    fontSize: initialFontSize,
+    fontFamily: initialFontFamily,
+    bold: initialBold,
+    italic: initialItalic,
+    underline: initialUnderline,
+    strikethrough: initialStrikethrough,
+    align: initialAlign,
+    color: initialColor,
+  }));
+
+  useEffect(() => {
+    setBoxData(prev => (prev.text === initialText ? prev : { ...prev, text: initialText }));
+  }, [initialText]);
+
+  useEffect(() => {
+    setBoxData(prev => (prev.x === initialX && prev.y === initialY ? prev : { ...prev, x: initialX, y: initialY }));
+  }, [initialX, initialY]);
+
+  useEffect(() => {
+    setBoxData(prev =>
+      prev.fontSize === initialFontSize ? prev : { ...prev, fontSize: initialFontSize },
+    );
+  }, [initialFontSize]);
+
+  useEffect(() => {
+    setBoxData(prev =>
+      prev.fontFamily === initialFontFamily ? prev : { ...prev, fontFamily: initialFontFamily },
+    );
+  }, [initialFontFamily]);
+
+  useEffect(() => {
+    setBoxData(prev => (prev.align === initialAlign ? prev : { ...prev, align: initialAlign }));
+  }, [initialAlign]);
+
+  useEffect(() => {
+    setBoxData(prev => (prev.color === initialColor ? prev : { ...prev, color: initialColor }));
+  }, [initialColor]);
+
+  useEffect(() => {
+    setBoxData(prev => (prev.bold === initialBold ? prev : { ...prev, bold: initialBold }));
+  }, [initialBold]);
+
+  useEffect(() => {
+    setBoxData(prev => (prev.italic === initialItalic ? prev : { ...prev, italic: initialItalic }));
+  }, [initialItalic]);
+
+  useEffect(() => {
+    setBoxData(prev =>
+      prev.underline === initialUnderline ? prev : { ...prev, underline: initialUnderline },
+    );
+  }, [initialUnderline]);
+
+  useEffect(() => {
+    setBoxData(prev =>
+      prev.strikethrough === initialStrikethrough
+        ? prev
+        : { ...prev, strikethrough: initialStrikethrough },
+    );
+  }, [initialStrikethrough]);
+
+  const handleStyleChange = (boxId: string, updates: Partial<SlideTextBox>) => {
+    setBoxData(prev => ({ ...prev, ...updates }));
+    onStyleChange?.(boxId, updates);
+  };
+
+  const handleTextChange = (boxId: string, nextText: string) => {
+    setBoxData(prev => (prev.text === nextText ? prev : { ...prev, text: nextText }));
+    onUpdate?.(boxId, nextText);
+  };
+
+  const handlePositionChange = (boxId: string, position: TextBoxPosition) => {
+    setBoxData(prev => ({ ...prev, ...position }));
+    onPositionChange?.(boxId, position);
+  };
+
+  return (
+    <ExhibitionTextBox
+      data={boxData}
+      isEditable={isEditable}
+      onTextChange={handleTextChange}
+      onChange={handleStyleChange}
+      onPositionChange={handlePositionChange}
+      onDelete={onDelete}
+      onInteract={onInteract}
+    />
   );
 };
 
