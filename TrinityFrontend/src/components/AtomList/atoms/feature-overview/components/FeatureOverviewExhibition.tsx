@@ -86,6 +86,34 @@ const toNumeric = (value: unknown): number | null => {
   return null;
 };
 
+const normaliseKeyToken = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const findMatchingKey = (record: Record<string, unknown>, candidate?: string | null) => {
+  if (!candidate || typeof candidate !== 'string') {
+    return undefined;
+  }
+
+  if (candidate in record && record[candidate] != null) {
+    return candidate;
+  }
+
+  const normalisedCandidate = normaliseKeyToken(candidate);
+  return Object.keys(record).find(key => normaliseKeyToken(key) === normalisedCandidate && record[key] != null);
+};
+
+const readFlexibleValue = (
+  record: Record<string, unknown>,
+  ...candidates: Array<string | undefined | null>
+) => {
+  for (const candidate of candidates) {
+    const key = findMatchingKey(record, candidate ?? undefined);
+    if (key) {
+      return record[key];
+    }
+  }
+  return undefined;
+};
+
 const normaliseTrendChartData = (
   stats: FeatureOverviewExhibitionSelection['statisticalDetails'] | undefined,
   chartState: FeatureOverviewExhibitionSelection['chartState'] | undefined,
@@ -105,15 +133,19 @@ const normaliseTrendChartData = (
 
       const record = entry as Record<string, unknown>;
 
-      const resolvedX =
-        record[xField] ?? record.date ?? record.timestamp ?? record.time ?? index + 1;
+      const resolvedXValue =
+        readFlexibleValue(record, xField, 'date', 'timestamp', 'time', 'period', 'time_period', 'timeperiod') ??
+        index + 1;
 
-      const rawValue =
-        record[yField] ??
-        record.value ??
-        record.metricValue ??
-        record.metric_value ??
-        record.y;
+      const rawValue = readFlexibleValue(
+        record,
+        yField,
+        'value',
+        'metricValue',
+        'metric_value',
+        'metric value',
+        'y',
+      );
 
       const numericValue = toNumeric(rawValue);
       if (numericValue == null) {
@@ -121,12 +153,13 @@ const normaliseTrendChartData = (
       }
 
       const point: Record<string, unknown> = {
-        [xField]: resolvedX,
+        [xField]: resolvedXValue,
         [yField]: numericValue,
       };
 
       const resolvedLegend =
-        (legendField ? record[legendField] : null) ?? record.series ?? record.legend;
+        (legendField ? readFlexibleValue(record, legendField) : undefined) ??
+        readFlexibleValue(record, 'series', 'legend');
 
       if (legendField && resolvedLegend != null) {
         point[legendField] = resolvedLegend;

@@ -523,47 +523,81 @@ const toRendererType = (value: unknown): ChartRendererType | null => {
   }
 };
 
+const normaliseKeyToken = (key: string) => key.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const toNumeric = (value: unknown): number | null => {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const normalized = trimmed.replace(/[\s,]+/g, '');
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const findMatchingKey = (row: Record<string, unknown>, candidate?: string) => {
+  if (!candidate || typeof candidate !== 'string') {
+    return undefined;
+  }
+
+  if (candidate in row && row[candidate] != null) {
+    return candidate;
+  }
+
+  const normalizedCandidate = normaliseKeyToken(candidate);
+  return Object.keys(row).find(
+    key => normaliseKeyToken(key) === normalizedCandidate && row[key] != null,
+  );
+};
+
+const readFlexibleValue = (
+  row: Record<string, unknown>,
+  ...candidates: Array<string | undefined>
+) => {
+  for (const candidate of candidates) {
+    const matched = findMatchingKey(row, candidate);
+    if (matched) {
+      return row[matched];
+    }
+  }
+  return undefined;
+};
+
 const sanitizeTimeseries = (
   entries: Array<Record<string, unknown>>,
   xField: string,
   yField: string,
 ): Array<Record<string, unknown>> => {
-  const xFieldFallbacks = [xField, 'date', 'timestamp', 'time'].filter(
-    (field): field is string => typeof field === 'string' && field.length > 0,
-  );
-  const yFieldFallbacks = [yField, 'value', 'metricValue', 'metric_value', 'y'].filter(
-    (field, index, array): field is string =>
-      typeof field === 'string' && field.length > 0 && array.indexOf(field) === index,
-  );
-
   return entries
     .map((entry, index) => {
       const normalised: Record<string, unknown> = { ...entry };
 
-      const resolvedX = xFieldFallbacks.find(field => entry[field] != null);
-      if (resolvedX) {
-        normalised[xField] = entry[resolvedX];
-      } else if (normalised[xField] == null) {
-        normalised[xField] = index + 1;
-      }
+      const resolvedXValue =
+        readFlexibleValue(entry, xField, 'date', 'timestamp', 'time', 'period', 'time_period', 'timeperiod') ??
+        index + 1;
 
-      const resolvedYField = yFieldFallbacks.find(field => entry[field] != null);
-      if (!resolvedYField) {
+      const rawValue = readFlexibleValue(
+        entry,
+        yField,
+        'value',
+        'metricValue',
+        'metric_value',
+        'metric value',
+        'y',
+      );
+
+      const numericValue = toNumeric(rawValue);
+      if (numericValue == null) {
         return null;
       }
 
-      const rawValue = entry[resolvedYField];
-      const numericValue =
-        typeof rawValue === 'number'
-          ? rawValue
-          : typeof rawValue === 'string'
-          ? Number(rawValue)
-          : Number.NaN;
-
-      if (!Number.isFinite(numericValue)) {
-        return null;
-      }
-
+      normalised[xField] = resolvedXValue;
       normalised[yField] = numericValue;
 
       return normalised;
@@ -587,23 +621,21 @@ const prepareChartData = (
 
   if (isRecord(stats.summary)) {
     return Object.entries(stats.summary)
-      .map(([key, value], index) => ({
-        [xField]: key || index,
-        [yField]: typeof value === 'number' ? value : Number(value),
-      }))
-      .filter(entry => Number.isFinite(entry[yField] as number));
+      .map(([key, value], index) => {
+        const numericValue = toNumeric(value);
+        if (numericValue == null) {
+          return null;
+        }
+
+        return {
+          [xField]: key || index,
+          [yField]: numericValue,
+        } as Record<string, unknown>;
+      })
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry));
   }
 
   return [];
-};
-
-const findMatchingKey = (row: Record<string, unknown>, candidate?: string) => {
-  if (!candidate) {
-    return undefined;
-  }
-
-  const lower = candidate.toLowerCase();
-  return Object.keys(row).find(key => key.toLowerCase() === lower);
 };
 
 const ensureRenderableChartConfig = (
