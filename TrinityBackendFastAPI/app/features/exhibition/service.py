@@ -9,6 +9,7 @@ from threading import Lock
 from typing import Any, Dict, Iterable, List, Optional
 
 from fastapi.concurrency import run_in_threadpool
+from pydantic import ValidationError
 
 try:  # pragma: no cover - pymongo should be installed but we guard for tests
     from pymongo.collection import Collection
@@ -19,6 +20,7 @@ except Exception:  # pragma: no cover - executed only if pymongo missing
 
 if __package__:
     from .mongo import ensure_mongo_connection, get_mongo_collection
+    from .schemas import VisualizationManifest
 else:  # pragma: no cover - allows direct module loading in unit tests
     import importlib.util
 
@@ -29,6 +31,7 @@ else:  # pragma: no cover - allows direct module loading in unit tests
         _mongo_spec.loader.exec_module(_mongo_module)
         ensure_mongo_connection = _mongo_module.ensure_mongo_connection  # type: ignore[attr-defined]
         get_mongo_collection = _mongo_module.get_mongo_collection  # type: ignore[attr-defined]
+        from .schemas import VisualizationManifest
     else:  # pragma: no cover - fallback when spec cannot be resolved
         def ensure_mongo_connection(*_args: Any, **_kwargs: Any) -> bool:
             logging.warning("ExhibitionStorage could not import Mongo helpers; Mongo disabled")
@@ -333,6 +336,56 @@ class ExhibitionStorage:
             payloads.append(entry)
         return payloads
 
+    @staticmethod
+    def _extract_manifest_from_component(component: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        manifest_candidate = component.get("visualisation_manifest") or component.get("visualisationManifest")
+        if isinstance(manifest_candidate, dict):
+            return manifest_candidate
+
+        metadata = component.get("metadata")
+        if isinstance(metadata, dict):
+            manifest_from_metadata = metadata.get("visualisationManifest") or metadata.get("visualisation_manifest")
+            if isinstance(manifest_from_metadata, dict):
+                return manifest_from_metadata
+
+        return None
+
+    @staticmethod
+    def _match_manifest_identifier(manifest: Dict[str, Any], target_id: str) -> bool:
+        candidate_id = manifest.get("manifestId")
+        if not candidate_id:
+            candidate_id = manifest.get("manifest_id") or manifest.get("manifestid") or manifest.get("id")
+
+        if isinstance(candidate_id, str):
+            return candidate_id.strip() == target_id
+
+        return False
+
+    def _find_manifest_in_entries(self, entries: Iterable[Dict[str, Any]], manifest_id: str) -> Optional[VisualizationManifest]:
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+
+            raw_components = self._resolve_component_payload(entry)
+            components = self._sanitise_components(raw_components)
+            for component in components:
+                manifest_payload = self._extract_manifest_from_component(component)
+                if not manifest_payload:
+                    continue
+
+                if not self._match_manifest_identifier(manifest_payload, manifest_id):
+                    continue
+
+                try:
+                    return VisualizationManifest.parse_obj(manifest_payload)
+                except ValidationError:
+                    logging.warning(
+                        "[ExhibitionStorage] Unable to parse visualisation manifest for %s", manifest_id,
+                    )
+                    continue
+
+        return None
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -378,6 +431,47 @@ class ExhibitionStorage:
                 return None
 
             return self._aggregate_entries(client, app, project, records)
+
+        return await run_in_threadpool(_lookup)
+
+    async def get_manifest(
+        self,
+        client_name: str,
+        app_name: str,
+        project_name: str,
+        manifest_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        target_manifest = self._normalise_identity(manifest_id)
+        if not target_manifest:
+            return None
+
+        client = self._normalise_identity(client_name)
+        app = self._normalise_identity(app_name)
+        project = self._normalise_identity(project_name)
+
+        if self._ensure_mongo_ready():
+            manifest = await run_in_threadpool(
+                lambda: self._find_manifest_in_entries(
+                    self._fetch_project_entries_from_mongo(client, app, project),
+                    target_manifest,
+                )
+            )
+            if manifest is not None:
+                return manifest.dict(by_alias=True)
+
+        def _lookup() -> Optional[Dict[str, Any]]:
+            records = [
+                record
+                for record in self._read_all_sync()
+                if self._normalise_identity(str(record.get("client_name", ""))) == client
+                and self._normalise_identity(str(record.get("app_name", ""))) == app
+                and self._normalise_identity(str(record.get("project_name", ""))) == project
+            ]
+
+            manifest = self._find_manifest_in_entries(records, target_manifest)
+            if manifest is None:
+                return None
+            return manifest.dict(by_alias=True)
 
         return await run_in_threadpool(_lookup)
 

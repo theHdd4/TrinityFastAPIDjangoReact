@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import TextBoxDisplay from '@/components/AtomList/atoms/text-box/TextBoxDisplay';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -957,6 +957,7 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
     [atom.manifestRef, atom.metadata, atom.visualisationManifest],
   );
 
+  const loadManifest = useExhibitionStore(state => state.loadManifest);
   const manifestFromStore = useExhibitionStore(
     useMemo(
       () => state => (manifestRef ? state.visualisationManifests[manifestRef] : undefined),
@@ -965,6 +966,14 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
   );
 
   const manifest: VisualizationManifest | undefined = manifestFromStore ?? atom.visualisationManifest;
+
+  useEffect(() => {
+    if (!manifestRef || manifest) {
+      return;
+    }
+
+    void loadManifest(manifestRef);
+  }, [loadManifest, manifest, manifestRef]);
 
   const metadata = useMemo<AtomMetadata>(() => {
     if (!isRecord(atom.metadata)) {

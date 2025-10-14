@@ -66,6 +66,10 @@ export interface ExhibitionConfigurationQuery {
   project_name: string;
 }
 
+export interface VisualizationManifestQuery extends ExhibitionConfigurationQuery {
+  manifestId: string;
+}
+
 export async function fetchExhibitionConfiguration(
   params: ExhibitionConfigurationQuery,
 ): Promise<ExhibitionConfigurationResponse | null> {
@@ -85,4 +89,31 @@ export async function fetchExhibitionConfiguration(
   }
 
   return response.json() as Promise<ExhibitionConfigurationResponse>;
+}
+
+export async function fetchVisualizationManifest(
+  params: VisualizationManifestQuery,
+): Promise<VisualizationManifest | null> {
+  const { manifestId, ...context } = params;
+  const trimmedId = manifestId.trim();
+  if (!trimmedId) {
+    return null;
+  }
+
+  const search = new URLSearchParams(context as Record<string, string>);
+  const response = await fetch(`${EXHIBITION_API}/manifests/${encodeURIComponent(trimmedId)}?${search.toString()}`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || 'Failed to fetch visualization manifest');
+  }
+
+  return response.json() as Promise<VisualizationManifest>;
 }

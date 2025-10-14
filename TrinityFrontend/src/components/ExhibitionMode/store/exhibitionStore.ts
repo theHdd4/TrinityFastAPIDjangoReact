@@ -2,6 +2,7 @@
 import { create } from 'zustand';
 import {
   fetchExhibitionConfiguration,
+  fetchVisualizationManifest,
   ExhibitionAtomPayload,
   ExhibitionComponentPayload,
   VisualizationManifest,
@@ -150,6 +151,7 @@ interface ExhibitionStore {
   bringSlideObjectsToFront: (cardId: string, objectIds: string[]) => void;
   sendSlideObjectsToBack: (cardId: string, objectIds: string[]) => void;
   groupSlideObjects: (cardId: string, objectIds: string[], groupId: string | null) => void;
+  loadManifest: (manifestId: string, context?: ProjectContext | null) => Promise<VisualizationManifest | null>;
   reset: () => void;
 }
 
@@ -853,7 +855,7 @@ const buildCardFromEntry = (entry: ExhibitionAtomPayload, index: number): Layout
   });
 };
 
-export const useExhibitionStore = create<ExhibitionStore>(set => ({
+export const useExhibitionStore = create<ExhibitionStore>((set, get) => ({
   cards: [],
   exhibitedCards: [],
   catalogueCards: [],
@@ -1014,6 +1016,47 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
           Object.keys(manifestById).length > 0 ? manifestById : state.visualisationManifests,
       };
     });
+  },
+  loadManifest: async (manifestId: string, explicitContext?: ProjectContext | null) => {
+    const trimmed = typeof manifestId === 'string' ? manifestId.trim() : '';
+    if (!trimmed) {
+      return null;
+    }
+
+    const existing = get().visualisationManifests[trimmed];
+    if (existing) {
+      return existing;
+    }
+
+    const resolvedContext = normaliseProjectContext(explicitContext ?? getActiveProjectContext());
+    if (!resolvedContext) {
+      console.info(
+        `[Exhibition] Skipping manifest fetch for ${trimmed} because no active project context was resolved`,
+      );
+      return null;
+    }
+
+    try {
+      const manifest = await fetchVisualizationManifest({ ...resolvedContext, manifestId: trimmed });
+      if (!manifest) {
+        return null;
+      }
+
+      set(state => ({
+        visualisationManifests: {
+          ...state.visualisationManifests,
+          [trimmed]: manifest,
+        },
+      }));
+
+      return manifest;
+    } catch (error) {
+      console.warn(
+        `[Exhibition] Failed to fetch manifest ${trimmed} from trinity_db.exhibition_catalogue`,
+        error,
+      );
+      return null;
+    }
   },
 
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => {
