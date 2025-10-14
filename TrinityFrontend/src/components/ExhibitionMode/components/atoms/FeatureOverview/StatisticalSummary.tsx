@@ -1,43 +1,22 @@
 import React, { useMemo } from 'react';
-import {
-  buildContextEntries,
-  buildSkuTableModel,
-  collectCombinationEntries,
-  collectDimensions,
-  extractSkuRowEntries,
-  extractSummaryEntries,
-  renderCombinationEntries,
-  renderContextEntries,
-  renderDimensions,
-  renderSkuDetails,
-  renderSummaryEntries,
-  renderTable,
-} from './shared';
+import { extractSummaryEntries, renderSummaryEntries } from './shared';
 import { FeatureOverviewComponentProps } from './types';
 
-const StatisticalSummary: React.FC<FeatureOverviewComponentProps> = ({ metadata, variant }) => {
-  const dimensions = useMemo(() => collectDimensions(metadata), [metadata]);
-  const combinationEntries = useMemo(() => collectCombinationEntries(metadata), [metadata]);
+const StatisticalSummary: React.FC<FeatureOverviewComponentProps> = ({ metadata }) => {
   const summaryEntries = useMemo(
     () => extractSummaryEntries(metadata.statisticalDetails),
     [metadata.statisticalDetails],
   );
-  const skuTableModel = useMemo(
-    () => buildSkuTableModel(metadata.skuStatisticsSettings, variant),
-    [metadata.skuStatisticsSettings, variant],
-  );
-  const skuRowEntries = useMemo(() => extractSkuRowEntries(metadata.skuRow), [metadata.skuRow]);
-  const contextEntries = useMemo(() => buildContextEntries(metadata), [metadata]);
+
+  const summaryContent = useMemo(() => renderSummaryEntries(summaryEntries), [summaryEntries]);
 
   return (
-    <div className="space-y-4">
-      {renderDimensions(dimensions)}
-      {renderCombinationEntries(combinationEntries)}
-
-      {renderSummaryEntries(summaryEntries)}
-      {renderTable(skuTableModel)}
-      {renderSkuDetails(skuRowEntries)}
-      {renderContextEntries(contextEntries)}
+    <div className="rounded-2xl border border-border bg-background/80 p-4 shadow-sm">
+      {summaryContent ?? (
+        <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+          Statistical summary will be displayed here after saving combinations in laboratory mode.
+        </div>
+      )}
     </div>
   );
 };

@@ -1038,6 +1038,99 @@ export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverview
     result.skuStatisticsSettings = skuStatisticsSettings;
   }
 
+  const selections = ensureRecordArray(base['exhibitionSelections'] ?? base['exhibition_selections']);
+  const primarySelection = selections.length > 0 ? selections[0] : null;
+  const primarySelectionRecord = primarySelection ? toRecord(primarySelection) : null;
+  const selectionNested = primarySelectionRecord?.metadata && isRecord(primarySelectionRecord.metadata)
+    ? { ...primarySelectionRecord, ...(primarySelectionRecord.metadata as Record<string, unknown>) }
+    : primarySelectionRecord ?? null;
+
+  if (selectionNested) {
+    if (!result.metric) {
+      const fallbackMetric = asString(selectionNested['metric'] ?? selectionNested['dependent_variable']);
+      if (fallbackMetric) {
+        result.metric = fallbackMetric;
+      }
+    }
+
+    if (!result.combination) {
+      const selectionCombination = toRecord(selectionNested['combination'] ?? selectionNested['combination_details']);
+      if (selectionCombination) {
+        result.combination = { ...selectionCombination };
+      }
+    }
+
+    if (!result.dimensions) {
+      const selectionDimensions = normaliseDimensions(
+        selectionNested['dimensions'] ?? selectionNested['dimension_combinations'],
+      );
+      if (selectionDimensions) {
+        result.dimensions = selectionDimensions;
+      }
+    }
+
+    if (!result.label) {
+      const selectionLabel = asString(
+        selectionNested['label'] ?? selectionNested['title'] ?? selectionNested['metric_label'],
+      );
+      if (selectionLabel) {
+        result.label = selectionLabel;
+      }
+    }
+
+    if (!result.chartState) {
+      const selectionChartState = normaliseChartState(
+        selectionNested['chartState'] ?? selectionNested['chart_state'],
+      );
+      if (selectionChartState) {
+        result.chartState = selectionChartState;
+      }
+    }
+
+    if (!result.featureContext) {
+      const selectionFeatureContext = normaliseFeatureContext(
+        selectionNested['featureContext'] ?? selectionNested['feature_context'],
+      );
+      if (selectionFeatureContext) {
+        result.featureContext = selectionFeatureContext;
+      }
+    }
+
+    if (!result.statisticalDetails) {
+      const selectionStats = normaliseStatistics(
+        selectionNested['statisticalDetails'] ?? selectionNested['statistical_details'],
+      );
+      if (selectionStats) {
+        result.statisticalDetails = selectionStats;
+      }
+    }
+
+    if (!result.skuRow) {
+      const selectionSkuRow = toRecord(selectionNested['skuRow'] ?? selectionNested['sku_row']);
+      if (selectionSkuRow) {
+        result.skuRow = selectionSkuRow;
+      }
+    }
+
+    if (!result.capturedAt) {
+      const selectionCapturedAt = asString(
+        selectionNested['capturedAt'] ?? selectionNested['captured_at'],
+      );
+      if (selectionCapturedAt) {
+        result.capturedAt = selectionCapturedAt;
+      }
+    }
+
+    if (!result.skuStatisticsSettings) {
+      const selectionSkuSettings = normaliseSkuStatisticsSettings(
+        selectionNested['skuStatisticsSettings'] ?? selectionNested['sku_statistics_settings'],
+      );
+      if (selectionSkuSettings) {
+        result.skuStatisticsSettings = selectionSkuSettings;
+      }
+    }
+  }
+
   if ('chartRendererProps' in base || 'chart_renderer_props' in base) {
     result.chartRendererProps = parsePossibleJson(
       base['chartRendererProps'] ?? base['chart_renderer_props'],
@@ -1058,8 +1151,31 @@ export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverview
     result.chart_config = parsePossibleJson(base['chart_config']);
   }
 
-  const viewType = normaliseViewType(base['viewType'] ?? base['view_type']);
-  result.viewType = viewType;
+  if (!result.chartRendererProps && selectionNested && ('chartRendererProps' in selectionNested || 'chart_renderer_props' in selectionNested)) {
+    result.chartRendererProps = parsePossibleJson(
+      selectionNested['chartRendererProps'] ?? selectionNested['chart_renderer_props'],
+    );
+  }
+
+  if (!result.chartRendererConfig && selectionNested && ('chartRendererConfig' in selectionNested || 'chart_renderer_config' in selectionNested)) {
+    result.chartRendererConfig = parsePossibleJson(
+      selectionNested['chartRendererConfig'] ?? selectionNested['chart_renderer_config'],
+    );
+  }
+
+  if (!result.chartConfig && selectionNested && 'chartConfig' in selectionNested) {
+    result.chartConfig = parsePossibleJson(selectionNested['chartConfig']);
+  }
+
+  if (!result.chart_config && selectionNested && 'chart_config' in selectionNested) {
+    result.chart_config = parsePossibleJson(selectionNested['chart_config']);
+  }
+
+  const baseViewType = normaliseViewType(base['viewType'] ?? base['view_type']);
+  const selectionViewType = selectionNested
+    ? normaliseViewType(selectionNested['viewType'] ?? selectionNested['view_type'])
+    : undefined;
+  result.viewType = baseViewType ?? selectionViewType;
 
   return result;
 };

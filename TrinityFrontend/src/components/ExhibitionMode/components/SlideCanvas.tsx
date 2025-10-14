@@ -73,6 +73,12 @@ type ActiveInteraction =
       initial: { x: number; y: number; width: number; height: number };
     };
 
+interface EditingTextState {
+  id: string;
+  value: string;
+  original: string;
+}
+
 const isAtomObject = (
   object: SlideObject,
 ): object is SlideObject & { props: { atom: DroppedAtom } } => {
@@ -88,6 +94,7 @@ const isAtomObject = (
 };
 
 const STRUCTURAL_OBJECT_TYPES = new Set(['title', 'accent-image']);
+const UNTITLED_SLIDE_TEXT = 'Untitled Slide';
 
 interface SlideCanvasProps {
   card: LayoutCard;
@@ -348,12 +355,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
 
   const resolvedTitle = useMemo(() => resolveCardTitle(card), [card]);
 
-  const [titleDraft, setTitleDraft] = useState(resolvedTitle);
-
-  useEffect(() => {
-    setTitleDraft(resolvedTitle);
-  }, [resolvedTitle]);
-
   const presenterLabel = useMemo(() => {
     if (typeof presenterName === 'string' && presenterName.trim().length > 0) {
       return presenterName.trim();
@@ -383,52 +384,21 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     () => nonStructuralObjects.length > 0 || textBoxes.length > 0,
   );
 
-  const handleTitleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canEdit) {
-      return;
-    }
-    setTitleDraft(event.target.value);
-  };
+  const handleTitleCommit = useCallback(
+    (nextTitle: string) => {
+      if (!canEdit) {
+        return;
+      }
 
-  const commitTitle = () => {
-    if (!canEdit) {
-      return;
-    }
+      const trimmed = nextTitle.trim();
+      const resolved = trimmed.length > 0 ? trimmed : UNTITLED_SLIDE_TEXT;
 
-    const trimmed = titleDraft.trim();
-    const nextTitle = trimmed.length > 0 ? trimmed : 'Untitled Slide';
-    const currentTitle =
-      typeof card.title === 'string' && card.title.trim().length > 0
-        ? card.title.trim()
-        : resolvedTitle;
-
-    if (nextTitle !== currentTitle) {
-      onTitleChange?.(nextTitle, card.id);
-    }
-
-    setTitleDraft(nextTitle);
-
-    const titleObjectId = buildSlideTitleObjectId(card.id);
-    const titleObject = slideObjects.find(object => object.id === titleObjectId);
-    const nextProps = titleObject?.props ? { ...titleObject.props } : {};
-    handleBulkUpdate({
-      [titleObjectId]: {
-        props: { ...nextProps, text: nextTitle },
-      },
-    });
-  };
-
-  const handleTitleBlur = () => {
-    commitTitle();
-  };
-
-  const handleTitleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      commitTitle();
-      event.currentTarget.blur();
-    }
-  };
+      if (resolved !== resolvedTitle) {
+        onTitleChange?.(resolved, card.id);
+      }
+    },
+    [canEdit, card.id, onTitleChange, resolvedTitle],
+  );
 
   const handleCanvasInteraction = () => {
     setHasInteracted(true);
@@ -573,22 +543,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           </div>
 
           <div className="flex flex-col gap-4">
-            <input
-              type="text"
-              value={titleDraft}
-              onChange={handleTitleInputChange}
-              onBlur={handleTitleBlur}
-              onKeyDown={handleTitleKeyDown}
-              placeholder="Untitled slide"
-              readOnly={!canEdit}
-              className={cn(
-                'w-full bg-transparent text-4xl font-bold text-foreground focus:outline-none focus:ring-0 focus:border-b focus:border-primary/40',
-                !canEdit && 'cursor-default text-foreground'
-              )}
-              aria-label="Slide title"
-              aria-readonly={!canEdit}
-            />
-
             <div
               className={cn(
                 'relative h-[520px] w-full overflow-hidden bg-card shadow-2xl transition-all duration-300',
@@ -615,6 +569,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                 onSendToBack={handleSendToBack}
                 onBulkUpdate={handleBulkUpdate}
                 onGroupObjects={handleGroupObjects}
+                onTitleCommit={handleTitleCommit}
               />
               {textBoxes.map(textBox => (
                 <ExhibitionTextBox
@@ -1041,6 +996,7 @@ interface CanvasStageProps {
   onSendToBack: (objectIds: string[]) => void;
   onBulkUpdate: (updates: Record<string, Partial<SlideObject>>) => void;
   onGroupObjects: (objectIds: string[], groupId: string | null) => void;
+  onTitleCommit?: (text: string) => void;
 }
 
 const MIN_OBJECT_WIDTH = 220;
@@ -1062,6 +1018,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       onSendToBack,
       onBulkUpdate,
       onGroupObjects,
+      onTitleCommit,
     },
     forwardedRef,
   ) => {
@@ -1080,6 +1037,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [activeInteraction, setActiveInteraction] = useState<ActiveInteraction | null>(null);
+    const [editingTextState, setEditingTextState] = useState<EditingTextState | null>(null);
+    const editingTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
     const focusCanvas = useCallback(() => {
       const node = internalRef.current;
@@ -1093,6 +1052,114 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     useEffect(() => {
       setSelectedIds(prev => prev.filter(id => objectsMap.has(id)));
     }, [objectsMap]);
+
+    useEffect(() => {
+      if (!editingTextState) {
+        return;
+      }
+
+      const object = objectsMap.get(editingTextState.id);
+      if (!object) {
+        setEditingTextState(null);
+      }
+    }, [editingTextState, objectsMap]);
+
+    useEffect(() => {
+      if (editingTextState && editingTextareaRef.current) {
+        const area = editingTextareaRef.current;
+        area.focus({ preventScroll: true });
+        area.select();
+      }
+    }, [editingTextState]);
+
+    const commitEditingText = useCallback(() => {
+      setEditingTextState(prev => {
+        if (!prev) {
+          return prev;
+        }
+
+        const object = objectsMap.get(prev.id);
+        if (!object || object.type !== 'title') {
+          return null;
+        }
+
+        const raw = prev.value ?? '';
+        const trimmed = raw.trim();
+        const resolved = trimmed.length > 0 ? trimmed : UNTITLED_SLIDE_TEXT;
+        const existing = typeof object.props?.text === 'string' ? object.props.text : '';
+
+        if (resolved !== existing) {
+          onInteract();
+          const nextProps = { ...(object.props || {}), text: resolved };
+          onBulkUpdate({
+            [object.id]: {
+              props: nextProps,
+            },
+          });
+          onTitleCommit?.(resolved);
+        }
+
+        return null;
+      });
+    }, [objectsMap, onBulkUpdate, onInteract, onTitleCommit]);
+
+    useEffect(() => {
+      if (!canEdit && editingTextState) {
+        commitEditingText();
+      }
+    }, [canEdit, commitEditingText, editingTextState]);
+
+    const cancelEditingText = useCallback(() => {
+      setEditingTextState(null);
+    }, []);
+
+    const beginEditingTitle = useCallback(
+      (objectId: string) => {
+        if (!canEdit) {
+          return;
+        }
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'title') {
+          return;
+        }
+        const currentText = typeof object.props?.text === 'string' ? object.props.text : '';
+        onInteract();
+        focusCanvas();
+        setSelectedIds([objectId]);
+        setEditingTextState({ id: objectId, value: currentText, original: currentText });
+      },
+      [canEdit, focusCanvas, objectsMap, onInteract],
+    );
+
+    const handleEditingValueChange = useCallback(
+      (value: string) => {
+        setEditingTextState(prev => {
+          if (!prev || prev.value === value) {
+            return prev;
+          }
+          onInteract();
+          return { ...prev, value };
+        });
+      },
+      [onInteract],
+    );
+
+    const handleObjectDoubleClick = useCallback(
+      (event: React.MouseEvent<HTMLDivElement>, objectId: string) => {
+        if (!canEdit) {
+          return;
+        }
+        const object = objectsMap.get(objectId);
+        if (!object) {
+          return;
+        }
+        if (object.type === 'title') {
+          event.stopPropagation();
+          beginEditingTitle(objectId);
+        }
+      },
+      [beginEditingTitle, canEdit, objectsMap],
+    );
 
     const clampPosition = useCallback((x: number, y: number, width: number, height: number) => {
       const canvas = internalRef.current;
@@ -1128,11 +1195,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         if (event.target !== event.currentTarget) {
           return;
         }
+        if (editingTextState) {
+          commitEditingText();
+        }
         onInteract();
         setSelectedIds([]);
         focusCanvas();
       },
-      [canEdit, focusCanvas, onInteract],
+      [canEdit, commitEditingText, editingTextState, focusCanvas, onInteract],
     );
 
     const handleObjectPointerDown = useCallback(
@@ -1142,6 +1212,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }
         event.preventDefault();
         event.stopPropagation();
+        if (editingTextState) {
+          commitEditingText();
+        }
         onInteract();
         focusCanvas();
 
@@ -1175,7 +1248,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           initialPositions,
         });
       },
-      [canEdit, focusCanvas, onInteract, objectsMap, onBringToFront, selectedIds],
+      [
+        canEdit,
+        commitEditingText,
+        editingTextState,
+        focusCanvas,
+        onInteract,
+        objectsMap,
+        onBringToFront,
+        selectedIds,
+      ],
     );
 
     const handleResizeStart = useCallback(
@@ -1218,6 +1300,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
         if (event.key === 'Escape') {
           setSelectedIds([]);
+          if (editingTextState) {
+            cancelEditingText();
+          }
           return;
         }
 
@@ -1287,7 +1372,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       },
       [
         canEdit,
+        cancelEditingText,
         clampAndSnapPosition,
+        editingTextState,
         onBulkUpdate,
         onRemoveAtom,
         onGroupObjects,
@@ -1421,7 +1508,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
       if (object.type === 'title') {
         const rawText = typeof object.props?.text === 'string' ? object.props.text : '';
-        const text = rawText.trim().length > 0 ? rawText : 'Untitled Slide';
+        const text = rawText.trim().length > 0 ? rawText : UNTITLED_SLIDE_TEXT;
         return (
           <div className="flex h-full w-full items-center justify-start px-6">
             <h2 className="text-4xl font-bold leading-tight text-foreground">{text}</h2>
@@ -1485,6 +1572,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
           const isAccentImageObject = object.type === 'accent-image';
           const isTitleObject = object.type === 'title';
+          const isEditingTitle = isTitleObject && editingTextState?.id === object.id;
 
           return (
             <div
@@ -1498,6 +1586,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 zIndex: isSelected ? zIndex + 100 : zIndex,
               }}
               onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
+              onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
             >
               <div
                 className={cn(
@@ -1526,14 +1615,37 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   <div
                     className={cn(
                       'h-full w-full overflow-hidden',
-                      isAccentImageObject
-                        ? undefined
-                        : isTitleObject
-                        ? 'bg-transparent'
-                        : 'rounded-2xl bg-background/90 p-3',
+                    isAccentImageObject
+                      ? undefined
+                      : isTitleObject
+                      ? 'bg-transparent'
+                      : 'rounded-2xl bg-background/90 p-3',
+                  )}
+                >
+                    {isEditingTitle ? (
+                      <textarea
+                        ref={editingTextareaRef}
+                        value={editingTextState.value}
+                        onChange={event => handleEditingValueChange(event.target.value)}
+                        onBlur={commitEditingText}
+                        onKeyDown={event => {
+                          if (event.key === 'Enter' && !event.shiftKey) {
+                            event.preventDefault();
+                            commitEditingText();
+                          }
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            cancelEditingText();
+                          }
+                        }}
+                        placeholder={UNTITLED_SLIDE_TEXT}
+                        className="h-full w-full resize-none bg-transparent px-6 py-4 text-4xl font-bold leading-tight text-foreground outline-none focus:outline-none focus:ring-0"
+                        spellCheck={false}
+                        onPointerDown={event => event.stopPropagation()}
+                      />
+                    ) : (
+                      renderObjectContent(object)
                     )}
-                  >
-                    {renderObjectContent(object)}
                   </div>
                 </div>
                 {canEdit && isAtomObject(object) && onRemoveAtom && (
@@ -1550,7 +1662,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 )}
               </div>
 
-              {canEdit && isSelected &&
+              {canEdit && isSelected && !isEditingTitle &&
                 handleDefinitions.map(definition => (
                   <span
                     key={definition.handle}
