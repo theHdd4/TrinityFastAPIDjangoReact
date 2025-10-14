@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Trash2, ArrowUp, ArrowDown } from 'lucide-react';
+import { Trash2, ArrowUp, ArrowDown, Move } from 'lucide-react';
 import { Handle, NodeProps, Position } from 'reactflow';
 
 export interface MoleculeNodeData {
@@ -18,11 +18,20 @@ export interface MoleculeNodeData {
   onAtomReorder: (moleculeId: string, newOrder: string[]) => void;
   onRemove: (moleculeId: string) => void;
   onClick: (moleculeId: string) => void;
+  width?: number;
+  height?: number;
+  onResize?: (nodeId: string, width: number, height: number) => void;
 }
 
 
 const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const [nodeSize, setNodeSize] = useState({ 
+    width: data.width || 256, 
+    height: data.height || 300 
+  });
+  const nodeRef = useRef<HTMLDivElement>(null);
 
   const atomsToShow = isExpanded ? data.atomOrder : data.atomOrder.slice(0, 3);
   const hasMoreAtoms = data.atomOrder.length > 3;
@@ -39,6 +48,8 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
         return 'border-orange-300 bg-orange-50';
       case 'Pre Process':
         return 'border-yellow-300 bg-yellow-50';
+      case 'Data Exploration':
+        return 'border-pink-300 bg-pink-50';
       default:
         return 'border-gray-300 bg-gray-50';
     }
@@ -59,14 +70,55 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
     data.onAtomReorder(id, newOrder);
   };
 
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(true);
+  };
+
+  const handleResize = (e: MouseEvent) => {
+    if (!isResizing || !nodeRef.current) return;
+    
+    const rect = nodeRef.current.getBoundingClientRect();
+    const newWidth = Math.max(200, Math.min(500, e.clientX - rect.left));
+    const newHeight = Math.max(200, Math.min(600, e.clientY - rect.top));
+    
+    setNodeSize({ width: newWidth, height: newHeight });
+  };
+
+  const handleResizeEnd = () => {
+    if (isResizing && data.onResize) {
+      data.onResize(id, nodeSize.width, nodeSize.height);
+    }
+    setIsResizing(false);
+  };
+
+  useEffect(() => {
+    if (isResizing) {
+      document.addEventListener('mousemove', handleResize);
+      document.addEventListener('mouseup', handleResizeEnd);
+      return () => {
+        document.removeEventListener('mousemove', handleResize);
+        document.removeEventListener('mouseup', handleResizeEnd);
+      };
+    }
+  }, [isResizing, nodeSize]);
+
   return (
     <div className="relative">
-      <Handle type="target" position={Position.Left} className="w-3 h-3 !bg-gray-500" />
-      <Handle type="source" position={Position.Right} className="w-3 h-3 !bg-gray-500" />
+      <Handle type="target" position={Position.Left} className="w-3 h-3 !bg-muted-foreground" />
+      <Handle type="source" position={Position.Right} className="w-3 h-3 !bg-muted-foreground" />
       <Card
-        className={`relative w-64 p-4 select-none ${getTypeColor(data.type)} border-2 ${
-          isExpanded ? 'min-h-96' : ''
+        ref={nodeRef}
+        className={`relative p-4 select-none ${getTypeColor(data.type)} border-2 transition-all duration-200 ${
+          isResizing ? 'shadow-lg' : ''
         }`}
+        style={{
+          width: `${nodeSize.width}px`,
+          height: `${nodeSize.height}px`,
+          minHeight: '200px',
+          minWidth: '200px'
+        }}
         onClick={e => {
           e.stopPropagation();
           data.onClick(id);
@@ -74,7 +126,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
       >
         <div className="drag-handle cursor-move">
           <button
-            className="absolute top-1 right-1 text-gray-400 hover:text-red-500"
+            className="absolute top-1 right-1 text-muted-foreground hover:text-destructive transition-colors"
             onClick={e => {
               e.stopPropagation();
               data.onRemove(id);
@@ -88,11 +140,11 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
               {data.type}
             </Badge>
           </div>
-          <h4 className="font-semibold text-gray-900 mb-1 text-sm">{data.title}</h4>
-          <p className="text-xs text-gray-700 mb-3">{data.subtitle}</p>
+          <h4 className="font-semibold text-foreground mb-1 text-sm">{data.title}</h4>
+          <p className="text-xs text-muted-foreground mb-3">{data.subtitle}</p>
         </div>
         <div className="space-y-1">
-          <p className="text-xs font-medium text-gray-600">Atoms ({data.atoms.length}):</p>
+          <p className="text-xs font-medium text-muted-foreground">Atoms ({data.atoms.length}):</p>
           <div
             className={`${isExpanded ? 'max-h-72' : 'max-h-40'} overflow-y-auto`}
             onPointerDownCapture={e => e.stopPropagation()}
@@ -101,11 +153,11 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
               {(isExpanded ? data.atomOrder : atomsToShow).map((atom, idx) => (
                 <div
                   key={atom}
-                  className="flex items-center space-x-2 text-xs bg-white px-2 py-1 rounded hover:bg-gray-50"
+                  className="flex items-center space-x-2 text-xs bg-card px-2 py-1 rounded hover:bg-accent transition-colors"
                 >
                   <div className="flex flex-col -my-1">
                     <button
-                      className="text-gray-400 hover:text-gray-600 disabled:opacity-40"
+                      className="text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors"
                       disabled={idx === 0}
                       onPointerDown={e => e.stopPropagation()}
                       onClick={e => {
@@ -116,7 +168,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                       <ArrowUp className="w-3 h-3" />
                     </button>
                     <button
-                      className="text-gray-400 hover:text-gray-600 disabled:opacity-40"
+                      className="text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors"
                       disabled={idx === (isExpanded ? data.atomOrder.length - 1 : atomsToShow.length - 1)}
                       onPointerDown={e => e.stopPropagation()}
                       onClick={e => {
@@ -132,7 +184,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                     onCheckedChange={checked => handleAtomToggle(atom, !!checked)}
                     className="w-4 h-4"
                   />
-                  <span className="flex-1 text-gray-600">{atom}</span>
+                  <span className="flex-1 text-foreground">{atom}</span>
                 </div>
               ))}
             </div>
@@ -142,7 +194,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                   e.stopPropagation();
                   setIsExpanded(true);
                 }}
-                className="text-xs text-gray-500 italic hover:text-gray-700 cursor-pointer mt-2"
+                className="text-xs text-muted-foreground italic hover:text-foreground cursor-pointer mt-2 transition-colors"
               >
                 +{data.atomOrder.length - 3} more atoms
               </button>
@@ -153,11 +205,26 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                   e.stopPropagation();
                   setIsExpanded(false);
                 }}
-                className="text-xs text-gray-500 italic hover:text-gray-700 cursor-pointer mt-2"
+                className="text-xs text-muted-foreground italic hover:text-foreground cursor-pointer mt-2 transition-colors"
               >
                 Show less
               </button>
             )}
+          </div>
+        </div>
+        
+        {/* Resize Handle */}
+        <div
+          className={`absolute bottom-0 right-0 w-4 h-4 cursor-se-resize bg-muted hover:bg-muted-foreground transition-colors ${
+            isResizing ? 'bg-primary' : ''
+          }`}
+          onMouseDown={handleResizeStart}
+          style={{
+            clipPath: 'polygon(100% 0%, 0% 100%, 100% 100%)'
+          }}
+        >
+          <div className="absolute bottom-0 right-0 w-full h-full flex items-end justify-end p-1">
+            <div className="w-2 h-2 bg-muted-foreground rounded-sm"></div>
           </div>
         </div>
       </Card>

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { safeStringify } from '@/utils/safeStringify';
 import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon } from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
@@ -123,9 +124,9 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
 }) => {
   const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings } = useLaboratoryStore();
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
-  const [activeTab, setActiveTab] = useState<string>('');
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
+  const [collapsedMolecules, setCollapsedMolecules] = useState<Record<string, boolean>>({});
   const [addDragTarget, setAddDragTarget] = useState<string | null>(null);
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [showAtomSuggestion, setShowAtomSuggestion] = useState<Record<string, boolean>>({});
@@ -169,7 +170,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     };
   }, [expandedCard]);
 
-  const { setCards } = useExhibitionStore();
+  const { updateCard, setCards } = useExhibitionStore();
   const { toast } = useToast();
 
   interface ColumnInfo {
@@ -764,17 +765,6 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       setLayoutCards(normalizedCards);
       const workflow = workflowOverride ?? deriveWorkflowMolecules(normalizedCards);
       setWorkflowMolecules(workflow);
-      setActiveTab(prevTab => {
-        if (workflow.length === 0) {
-          return '';
-        }
-
-        if (prevTab && workflow.some(molecule => molecule.moleculeId === prevTab)) {
-          return prevTab;
-        }
-
-        return workflow[0].moleculeId;
-      });
 
       hasAppliedInitialCards = true;
       markLoadingComplete();
@@ -1343,6 +1333,19 @@ const handleAddDragLeave = (e: React.DragEvent) => {
     setExpandedCard(expandedCard === id ? null : id);
   };
 
+  const toggleMoleculeCollapse = (moleculeId: string) => {
+    setCollapsedMolecules(prev => ({ ...prev, [moleculeId]: !prev[moleculeId] }));
+  };
+
+  const handleExhibitionToggle = (cardId: string, isExhibited: boolean) => {
+    const updated = (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
+      card.id === cardId ? { ...card, isExhibited } : card
+    );
+
+    setLayoutCards(updated);
+    setCards(updated);
+  };
+
   const refreshCardAtoms = async (cardId: string) => {
     const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
     if (!card) return;
@@ -1369,36 +1372,44 @@ const handleAddDragLeave = (e: React.DragEvent) => {
     return (
       <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
         <div className={canEdit ? '' : 'pointer-events-none'}>
-          <div className="p-6">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <div className="mb-6 bg-white rounded-lg border border-gray-200 p-1 shadow-sm">
-              <TabsList className="grid auto-cols-fr grid-flow-col w-full h-12 bg-transparent p-0 gap-1">
-                {workflowMolecules.map((molecule) => (
-                  <TabsTrigger
-                    key={molecule.moleculeId}
-                    value={molecule.moleculeId}
-                    className="px-6 py-3 text-sm font-medium rounded-md transition-all duration-200 \
-                             data-[state=active]:bg-[#458EE2] data-[state=active]:text-white data-[state=active]:shadow-md\
-                             data-[state=inactive]:bg-transparent data-[state=inactive]:text-gray-600 \
-                             data-[state=inactive]:hover:bg-gray-50 data-[state=inactive]:hover:text-gray-900\
-                             border-0 ring-0 focus:ring-0 focus-visible:ring-0"
-                  >
-                    {molecule.moleculeTitle}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </div>
+          <div className="p-6 space-y-6">
+            {workflowMolecules.map((molecule) => {
+              const isCollapsed = collapsedMolecules[molecule.moleculeId];
+              const moleculeCards = Array.isArray(layoutCards) 
+                ? layoutCards.filter(card => card.moleculeId === molecule.moleculeId)
+                : [];
+              const atomCount = moleculeCards.reduce((sum, card) => sum + card.atoms.length, 0);
 
-            {workflowMolecules.map((molecule) => (
-              <TabsContent key={molecule.moleculeId} value={molecule.moleculeId} className="mt-0">
-                <div className="space-y-6">
-                  <div className="flex items-center mb-6">
-                    <h3 className="text-xl font-semibold text-gray-900">
-                      {molecule.moleculeTitle} Atoms
-                    </h3>
+              return (
+              <Card key={molecule.moleculeId} className="bg-white border-2 border-gray-200 shadow-lg rounded-xl overflow-hidden">
+                {/* Collapsible Molecule Header */}
+                <div 
+                  className="flex items-center justify-between p-3 bg-white border-b border-gray-200 cursor-pointer hover:bg-gray-50 transition-all duration-200"
+                  onClick={() => toggleMoleculeCollapse(molecule.moleculeId)}
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="w-2 h-6 bg-yellow-500 rounded-full"></div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        {molecule.moleculeTitle}
+                      </h3>
+                      <p className="text-xs text-gray-600 mt-0.5">
+                        {moleculeCards.length} card{moleculeCards.length !== 1 ? 's' : ''} • {atomCount} atom{atomCount !== 1 ? 's' : ''}
+                      </p>
+                    </div>
                   </div>
+                  <button className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+                    <ChevronDown 
+                      className={`w-5 h-5 text-gray-600 transition-transform duration-300 ${
+                        isCollapsed ? '-rotate-90' : 'rotate-0'
+                      }`}
+                    />
+                  </button>
+                </div>
 
-                  <div className="space-y-6 w-full">
+                {/* Molecule Content */}
+                {!isCollapsed && (
+                <div className="p-6 space-y-6 w-full bg-gradient-to-br from-gray-50 to-white">
                     {Array.isArray(layoutCards) &&
                       layoutCards
                         .filter(card => card.moleculeId === molecule.moleculeId)
@@ -1437,6 +1448,13 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                               />
                             </div>
                             <div className="flex items-center space-x-2">
+                              <span className="text-xs text-gray-500">Exhibit the Card</span>
+                              <Switch
+                                checked={card.isExhibited || false}
+                                onCheckedChange={checked => handleExhibitionToggle(card.id, checked)}
+                                onClick={e => e.stopPropagation()}
+                                className="data-[state=checked]:bg-[#458EE2]"
+                              />
                               <button
                                 onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
                                 className="p-1 hover:bg-gray-100 rounded"
@@ -1514,10 +1532,38 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                       <DataUploadValidateAtom atomId={atom.id} />
                                     ) : atom.atomId === 'feature-overview' ? (
                                       <FeatureOverviewAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'explore' ? (
+                                      <ExploreAtom atomId={atom.id} />
                                     ) : atom.atomId === 'chart-maker' ? (
                                       <ChartMakerAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'concat' ? (
+                                      <ConcatAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'merge' ? (
+                                      <MergeAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'column-classifier' ? (
+                                      <ColumnClassifierAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'dataframe-operations' ? (
+                                      <DataFrameOperationsAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'create-column' ? (
+                                      <CreateColumnAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'groupby-wtg-avg' ? (
+                                      <GroupByAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'build-model-feature-based' ? (
+                                      <BuildModelFeatureBasedAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'select-models-feature' ? (
+                                      <SelectModelsFeatureAtom atomId={atom.id} />
                                     ) : atom.atomId === 'evaluate-models-feature' ? (
                                       <EvaluateModelsFeatureAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'scope-selector' ? (
+                                      <ScopeSelectorAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'correlation' ? (
+                                      <CorrelationAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'auto-regressive-models' ? (
+                                      <AutoRegressiveModelsAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'select-models-auto-regressive' ? (
+                                      <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                                      <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
                                     ) : (
                                       <div>
                                         <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -1551,13 +1597,13 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         </span>
                       </button>
                     </div>
-                  </div>
                 </div>
-              </TabsContent>
-            ))}
-          </Tabs>
+                )}
+              </Card>
+            );
+            })}
+          </div>
         </div>
-      </div>
       </div>
     );
   }
@@ -1587,7 +1633,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, card.id)}
           >
-            {/* Card Header */}
+            {/* Card Header with Exhibition Toggle */}
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <div className="flex items-center space-x-2">
                 <Eye className={`w-4 h-4 ${card.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
@@ -1621,6 +1667,13 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                 </button>
               </div>
               <div className="flex items-center space-x-2">
+                <span className="text-xs text-gray-500">Exhibit the Card</span>
+                <Switch
+                  checked={card.isExhibited || false}
+                  onCheckedChange={(checked) => handleExhibitionToggle(card.id, checked)}
+                  onClick={e => e.stopPropagation()}
+                  className="data-[state=checked]:bg-[#458EE2]"
+                />
                 <button
                   onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
                   className="p-1 hover:bg-gray-100 rounded"
@@ -1852,6 +1905,12 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                 </span>
                 </div>
                 <div className="flex items-center space-x-2">
+                <span className="text-sm text-gray-500">Exhibit the Card</span>
+                <Switch
+                  checked={layoutCards.find(c => c.id === expandedCard)?.isExhibited || false}
+                  onCheckedChange={(checked) => handleExhibitionToggle(expandedCard, checked)}
+                  className="data-[state=checked]:bg-[#458EE2]"
+                />
                 <button
                   onClick={() => setExpandedCard(null)}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"

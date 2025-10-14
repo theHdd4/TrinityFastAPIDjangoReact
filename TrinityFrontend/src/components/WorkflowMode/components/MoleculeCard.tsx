@@ -25,6 +25,7 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit }) => {
       case 'Explore': return 'border-green-300 bg-green-50';
       case 'Engineer': return 'border-orange-300 bg-orange-50';
       case 'Pre Process': return 'border-yellow-300 bg-yellow-50';
+      case 'Data Exploration': return 'border-pink-300 bg-pink-50';
       default: return 'border-gray-300 bg-gray-50';
     }
   };
@@ -51,14 +52,14 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit }) => {
         </Badge>
       </div>
       
-      <h4 className="font-semibold text-gray-900 mb-2 text-sm">{molecule.title}</h4>
-      <p className="text-xs text-gray-700 mb-3">{molecule.subtitle}</p>
+      <h4 className="font-semibold text-foreground mb-2 text-sm">{molecule.title}</h4>
+      <p className="text-xs text-muted-foreground mb-3">{molecule.subtitle}</p>
       
       <div className="space-y-1">
-        <p className="text-xs font-medium text-gray-600">Atoms ({molecule.atoms.length}):</p>
+        <p className="text-xs font-medium text-muted-foreground">Atoms ({molecule.atoms.length}):</p>
         <div className="space-y-1">
           {atomsToShow.map((atom, index) => (
-            <div key={index} className="text-xs text-gray-600 bg-white px-2 py-1 rounded">
+            <div key={index} className="text-xs text-foreground bg-card px-2 py-1 rounded border border-border">
               {atom}
             </div>
           ))}
@@ -68,7 +69,7 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit }) => {
                 e.stopPropagation();
                 setIsExpanded(true);
               }}
-              className="text-xs text-gray-500 italic hover:text-gray-700 cursor-pointer"
+              className="text-xs text-muted-foreground italic hover:text-foreground cursor-pointer transition-colors"
             >
               +{molecule.atoms.length - 3} more atoms
             </button>
@@ -79,7 +80,7 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit }) => {
                 e.stopPropagation();
                 setIsExpanded(false);
               }}
-              className="text-xs text-gray-500 italic hover:text-gray-700 cursor-pointer"
+              className="text-xs text-muted-foreground italic hover:text-foreground cursor-pointer transition-colors"
             >
               Show less
             </button>

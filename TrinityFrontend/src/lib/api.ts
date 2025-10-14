@@ -63,6 +63,7 @@ export const REGISTRY_API =
   normalizeUrl(import.meta.env.VITE_REGISTRY_API) ||
   `${backendOrigin}${djangoPrefix}/registry`;
 
+
 export const TENANTS_API =
   normalizeUrl(import.meta.env.VITE_TENANTS_API) ||
   `${backendOrigin}${djangoPrefix}/tenants`;
@@ -78,6 +79,10 @@ export const CARD_API =
 export const SUBSCRIPTIONS_API =
   normalizeUrl(import.meta.env.VITE_SUBSCRIPTIONS_API) ||
   `${backendOrigin}${djangoPrefix}/subscriptions`;
+
+export const WORKFLOWS_API =
+  normalizeUrl(import.meta.env.VITE_WORKFLOWS_API) ||
+  `${backendOrigin}${djangoPrefix}/workflows`;
 
 export const VALIDATE_API =
   normalizeUrl(import.meta.env.VITE_VALIDATE_API) ||
