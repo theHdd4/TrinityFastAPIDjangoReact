@@ -1,449 +1,328 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
 import TextBoxToolbar from './TextBoxToolbar';
-import type { SlideTextBox, TextBoxPosition } from './types';
-import { DEFAULT_TEXT_BOX_TEXT } from './constants';
+import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from './constants';
+import type { TextBoxFormatting } from './types';
 
-interface ExhibitionTextBoxProps {
-  data: SlideTextBox;
-  isEditable?: boolean;
-  onTextChange: (id: string, text: string) => void;
-  onChange: (id: string, updates: Partial<SlideTextBox>) => void;
-  onPositionChange: (id: string, position: TextBoxPosition) => void;
-  onInteract?: () => void;
-  onDelete?: (id: string) => void;
+interface SlideTextBoxObjectProps {
+  id: string;
+  canEdit: boolean;
+  props: Record<string, unknown> | undefined;
+  isEditing: boolean;
+  isSelected: boolean;
+  editingValue: string;
+  onBeginEditing: () => void;
+  onCommitEditing: () => void;
+  onCancelEditing: () => void;
+  onEditingChange: (value: string) => void;
+  onUpdateFormatting: (updates: Partial<TextBoxFormatting>) => void;
+  onDelete?: () => void;
+  onInteract: () => void;
+  onToolbarStateChange: (objectId: string, toolbar: React.ReactNode | null) => void;
 }
 
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+const clampFontSize = (value: number) => Math.min(Math.max(value, 8), 200);
 
-export const ExhibitionTextBox: React.FC<ExhibitionTextBoxProps> = ({
-  data,
-  isEditable = true,
-  onTextChange,
-  onChange,
-  onPositionChange,
-  onInteract,
+export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
+  id,
+  canEdit,
+  props,
+  isEditing,
+  isSelected,
+  editingValue,
+  onBeginEditing,
+  onCommitEditing,
+  onCancelEditing,
+  onEditingChange,
+  onUpdateFormatting,
   onDelete,
+  onInteract,
+  onToolbarStateChange,
 }) => {
   const textRef = useRef<HTMLDivElement | null>(null);
-  const [text, setText] = useState<string>(data.text);
-  const [fontSize, setFontSize] = useState<number>(data.fontSize);
-  const [fontFamily, setFontFamily] = useState<string>(data.fontFamily);
-  const [bold, setBold] = useState<boolean>(data.bold);
-  const [italic, setItalic] = useState<boolean>(data.italic);
-  const [underline, setUnderline] = useState<boolean>(data.underline);
-  const [strikethrough, setStrikethrough] = useState<boolean>(data.strikethrough);
-  const [align, setAlign] = useState(data.align);
-  const [color, setColor] = useState<string>(data.color);
-  const [isEditing, setIsEditing] = useState(false);
-  const [isActive, setIsActive] = useState(false);
-  const [showToolbar, setShowToolbar] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragOrigin, setDragOrigin] = useState<TextBoxPosition>({ x: data.x, y: data.y });
-  const [position, setPosition] = useState<TextBoxPosition>({ x: data.x, y: data.y });
-  const [contextMenuOpen, setContextMenuOpen] = useState(false);
-
-  const runCommand = (command: string) => {
-    if (!isEditable || typeof document === 'undefined') {
-      return;
-    }
-    if (document.queryCommandSupported?.(command)) {
-      textRef.current?.focus();
-      document.execCommand(command, false);
-    }
-  };
+  const selectionRangeRef = useRef<Range | null>(null);
+  const formatting = useMemo(() => extractTextBoxFormatting(props), [props]);
+  const [localFormatting, setLocalFormatting] = useState<TextBoxFormatting>(formatting);
 
   useEffect(() => {
-    setText(data.text);
-  }, [data.text]);
+    setLocalFormatting(formatting);
+  }, [formatting]);
 
   useEffect(() => {
-    setFontSize(data.fontSize);
-  }, [data.fontSize]);
-
-  useEffect(() => {
-    setFontFamily(data.fontFamily);
-  }, [data.fontFamily]);
-
-  useEffect(() => {
-    setBold(data.bold);
-  }, [data.bold]);
-
-  useEffect(() => {
-    setItalic(data.italic);
-  }, [data.italic]);
-
-  useEffect(() => {
-    setUnderline(data.underline);
-  }, [data.underline]);
-
-  useEffect(() => {
-    setStrikethrough(data.strikethrough);
-  }, [data.strikethrough]);
-
-  useEffect(() => {
-    setAlign(data.align);
-  }, [data.align]);
-
-  useEffect(() => {
-    setColor(data.color);
-  }, [data.color]);
-
-  useEffect(() => {
-    setPosition({ x: data.x, y: data.y });
-  }, [data.x, data.y]);
-
-  useEffect(() => {
-    if (!isActive) {
+    if (!textRef.current) {
       return;
     }
 
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (!target) {
+    const target = isEditing ? editingValue : localFormatting.text;
+    if (textRef.current.innerHTML !== target) {
+      textRef.current.innerHTML = target;
+    }
+
+    if (isEditing) {
+      requestAnimationFrame(() => {
+        textRef.current?.focus();
+      });
+    }
+  }, [editingValue, isEditing, localFormatting.text]);
+
+  const handleInput = useCallback(() => {
+    if (!textRef.current) {
+      return;
+    }
+    onEditingChange(textRef.current.innerHTML);
+  }, [onEditingChange]);
+
+  const handleBlur = useCallback(() => {
+    if (!isEditing) {
+      return;
+    }
+    onCommitEditing();
+  }, [isEditing, onCommitEditing]);
+
+  useEffect(() => {
+    if (!isEditing || typeof document === 'undefined') {
+      selectionRangeRef.current = null;
+      return;
+    }
+
+    const handleSelectionChange = () => {
+      const selection = document.getSelection();
+      if (!selection || selection.rangeCount === 0) {
         return;
       }
-      if (textRef.current && textRef.current.contains(target)) {
+
+      const anchorNode = selection.anchorNode;
+      if (!anchorNode || !textRef.current) {
         return;
       }
-      setIsActive(false);
+
+      if (textRef.current.contains(anchorNode)) {
+        selectionRangeRef.current = selection.getRangeAt(0);
+      }
     };
 
-    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('selectionchange', handleSelectionChange);
+
     return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('selectionchange', handleSelectionChange);
     };
-  }, [isActive]);
+  }, [isEditing]);
 
-  useEffect(() => {
-    if (!isDragging) {
+  const restoreSelection = useCallback(() => {
+    if (typeof document === 'undefined') {
       return;
     }
 
-    const handleMove = (event: MouseEvent) => {
-      setPosition(prev => ({
-        x: event.clientX - dragOrigin.x,
-        y: event.clientY - dragOrigin.y,
-      }));
-    };
+    const selection = document.getSelection();
+    if (!selection || !selectionRangeRef.current) {
+      return;
+    }
 
-    const handleUp = (event: MouseEvent) => {
-      setIsDragging(false);
-      const clamped: TextBoxPosition = {
-        x: clamp(event.clientX - dragOrigin.x, 0, Number.MAX_SAFE_INTEGER),
-        y: clamp(event.clientY - dragOrigin.y, 0, Number.MAX_SAFE_INTEGER),
-      };
-      setPosition(clamped);
-      onPositionChange(data.id, clamped);
-    };
+    selection.removeAllRanges();
+    selection.addRange(selectionRangeRef.current);
+  }, []);
 
-    document.addEventListener('mousemove', handleMove);
-    document.addEventListener('mouseup', handleUp);
+  const runCommand = useCallback(
+    (command: string) => {
+      if (!canEdit || typeof document === 'undefined') {
+        return;
+      }
 
-    return () => {
-      document.removeEventListener('mousemove', handleMove);
-      document.removeEventListener('mouseup', handleUp);
-    };
-  }, [isDragging, dragOrigin, data.id, onPositionChange]);
+      if (document.queryCommandSupported?.(command)) {
+        textRef.current?.focus();
+        restoreSelection();
+        document.execCommand(command, false);
+        handleInput();
+      }
+    },
+    [canEdit, handleInput, restoreSelection],
+  );
+
+  const updateFormatting = useCallback(
+    (updates: Partial<TextBoxFormatting>) => {
+      setLocalFormatting(prev => ({ ...prev, ...updates }));
+      onUpdateFormatting(updates);
+      onInteract();
+    },
+    [onInteract, onUpdateFormatting],
+  );
+
+  const handleToggle = useCallback(
+    (key: keyof Pick<TextBoxFormatting, 'bold' | 'italic' | 'underline' | 'strikethrough'>) => {
+      updateFormatting({ [key]: !localFormatting[key] } as Partial<TextBoxFormatting>);
+    },
+    [localFormatting, updateFormatting],
+  );
+
+  const handleAlign = useCallback(
+    (align: TextBoxFormatting['align']) => {
+      if (isEditing) {
+        const command =
+          align === 'center' ? 'justifyCenter' : align === 'right' ? 'justifyRight' : 'justifyLeft';
+        runCommand(command);
+      }
+
+      updateFormatting({ align });
+    },
+    [isEditing, runCommand, updateFormatting],
+  );
+
+  const handleFontFamily = useCallback(
+    (fontFamily: string) => {
+      updateFormatting({ fontFamily });
+    },
+    [updateFormatting],
+  );
+
+  const handleColor = useCallback(
+    (color: string) => {
+      updateFormatting({ color });
+    },
+    [updateFormatting],
+  );
+
+  const handleIncreaseFontSize = useCallback(() => {
+    updateFormatting({ fontSize: clampFontSize(localFormatting.fontSize + 2) });
+  }, [localFormatting.fontSize, updateFormatting]);
+
+  const handleDecreaseFontSize = useCallback(() => {
+    updateFormatting({ fontSize: clampFontSize(localFormatting.fontSize - 2) });
+  }, [localFormatting.fontSize, updateFormatting]);
 
   const handleDoubleClick = () => {
-    if (!isEditable) {
+    if (!canEdit) {
       return;
     }
-    setIsEditing(true);
-    setIsActive(true);
-    onInteract?.();
-
-    requestAnimationFrame(() => {
-      textRef.current?.focus();
-    });
+    onInteract();
+    onBeginEditing();
   };
 
-  const handleBlur = () => {
-    setIsEditing(false);
-    if (textRef.current) {
-      const html = textRef.current.innerHTML.trim();
-      setText(html);
-      onTextChange(data.id, html);
-    }
-  };
-
-  const handleInput = () => {
-    if (textRef.current) {
-      setText(textRef.current.innerHTML);
-    }
-  };
-
-  const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (!isEditable) {
-      return;
-    }
-    if (isEditing) {
-      return;
-    }
-    if (event.target instanceof HTMLElement && textRef.current?.contains(event.target) && event.target !== event.currentTarget) {
-      return;
-    }
-    setIsActive(true);
-    setIsDragging(true);
-    setDragOrigin({
-      x: event.clientX - position.x,
-      y: event.clientY - position.y,
-    });
-    onInteract?.();
-    event.preventDefault();
-  };
-
-  const handleClick = () => {
-    if (!isEditable) {
-      return;
-    }
-    setIsActive(true);
-    onInteract?.();
-  };
-
-  const isNodeWithinText = useCallback(
-    (node: Node | null): boolean => {
-      if (!node || !textRef.current) {
-        return false;
-      }
-
-      if (node === textRef.current) {
-        return true;
-      }
-
-      if (node instanceof Element) {
-        return textRef.current.contains(node);
-      }
-
-      return isNodeWithinText(node.parentNode);
-    },
-    [],
-  );
-
-  const hasEditableSelection = useCallback(() => {
-    if (typeof window === 'undefined' || !textRef.current) {
-      return false;
-    }
-
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed) {
-      return false;
-    }
-
-    const { anchorNode, focusNode } = selection;
-
-    return isNodeWithinText(anchorNode) && isNodeWithinText(focusNode);
-  }, [isNodeWithinText]);
-
-  const handleContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (!isEditable) {
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!isEditing) {
       return;
     }
 
-    const validSelection = hasEditableSelection();
-    if (!validSelection) {
-      setShowToolbar(false);
-      setContextMenuOpen(false);
+    if (event.key === 'Escape') {
       event.preventDefault();
-      return;
+      onCancelEditing();
     }
-
-    setIsActive(true);
-    onInteract?.();
   };
 
-  const handleContextMenuOpenChange = (open: boolean) => {
-    if (!open) {
-      setContextMenuOpen(false);
-      setShowToolbar(false);
-      return;
-    }
-
-    if (!hasEditableSelection()) {
-      setContextMenuOpen(false);
-      setShowToolbar(false);
-      return;
-    }
-
-    setContextMenuOpen(true);
-    setShowToolbar(true);
-  };
-
-  const increaseFontSize = () => {
-    setFontSize(prev => {
-      const next = clamp(prev + 2, 8, 200);
-      onChange(data.id, { fontSize: next });
-      return next;
-    });
-  };
-
-  const decreaseFontSize = () => {
-    setFontSize(prev => {
-      const next = clamp(prev - 2, 8, 200);
-      onChange(data.id, { fontSize: next });
-      return next;
-    });
-  };
-
-  const toggleBold = () => {
-    setBold(prev => {
-      const next = !prev;
-      onChange(data.id, { bold: next });
-      return next;
-    });
-  };
-
-  const toggleItalic = () => {
-    setItalic(prev => {
-      const next = !prev;
-      onChange(data.id, { italic: next });
-      return next;
-    });
-  };
-
-  const toggleUnderline = () => {
-    setUnderline(prev => {
-      const next = !prev;
-      onChange(data.id, { underline: next });
-      return next;
-    });
-  };
-
-  const toggleStrikethrough = () => {
-    setStrikethrough(prev => {
-      const next = !prev;
-      onChange(data.id, { strikethrough: next });
-      return next;
-    });
-  };
-
-  const handleAlign = (nextAlign: typeof align) => {
-    setAlign(nextAlign);
-    onChange(data.id, { align: nextAlign });
-  };
-
-  const handleFontFamilyChange = (nextFont: string) => {
-    setFontFamily(nextFont);
-    onChange(data.id, { fontFamily: nextFont });
-  };
-
-  const handleColorChange = (nextColor: string) => {
-    setColor(nextColor);
-    onChange(data.id, { color: nextColor });
-  };
-
-  const handleDelete = () => {
-    onDelete?.(data.id);
-  };
+  const toolbar = useMemo(
+    () => (
+      <TextBoxToolbar
+        fontFamily={localFormatting.fontFamily}
+        onFontFamilyChange={handleFontFamily}
+        fontSize={localFormatting.fontSize}
+        onIncreaseFontSize={handleIncreaseFontSize}
+        onDecreaseFontSize={handleDecreaseFontSize}
+        bold={localFormatting.bold}
+        italic={localFormatting.italic}
+        underline={localFormatting.underline}
+        strikethrough={localFormatting.strikethrough}
+        onToggleBold={() => handleToggle('bold')}
+        onToggleItalic={() => handleToggle('italic')}
+        onToggleUnderline={() => handleToggle('underline')}
+        onToggleStrikethrough={() => handleToggle('strikethrough')}
+        align={localFormatting.align}
+        onAlign={handleAlign}
+        onBulletedList={() => runCommand('insertUnorderedList')}
+        onNumberedList={() => runCommand('insertOrderedList')}
+        color={localFormatting.color}
+        onColorChange={handleColor}
+        onRequestEffects={() => {}}
+        onRequestAnimate={() => {}}
+        onRequestPosition={() => {}}
+        onDelete={onDelete}
+      />
+    ),
+    [
+      handleAlign,
+      handleColor,
+      handleDecreaseFontSize,
+      handleFontFamily,
+      handleIncreaseFontSize,
+      handleToggle,
+      localFormatting.align,
+      localFormatting.bold,
+      localFormatting.color,
+      localFormatting.fontFamily,
+      localFormatting.fontSize,
+      localFormatting.italic,
+      localFormatting.strikethrough,
+      localFormatting.underline,
+      onDelete,
+      runCommand,
+    ],
+  );
 
   useEffect(() => {
-    if (textRef.current && textRef.current.innerHTML !== text) {
-      textRef.current.innerHTML = text;
+    if (!canEdit) {
+      onToolbarStateChange(id, null);
+      return () => {
+        onToolbarStateChange(id, null);
+      };
     }
-  }, [text]);
 
-  const containerStyles = useMemo(
-    () => ({
-      left: position.x,
-      top: position.y,
-      zIndex: isActive ? 60 : 20,
-    }),
-    [position.x, position.y, isActive],
+    const shouldShow = isSelected || isEditing;
+    onToolbarStateChange(id, shouldShow ? toolbar : null);
+
+    return () => {
+      onToolbarStateChange(id, null);
+    };
+  }, [canEdit, id, isEditing, isSelected, onToolbarStateChange, toolbar]);
+
+  const content = (
+    <div
+      className={cn(
+        'h-full w-full overflow-hidden rounded-2xl border border-transparent bg-background/95 p-3 transition-colors',
+        canEdit && !isEditing && 'hover:border-border/80',
+        isEditing && 'border-primary shadow-lg',
+      )}
+      onDoubleClick={handleDoubleClick}
+      onPointerDown={event => {
+        if (isEditing) {
+          event.stopPropagation();
+        }
+      }}
+      onContextMenu={event => {
+        if (canEdit) {
+          event.preventDefault();
+        }
+      }}
+    >
+      <div
+        ref={textRef}
+        className={cn(
+          'h-full w-full overflow-auto outline-none empty:before:absolute empty:before:left-3 empty:before:top-3 empty:before:text-sm empty:before:text-muted-foreground/70 empty:before:content-[attr(data-placeholder)]',
+          canEdit ? 'cursor-text' : 'cursor-default select-none',
+        )}
+        contentEditable={canEdit && isEditing}
+        suppressContentEditableWarning
+        spellCheck={false}
+        onInput={handleInput}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        data-placeholder={DEFAULT_TEXT_BOX_TEXT}
+        style={{
+          fontSize: `${localFormatting.fontSize}px`,
+          fontFamily: localFormatting.fontFamily,
+          fontWeight: localFormatting.bold ? 'bold' : 'normal',
+          fontStyle: localFormatting.italic ? 'italic' : 'normal',
+          textDecoration: `${localFormatting.underline ? 'underline' : ''} ${
+            localFormatting.strikethrough ? 'line-through' : ''
+          }`.trim(),
+          textAlign: localFormatting.align,
+          color: localFormatting.color,
+        }}
+      />
+      {!canEdit && localFormatting.text.trim().length === 0 && (
+        <span className="text-sm text-muted-foreground/70">{DEFAULT_TEXT_BOX_TEXT}</span>
+      )}
+    </div>
   );
 
-  const textDecoration = useMemo(() => {
-    const decorations: string[] = [];
-    if (underline) {
-      decorations.push('underline');
-    }
-    if (strikethrough) {
-      decorations.push('line-through');
-    }
-    return decorations.join(' ');
-  }, [underline, strikethrough]);
-
-  const toolbarProps = {
-    fontFamily,
-    onFontFamilyChange: handleFontFamilyChange,
-    fontSize,
-    onIncreaseFontSize: increaseFontSize,
-    onDecreaseFontSize: decreaseFontSize,
-    bold,
-    italic,
-    underline,
-    strikethrough,
-    onToggleBold: toggleBold,
-    onToggleItalic: toggleItalic,
-    onToggleUnderline: toggleUnderline,
-    onToggleStrikethrough: toggleStrikethrough,
-    align,
-    onAlign: handleAlign,
-    onBulletedList: () => runCommand('insertUnorderedList'),
-    onNumberedList: () => runCommand('insertOrderedList'),
-    color,
-    onColorChange: handleColorChange,
-    onRequestEffects: () => {},
-    onRequestAnimate: () => {},
-    onRequestPosition: () => {},
-    onDelete: handleDelete,
-  } as const;
-
-  return (
-    <ContextMenu open={contextMenuOpen} onOpenChange={handleContextMenuOpenChange}>
-      <ContextMenuTrigger asChild>
-        <div
-          className={cn('absolute group', isDragging && 'cursor-move opacity-60')}
-          style={containerStyles}
-          onMouseDown={handleMouseDown}
-          onClick={handleClick}
-          onContextMenu={handleContextMenu}
-        >
-          {showToolbar && isEditable && !isDragging && (
-            <TextBoxToolbar {...toolbarProps} />
-          )}
-
-          <div
-            ref={textRef}
-            className={cn(
-              'min-w-[200px] min-h-[40px] p-3 rounded border-2 transition-all outline-none bg-background/80 backdrop-blur',
-              isEditing
-                ? 'border-primary shadow-lg'
-                : isActive
-                ? 'border-primary/50 cursor-move'
-                : 'border-transparent hover:border-border cursor-move',
-              isDragging && 'pointer-events-none',
-            )}
-            contentEditable={isEditable && isEditing}
-            suppressContentEditableWarning
-            onDoubleClick={handleDoubleClick}
-            onBlur={handleBlur}
-            onInput={handleInput}
-            style={{
-              fontSize: `${fontSize}px`,
-              fontFamily,
-              fontWeight: bold ? 'bold' : 'normal',
-              fontStyle: italic ? 'italic' : 'normal',
-              textDecoration,
-              textAlign: align,
-              color,
-              userSelect: isEditable ? undefined : 'none',
-            }}
-            data-placeholder={DEFAULT_TEXT_BOX_TEXT}
-          />
-        </div>
-      </ContextMenuTrigger>
-
-      <ContextMenuContent className="w-auto">
-        <TextBoxToolbar variant="context" {...toolbarProps} />
-      </ContextMenuContent>
-    </ContextMenu>
-  );
+  return content;
 };
 
-export default ExhibitionTextBox;
+export default SlideTextBoxObject;
