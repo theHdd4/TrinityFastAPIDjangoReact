@@ -1319,10 +1319,14 @@ async def chart_data_multidim(explore_atom_id: str):
         print(f"Data shape: {processed_df.shape}")
         raise HTTPException(status_code=500, detail=f"Grouping failed: {str(e)}")
 
+    # Initialize actual_x_axis for all chart types
+    actual_x_axis = None
+    if x_axis:
+        actual_x_axis = find_column(x_axis, df.columns)
+
     # Format data based on chart type
     if chart_type == "line_chart" and x_axis:
         # Line chart specific processing
-        actual_x_axis = find_column(x_axis, df.columns)
         
         if not actual_x_axis:
             raise HTTPException(status_code=400, detail=f"X-axis column '{x_axis}' not found")
