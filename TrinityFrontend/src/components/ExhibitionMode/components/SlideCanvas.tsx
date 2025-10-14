@@ -552,6 +552,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                 isDragOver={Boolean(isDragOver && canEdit && draggedAtom)}
                 objects={slideObjects}
                 showEmptyState={!hasInteracted && nonStructuralObjects.length === 0}
+                layout={settings.cardLayout}
+                cardColor={settings.cardColor}
                 onCanvasDragLeave={handleDragLeave}
                 onCanvasDragOver={handleDragOver}
                 onCanvasDrop={handleDrop}
@@ -968,6 +970,8 @@ interface CanvasStageProps {
   objects: SlideObject[];
   isDragOver: boolean;
   showEmptyState: boolean;
+  layout: CardLayout;
+  cardColor: CardColor;
   onCanvasDragOver: (event: React.DragEvent) => void;
   onCanvasDragLeave: () => void;
   onCanvasDrop: (event: React.DragEvent) => void;
@@ -984,6 +988,41 @@ interface CanvasStageProps {
 const MIN_OBJECT_WIDTH = 220;
 const MIN_OBJECT_HEIGHT = 120;
 
+const layoutOverlayGradients: Record<CardColor, string> = {
+  default: 'from-purple-500/35 via-pink-500/22 to-orange-400/25',
+  blue: 'from-sky-500/35 via-cyan-400/22 to-teal-400/25',
+  purple: 'from-violet-500/35 via-purple-500/24 to-fuchsia-400/25',
+  green: 'from-emerald-500/32 via-teal-400/22 to-lime-400/24',
+  orange: 'from-orange-500/34 via-amber-400/24 to-yellow-400/24',
+};
+
+const LayoutOverlay: React.FC<{ layout: CardLayout; color: CardColor }> = ({ layout, color }) => {
+  if (layout === 'none') {
+    return null;
+  }
+
+  const gradient = layoutOverlayGradients[color] ?? layoutOverlayGradients.default;
+  const baseClass = cn(
+    'pointer-events-none absolute rounded-[28px] bg-gradient-to-br backdrop-blur-sm',
+    'shadow-[0_36px_80px_-34px_rgba(79,70,229,0.55)] ring-1 ring-white/20',
+    gradient,
+  );
+
+  switch (layout) {
+    case 'top':
+      return <div className={cn(baseClass, 'inset-x-8 top-6 h-[140px]')} />;
+    case 'bottom':
+      return <div className={cn(baseClass, 'inset-x-8 bottom-6 h-[160px]')} />;
+    case 'left':
+      return <div className={cn(baseClass, 'left-6 top-10 bottom-10 w-[240px]')} />;
+    case 'right':
+      return <div className={cn(baseClass, 'right-6 top-10 bottom-10 w-[240px]')} />;
+    case 'full':
+    default:
+      return <div className={cn(baseClass, 'inset-6')} />;
+  }
+};
+
 const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
   (
     {
@@ -991,6 +1030,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       objects,
       isDragOver,
       showEmptyState,
+      layout,
+      cardColor,
       onCanvasDragOver,
       onCanvasDragLeave,
       onCanvasDrop,
@@ -1604,7 +1645,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       <div
         ref={setRef}
         className={cn(
-          'relative h-full w-full rounded-3xl border-2 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+          'relative h-full w-full overflow-hidden rounded-3xl border-2 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
           canEdit ? 'bg-background/95' : 'bg-background/80',
           showEmptyState ? 'border-dashed border-border/70' : 'border-border/60',
           isDragOver ? 'border-primary/60 ring-2 ring-primary/20 shadow-xl scale-[0.99]' : undefined,
@@ -1616,18 +1657,23 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         onDragLeave={onCanvasDragLeave}
         onDrop={onCanvasDrop}
       >
+        <div className="pointer-events-none absolute inset-0 z-0">
+          <LayoutOverlay layout={layout} color={cardColor} />
+        </div>
+
         {showEmptyState && (
-          <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center rounded-3xl border-2 border-dashed border-border/60 bg-muted/20 px-6 text-center text-sm text-muted-foreground">
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-3xl border-2 border-dashed border-border/60 bg-muted/20 px-6 text-center text-sm text-muted-foreground">
             Add components from the catalogue to build your presentation slide.
           </div>
         )}
 
-        {objects.map(object => {
-          const isSelected = selectedIds.includes(object.id);
-          const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
-          const isAccentImageObject = object.type === 'accent-image';
-          const isTitleObject = object.type === 'title';
-          const isTextBoxObject = object.type === 'text-box';
+        <div className="relative z-20 h-full w-full">
+          {objects.map(object => {
+            const isSelected = selectedIds.includes(object.id);
+            const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
+            const isAccentImageObject = object.type === 'accent-image';
+            const isTitleObject = object.type === 'title';
+            const isTextBoxObject = object.type === 'text-box';
           const isEditingTitle =
             isTitleObject && editingTextState?.id === object.id && editingTextState.type === 'title';
           const isEditingTextBox =
@@ -1772,6 +1818,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             </div>
           );
         })}
+        </div>
 
         {isDragOver && canEdit && (
           <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center rounded-3xl border-2 border-dashed border-primary/60 bg-primary/10 text-xs font-semibold uppercase tracking-wide text-primary">

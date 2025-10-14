@@ -246,7 +246,12 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   return (
     <ContextMenu open={contextOpen} onOpenChange={handleContextOpenChange}>
       <ContextMenuTrigger asChild>{content}</ContextMenuTrigger>
-      <ContextMenuContent className="z-[3000] w-[420px] border-border bg-background/95 p-1 shadow-2xl">
+      <ContextMenuContent
+        align="start"
+        sideOffset={6}
+        collisionPadding={12}
+        className="z-[3500] overflow-visible rounded-full border border-border/70 bg-background/95 p-0 shadow-[0_24px_48px_-18px_rgba(124,58,237,0.45)] backdrop-blur-lg"
+      >
         {toolbar}
       </ContextMenuContent>
     </ContextMenu>
