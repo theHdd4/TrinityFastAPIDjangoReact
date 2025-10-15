@@ -1,9 +1,4 @@
 const hostIp = import.meta.env.VITE_HOST_IP;
-// When running the dev stack the frontend listens on port 8081 while
-// Django/FASTAPI are published on 8003/8004/8005 respectively. Detect this
-// scenario using the current browser port so the correct defaults are used when
-// no explicit environment variables are provided.
-// Also detect development environment by hostname, port, or environment variable
 const isDevStack =
   (typeof window !== 'undefined' && window.location.port === '8081') ; //||
   // import.meta.env.VITE_FRONTEND_PORT === '8081' ||
@@ -30,19 +25,12 @@ if (!backendOrigin) {
     backendOrigin = `http://localhost:${djangoPort}`;
   }
 } else if (isDevStack && backendOrigin.endsWith(`:${frontendPort}`)) {
-  // When the dev stack is running the frontend uses port 8081 while
-  // Django listens on 8003. Avoid hitting the nginx container by correcting
-  // the port if the backend origin matches the frontend port.
   backendOrigin = backendOrigin.replace(
     new RegExp(`:${frontendPort}$`),
     `:${djangoPort}`,
   );
 }
 
-// When hosting through Traefik the Django service is exposed under the
-// `/admin` prefix while direct container access uses the plain `/api` paths.
-// Detect which form to use based on the backend origin. If it points at the
-// container port `8000` we assume no proxy is stripping `/admin`.
 
 const usesProxy = !backendOrigin.includes(`:${djangoPort}`);
 const djangoPrefix = usesProxy ? '/admin/api' : '/api';
@@ -91,6 +79,10 @@ export const SUBSCRIPTIONS_API =
   normalizeUrl(import.meta.env.VITE_SUBSCRIPTIONS_API) ||
   `${backendOrigin}${djangoPrefix}/subscriptions`;
 
+export const SIGNUPS_API =
+  normalizeUrl(import.meta.env.VITE_SIGNUPS_API) ||
+  `${backendOrigin}${djangoPrefix}/signups`;
+
 export const VALIDATE_API =
   normalizeUrl(import.meta.env.VITE_VALIDATE_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/data-upload-validate`;
@@ -122,17 +114,14 @@ export const SCOPE_SELECTOR_API =
 export const CREATECOLUMN_API =
   import.meta.env.VITE_CREATECOLUMN_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/create-column`;
 
-
-
 export const GROUPBY_API =
   import.meta.env.VITE_GROUPBY_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/groupby`;
-
 
 let aiBase = normalizeUrl(import.meta.env.VITE_TRINITY_AI_API);
 if (!aiBase) {
   aiBase = backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${aiPort}`);
 }
-// Ensure the base URL ends with the `/trinityai` prefix exactly once
+
 const normalizedAiBase = aiBase.replace(/\/?$/, '');
 export const TRINITY_AI_API = normalizedAiBase.endsWith('/trinityai')
   ? normalizedAiBase
@@ -185,6 +174,29 @@ export const EVALUATE_API =
   normalizeUrl(import.meta.env.VITE_EVALUATE_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/evaluate`;
 
+// Signup API function
+export const submitSignup = async (data: {
+  first_name: string;
+  last_name: string;
+  email: string;
+  institution_company: string;
+}) => {
+  const response = await fetch(`${SIGNUPS_API}/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.email?.[0] || errorData.message || 'Signup failed');
+  }
+
+  return response.json();
+};
+
 // Growth Rates API functions
 export const calculateFiscalGrowth = async (params: {
   scope: string;
@@ -193,7 +205,7 @@ export const calculateFiscalGrowth = async (params: {
   fiscal_start_month?: number;
   frequency?: string;
   start_year?: number;
-  run_id?: string;  // Add run_id parameter
+  run_id?: string; 
 }) => {
   const formData = new FormData();
   formData.append('scope', params.scope);
@@ -219,6 +231,7 @@ export const calculateFiscalGrowth = async (params: {
 
   return response.json();
 };
+
 
 export const calculateHalfYearlyGrowth = async (params: {
   scope: string;

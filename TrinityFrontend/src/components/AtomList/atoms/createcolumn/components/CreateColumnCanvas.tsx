@@ -28,7 +28,7 @@ import CreateColumnInputFiles from './CreateColumnInputFiles';
 
 interface Operation {
   id: string;
-  type: 'add' | 'subtract' | 'multiply' | 'divide' | 'power' | 'sqrt' | 'log' | 'abs' | 'dummy' | 'rpi' | 'residual' | 'stl_outlier' | 'logistic' | 'detrend' | 'deseasonalize' | 'detrend_deseasonalize' | 'exp' | 'standardize_zscore' | 'standardize_minmax';
+  type: 'add' | 'subtract' | 'multiply' | 'divide' | 'power' | 'sqrt' | 'log' | 'abs' | 'dummy' | 'rpi' | 'residual' | 'stl_outlier' | 'logistic' | 'detrend' | 'deseasonalize' | 'detrend_deseasonalize' | 'exp' | 'standardize_zscore' | 'standardize_minmax' | 'datetime';
   name: string;
   columns?: string[];
   newColumnName: string;
@@ -87,10 +87,12 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
     c && typeof c.data_type === 'string' &&
     ['object', 'string', 'category', 'bool'].some(type => c.data_type.toLowerCase().includes(type))
   ).map((c: any) => c.column);
+  // All columns for datetime operations (since date columns can have various data types)
+  const allAvailableColumns: string[] = allColumns.map((c: any) => c.column).filter(Boolean);
 
   // Helper to get available columns for a specific operation (including created columns from previous operations)
-  const getAvailableColumnsForOperation = (operationIndex: number, isNumerical: boolean = true) => {
-    const baseColumns = isNumerical ? numericalColumns : categoricalColumns;
+  const getAvailableColumnsForOperation = (operationIndex: number, isNumerical: boolean = true, includeAllColumns: boolean = false) => {
+    const baseColumns = includeAllColumns ? allAvailableColumns : (isNumerical ? numericalColumns : categoricalColumns);
     const createdColumns: string[] = [];
     
     // Add output columns from previous operations
@@ -102,7 +104,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         if (outputColName) {
           // For categorical operations, only include created columns if they are categorical
           // For numerical operations, include all created columns
-          if (isNumerical || prevOp.type === 'dummy') {
+          // For datetime operations, include all created columns
+          if (includeAllColumns || isNumerical || prevOp.type === 'dummy') {
             createdColumns.push(outputColName);
           }
         }
@@ -147,6 +150,19 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       case 'detrend': return columns.length > 0 ? `${columns[0]}_detrended` : 'detrended';
       case 'deseasonalize': return columns.length > 0 ? `${columns[0]}_deseasonalized` : 'deseasonalized';
       case 'detrend_deseasonalize': return columns.length > 0 ? `${columns[0]}_detrend_deseasonalized` : 'detrend_deseasonalized';
+      case 'datetime': {
+        if (columns.length > 0 && op.param) {
+          const dateCol = columns[0];
+          const param = op.param as string;
+          if (param === 'to_year') return `${dateCol}_year`;
+          if (param === 'to_month') return `${dateCol}_month`;
+          if (param === 'to_week') return `${dateCol}_week`;
+          if (param === 'to_day') return `${dateCol}_day`;
+          if (param === 'to_day_name') return `${dateCol}_day_name`;
+          if (param === 'to_month_name') return `${dateCol}_month_name`;
+        }
+        return 'datetime_extract';
+      }
       default: return `${op.type}_${columns.join('_')}`;
     }
   };
@@ -234,8 +250,12 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
           if (resp.ok) {
             const data = await resp.json();
             if (Array.isArray(data.identifiers) && data.identifiers.length > 0) {
-              setMongoIdentifiers(data.identifiers || []);
-              setSelectedIdentifiers(data.identifiers || []);
+              // Filter out 'date' from MongoDB/Redis identifiers (case-insensitive)
+              const filteredIdentifiers = (data.identifiers || []).filter(
+                (id: string) => id.toLowerCase() !== 'date'
+              );
+              setMongoIdentifiers(filteredIdentifiers);
+              setSelectedIdentifiers(filteredIdentifiers);
               setShowCatSelector(false);
               return;
             }
@@ -376,6 +396,14 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
               formData.append(`${key}_rename`, rename);
             }
             formData.append(key, colString);
+          } else if (op.type === 'datetime') {
+            if (op.param) {
+              formData.append(`${key}_param`, op.param as string);
+            }
+            if (rename) {
+              formData.append(`${key}_rename`, rename);
+            }
+            formData.append(key, colString);
           } else {
             // For dummy, rpi, etc., require at least 1 column
             if (rename) {
@@ -392,7 +420,6 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       // Save operations order - backend will process operations sequentially
       formData.append('options', operations.map(op => op.type).join(','));
       // In handleCreate, get the latest identifiers from the ref
-      console.log('DEBUG: identifiers at perform', selectedIdentifiers);
       formData.append('identifiers', selectedIdentifiers.join(','));
       // Call backend
       const res = await fetch(`${CREATECOLUMN_API}/perform`, {
@@ -400,7 +427,6 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         body: formData,
       });
       const text = await res.text();
-      console.log('Backend response:', text);
       let data;
       try {
         data = JSON.parse(text);
@@ -440,7 +466,6 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       // The backend now returns the actual data in data.results
       if (data.results && Array.isArray(data.results)) {
         setPreview(data.results);
-        console.log('✅ Preview data loaded directly from perform response:', data.results.length, 'rows');
         
         // Set the preview file for pagination
         if (data.result_file) {
@@ -453,7 +478,6 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       
       toast({ title: 'Success', description: 'Columns created and preview loaded.' });
       // In handleCreate, after a successful perform, set the last used identifiers
-      console.log('DEBUG: selectedIdentifiers at perform', selectedIdentifiers);
       // setLastUsedIdentifiers(selectedIdentifiers); // This state is no longer needed
     } catch (e: any) {
       const errorMsg = e?.message || (typeof e === 'string' ? e : 'Failed to create columns');
@@ -571,6 +595,22 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
               case 'detrend': created_column_name = columns.length > 0 ? `${columns[0]}_detrended` : 'detrended'; break;
               case 'deseasonalize': created_column_name = columns.length > 0 ? `${columns[0]}_deseasonalized` : 'deseasonalized'; break;
               case 'detrend_deseasonalize': created_column_name = columns.length > 0 ? `${columns[0]}_detrend_deseasonalized` : 'detrend_deseasonalized'; break;
+              case 'datetime': {
+                if (columns.length > 0 && op.param) {
+                  const dateCol = columns[0];
+                  const param = op.param as string;
+                  if (param === 'to_year') created_column_name = `${dateCol}_year`;
+                  else if (param === 'to_month') created_column_name = `${dateCol}_month`;
+                  else if (param === 'to_week') created_column_name = `${dateCol}_week`;
+                  else if (param === 'to_day') created_column_name = `${dateCol}_day`;
+                  else if (param === 'to_day_name') created_column_name = `${dateCol}_day_name`;
+                  else if (param === 'to_month_name') created_column_name = `${dateCol}_month_name`;
+                  else created_column_name = 'datetime_extract';
+                } else {
+                  created_column_name = 'datetime_extract';
+                }
+                break;
+              }
               default: created_column_name = `${op.type}_${columns.join('_')}`; break;
             }
           }
@@ -615,7 +655,6 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   };
 
   const handleIdentifiersChange = (ids: string[]) => {
-    console.log('DEBUG: onIdentifiersChange called', ids);
     setSelectedIdentifiers(ids);
   };
 
@@ -1325,6 +1364,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
             // Get available columns for this operation (including created columns from previous operations)
             const availableNumericalColumns = getAvailableColumnsForOperation(operationIndex, true);
             const availableCategoricalColumns = getAvailableColumnsForOperation(operationIndex, false);
+            const availableAllColumns = getAvailableColumnsForOperation(operationIndex, true, true);
             // Show error if the output column name already exists in the uploaded file
             const outputColName = getOutputColName(operation);
             const nameExists = isNameInUploadedFile(outputColName);
@@ -1335,6 +1375,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
             // Parameter input fields for new operations
             const showPowerParam = opType === 'power';
             const showLogisticParam = opType === 'logistic';
+            const showDatetimeParam = opType === 'datetime';
             // Only allow rename for standardize if one column is selected
             const isStandardize = opType.startsWith('standardize');
             const allowRename = !isStandardize || (opColumns.length === 1);
@@ -1409,7 +1450,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
                             placeholder={`Select column ${idx + 1}`}
                             value={col}
                             onValueChange={value => updateColumnSelector(operation.id, idx, value)}
-                            options={(operation.type === 'dummy' ? availableCategoricalColumns : availableNumericalColumns).map(option => ({
+                            options={(operation.type === 'dummy' ? availableCategoricalColumns : operation.type === 'datetime' ? availableAllColumns : availableNumericalColumns).map(option => ({
                               value: option,
                               label: `${option}${isCreatedColumn(option, operationIndex) ? " (created)" : ""}`
                             }))}
@@ -1503,6 +1544,30 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
                       style={{ minWidth: 0 }}
                     />
                   </div>
+                )}
+                {/* Parameter select for datetime */}
+                {showDatetimeParam && (
+                  <Select
+                    value={operation.param as string || ''}
+                    onValueChange={(value) => {
+                      const updated = operations.map(op =>
+                        op.id === operation.id ? { ...op, param: value } : op
+                      );
+                      onOperationsChange(updated);
+                    }}
+                  >
+                    <SelectTrigger className="w-40 ml-2 bg-white">
+                      <SelectValue placeholder="Select component" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="to_year">Year</SelectItem>
+                      <SelectItem value="to_month">Month</SelectItem>
+                      <SelectItem value="to_week">Week</SelectItem>
+                      <SelectItem value="to_day">Day</SelectItem>
+                      <SelectItem value="to_day_name">Day Name</SelectItem>
+                      <SelectItem value="to_month_name">Month Name</SelectItem>
+                    </SelectContent>
+                  </Select>
                 )}
                 {['detrend', 'deseasonalize', 'detrend_deseasonalize'].includes(opType) && periodNeeded[operation.id] && (
                   <input

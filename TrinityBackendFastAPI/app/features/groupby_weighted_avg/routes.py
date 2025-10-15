@@ -344,19 +344,19 @@ async def perform_groupby_route(
         # Construct the full object path
         full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
         
-        print(f"🔍 GroupBy file path resolution:")
-        print(f"  Original object_names: {object_names}")
-        print(f"  Current prefix: {prefix}")
-        print(f"  Full object path: {full_object_path}")
+        # print(f"🔍 GroupBy file path resolution:")
+        # print(f"  Original object_names: {object_names}")
+        # print(f"  Current prefix: {prefix}")
+        # print(f"  Full object path: {full_object_path}")
         
         # Use the full path to load the dataframe
         df = get_minio_df(bucket=bucket_name, file_key=full_object_path)
         df = clean_columns(df)
         
-        print(f"✅ Successfully loaded dataframe with shape: {df.shape}")
-        print(f"  Columns: {list(df.columns)}")
-        print(f"  Identifiers: {identifiers}")
-        print(f"  Aggregations: {aggregations}")
+        # print(f"✅ Successfully loaded dataframe with shape: {df.shape}")
+        # print(f"  Columns: {list(df.columns)}")
+        # print(f"  Identifiers: {identifiers}")
+        # print(f"  Aggregations: {aggregations}")
         
         grouped = groupby_base_func(df, identifiers, aggregations)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -383,7 +383,7 @@ async def perform_groupby_route(
             "results": grouped_data  # 🔧 Add the actual grouped results
         }
     except Exception as e:
-        print(f"❌ GroupBy operation failed: {e}")
+        # print(f"❌ GroupBy operation failed: {e}")
         import traceback
         traceback.print_exc()
         return {"status": "FAILURE", "error": str(e)}
@@ -412,7 +412,7 @@ async def save_groupby_dataframe(
         # Get consistent object prefix and construct full path
         prefix = await get_object_prefix()
         filename = f"{prefix}groupby/{filename}"
-        print(f"🔍 GroupBy Save: prefix={prefix}, final filename={filename}")
+        # print(f"🔍 GroupBy Save: prefix={prefix}, final filename={filename}")
         
         # Save to MinIO as Arrow file
         table = pa.Table.from_pandas(df)

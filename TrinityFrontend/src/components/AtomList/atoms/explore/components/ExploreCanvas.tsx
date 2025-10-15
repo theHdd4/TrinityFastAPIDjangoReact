@@ -618,6 +618,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             title: safeData.title || '',
             legendField: safeData.legendField || '', // Field to use for creating multiple lines/series
             sortOrder: null,
+            sortColumn: '',
           },
         ]
   );
@@ -641,6 +642,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       title: safeData.title || '',
       legendField: safeData.legendField || '',
       sortOrder: null as string | null,
+      sortColumn: '',
     };
 
     const nextConfigs =
@@ -844,6 +846,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           title: '',
           legendField: '', // Field to use for creating multiple lines/series
           sortOrder: null,
+          sortColumn: '',
         }
       ]);
       
@@ -1126,6 +1129,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           title: '',
           legendField: '', // Field to use for creating multiple lines/series
           sortOrder: null,
+          sortColumn: '',
         }
       ]);
       
@@ -2069,7 +2073,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     const config = chartConfigs[index] || chartConfigs[0];
     const isSettingsVisible = chartSettingsVisible[index] || false;
     const rendererProps = {
-      key: `chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartDataSets[index]?.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-sort-${config.sortOrder || 'none'}-yaxes-${(config.yAxes || []).join('-')}`,
+      key: `chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartDataSets[index]?.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-yaxes-${(config.yAxes || []).join('-')}-sortcol-${config.sortColumn || 'none'}-sortorder-${config.sortOrder || 'none'}`,
       type: config.chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
       data: chartDataSets[index] || [],
       xField: config.xAxis || undefined,
@@ -2095,6 +2099,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       onSave: () => handleChartSave(index),
       sortOrder: config.sortOrder || null,
       onSortChange: (order) => handleSortOrderChange(index, order),
+      sortColumn: config.sortColumn || '',
+      onSortColumnChange: (column) => handleSortColumnChange(index, column),
       showLegend: chartOptions[index]?.legend,
       showAxisLabels: chartOptions[index]?.axisLabels,
       showDataLabels: chartOptions[index]?.dataLabels,
@@ -3038,6 +3044,15 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     newConfigs[chartIndex] = { ...newConfigs[chartIndex], sortOrder: order };
     setChartConfigs(newConfigs);
     safeTriggerChartGeneration(chartIndex, newConfigs[chartIndex], 100);
+  };
+
+  // Handle sort column change for charts
+  const handleSortColumnChange = (chartIndex: number, column: string) => {
+    console.log('🔍 EXPLORE: handleSortColumnChange called', { chartIndex, column });
+    const newConfigs = [...chartConfigs];
+    newConfigs[chartIndex] = { ...newConfigs[chartIndex], sortColumn: column };
+    console.log('🔍 EXPLORE: Updated config', newConfigs[chartIndex]);
+    setChartConfigs(newConfigs);
   };
 
   // Handle save action for charts

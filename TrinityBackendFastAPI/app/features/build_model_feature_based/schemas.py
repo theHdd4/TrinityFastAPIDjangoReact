@@ -81,6 +81,15 @@ class CustomModelConfig(BaseModel):
     adam: Optional[bool] = False
     constraints: Optional[List[ModelConstraint]] = []
 
+class ROIFeatureResult(BaseModel):
+    """ROI calculation result for a single feature."""
+    cprp_value: float = Field(..., description="CPRP value used for calculation")
+    beta_coefficient: float = Field(..., description="Model coefficient (beta) for the feature")
+    beta_transformed_sum: float = Field(..., description="Sum of beta * transformed values (numerator)")
+    cprp_original_sum: float = Field(..., description="Sum of cprp * original values (denominator)")
+    avg_price_column: float = Field(..., description="Average price column value")
+    roi: float = Field(..., description="Final ROI calculation result")
+
 class ModelTrainingRequest(BaseModel):
     """Request for model training endpoint."""
     scope_id: str
@@ -132,6 +141,9 @@ class ModelResult(BaseModel):
     contributions: Optional[Dict[str, float]] = Field(None, description="Contribution values for each variable")
     elasticity_details: Optional[Dict[str, Any]] = Field(None, description="Details about elasticity calculation")
     contribution_details: Optional[Dict[str, Any]] = Field(None, description="Details about contribution calculation")
+    
+    # ROI Results fields
+    roi_results: Optional[Dict[str, ROIFeatureResult]] = Field(None, description="ROI calculation results for selected features")
 
 
 class StackModelResult(BaseModel):
@@ -142,7 +154,6 @@ class StackModelResult(BaseModel):
     r2_train: float
     r2_test: float
     coefficients: Dict[str, float] = Field(..., description="Beta coefficients")
-    standardized_coefficients: Optional[Dict[str, float]] = Field(None, description="Standardized coefficients for reference")
     intercept: float = Field(..., description="Model intercept")
     aic: float = Field(..., description="Akaike Information Criterion")
     bic: float = Field(..., description="Bayesian Information Criterion")
@@ -152,15 +163,12 @@ class StackModelResult(BaseModel):
     best_alpha: Optional[float] = Field(None, description="Best alpha value found during auto-tuning")
     best_cv_score: Optional[float] = Field(None, description="Best cross-validation score during auto-tuning")
     best_l1_ratio: Optional[float] = Field(None, description="Best L1 ratio found during auto-tuning (for ElasticNet)")
-    
-    # Additional fields for consistency with individual modeling
-    mape_train_std: float = Field(0.0, description="Standard deviation of train MAPE")
-    mape_test_std: float = Field(0.0, description="Standard deviation of test MAPE")
-    r2_train_std: float = Field(0.0, description="Standard deviation of train R²")
-    r2_test_std: float = Field(0.0, description="Standard deviation of test R²")
-    fold_results: List[Dict[str, Any]] = Field(default_factory=list, description="Individual fold results")
+
     train_size: int = Field(0, description="Number of training samples")
     test_size: int = Field(0, description="Number of test samples")
+    
+    # ROI Results fields
+    roi_results: Optional[Dict[str, ROIFeatureResult]] = Field(None, description="ROI calculation results for selected features")
 
 
 class CombinationModelResults(BaseModel):
@@ -280,10 +288,16 @@ class ModelResultDocument(BaseModel):
     variable_statistics: List[Dict[str, Any]] = Field(default_factory=list, description="Detailed statistics for each variable")
     variable_averages: Dict[str, float] = Field(default_factory=dict, description="Simple averages for quick access")
     
+    # MMM Configuration
+    combo_config: Optional[Dict[str, Any]] = Field(None, description="Combination configuration for MMM modeling")
+    
     # Fold results
     fold_results: List[Dict[str, Any]] = Field(default_factory=list, description="Detailed results for each fold")
     is_fold_result: bool = Field(False, description="False for aggregated, True for individual fold")
     fold_index: Optional[int] = Field(None, description="Only set if is_fold_result is True")
+    
+    # ROI Results fields
+    roi_results: Optional[Dict[str, ROIFeatureResult]] = Field(None, description="ROI calculation results for selected features")
     
     # Metadata
     created_at: datetime = Field(default_factory=datetime.now)
@@ -541,6 +555,8 @@ class MarketingModelTrainingResponse(BaseModel):
     summary: Dict[str, Any]
     best_models: Dict[str, int]
     execution_time_seconds: float
+    all_model_results: Optional[List[Dict[str, Any]]] = Field(None, description="All detailed model results with metrics")
+    combination_wise_results: Optional[Dict[str, List[Dict[str, Any]]]] = Field(None, description="Results organized by combination")
     
     class Config:
         schema_extra = {
@@ -560,7 +576,42 @@ class MarketingModelTrainingResponse(BaseModel):
                     "by_r2": 1,
                     "by_aic": 0
                 },
-                "execution_time_seconds": 2.34
+                "execution_time_seconds": 2.34,
+                "all_model_results": [
+                    {
+                        "model_name": "Linear Regression",
+                        "mape_test": 0.15,
+                        "r2_test": 0.85,
+                        "aic": 1200.5,
+                        "bic": 1210.3,
+                        "cluster_id": "cluster_0",
+                        "parameter_combination": {...}
+                    }
+                ],
+                "combination_wise_results": {
+                    "Brand_A_Region_X": [
+                        {
+                            "model_name": "Linear Regression",
+                            "mape_test": 0.12,
+                            "r2_test": 0.88,
+                            "cluster_id": "cluster_0"
+                        },
+                        {
+                            "model_name": "Ridge Regression", 
+                            "mape_test": 0.15,
+                            "r2_test": 0.85,
+                            "cluster_id": "cluster_0"
+                        }
+                    ],
+                    "Brand_B_Region_Y": [
+                        {
+                            "model_name": "Linear Regression",
+                            "mape_test": 0.18,
+                            "r2_test": 0.82,
+                            "cluster_id": "cluster_1"
+                        }
+                    ]
+                }
             }
         }
 

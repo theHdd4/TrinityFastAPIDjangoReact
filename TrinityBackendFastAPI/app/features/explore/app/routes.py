@@ -48,6 +48,26 @@ explore_atoms = {}
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin_dev")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "pass_dev")
+
+# Helper function to convert date values to ISO format (YYYY-MM-DD)
+def convert_date_to_iso(value):
+    """Convert date/datetime values to ISO format string (YYYY-MM-DD) for proper sorting"""
+    if value is None or pd.isna(value):
+        return value
+    
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    elif isinstance(value, date):
+        return value.isoformat()
+    elif isinstance(value, pd.Timestamp):
+        return value.date().isoformat()
+    else:
+        # Try to parse if it's a string date
+        try:
+            parsed_date = pd.to_datetime(value)
+            return parsed_date.date().isoformat()
+        except:
+            return value
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
 OBJECT_PREFIX = os.getenv("OBJECT_PREFIX", "qmmqq/sales/")
 
@@ -1299,10 +1319,14 @@ async def chart_data_multidim(explore_atom_id: str):
         print(f"Data shape: {processed_df.shape}")
         raise HTTPException(status_code=500, detail=f"Grouping failed: {str(e)}")
 
+    # Initialize actual_x_axis for all chart types
+    actual_x_axis = None
+    if x_axis:
+        actual_x_axis = find_column(x_axis, df.columns)
+
     # Format data based on chart type
     if chart_type == "line_chart" and x_axis:
         # Line chart specific processing
-        actual_x_axis = find_column(x_axis, df.columns)
         
         if not actual_x_axis:
             raise HTTPException(status_code=400, detail=f"X-axis column '{x_axis}' not found")
@@ -1898,6 +1922,41 @@ async def chart_data_multidim(explore_atom_id: str):
     else:
         # For other chart types, use the data as is
         recharts_data = converted_chart_data
+
+    # Convert date columns to ISO format (YYYY-MM-DD) for proper sorting in frontend
+    if isinstance(recharts_data, list) and recharts_data:
+        # Check if we have date columns (column name contains 'date' or actual_x_axis if it's a date)
+        date_columns = []
+        
+        # Check x_axis column
+        if actual_x_axis:
+            sample_value = None
+            for item in recharts_data:
+                if isinstance(item, dict) and actual_x_axis in item:
+                    sample_value = item[actual_x_axis]
+                    break
+            
+            # Check if sample value is a date type or if column name suggests it's a date
+            if sample_value is not None and (
+                isinstance(sample_value, (datetime, date, pd.Timestamp)) or
+                actual_x_axis.lower().find('date') != -1
+            ):
+                date_columns.append(actual_x_axis)
+        
+        # Also check other columns that might be dates
+        if isinstance(recharts_data[0], dict):
+            for key in recharts_data[0].keys():
+                if key not in date_columns and key.lower().find('date') != -1:
+                    date_columns.append(key)
+        
+        # Convert date values in identified date columns
+        if date_columns:
+            print(f"🗓️ Converting date columns to ISO format: {date_columns}")
+            for item in recharts_data:
+                if isinstance(item, dict):
+                    for col in date_columns:
+                        if col in item:
+                            item[col] = convert_date_to_iso(item[col])
 
     # Enhanced return statement with cache and MongoDB info
     return {

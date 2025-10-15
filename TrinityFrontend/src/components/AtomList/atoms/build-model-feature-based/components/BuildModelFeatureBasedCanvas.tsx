@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -7,12 +7,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Plus, Play, X, Settings2, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Info } from 'lucide-react';
+import { Plus, Play, X, Settings2, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Info, DollarSign } from 'lucide-react';
 import { BuildModelFeatureBasedData, VariableTransformation, ModelConfig } from '../BuildModelFeatureBasedAtom';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { BUILD_MODEL_API } from '@/lib/api';
 import { MultiSelectDropdown } from '@/templates/dropdown/multiselect';
 import { SingleSelectDropdown } from '@/templates/dropdown/single-select';
+import ROIConfiguration, { ROIConfig } from './ROIConfiguration';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -46,6 +47,40 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
   const [modelingSectionExpanded, setModelingSectionExpanded] = useState(true);
   const [minimizedCombinations, setMinimizedCombinations] = useState<Set<number>>(new Set());
   const [constraintSettingsOpen, setConstraintSettingsOpen] = useState(false);
+  const [roiSettingsOpen, setRoiSettingsOpen] = useState(false);
+  const [enableConstraintSetup, setEnableConstraintSetup] = useState(false);
+  const [enableROICalculation, setEnableROICalculation] = useState(false);
+  
+  // Refs for auto-scrolling to configuration containers
+  const constraintConfigRef = useRef<HTMLDivElement>(null);
+  const roiConfigRef = useRef<HTMLDivElement>(null);
+  
+  // Function to scroll to a configuration container
+  const scrollToConfig = (ref: React.RefObject<HTMLDivElement>) => {
+    if (ref.current) {
+      ref.current.scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'nearest',
+        inline: 'nearest'
+      });
+    }
+  };
+  const [roiConfig, setRoiConfig] = useState<ROIConfig>({
+    enabled: false,  // Will be set based on enableROICalculation state
+    features: {},
+    priceColumn: '',
+    perCombinationCPRP: false,
+    combinationCPRPValues: {},
+    manualPriceEntry: false,
+    manualPriceValue: undefined,
+    perCombinationManualPrice: false,
+    combinationManualPriceValues: {},
+    averageMonths: undefined,
+    roiVariables: [],
+    perCombinationCostPerUnit: false,
+    costPerUnit: {},
+    combinationCostPerUnit: {}
+  });
   
   // Model Performance Metrics sorting and filtering state - per combination
   const [performanceSortColumn, setPerformanceSortColumn] = useState<{ [comboIndex: number]: string }>({});
@@ -124,6 +159,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
           return 'minmax';
         case 'standardize':
           return 'standard';
+        case 'media':
+          return 'media'; // MMM media transformation pipeline
         case 'none':
         case 'log':
         case 'sqrt':
@@ -149,33 +186,57 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
       return modelConfigs.map(config => {
         // Regular constrained models (for individual modeling)
         if (config.id === 'Custom Constrained Ridge' || config.id === 'Constrained Linear Regression') {
+          // Transform constraint arrays to the expected backend format
+          const variableConstraints = [
+            ...(finalData.negativeConstraints || []).map(variable => ({
+              variable_name: variable,
+              constraint_type: 'negative'
+            })),
+            ...(finalData.positiveConstraints || []).map(variable => ({
+              variable_name: variable,
+              constraint_type: 'positive'
+            }))
+          ];
+          
           const updatedConfig = {
             ...config,
             parameters: {
               ...config.parameters,
-              negative_constraints: finalData.negativeConstraints || [],
-              positive_constraints: finalData.positiveConstraints || []
+              variable_constraints: variableConstraints,
+              use_constraints: variableConstraints.length > 0
             }
           };
           console.log(`🔍 Frontend - ${config.id} constraints:`, {
-            negative: updatedConfig.parameters.negative_constraints,
-            positive: updatedConfig.parameters.positive_constraints
+            variable_constraints: variableConstraints,
+            use_constraints: variableConstraints.length > 0
           });
           return updatedConfig;
         }
         // Stack constrained models (for stack modeling)
         else if (config.id === 'Constrained Ridge' || config.id === 'Constrained Linear Regression') {
+          // Transform constraint arrays to the expected backend format
+          const variableConstraints = [
+            ...(finalData.negativeConstraints || []).map(variable => ({
+              variable_name: variable,
+              constraint_type: 'negative'
+            })),
+            ...(finalData.positiveConstraints || []).map(variable => ({
+              variable_name: variable,
+              constraint_type: 'positive'
+            }))
+          ];
+          
           const updatedConfig = {
             ...config,
             parameters: {
               ...config.parameters,
-              negative_constraints: finalData.negativeConstraints || [],
-              positive_constraints: finalData.positiveConstraints || []
+              variable_constraints: variableConstraints,
+              use_constraints: variableConstraints.length > 0
             }
           };
           console.log(`🔍 Frontend - ${config.id} stack constraints:`, {
-            negative: updatedConfig.parameters.negative_constraints,
-            positive: updatedConfig.parameters.positive_constraints
+            variable_constraints: variableConstraints,
+            use_constraints: variableConstraints.length > 0
           });
           return updatedConfig;
         }
@@ -183,32 +244,175 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
       });
     };
 
-    // Construct the request payload for the direct endpoint
-    const requestPayload = {
-      run_id: tempRunId, // Send the run_id for progress tracking
-      scope_number: finalData.selectedScope, // Send the scope number directly
-      combinations: finalData.selectedCombinations, // Send the combination strings directly
-      x_variables: allXVariables,
-      y_variable: finalData.yVariable,
-      standardization: standardization,
-      custom_model_configs: null, // Can be enhanced later
-      // Individual modeling fields
-      individual_modeling: finalData.individualModeling ?? false,
-      individual_k_folds: finalData.individualKFolds || 5,
-      individual_test_size: finalData.individualTestSize || 0.2,
-      individual_models_to_run: finalData.individualSelectedModels || [],
-      individual_custom_model_configs: addConstraintsToModelConfigs(finalData.individualModelConfigs || []),
-      // Stack modeling fields
-      stack_modeling: finalData.stackModeling || false,
-      stack_k_folds: finalData.stackKFolds || 5,
-      stack_test_size: finalData.stackTestSize || 0.2,
-      stack_models_to_run: finalData.stackSelectedModels || [],
-      stack_custom_model_configs: addConstraintsToModelConfigs(finalData.stackModelConfigs || []),
-      pool_by_identifiers: (finalData.poolByIdentifiers || []).map(id => id.toLowerCase()),
-      numerical_columns_for_clustering: (finalData.numericalColumnsForClustering || []).map(col => col.toLowerCase()),
-      apply_interaction_terms: finalData.applyInteractionTerms || true,
-      numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map(col => col.toLowerCase())
-    };
+    // Determine endpoint and payload based on model type
+    const isMMM = finalData?.modelType === 'mmm';
+    const endpoint = isMMM ? '/mmm-train-models' : '/train-models-direct';
+    
+    let requestPayload;
+    
+    if (isMMM) {
+      // Construct variable_configs from transformations for MMM
+      // Map each variable to its specific transformation based on the UI structure
+      const variableConfigs: { [key: string]: any } = {};
+      
+      // Create a mapping of variables to their transformations
+      finalData.xVariables?.forEach((xVar, xVarIndex) => {
+        const transformation = finalData.transformations?.[xVarIndex] || 'none';
+        
+        if (Array.isArray(xVar)) {
+          // Handle array variables (multiple selections in one row)
+          xVar.forEach((variable) => {
+            if (variable) {
+              variableConfigs[variable] = getTransformationConfig(transformation);
+            }
+          });
+        } else if (xVar) {
+          // Handle single variable
+          variableConfigs[xVar] = getTransformationConfig(transformation);
+        }
+      });
+      
+      // Helper function to get transformation config
+      function getTransformationConfig(transformation: string) {
+        if (transformation === 'media') {
+          return {
+            type: 'media'
+            // Parameters are hardcoded in backend as requested
+          };
+        } else if (transformation === 'standardize') {
+          return {
+            type: 'standard'
+          };
+        } else if (transformation === 'normalize') {
+          return {
+            type: 'minmax'
+          };
+        } else {
+          return {
+            type: 'none'
+          };
+        }
+      }
+      
+      // MMM payload with stack modeling support
+      requestPayload = {
+        run_id: tempRunId,
+        scope_number: finalData.selectedScope,
+        combinations: finalData.selectedCombinations,
+        x_variables: allXVariables.map((variable) => variable.toLowerCase()),
+        y_variable: finalData.yVariable?.toLowerCase(),
+        variable_configs: variableConfigs,
+        // Individual modeling fields
+        individual_modeling: finalData.individualModeling ?? true, // Default to true for backward compatibility
+        individual_models_to_run: finalData.individualSelectedModels || [],
+        individual_custom_model_configs: addConstraintsToModelConfigs(finalData.individualModelConfigs || []),
+        individual_k_folds: finalData.individualKFolds || 5,
+        individual_test_size: finalData.individualTestSize || 0.2,
+        // Stack modeling fields
+        stack_modeling: finalData.stackModeling || false,
+        stack_k_folds: finalData.stackKFolds || 5,
+        stack_test_size: finalData.stackTestSize || 0.2,
+        stack_models_to_run: finalData.stackSelectedModels || [],
+        stack_custom_model_configs: addConstraintsToModelConfigs(finalData.stackModelConfigs || []),
+        pool_by_identifiers: (finalData.poolByIdentifiers || []).map((id) => id.toLowerCase()),
+        numerical_columns_for_clustering: (finalData.numericalColumnsForClustering || []).map((col) => col.toLowerCase()),
+        apply_interaction_terms: finalData.applyInteractionTerms ?? true,
+        numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map((col) => col.toLowerCase()),
+        price_column: finalData.priceColumn?.toLowerCase(),
+        // ROI configuration
+        roi_config: {
+          ...roiConfig,
+          enabled: enableROICalculation
+        },
+        // Constraints configuration
+        constraints_config: {
+          enabled: finalData.enableConstraintSetup || false,
+          negative_constraints: finalData.negativeConstraints || [],
+          positive_constraints: finalData.positiveConstraints || []
+        }
+      };
+    } else {
+      // Construct variable_configs from transformations for General modeling (per-variable)
+      const variableConfigs: { [key: string]: any } = {};
+      
+      // Create a mapping of variables to their transformations
+      finalData.xVariables?.forEach((xVar, xVarIndex) => {
+        const transformation = finalData.transformations?.[xVarIndex] || 'none';
+        
+        if (Array.isArray(xVar)) {
+          // Handle array variables (multiple selections in one row)
+          xVar.forEach((variable) => {
+            if (variable) {
+              variableConfigs[variable] = getTransformationConfig(transformation);
+            }
+          });
+        } else if (xVar) {
+          // Handle single variable
+          variableConfigs[xVar] = getTransformationConfig(transformation);
+        }
+      });
+      
+      // Helper function to get transformation config
+      function getTransformationConfig(transformation: string) {
+        if (transformation === 'media') {
+          return {
+            type: 'media'
+            // Parameters are hardcoded in backend as requested
+          };
+        } else if (transformation === 'standardize') {
+          return {
+            type: 'standard'
+          };
+        } else if (transformation === 'normalize') {
+          return {
+            type: 'minmax'
+          };
+        } else {
+          return {
+            type: 'none'
+          };
+        }
+      }
+      
+      // General models payload with per-variable transformations
+      requestPayload = {
+        run_id: tempRunId, // Send the run_id for progress tracking
+        scope_number: finalData.selectedScope, // Send the scope number directly
+        combinations: finalData.selectedCombinations, // Send the combination strings directly
+        x_variables: allXVariables.map((variable) => variable.toLowerCase()),
+        y_variable: finalData.yVariable?.toLowerCase(),
+        variable_configs: variableConfigs, // Per-variable transformations
+        standardization: standardization, // Keep for backward compatibility
+        custom_model_configs: null, // Can be enhanced later
+        // Individual modeling fields
+        individual_modeling: finalData.individualModeling ?? false,
+        individual_k_folds: finalData.individualKFolds || 5,
+        individual_test_size: finalData.individualTestSize || 0.2,
+        individual_models_to_run: finalData.individualSelectedModels || [],
+        individual_custom_model_configs: addConstraintsToModelConfigs(finalData.individualModelConfigs || []),
+        // Stack modeling fields
+        stack_modeling: finalData.stackModeling || false,
+        stack_k_folds: finalData.stackKFolds || 5,
+        stack_test_size: finalData.stackTestSize || 0.2,
+        stack_models_to_run: finalData.stackSelectedModels || [],
+        stack_custom_model_configs: addConstraintsToModelConfigs(finalData.stackModelConfigs || []),
+        pool_by_identifiers: (finalData.poolByIdentifiers || []).map((id) => id.toLowerCase()),
+        numerical_columns_for_clustering: (finalData.numericalColumnsForClustering || []).map((col) => col.toLowerCase()),
+        apply_interaction_terms: finalData.applyInteractionTerms ?? true,
+        numerical_columns_for_interaction: (finalData.numericalColumnsForInteraction || []).map(col => col.toLowerCase()),
+        // ROI configuration
+        roi_config: {
+          ...roiConfig,
+          enabled: enableROICalculation
+        },
+        // Constraints configuration
+        constraints_config: {
+          enabled: finalData.enableConstraintSetup || false,
+          negative_constraints: finalData.negativeConstraints || [],
+          positive_constraints: finalData.positiveConstraints || []
+        }
+      };
+    }
 
  
 
@@ -250,7 +454,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         }
       }, 1000); // Poll every second
       
-      const response = await fetch(`${BUILD_MODEL_API}/train-models-direct`, {
+      
+      const response = await fetch(`${BUILD_MODEL_API}${endpoint}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -465,10 +670,12 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             // Use the numerical_columns directly from the backend response
             const numericalCols = data.numerical_columns || [];
             
+            
             if (numericalCols.length > 0) {
             setNumericalColumns(numericalCols);
             } else {
               // Fallback to default columns if no numerical columns found
+              console.log('⚠️ No numerical columns found, using fallback');
               setNumericalColumns(['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6', 'Feature 7', 'Feature 8']);
             }
           } else {
@@ -517,6 +724,56 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     }
   }, [modelResult?.combination_results]);
 
+  // Auto-open constraint settings for general modeling when X-variables are selected
+  useEffect(() => {
+    if (finalData?.yVariable && 
+        finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && 
+        finalData?.modelType !== 'mmm') {
+      setConstraintSettingsOpen(true);
+    }
+  }, [finalData?.yVariable, finalData?.xVariables, finalData?.modelType]);
+
+
+  // Handle constraint setup checkbox changes
+  useEffect(() => {
+    if (enableConstraintSetup) {
+      setConstraintSettingsOpen(true);
+    } else {
+      setConstraintSettingsOpen(false);
+      // Clear constraint data when disabled
+      handleDataChange({ 
+        positiveConstraints: [], 
+        negativeConstraints: [] 
+      });
+    }
+  }, [enableConstraintSetup]);
+
+  // Handle ROI calculation checkbox changes
+  useEffect(() => {
+    if (enableROICalculation) {
+      setRoiSettingsOpen(true);
+    } else {
+      setRoiSettingsOpen(false);
+      // Clear ROI config when disabled
+      setRoiConfig({
+        enabled: true,
+        features: {},
+        priceColumn: '',
+        perCombinationCPRP: false,
+        combinationCPRPValues: {},
+        manualPriceEntry: false,
+        manualPriceValue: undefined,
+        perCombinationManualPrice: false,
+        combinationManualPriceValues: {},
+        averageMonths: undefined,
+        roiVariables: [],
+        perCombinationCostPerUnit: false,
+        costPerUnit: {},
+        combinationCostPerUnit: {}
+      });
+    }
+  }, [enableROICalculation]);
+
   // Model Performance Metrics sorting and filtering functions
   const getPerformanceUniqueColumnValues = (column: string, modelResults: any[], comboIndex: number): string[] => {
     if (!modelResults.length) return [];
@@ -545,8 +802,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
           } else if (filterColumn === 'BIC') {
             cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
-          } else if (filterColumn === 'Best Alpha') {
-            cellValue = model.best_alpha ? String(model.best_alpha.toFixed(6)) : 'N/A';
           }
           return filterValues.includes(cellValue);
         });
@@ -570,8 +825,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
       } else if (column === 'BIC') {
         cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
-      } else if (column === 'Best Alpha') {
-        cellValue = model.best_alpha ? String(model.best_alpha.toFixed(6)) : 'N/A';
       }
       if (cellValue && !values.includes(cellValue)) {
         values.push(cellValue);
@@ -684,8 +937,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             cellValue = model.aic ? String(model.aic.toFixed(1)) : 'N/A';
           } else if (column === 'BIC') {
             cellValue = model.bic ? String(model.bic.toFixed(1)) : 'N/A';
-          } else if (column === 'Best Alpha') {
-            cellValue = model.best_alpha ? String(model.best_alpha.toFixed(6)) : 'N/A';
           }
           return filterValues.includes(cellValue);
         });
@@ -722,9 +973,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
         } else if (currentSortColumn === 'BIC') {
           aVal = a.bic || 0;
           bVal = b.bic || 0;
-        } else if (currentSortColumn === 'Best Alpha') {
-          aVal = a.best_alpha || 0;
-          bVal = b.best_alpha || 0;
         }
         
         if (aVal === bVal) return 0;
@@ -864,105 +1112,223 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                   <ChevronRight className="w-4 h-4" />
                 )}
               </Button>
-              {/* Constraint Settings Toggle */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setConstraintSettingsOpen(!constraintSettingsOpen)}
-                className="flex items-center gap-2"
-              >
-                <Settings2 className="w-4 h-4" />
-                Constraints
-              </Button>
             </div>
           </div>
         </div>
         {modelingSectionExpanded && (
-          <div className="p-6 space-y-6">
-            {/* Header row for Y & X variable controls */}
-          <div className="flex items-center mb-2">
-            <label className="text-sm font-medium text-muted-foreground w-3/16">Select Y-Variable</label>
-            <label className="text-sm font-medium text-muted-foreground w-3/16 pl-4">Select X-Variable</label>
-            <div className="flex-1" />
-            <Button size="sm" className="bg-orange-300 text-white hover:bg-orange-400" onClick={addXVariable}>
-              <Plus className="w-4 h-4 mr-2" />
-              Add Variable
-            </Button>
+          <div className="p-6 space-y-5">
+            {/* Part 1: Select Y Variable */}
+            <div className="space-y-3">
+              <div className="p-4 rounded-lg shadow-[2px_0_8px_rgba(0,0,0,0.1)] bg-white border border-gray-200 transform transition-all duration-300 hover:shadow-[4px_0_12px_rgba(0,0,0,0.15)]">
+                <div className="mb-2">
+                  <p className="text-sm font-medium text-gray-700">
+                    <span className="text-orange-500 font-semibold text-sm">(1/4)</span> Select your dependent variable (Y-Variable) - the outcome you want to predict:
+                  </p>
           </div>
 
-          {/* Combined Y & X-Variables Selection list */}
-          <div className="space-y-3">
-            {(finalData?.xVariables || []).map((variable, index) => (
-              <div key={`x-variable-${index}`} className={`grid grid-cols-12 gap-4 items-center p-3 rounded-lg shadow-sm ${index % 2 === 0 ? 'bg-white border-l-4 border-indigo-300' : 'bg-gray-50 border-l-4 border-teal-300'}`}>
-                {/* Y-variable column only for first row */}
-                {index === 0 ? (
-                  <div className="col-span-3 flex items-center">
-                    <SingleSelectDropdown
+                <div className="flex gap-4 items-center">
+                  <div className="w-72">
+                      <SingleSelectDropdown
+                        label=""
+                        placeholder={isLoadingColumns ? "Loading..." : "Select Y-Variable"}
+                        value={finalData?.yVariable || 'none'}
+                        onValueChange={(value) => {
+                          if (value === 'none') {
+                            handleDataChange({ yVariable: '' });
+                          } else {
+                            handleDataChange({ yVariable: value });
+                          }
+                        }}
+                        options={isLoadingColumns ? [] : [
+                          { value: 'none', label: 'None' },
+                          ...numericalColumns
+                            .filter(col => {
+                            // Exclude any X-variables that are selected
+                              const isSelectedAsXVariable = finalData?.xVariables?.some(xVar => 
+                                Array.isArray(xVar) ? xVar.includes(col) : xVar === col
+                              );
+                              return !isSelectedAsXVariable;
+                            })
+                            .map(col => ({ value: col, label: col }))
+                        ]}
+                        disabled={isLoadingColumns}
+                      className="w-full"
+                      />
+                    </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Part 2: Select X Variables and Transformations - Only show when Y variable is selected */}
+            {finalData?.yVariable && (
+              <div className="space-y-3 animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
+                <div className="p-4 rounded-lg shadow-[2px_0_8px_rgba(0,0,0,0.1)] bg-white border border-gray-200 transform transition-all duration-300 hover:shadow-[4px_0_12px_rgba(0,0,0,0.15)]">
+                  <div className="mb-2">
+                    <p className="text-sm font-medium text-gray-700">
+                      <span className="text-orange-500 font-semibold text-sm">(2/4)</span> Select independent variables (X-Variables) and their transformations - the factors that influence your outcome:
+                    </p>
+                    
+                    {/* Display selected X-variables */}
+                    {finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {finalData.xVariables
+                          .filter(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar)
+                          .map((xVar, index) => {
+                            const variables = Array.isArray(xVar) ? xVar : [xVar];
+                            return variables.map((variable, varIndex) => (
+                              <span
+                                key={`${index}-${varIndex}`}
+                                className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-400 text-white border border-orange-500"
+                              >
+                                {variable}
+                              </span>
+                            ));
+                          })
+                          .flat()}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* X-Variables Selection */}
+                  <div className="space-y-2">
+                    {/* Dropdowns row */}
+                    <div className="flex items-end gap-1">
+                {/* X-variable select */}
+                      <div className="w-72 flex-shrink-0">
+                    <MultiSelectDropdown
                       label=""
-                      placeholder={isLoadingColumns ? "Loading..." : "Select Y-Variable"}
-                      value={finalData?.yVariable || ''}
-                      onValueChange={(value) => handleDataChange({ yVariable: value })}
+                      placeholder={isLoadingColumns ? "Loading..." : "Select X-Variables"}
+                          selectedValues={Array.isArray(finalData?.xVariables?.[0]) ? finalData.xVariables[0] : (finalData?.xVariables?.[0] ? [finalData.xVariables[0]] : [])}
+                          onSelectionChange={(selectedValues) => updateXVariable(0, selectedValues)}
                       options={isLoadingColumns ? [] : numericalColumns
-                        .filter(col => {
-                          // Exclude any X-variables that are selected (either as strings or arrays)
-                          const isSelectedAsXVariable = finalData?.xVariables?.some(xVar => 
-                            Array.isArray(xVar) ? xVar.includes(col) : xVar === col
-                          );
-                          return !isSelectedAsXVariable;
-                        })
+                        .filter(col => col !== finalData?.yVariable)
                         .map(col => ({ value: col, label: col }))
                       }
+                      showSelectAll={true}
+                      showTrigger={true}
                       disabled={isLoadingColumns}
                       className="w-full"
+                          triggerClassName="w-full h-10 max-w-none"
                     />
-                  </div>
-                ) : (
-                  <div className="col-span-3" />
-                )}
-
-                {/* X-variable select */}
-                <div className="col-span-3 flex items-center">
-                  <MultiSelectDropdown
-                    label=""
-                    placeholder={isLoadingColumns ? "Loading..." : "Select X-Variables"}
-                    selectedValues={Array.isArray(variable) ? variable : variable ? [variable] : []}
-                    onSelectionChange={(selectedValues) => updateXVariable(index, selectedValues)}
-                    options={isLoadingColumns ? [] : numericalColumns
-                      .filter(col => col !== finalData?.yVariable)
-                      .map(col => ({ value: col, label: col }))
-                    }
-                    showSelectAll={true}
-                    showTrigger={true}
-                    disabled={isLoadingColumns}
-                    className="w-full"
-                  />
                 </div>
 
-                {/* Standardization select */}
-                <div className="col-span-3 flex items-center">
-                  <SingleSelectDropdown
-                    label=""
-                    placeholder="Standardization"
-                    value={finalData?.transformations?.[index] || ''}
-                    onValueChange={(val) => updateTransformation(index, val)}
-                    options={[
-                      { value: "none", label: "None" },
-                      { value: "normalize", label: "Normalize (Min-Max)" },
-                      { value: "standardize", label: "Standardize (Z-Score)" }
-                    ]}
-                    className="w-full"
-                  />
+                      {/* Transformation select */}
+                      <div className="w-72 flex-shrink-0">
+                    <SingleSelectDropdown
+                      label=""
+                          placeholder="Select Transformation"
+                          value={finalData?.transformations?.[0] || ''}
+                          onValueChange={(val) => updateTransformation(0, val)}
+                      options={[
+                        { value: "none", label: "None" },
+                        { value: "normalize", label: "Normalize (Min-Max)" },
+                        { value: "standardize", label: "Standardize (Z-Score)" },
+                        ...(finalData?.modelType === 'mmm' ? [
+                          { value: "media", label: "Media (Adstock → Standard → Logistic → MinMax)" }
+                        ] : [])
+                      ]}
+                          className="w-full"
+                          triggerClassName="w-full h-10"
+                    />
                 </div>
 
-
-                {/* Remove button */}
-                <div className="col-span-1">
-                  <Button size="sm" variant="ghost" onClick={() => removeXVariable(index)}>
+                      {/* Clear All Button */}
+                <div className="flex-shrink-0">
+                        <button 
+                          className="h-10 w-10 flex items-center justify-center text-black hover:text-red-600 transition-all duration-200 hover:scale-110 active:scale-95" 
+                          onClick={() => {
+                            handleDataChange({ xVariables: [], transformations: [] });
+                            // Reset configuration states when clearing X-variables
+                            setConstraintSettingsOpen(false);
+                            setRoiSettingsOpen(false);
+                            setEnableConstraintSetup(false);
+                            setEnableROICalculation(false);
+                          }}
+                          title="Clear all selections"
+                        >
                     <X className="w-4 h-4" />
-                  </Button>
+                        </button>
+                  </div>
+                </div>
+
+                  </div>
+
+                    {/* Individual X-Variable Rows */}
+                    {finalData?.xVariables && finalData.xVariables.length > 1 && (
+                      <>
+                        {finalData.xVariables.slice(1).map((xVar, index) => (
+                          <div key={index + 1} className="flex items-end gap-1">
+                            {/* X-variable select */}
+                            <div className="w-72 flex-shrink-0">
+                              <MultiSelectDropdown
+                                label=""
+                                placeholder={isLoadingColumns ? "Loading..." : "Select X-Variables"}
+                                selectedValues={Array.isArray(xVar) ? xVar : (xVar ? [xVar] : [])}
+                                onSelectionChange={(selectedValues) => updateXVariable(index + 1, selectedValues)}
+                                options={isLoadingColumns ? [] : numericalColumns
+                                  .filter(col => col !== finalData?.yVariable)
+                                  .map(col => ({ value: col, label: col }))
+                                }
+                                showSelectAll={true}
+                                showTrigger={true}
+                                disabled={isLoadingColumns}
+                                className="w-full"
+                                triggerClassName="w-full h-10 max-w-none"
+                              />
+                            </div>
+
+                            {/* Transformation select */}
+                            <div className="w-72 flex-shrink-0">
+                              <SingleSelectDropdown
+                                label=""
+                                placeholder="Select Transformation"
+                                value={finalData?.transformations?.[index + 1] || ''}
+                                onValueChange={(val) => updateTransformation(index + 1, val)}
+                                options={[
+                                  { value: "none", label: "None" },
+                                  { value: "normalize", label: "Normalize (Min-Max)" },
+                                  { value: "standardize", label: "Standardize (Z-Score)" },
+                                  ...(finalData?.modelType === 'mmm' ? [
+                                    { value: "media", label: "Media (Adstock → Standard → Logistic → MinMax)" }
+                                  ] : [])
+                                ]}
+                                className="w-full"
+                                triggerClassName="w-full h-10"
+                              />
+                            </div>
+
+                            {/* Remove Variable Button */}
+                <div className="flex-shrink-0">
+                              <button 
+                                className="h-10 w-10 flex items-center justify-center text-black hover:text-red-600 transition-colors" 
+                                onClick={() => {
+                                  const updatedXVariables = finalData.xVariables.filter((_, i) => i !== index + 1);
+                                  const updatedTransformations = finalData.transformations.filter((_, i) => i !== index + 1);
+                                  handleDataChange({ 
+                                    xVariables: updatedXVariables, 
+                                    transformations: updatedTransformations 
+                                  });
+                                }}
+                                title="Remove this X-variable"
+                              >
+                    <X className="w-4 h-4" />
+                              </button>
                 </div>
               </div>
             ))}
+                      </>
+                    )}
+
+                      {/* Add Variable Button - Left aligned */}
+                      <div className="flex justify-start mt-3 animate-in slide-in-from-bottom-2 fade-in duration-400 ease-out delay-300">
+                        <Button
+                          size="sm"
+                          className="bg-orange-300 text-white hover:bg-orange-400 h-8 px-3 text-xs transition-all duration-200 hover:scale-105 active:scale-95 hover:shadow-md"
+                          onClick={addXVariable}
+                        >
+                          <Plus className="w-3 h-3 mr-1 transition-transform duration-200 group-hover:rotate-90" />
+                          Add Variable
+                        </Button>
           </div>
 
           {/* Interaction Terms Controls - Only show when stack modeling is enabled */}
@@ -1040,9 +1406,9 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                         <>
                           <div className="flex items-center gap-2 py-1 border-b mb-2">
                             <Checkbox
-                              checked={finalData?.numericalColumnsForInteraction?.length === (finalData?.xVariables?.[0] || []).filter(col => col !== finalData?.yVariable).length}
+                              checked={finalData?.numericalColumnsForInteraction?.length === (finalData?.xVariables?.flat() || []).filter(col => col !== finalData?.yVariable).length}
                               onCheckedChange={(checked) => {
-                                const availableColumns = (finalData?.xVariables?.[0] || []).filter(col => col !== finalData?.yVariable);
+                                const availableColumns = (finalData?.xVariables?.flat() || []).filter(col => col !== finalData?.yVariable);
                                 handleDataChange({ 
                                   numericalColumnsForInteraction: checked ? availableColumns : [] 
                                 });
@@ -1050,7 +1416,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                             />
                             <span className="text-sm font-medium">Select All</span>
                           </div>
-                          {(finalData?.xVariables?.[0] || [])
+                          {(finalData?.xVariables?.flat() || [])
                             .filter(col => col !== finalData?.yVariable)
                             .map(col => {
                               const isChecked = finalData?.numericalColumnsForInteraction?.includes(col) || false;
@@ -1078,178 +1444,150 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
               )}
             </div>
           )}
-        </div>
-        )}
-      </Card>
+                </div>
+            </div>
+          )}
 
-      {/* Constraint Settings Box */}
-      {constraintSettingsOpen && (
-        <Card className="mb-6">
-          <div className="py-2 px-4 border-b bg-muted/30">
-            <h3 className="font-semibold text-foreground flex items-center gap-2">
-              <Settings2 className="w-4 h-4 text-primary" />
-              Constraint Configuration
-            </h3>
-          </div>
-          <div className="p-6 space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Non-Positive Constraints */}
-              <div className="space-y-3">
-                <Label className="text-sm font-medium text-red-700">Non-Positive Constraints (≤0)</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button 
-                      variant="outline" 
-                      className="w-full justify-between"
-                    >
-                      <span>
-                        {data?.negativeConstraints?.length > 0 
-                          ? `${data.negativeConstraints.length} variable${data.negativeConstraints.length > 1 ? 's' : ''} selected`
-                          : "Select Variables"
-                        }
-                      </span>
-                      <ChevronDown className="w-4 h-4" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
-                    <div className="flex items-center gap-2 py-1 border-b mb-2">
-                      <Checkbox
-                        checked={(() => {
-                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.positiveConstraints?.includes(variable));
-                          return data?.negativeConstraints?.length === availableVariables.length && availableVariables.length > 0;
-                        })()}
-                        onCheckedChange={(checked) => {
-                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.positiveConstraints?.includes(variable));
-                          if (checked) {
-                            // When selecting all negative constraints, clear positive constraints
-                            handleDataChange({ 
-                              negativeConstraints: availableVariables,
-                              positiveConstraints: []
-                            });
-                          } else {
-                            handleDataChange({ 
-                              negativeConstraints: [] 
-                            });
-                          }
-                        }}
-                      />
-                      <span className="text-sm font-medium">Select All</span>
-                    </div>
-                    {(data?.xVariables?.[0] || [])
-                      .filter(variable => !data?.positiveConstraints?.includes(variable)) // Exclude variables already selected in positive constraints
-                      .map(variable => {
-                        const isChecked = data?.negativeConstraints?.includes(variable) || false;
-                        return (
-                          <div key={variable} className="flex items-center gap-2 py-1">
+            {/* Part 3: Configuration Options - Show when X variables are selected */}
+            {finalData?.yVariable && 
+               finalData?.xVariables?.some(xVar => Array.isArray(xVar) ? xVar.length > 0 : xVar) && (
+              <div className="space-y-3 animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
+                {/* Constraint Configuration Container - Always show */}
+              <div className="p-4 rounded-lg shadow-[2px_0_8px_rgba(0,0,0,0.1)] bg-white border border-gray-200 transform transition-all duration-300 hover:shadow-[4px_0_12px_rgba(0,0,0,0.15)]">
+                  <div className="flex items-center space-x-3">
+                    <span className="text-orange-500 font-semibold text-sm">(3/4)</span>
                             <Checkbox
-                              checked={isChecked}
-                            onCheckedChange={(checked) => {
-                              const current = data?.negativeConstraints || [];
-                              const updated = checked 
-                                ? [...current, variable]
-                                : current.filter(v => v !== variable);
-                              
-                              // If adding to negative constraints, remove from positive constraints
-                              if (checked) {
+                      id="constraint-option"
+                      checked={enableConstraintSetup}
+                      disabled={false}
+                              onCheckedChange={(checked) => {
+                        setEnableConstraintSetup(!!checked);
+                        setConstraintSettingsOpen(!!checked);
+                        // Auto-scroll to constraint configuration when enabled
+                        if (checked) {
+                          setTimeout(() => scrollToConfig(constraintConfigRef), 50);
+                        }
+                      }}
+                      className="transition-all duration-200 hover:scale-110"
+                    />
+                    <Label htmlFor="constraint-option" className="text-sm font-medium cursor-pointer">
+                      Set Constraint
+                          </Label>
+                        </div>
+                
+                {/* Constraint Configuration Box - Show when checkbox is enabled */}
+                {enableConstraintSetup && (
+                  <div ref={constraintConfigRef} className="mt-4 animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
+                    <div className="p-4 rounded-lg bg-white border border-gray-200">
+                      <div className="mb-4">
+                        <p className="text-sm font-medium text-gray-700">
+                            Configure constraints for your model - set which variables should have non-positive or non-negative effects:
+                        </p>
+                      </div>
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                          {/* Non-Positive Constraints */}
+                          <div className="space-y-3">
+                            <h4 className="text-sm font-medium text-gray-900">Non-Positive Constraints</h4>
+                            <MultiSelectDropdown
+                              label=""
+                              placeholder="Select Variables"
+                              selectedValues={data?.negativeConstraints || []}
+                              onSelectionChange={(selectedValues) => {
+                                // If adding to negative constraints, remove from positive constraints
                                 const currentPositive = data?.positiveConstraints || [];
-                                const updatedPositive = currentPositive.filter(v => v !== variable);
+                                const updatedPositive = currentPositive.filter(v => !selectedValues.includes(v));
                                 handleDataChange({ 
-                                  negativeConstraints: updated,
+                                  negativeConstraints: selectedValues,
                                   positiveConstraints: updatedPositive
                                 });
-                              } else {
-                                handleDataChange({ negativeConstraints: updated });
-                              }
-                            }}
+                              }}
+                              options={(data?.xVariables?.flat() || [])
+                                .filter(variable => !(data?.positiveConstraints || []).includes(variable))
+                                .map(variable => ({ value: variable, label: variable }))}
+                              showTrigger={true}
+                              className="w-full min-w-0"
+                              triggerClassName="w-full max-w-none"
                             />
-                            <span className="text-sm">{variable}</span>
                           </div>
-                        );
-                      })}
-                  </PopoverContent>
-                </Popover>
-              </div>
 
-              {/* Non-Negative Constraints */}
-              <div className="space-y-3">
-                <Label className="text-sm font-medium text-green-700">Non-Negative Constraints (≥0)</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button 
-                      variant="outline" 
-                      className="w-full justify-between"
-                    >
-                      <span>
-                        {data?.positiveConstraints?.length > 0 
-                          ? `${data.positiveConstraints.length} variable${data.positiveConstraints.length > 1 ? 's' : ''} selected`
-                          : "Select Variables"
-                        }
-                      </span>
-                      <ChevronDown className="w-4 h-4" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="bg-white border-gray-200 max-h-60 overflow-y-auto w-56 p-2">
-                    <div className="flex items-center gap-2 py-1 border-b mb-2">
-                      <Checkbox
-                        checked={(() => {
-                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.negativeConstraints?.includes(variable));
-                          return data?.positiveConstraints?.length === availableVariables.length && availableVariables.length > 0;
-                        })()}
-                        onCheckedChange={(checked) => {
-                          const availableVariables = (data?.xVariables?.[0] || []).filter(variable => !data?.negativeConstraints?.includes(variable));
-                          if (checked) {
-                            // When selecting all positive constraints, clear negative constraints
-                            handleDataChange({ 
-                              positiveConstraints: availableVariables,
-                              negativeConstraints: []
-                            });
-                          } else {
-                            handleDataChange({ 
-                              positiveConstraints: [] 
-                            });
-                          }
-                        }}
-                      />
-                      <span className="text-sm font-medium">Select All</span>
-                    </div>
-                    {(data?.xVariables?.[0] || [])
-                      .filter(variable => !data?.negativeConstraints?.includes(variable)) // Exclude variables already selected in negative constraints
-                      .map(variable => {
-                        const isChecked = data?.positiveConstraints?.includes(variable) || false;
-                        return (
-                          <div key={variable} className="flex items-center gap-2 py-1">
-                            <Checkbox
-                              checked={isChecked}
-                            onCheckedChange={(checked) => {
-                              const current = data?.positiveConstraints || [];
-                              const updated = checked 
-                                ? [...current, variable]
-                                : current.filter(v => v !== variable);
-                              
-                              // If adding to positive constraints, remove from negative constraints
-                              if (checked) {
+                          {/* Non-Negative Constraints */}
+                          <div className="space-y-3">
+                            <h4 className="text-sm font-medium text-gray-900">Non-Negative Constraints</h4>
+                            <MultiSelectDropdown
+                              label=""
+                              placeholder="Select Variables"
+                              selectedValues={data?.positiveConstraints || []}
+                              onSelectionChange={(selectedValues) => {
+                                // If adding to positive constraints, remove from negative constraints
                                 const currentNegative = data?.negativeConstraints || [];
-                                const updatedNegative = currentNegative.filter(v => v !== variable);
+                                const updatedNegative = currentNegative.filter(v => !selectedValues.includes(v));
                                 handleDataChange({ 
-                                  positiveConstraints: updated,
+                                  positiveConstraints: selectedValues,
                                   negativeConstraints: updatedNegative
                                 });
-                              } else {
-                                handleDataChange({ positiveConstraints: updated });
-                              }
-                            }}
+                              }}
+                              options={(data?.xVariables?.flat() || [])
+                                .filter(variable => !(data?.negativeConstraints || []).includes(variable))
+                                .map(variable => ({ value: variable, label: variable }))}
+                              showTrigger={true}
+                              className="w-full min-w-0"
+                              triggerClassName="w-full max-w-none"
                             />
-                            <span className="text-sm">{variable}</span>
                           </div>
-                        );
-                      })}
-                  </PopoverContent>
-                </Popover>
+                        </div>
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          </div>
+
+                {/* ROI Configuration Container - Only show for MMM models */}
+                {finalData?.modelType === 'mmm' && (
+                <div className="mt-2 p-4 rounded-lg shadow-[2px_0_8px_rgba(0,0,0,0.1)] bg-white border border-gray-200 transform transition-all duration-300 hover:shadow-[4px_0_12px_rgba(0,0,0,0.15)]">
+                    <div className="flex items-center space-x-3">
+                      <span className="text-orange-500 font-semibold text-sm">(4/4)</span>
+                      <Checkbox
+                        id="roi-option"
+                        checked={enableROICalculation}
+                        disabled={false}
+                        onCheckedChange={(checked) => {
+                          setEnableROICalculation(!!checked);
+                          setRoiSettingsOpen(!!checked);
+                          // Auto-scroll to ROI configuration when enabled
+                          if (checked) {
+                            setTimeout(() => scrollToConfig(roiConfigRef), 50);
+                          }
+                        }}
+                        className="transition-all duration-200 hover:scale-110"
+                      />
+                      <Label htmlFor="roi-option" className="text-sm font-medium cursor-pointer">
+                        ROI specific input
+                      </Label>
+                    </div>
+
+                    {/* ROI Configuration Box - Show when checkbox is enabled */}
+                    {enableROICalculation && (
+                      <div ref={roiConfigRef} className="mt-4 animate-in slide-in-from-top-6 fade-in duration-500 ease-out">
+                        <ROIConfiguration
+                          availableFeatures={data?.xVariables?.flat() || []}
+                          availableColumns={numericalColumns || []}
+                          availableCombinations={data?.selectedCombinations || []}
+                          roiConfig={roiConfig}
+                          onROIConfigChange={setRoiConfig}
+                          yVariable={data?.yVariable}
+                        />
+                      </div>
+                    )}
+                </div>
+            )}
+              </div>
+            )}
+
+
+
+                          </div>
+        )}
         </Card>
-      )}
+
 
       {/* Run Model Button */}
       <div className="mb-6">
@@ -1340,13 +1678,13 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             {modelResult.combination_results && modelResult.combination_results.length > 0 ? (
               <div className="max-h-[600px] overflow-y-auto space-y-4">
                 {modelResult.combination_results.map((combination, comboIndex) => (
-                  <div key={comboIndex} className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow duration-200">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-green-100 rounded-lg">
-                          <Target className="w-5 h-5 text-green-600" />
+                  <div key={comboIndex} className="bg-white border border-gray-200 rounded-lg p-2 shadow-sm hover:shadow-md transition-shadow duration-200">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-1.5">
+                        <div className="p-1 bg-green-100 rounded">
+                          <Target className="w-3.5 h-3.5 text-green-600" />
                         </div>
-                                <h4 className="font-semibold text-base text-gray-800">
+                                <h4 className="font-semibold text-xs text-gray-800">
           Combination: <span 
             className="text-green-600 font-bold cursor-pointer hover:underline hover:text-green-700 transition-colors"
             onClick={() => handleOpenCombinationFile(combination.combination_id)}
@@ -1360,12 +1698,12 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                         variant="ghost"
                         size="sm"
                         onClick={() => toggleCombinationMinimize(comboIndex)}
-                        className="h-8 w-8 p-0 hover:bg-gray-100"
+                        className="h-5 w-5 p-0 hover:bg-gray-100"
                       >
                         {minimizedCombinations.has(comboIndex) ? (
-                          <Maximize2 className="w-4 h-4 text-gray-600" />
+                          <Maximize2 className="w-3 h-3 text-gray-600" />
                         ) : (
-                          <Minimize2 className="w-4 h-4 text-gray-600" />
+                          <Minimize2 className="w-3 h-3 text-gray-600" />
                         )}
                       </Button>
                     </div>
@@ -1690,50 +2028,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                         </ContextMenuContent>
                                       </ContextMenu>
                                     </TableHead>
-                                    <TableHead className="font-semibold text-gray-700">
-                                      <ContextMenu>
-                                        <ContextMenuTrigger asChild>
-                                          <div className="flex items-center gap-1 cursor-pointer">
-                                            Best Alpha
-                                            {(performanceSortColumn[comboIndex] || '') === 'Best Alpha' && (
-                                              (performanceSortDirection[comboIndex] || 'asc') === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                                            )}
-                                          </div>
-                                        </ContextMenuTrigger>
-                                        <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
-                                          <ContextMenuSub>
-                                            <ContextMenuSubTrigger className="flex items-center">
-                                              <ArrowUp className="w-4 h-4 mr-2" /> Sort
-                                            </ContextMenuSubTrigger>
-                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md">
-                                              <ContextMenuItem onClick={() => handlePerformanceSort('Best Alpha', comboIndex, 'asc')}>
-                                                <ArrowUp className="w-4 h-4 mr-2" /> Ascending
-                                              </ContextMenuItem>
-                                              <ContextMenuItem onClick={() => handlePerformanceSort('Best Alpha', comboIndex, 'desc')}>
-                                                <ArrowDown className="w-4 h-4 mr-2" /> Descending
-                                              </ContextMenuItem>
-                                            </ContextMenuSubContent>
-                                          </ContextMenuSub>
-                                          <ContextMenuSeparator />
-                                          <ContextMenuSub>
-                                            <ContextMenuSubTrigger className="flex items-center">
-                                              <FilterIcon className="w-4 h-4 mr-2" /> Filter
-                                            </ContextMenuSubTrigger>
-                                            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
-                                              <PerformanceFilterMenu column="Best Alpha" modelResults={combination.model_results} comboIndex={comboIndex} />
-                                            </ContextMenuSubContent>
-                                          </ContextMenuSub>
-                                          {performanceColumnFilters[comboIndex]?.['Best Alpha']?.length > 0 && (
-                                            <>
-                                              <ContextMenuSeparator />
-                                              <ContextMenuItem onClick={() => clearPerformanceColumnFilter('Best Alpha', comboIndex)}>
-                                                Clear Filter
-                                              </ContextMenuItem>
-                                            </>
-                                          )}
-                                        </ContextMenuContent>
-                                      </ContextMenu>
-                                    </TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -1746,9 +2040,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                       <TableCell className="font-mono text-sm">{model.r2_test?.toFixed(1) || 'N/A'}</TableCell>
                                       <TableCell className="font-mono text-sm">{model.aic?.toFixed(1) || 'N/A'}</TableCell>
                                       <TableCell className="font-mono text-sm">{model.bic?.toFixed(1) || 'N/A'}</TableCell>
-                                      <TableCell className="font-mono text-sm">
-                                        {model.best_alpha ? model.best_alpha.toFixed(6) : 'N/A'}
-                                      </TableCell>
                                     </TableRow>
                                   ))}
                                 </TableBody>
@@ -1792,7 +2083,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                     ))}
                                   </TableRow>
                                   {/* X-variables rows */}
-                                   {finalData?.xVariables?.[0]?.map((variable) => (
+                                   {finalData?.xVariables?.flat()?.map((variable) => (
                                     <TableRow key={variable} className="hover:bg-purple-50/50 transition-colors duration-150">
                                       <TableCell className="font-semibold text-purple-600">{variable}</TableCell>
                                       {combination.model_results.map((model, index) => (
@@ -1828,7 +2119,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                    </TableRow>
                                  </TableHeader>
                                  <TableBody>
-                                   {finalData?.xVariables?.[0]?.map((variable) => (
+                                   {finalData?.xVariables?.flat()?.map((variable) => (
                                      <TableRow key={variable} className="hover:bg-orange-50/50 transition-colors duration-150">
                                        <TableCell className="font-semibold text-orange-600">{variable}</TableCell>
                                        {combination.model_results.map((model, index) => (
@@ -1864,20 +2155,92 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
                                    </TableRow>
                                  </TableHeader>
                                  <TableBody>
-                                   {finalData?.xVariables?.[0]?.map((variable) => (
+                                   {finalData?.xVariables?.flat()?.map((variable) => (
                                      <TableRow key={variable} className="hover:bg-teal-50/50 transition-colors duration-150">
                                        <TableCell className="font-semibold text-teal-600">{variable}</TableCell>
                                        {combination.model_results.map((model, index) => (
                                          <TableCell key={index} className="font-mono text-sm">
                                            {model.contributions && model.contributions[variable.toLowerCase()] !== undefined
                                              ? (model.contributions[variable.toLowerCase()] * 100).toFixed(1) + '%'
-                                            : 'N/A'}
-                                        </TableCell>
-                                      ))}
-                </TableRow>
-              ))}
+                                             : 'N/A'}
+                                         </TableCell>
+                                       ))}
+                                     </TableRow>
+                                   ))}
             </TableBody>
           </Table>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* ROI Table - Only show for MMM models */}
+                        {finalData?.modelType === 'mmm' && combination.model_results && combination.model_results.length > 0 && (
+                          <div className="bg-gray-50 rounded-lg p-4">
+                            <h5 className="font-semibold text-lg text-gray-700 mb-4 flex items-center gap-2">
+                              <DollarSign className="w-5 h-5 text-green-600" />
+                              ROI Results
+                            </h5>
+                            <div className="overflow-x-auto">
+                              <Table className="bg-white rounded-lg border border-gray-200">
+                                <TableHeader>
+                                  <TableRow className="bg-gradient-to-r from-green-50 to-emerald-50 hover:bg-gradient-to-r hover:from-green-100 hover:to-emerald-100">
+                                    <TableHead className="font-semibold text-gray-700 bg-green-50">Feature</TableHead>
+                                    {combination.model_results.map((model, index) => (
+                                      <TableHead key={index} className="font-semibold text-gray-700">{model.model_name}</TableHead>
+                                    ))}
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {(() => {
+                                    // Get all variables that have ROI results in at least one model
+                                    const variablesWithROI = new Set<string>();
+                                    combination.model_results.forEach(model => {
+                                      if (model.roi_results) {
+                                        Object.keys(model.roi_results).forEach(variable => {
+                                          variablesWithROI.add(variable);
+                                        });
+                                      }
+                                    });
+                                    
+                                    // Convert to array and sort
+                                    const roiVariables = Array.from(variablesWithROI).sort();
+                                    
+                                    console.log('ROI Variables found:', roiVariables);
+                                    
+                                    // If no ROI variables found, show a message
+                                    if (roiVariables.length === 0) {
+                                      return (
+                                        <TableRow>
+                                          <TableCell colSpan={combination.model_results.length + 1} className="text-center text-gray-500 py-4">
+                                            No ROI results available. Make sure to select features in ROI configuration.
+                                          </TableCell>
+                                        </TableRow>
+                                      );
+                                    }
+                                    
+                                    return roiVariables.map((variable) => (
+                                      <TableRow key={variable} className="hover:bg-green-50/50 transition-colors duration-150">
+                                        <TableCell className="font-semibold text-green-600">{variable}</TableCell>
+                                        {combination.model_results.map((model, index) => {
+                                          const roiData = model.roi_results && model.roi_results[variable];
+                                          const roiValue = roiData ? roiData.roi : null;
+                                          
+                                          // Debug logging for each cell
+                                          console.log(`ROI Cell Debug - Model: ${model.model_name}, Variable: ${variable}, ROI Data:`, roiData, 'ROI Value:', roiValue);
+                                          
+                                          return (
+                                            <TableCell key={index} className="font-mono text-sm">
+                                              {roiValue !== null && roiValue !== undefined
+                                                ? roiValue.toFixed(2)
+                                                : 'N/A'}
+                                            </TableCell>
+                                          );
+                                        })}
+                                      </TableRow>
+                                    ));
+                                  })()}
+                                </TableBody>
+                              </Table>
                             </div>
                           </div>
                         )}

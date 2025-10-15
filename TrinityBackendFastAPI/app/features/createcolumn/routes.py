@@ -33,7 +33,8 @@ CREATE_OPTIONS = {
     "dummy",
     "seasonality",
     "trend",
-    "rpi"
+    "rpi",
+    "datetime"
 }
 
 
@@ -171,7 +172,7 @@ async def perform_create(
                 columns = value.split(",")
                 rename_key = f"{op_type}_{op_idx}_rename"
                 rename_val = form_data.get(rename_key, None)
-                op_items.append((op_type, columns, rename_val))
+                op_items.append((op_type, columns, rename_val, op_idx))
         # Fallback for legacy single operations (no _idx)
         for key, value in form_data.multi_items():
             if key in ["options", "object_names", "bucket_name"]:
@@ -181,22 +182,9 @@ async def perform_create(
             columns = value.split(",")
             rename_key = f"{key}_rename"
             rename_val = form_data.get(rename_key, None)
-            op_items.append((key, columns, rename_val))
+            op_items.append((key, columns, rename_val, None))
         new_cols_total = []
-        for op, columns, rename_val in op_items:
-            op_idx = None
-            # Try to extract op_idx from op_items if available
-            # op_items is built from (op_type, columns, rename_val), but we need op_idx for param
-            # So, let's reconstruct op_idx from the key pattern
-            # We'll use the same regex as above
-            import re
-            op_pattern = re.compile(r'^(\w+)_([0-9]+)$')
-            for key, value in form_data.multi_items():
-                m = op_pattern.match(key)
-                if m and m.group(1) == op:
-                    op_idx = m.group(2)
-                    break
-
+        for op, columns, rename_val, op_idx in op_items:
             if op == "add":
                 new_col = rename_val if rename_val else "_plus_".join(columns)
                 df[new_col] = df[columns].sum(axis=1)
@@ -241,12 +229,40 @@ async def perform_create(
                 new_col = rename_val if rename_val else f"Res_{y_var}"
                 new_cols_total.append(new_col)
             elif op == "stl_outlier":
-                df, outlier_col = apply_stl_outlier(df, columns)
-                if rename_val:
-                    df = df.rename(columns={outlier_col: rename_val})
-                    new_cols_total.append(rename_val)
-                else:
-                    new_cols_total.append(outlier_col)
+                # STL outlier detection - applied per identifier group
+                d_date = next((c for c in df.columns if c.strip().lower() == 'date'), None)
+                if not d_date or d_date not in df.columns:
+                    raise ValueError("Date column not found in data for STL outlier detection.")
+                
+                def stl_outlier_func(subdf):
+                    subdf = subdf.copy()
+                    subdf[d_date] = pd.to_datetime(subdf[d_date], errors='coerce')
+                    subdf = subdf.sort_values(by=d_date)
+                    
+                    new_col = rename_val if rename_val else 'is_outlier'
+                    subdf[new_col] = 0  # Default to 0 (not an outlier)
+                    
+                    if len(subdf) < 14:  # Need minimum data points for STL
+                        return subdf
+                    
+                    # Check if Volume column exists
+                    volume_col = next((c for c in subdf.columns if c.strip().lower() == 'volume'), None)
+                    if not volume_col:
+                        return subdf
+                    
+                    try:
+                        res = STL(subdf[volume_col], seasonal=13, period=13).fit()
+                        residual = res.resid
+                        z_score_residual = (residual - residual.mean()) / residual.std()
+                        subdf[new_col] = (z_score_residual.abs() > 3).astype(int)
+                    except Exception as e:
+                        print(f"STL outlier failed for group: {e}")
+                    
+                    return subdf
+                
+                df = group_apply(df, stl_outlier_func)
+                new_col = rename_val if rename_val else 'is_outlier'
+                new_cols_total.append(new_col)
             elif op == "dummy":
                 for col in columns:
                     if col not in df.columns:
@@ -256,6 +272,54 @@ async def perform_create(
                     new_col = rename_val if rename_val else f"{col}_dummy"
                     df[new_col] = pd.Categorical(df[col]).codes
                     new_cols_total.append(new_col)
+            elif op == "datetime":
+                # Extract datetime components from a date column
+                # Expects: columns[0] = date column, and a param specifying which component to extract
+                # param options: "to_year", "to_month", "to_week", "to_day", "to_day_name", "to_month_name"
+                date_col = columns[0]
+                if date_col not in df.columns:
+                    raise ValueError(
+                        f"Column '{date_col}' not found in data for datetime operation. Available columns: {list(df.columns)}"
+                    )
+                
+                # Get the datetime extraction type from param
+                param = form_data.get(f"{op}_{op_idx}_param", None)
+                if param is None:
+                    raise HTTPException(status_code=400, detail="Missing `param` for datetime operation. Expected: to_year, to_month, to_week, or to_day")
+                
+                # Convert column to datetime temporarily for extraction (don't modify original)
+                date_series = pd.to_datetime(df[date_col], errors='coerce')
+                
+                # Extract the requested component
+                if param == "to_year":
+                    new_col = rename_val if rename_val else f"{date_col}_year"
+                    df[new_col] = date_series.dt.year
+                    new_cols_total.append(new_col)
+                elif param == "to_month":
+                    new_col = rename_val if rename_val else f"{date_col}_month"
+                    df[new_col] = date_series.dt.month
+                    new_cols_total.append(new_col)
+                elif param == "to_week":
+                    new_col = rename_val if rename_val else f"{date_col}_week"
+                    df[new_col] = date_series.dt.isocalendar().week
+                    new_cols_total.append(new_col)
+                elif param == "to_day":
+                    new_col = rename_val if rename_val else f"{date_col}_day"
+                    df[new_col] = date_series.dt.day
+                    new_cols_total.append(new_col)
+                elif param == "to_day_name":
+                    new_col = rename_val if rename_val else f"{date_col}_day_name"
+                    df[new_col] = date_series.dt.day_name()
+                    new_cols_total.append(new_col)
+                elif param == "to_month_name":
+                    new_col = rename_val if rename_val else f"{date_col}_month_name"
+                    df[new_col] = date_series.dt.month_name()
+                    new_cols_total.append(new_col)
+                else:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Invalid datetime param: {param}. Expected: to_year, to_month, to_week, to_day, to_day_name, or to_month_name"
+                    )
             elif op == "rpi":
                 try:
                     df, rpi_cols = compute_rpi(df, columns)
@@ -441,20 +505,43 @@ async def perform_create(
             elif op.startswith('standardize'):
                 method = op.split("_")[1]  # zscore / minmax / none
                 def standardize_func(subdf):
-                    if method == 'zscore':
-                        scaler = StandardScaler()
-                    elif method == 'minmax':
-                        scaler = MinMaxScaler()
-                    else:
-                        raise ValueError("Unknown standardization method")
+                    subdf = subdf.copy()
                     if rename_val:
                         col = columns[0]
                         new_col = rename_val
-                        subdf[new_col] = scaler.fit_transform(subdf[[col]]) if scaler else subdf[col]
+                        # Create a new scaler for this column
+                        if method == 'zscore':
+                            scaler = StandardScaler()
+                        elif method == 'minmax':
+                            scaler = MinMaxScaler()
+                        else:
+                            raise ValueError("Unknown standardization method")
+                        
+                        # Apply standardization
+                        try:
+                            transformed = scaler.fit_transform(subdf[[col]])
+                            subdf[new_col] = transformed.flatten()
+                        except Exception as e:
+                            print(f"Standardization warning: {e}. Setting default values.")
+                            subdf[new_col] = 0 if method == 'zscore' else 0.5
                     else:
                         for col in columns:
                             new_col = f"{col}_{method}_scaled"
-                            subdf[new_col] = scaler.fit_transform(subdf[[col]]) if scaler else subdf[col]
+                            # Create a NEW scaler for EACH column
+                            if method == 'zscore':
+                                scaler = StandardScaler()
+                            elif method == 'minmax':
+                                scaler = MinMaxScaler()
+                            else:
+                                raise ValueError("Unknown standardization method")
+                            
+                            # Apply standardization
+                            try:
+                                transformed = scaler.fit_transform(subdf[[col]])
+                                subdf[new_col] = transformed.flatten()
+                            except Exception as e:
+                                print(f"Standardization warning for {col}: {e}. Setting default values.")
+                                subdf[new_col] = 0 if method == 'zscore' else 0.5
                     return subdf
                 df = group_apply(df, standardize_func)
                 # Always add all new columns to new_cols_total

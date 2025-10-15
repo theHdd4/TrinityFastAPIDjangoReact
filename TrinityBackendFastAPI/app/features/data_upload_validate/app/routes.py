@@ -100,7 +100,70 @@ CUSTOM_CONFIG_DIR.mkdir(exist_ok=True)
 extraction_results = {}
 
 # Common Polars CSV options to improve schema inference on large files
-CSV_READ_KWARGS = {"low_memory": True, "infer_schema_length": 10_000}
+CSV_READ_KWARGS = {
+    "low_memory": True, 
+    "infer_schema_length": 10_000,
+    "encoding": "utf8-lossy"  # Handle all encodings gracefully (UTF-8, Latin-1, Windows-1252, etc.)
+}
+
+def _smart_csv_parse(content: bytes, csv_kwargs: dict) -> tuple[pl.DataFrame, list[str], dict]:
+    """
+    Smart CSV parsing that automatically detects and handles mixed data types.
+    Returns DataFrame, list of warnings, and detailed metadata about data quality issues.
+    """
+    warnings = []
+    metadata = {
+        "mixed_dtype_columns": [],
+        "encoding_used": "utf8-lossy",
+        "parsing_method": "standard"
+    }
+    
+    # Step 1: Try normal parsing first (FAST PATH)
+    try:
+        df = pl.read_csv(io.BytesIO(content), **csv_kwargs)
+        return df, warnings, metadata
+    except Exception as e1:
+        error_msg = str(e1).lower()
+        
+        # Step 2: Quick check - if it's a mixed data type error, jump directly to ignore_errors
+        if "could not parse" in error_msg and "as dtype" in error_msg:
+            print(f"🔄 Mixed data type detected, using ignore_errors for fast handling...")
+            try:
+                kwargs_ignore = csv_kwargs.copy()
+                kwargs_ignore["ignore_errors"] = True
+                df = pl.read_csv(io.BytesIO(content), **kwargs_ignore)
+                metadata["parsing_method"] = "ignore_errors"
+                
+                # Extract problematic column name from error message
+                try:
+                    import re
+                    match = re.search(r"at column '([^']+)'", str(e1))
+                    if match:
+                        problematic_col = match.group(1)
+                        metadata["mixed_dtype_columns"] = [problematic_col]
+                        warnings.append(f"Detected mixed data types in column: {problematic_col}")
+                        warnings.append("File may contain mixed numeric and text values - converted problematic data to preserve integrity")
+                except:
+                    warnings.append("Detected mixed data types - some problematic data was handled")
+                
+                return df, warnings, metadata
+            except Exception as e2:
+                print(f"❌ ignore_errors failed: {e2}")
+        
+        # Step 3: Final fallback - everything as strings (GUARANTEED TO WORK)
+        try:
+            print(f"🔄 Final fallback: Reading all columns as strings")
+            kwargs_strings = {k: v for k, v in csv_kwargs.items() if k not in ["infer_schema_length"]}
+            df = pl.read_csv(io.BytesIO(content), dtypes=pl.Utf8, **kwargs_strings)
+            metadata["parsing_method"] = "all_strings"
+            metadata["mixed_dtype_columns"] = []  # Can't determine specific columns
+            warnings.append("All columns read as strings to handle data type conflicts")
+            warnings.append("Please use Dataframe Operations atom to fix column data types if needed")
+            return df, warnings, metadata
+        except Exception as e3:
+            print(f"❌ All parsing methods failed: {e3}")
+            raise e1  # Re-raise original error
+
 
 # Health check
 @router.get("/health")
@@ -453,24 +516,108 @@ async def upload_file(
     # endpoint.
     tmp_prefix = prefix + "tmp/"
     content = await file.read()
+    
     try:
         if file.filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
+            print(f"🔄 Processing CSV file: {file.filename}")
+            print(f"📊 File size: {len(content)} bytes")
+            print(f"📊 CSV_READ_KWARGS: {CSV_READ_KWARGS}")
+            
+            # Smart CSV parsing with automatic mixed data type detection
+            df_pl, parsing_warnings, parsing_metadata = _smart_csv_parse(content, CSV_READ_KWARGS)
+            
+            # Report any warnings about data quality issues
+            if parsing_warnings:
+                print(f"⚠️ Data Quality Warnings:")
+                for warning in parsing_warnings:
+                    print(f"  - {warning}")
+                    
+            if parsing_metadata.get("mixed_dtype_columns"):
+                print(f"🔍 Columns with mixed data types: {', '.join(parsing_metadata['mixed_dtype_columns'])}")
+                    
+            print(f"📊 DataFrame shape: {df_pl.shape}")
+            print(f"📊 Sample data: {df_pl.head(2).to_dicts()}")
+            
         elif file.filename.lower().endswith((".xls", ".xlsx")):
-            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
+            print(f"🔄 Processing Excel file: {file.filename}")
+            try:
+                # First try with pandas, then convert to polars
+                df_pandas = pd.read_excel(io.BytesIO(content))
+                print(f"📊 Pandas DataFrame shape: {df_pandas.shape}")
+                print(f"📊 Sample data types: {df_pandas.dtypes.to_dict()}")
+                
+                # Convert to polars with better type handling
+                df_pl = pl.from_pandas(df_pandas)
+                print(f"✅ Excel parsed successfully - Shape: {df_pl.shape}")
+            except Exception as e1:
+                print(f"❌ Standard Excel parsing failed: {e1}")
+                try:
+                    # Try with different pandas options
+                    df_pandas = pd.read_excel(io.BytesIO(content), dtype=str)
+                    print(f"📊 Reading as string types - Shape: {df_pandas.shape}")
+                    df_pl = pl.from_pandas(df_pandas)
+                    print(f"✅ Excel parsed as strings - Shape: {df_pl.shape}")
+                except Exception as e2:
+                    print(f"❌ String parsing also failed: {e2}")
+                    raise e1  # Re-raise original error
         else:
+            print(f"❌ Unsupported file type: {file.filename}")
             raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
     except Exception as e:
+        print(f"❌ Error parsing file {file.filename}: {str(e)}")
+        print(f"📊 Error type: {type(e).__name__}")
         raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
 
+    print(f"🔄 Converting to Arrow format...")
     arrow_buf = io.BytesIO()
     df_pl.write_ipc(arrow_buf)
     arrow_name = Path(file.filename).stem + ".arrow"
+    print(f"📊 Arrow file: {arrow_name}")
+    print(f"📊 Arrow buffer size: {len(arrow_buf.getvalue())} bytes")
+    
     # Store under temporary prefix to hide from list_saved_dataframes
+    print(f"📤 Uploading to MinIO...")
+    print(f"📊 MinIO prefix: {tmp_prefix}")
     result = upload_to_minio(arrow_buf.getvalue(), arrow_name, tmp_prefix)
+    print(f"📊 MinIO result: {result}")
+    
     if result.get("status") != "success":
+        print(f"❌ MinIO upload failed: {result.get('error_message')}")
         raise HTTPException(status_code=500, detail=result.get("error_message", "Upload failed"))
-    return {"file_path": result["object_name"]}
+    
+    print(f"✅ Upload successful: {result['object_name']}")
+    
+    # Prepare response with warnings and metadata if any
+    response = {
+        "file_path": result["object_name"],
+        "file_name": file.filename
+    }
+    
+    if 'parsing_warnings' in locals() and parsing_warnings:
+        response["warnings"] = parsing_warnings
+        response["has_data_quality_issues"] = True
+        
+        if 'parsing_metadata' in locals() and parsing_metadata.get("mixed_dtype_columns"):
+            mixed_cols = parsing_metadata["mixed_dtype_columns"]
+            response["mixed_dtype_columns"] = mixed_cols
+            response["mixed_dtype_count"] = len(mixed_cols)
+            
+            # Create user-friendly message
+            if len(mixed_cols) > 0:
+                col_list = ", ".join(mixed_cols[:5])  # Show first 5 columns
+                if len(mixed_cols) > 5:
+                    col_list += f" and {len(mixed_cols) - 5} more"
+                    
+                response["message"] = f"File '{file.filename}' has mixed data types in columns: {col_list}. This may lead to unstable results. Please use Dataframe Operations atom to fix column data types."
+            else:
+                response["message"] = "File uploaded successfully with data quality warnings. Some atoms may need data type conversion."
+        else:
+            response["message"] = "File uploaded successfully with data quality warnings. Some atoms may need data type conversion."
+    else:
+        response["message"] = "File uploaded successfully"
+        response["has_data_quality_issues"] = False
+    
+    return response
 
 
 @router.delete("/temp-uploads")
