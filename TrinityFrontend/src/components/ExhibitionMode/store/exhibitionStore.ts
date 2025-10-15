@@ -859,6 +859,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   loadSavedConfiguration: async (explicitContext?: ProjectContext | null) => {
     let loadedCards: LayoutCard[] = [];
     let catalogueEntries: ExhibitionAtomPayload[] = [];
+    let remoteCatalogueResolved = false;
     let layoutCards: LayoutCard[] = [];
     let layoutSlideObjects: Record<string, SlideObject[]> = {};
     const resolvedContext = normaliseProjectContext(explicitContext ?? getActiveProjectContext());
@@ -872,6 +873,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       );
       try {
         const remote = await fetchExhibitionConfiguration(resolvedContext);
+        remoteCatalogueResolved = true;
         const remoteAtoms = remote && Array.isArray(remote.atoms) ? remote.atoms : [];
         catalogueEntries = remoteAtoms;
 
@@ -938,6 +940,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
       const remoteCards = loadedCards.map(withPresentationDefaults);
       const hasRemoteCards = remoteCards.length > 0;
+      const shouldUseRemoteCatalogue = remoteCatalogueResolved;
       const hasLayoutCards = layoutCards.length > 0;
       const preparedLayoutCards = hasLayoutCards ? layoutCards.map(withPresentationDefaults) : [];
       const preservedCards = state.cards.map(withPresentationDefaults);
@@ -958,7 +961,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       }
 
       const nextExhibitedCards = ensuredCards.filter(card => card.isExhibited);
-      const nextCatalogueCards = hasRemoteCards
+      const nextCatalogueCards = shouldUseRemoteCatalogue
         ? computeCatalogueCards(remoteCards)
         : computeCatalogueCards(ensuredCards);
 
@@ -981,10 +984,12 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
               (card.moleculeTitle ? ` (${card.moleculeTitle})` : ''),
           );
         });
-      } else {
+      } else if (shouldUseRemoteCatalogue) {
         console.info(
           '[Exhibition] Exhibition catalogue has no components to display after processing remote data',
         );
+      } else {
+        console.info('[Exhibition] Exhibition catalogue has no exhibited components available in local cache');
       }
 
       if (shouldResetSlides && state.cards.length > 0) {
@@ -1010,7 +1015,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         cards: ensuredCards,
         exhibitedCards: nextExhibitedCards,
         catalogueCards: nextCatalogueCards,
-        catalogueEntries,
+        catalogueEntries: shouldUseRemoteCatalogue ? catalogueEntries : state.catalogueEntries,
         lastLoadedContext: resolvedContext,
         slideObjectsByCardId: nextSlideObjects,
       };
