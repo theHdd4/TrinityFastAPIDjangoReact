@@ -23,8 +23,10 @@ export interface ExhibitionTableTrayProps {
   canEdit?: boolean;
   rows: number;
   cols: number;
+  showOutline?: boolean;
   selectedCell: { row: number; col: number } | null;
   onToggleLock: () => void;
+  onToggleOutline?: () => void;
   onDelete: () => void;
   onDeleteColumn: () => void;
   onDelete2Columns: () => void;
@@ -41,8 +43,10 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
   canEdit = true,
   rows,
   cols,
+  showOutline = true,
   selectedCell,
   onToggleLock,
+  onToggleOutline,
   onDelete,
   onDeleteColumn,
   onDelete2Columns,
@@ -86,6 +90,11 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
         <Lock className="mr-2 h-4 w-4" />
         {locked ? 'Unlock' : 'Lock'}
         <ContextMenuShortcut>Alt+Shift+L</ContextMenuShortcut>
+      </ContextMenuItem>
+
+      <ContextMenuItem onClick={onToggleOutline} disabled={!canEdit}>
+        <AlignHorizontalSpaceAround className="mr-2 h-4 w-4" />
+        {showOutline ? 'Hide table outline' : 'Show table outline'}
       </ContextMenuItem>
 
       <ContextMenuSeparator />

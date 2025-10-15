@@ -48,8 +48,13 @@ import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
 import {
   DEFAULT_TABLE_COLS,
   DEFAULT_TABLE_ROWS,
+  cloneCell,
+  cloneTableMatrix,
+  createEmptyCell,
   createEmptyTableData,
+  createEmptyTableRow,
   normaliseTableData,
+  type TableCellData,
 } from './operationsPalette/tables/constants';
 import type { TextBoxFormatting } from './operationsPalette/textBox/types';
 
@@ -1689,8 +1694,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         const rowCount = tableData.length;
         const colCount = tableData[0]?.length ?? 0;
         const storedLocked = Boolean(props.locked);
+        const showOutline = props.showOutline !== false;
 
-        const applyTableUpdate = (updater: (current: string[][]) => string[][]) => {
+        const applyTableUpdate = (updater: (current: TableCellData[][]) => TableCellData[][]) => {
           if (!canEdit) {
             return;
           }
@@ -1719,10 +1725,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             return;
           }
           applyTableUpdate(current => {
-            const next = current.map(row => [...row]);
+            const next = cloneTableMatrix(current);
             const targetCols = current[0]?.length ?? DEFAULT_TABLE_COLS;
             for (let index = 0; index < count; index += 1) {
-              next.push(Array.from({ length: targetCols }, () => ''));
+              next.push(createEmptyTableRow(targetCols));
             }
             return next;
           });
@@ -1737,9 +1743,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               return createEmptyTableData(1, Math.max(count, 1));
             }
             return current.map(row => {
-              const nextRow = [...row];
+              const nextRow = row.map(cell => cloneCell(cell));
               for (let index = 0; index < count; index += 1) {
-                nextRow.push('');
+                nextRow.push(createEmptyCell());
               }
               return nextRow;
             });
@@ -1756,7 +1762,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             }
             const start = Math.max(0, Math.min(startIndex, current.length - 1));
             const end = Math.min(current.length, start + count);
-            const next = current.filter((_, index) => index < start || index >= end);
+            const filtered = current.filter((_, index) => index < start || index >= end);
+            if (filtered.length === 0) {
+              const cols = current[0]?.length ?? DEFAULT_TABLE_COLS;
+              return createEmptyTableData(1, cols);
+            }
+            const next = cloneTableMatrix(filtered);
             if (next.length === 0) {
               const cols = current[0]?.length ?? DEFAULT_TABLE_COLS;
               return createEmptyTableData(1, cols);
@@ -1777,9 +1788,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const start = Math.max(0, Math.min(startIndex, cols - 1));
             const end = Math.min(cols, start + count);
             return current.map(row => {
-              const nextRow = row.filter((_, index) => index < start || index >= end);
+              const nextRow = row
+                .filter((_, index) => index < start || index >= end)
+                .map(cell => cloneCell(cell));
               if (nextRow.length === 0) {
-                return [''];
+                return [createEmptyCell()];
               }
               return nextRow;
             });
@@ -1801,6 +1814,21 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           });
         };
 
+        const handleToggleOutline = () => {
+          if (!canEdit) {
+            return;
+          }
+          onInteract();
+          onBulkUpdate({
+            [object.id]: {
+              props: {
+                ...(object.props || {}),
+                showOutline: !showOutline,
+              },
+            },
+          });
+        };
+
         return (
           <ExhibitionTable
             id={object.id}
@@ -1808,6 +1836,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             rows={rowCount}
             cols={colCount}
             locked={storedLocked}
+            showOutline={showOutline}
             canEdit={canEdit}
             onUpdateCell={(rowIndex, colIndex, value) => {
               if (!canEdit) {
@@ -1816,11 +1845,34 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               const safeRow = Math.max(0, Math.min(rowIndex, tableData.length - 1));
               const safeCol = Math.max(0, Math.min(colIndex, (tableData[safeRow]?.length ?? 1) - 1));
               applyTableUpdate(current => {
-                const next = current.map(row => [...row]);
+                const next = cloneTableMatrix(current);
                 if (!next[safeRow]) {
                   return current;
                 }
-                next[safeRow][safeCol] = typeof value === 'string' ? value : String(value ?? '');
+                const cell = next[safeRow][safeCol];
+                if (!cell) {
+                  return current;
+                }
+                cell.content = typeof value === 'string' ? value : String(value ?? '');
+                return next;
+              });
+            }}
+            onUpdateCellFormatting={(rowIndex, colIndex, updates) => {
+              if (!canEdit) {
+                return;
+              }
+              const safeRow = Math.max(0, Math.min(rowIndex, tableData.length - 1));
+              const safeCol = Math.max(0, Math.min(colIndex, (tableData[safeRow]?.length ?? 1) - 1));
+              applyTableUpdate(current => {
+                const next = cloneTableMatrix(current);
+                const cell = next[safeRow]?.[safeCol];
+                if (!cell) {
+                  return current;
+                }
+                cell.formatting = {
+                  ...cell.formatting,
+                  ...updates,
+                };
                 return next;
               });
             }}
@@ -1840,6 +1892,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               onRemoveObject?.(object.id);
             }}
             onToggleLock={handleToggleLock}
+            onToggleOutline={handleToggleOutline}
+            onToolbarStateChange={node => handleTextToolbarStateChange(object.id, node)}
+            onInteract={onInteract}
             className="h-full w-full overflow-auto"
           />
         );
@@ -1893,6 +1948,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
             const isAccentImageObject = object.type === 'accent-image';
             const isTextBoxObject = object.type === 'text-box';
+            const isTableObject = object.type === 'table';
             const isEditingTextBox =
               isTextBoxObject &&
               editingTextState?.id === object.id &&
@@ -1919,8 +1975,15 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 className={cn(
                   'relative flex h-full w-full flex-col overflow-hidden rounded-3xl border-2 shadow-xl transition-all',
                   isAccentImageObject ? 'bg-muted/30' : 'bg-background/95',
-                  isSelected ? 'border-primary shadow-2xl' : 'border-border/70 hover:border-primary/40',
+                  isSelected
+                    ? isTableObject
+                      ? 'border-primary/80 shadow-none'
+                      : 'border-primary shadow-2xl'
+                    : isTableObject
+                    ? 'border-transparent'
+                    : 'border-border/70 hover:border-primary/40',
                   isTextBoxObject && 'overflow-visible border-transparent bg-transparent shadow-none',
+                  isTableObject && 'border-transparent bg-transparent shadow-none',
                 )}
               >
                 {isAtomObject(object) && (
@@ -1939,6 +2002,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     'relative flex-1 overflow-hidden',
                     isAccentImageObject ? undefined : 'p-4',
                     isTextBoxObject && 'overflow-visible p-0',
+                    isTableObject && 'p-0',
                   )}
                 >
                   {isTextBoxObject ? (
@@ -1975,7 +2039,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     <div
                       className={cn(
                         'h-full w-full overflow-hidden',
-                        isAccentImageObject ? undefined : 'rounded-2xl bg-background/90 p-3',
+                        isAccentImageObject
+                          ? undefined
+                          : isTableObject
+                          ? 'bg-transparent'
+                          : 'rounded-2xl bg-background/90 p-3',
+                        isTableObject && 'p-0',
                       )}
                     >
                       {renderObjectContent(object)}
