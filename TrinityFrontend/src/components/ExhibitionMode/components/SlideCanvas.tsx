@@ -45,6 +45,17 @@ import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
 import { SlideTextBoxObject } from './operationsPalette/textBox/TextBox';
 import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from './operationsPalette/textBox/constants';
 import type { TextBoxFormatting } from './operationsPalette/textBox/types';
+import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
+import {
+  DEFAULT_TABLE_COLS,
+  DEFAULT_TABLE_ROWS,
+  cloneTableMatrix,
+  createEmptyCell,
+  createEmptyTableRow,
+  normaliseTableData,
+  type TableCellData,
+  type TableCellFormatting,
+} from './operationsPalette/tables/constants';
 
 interface CanvasDropPlacement {
   x: number;
@@ -96,6 +107,79 @@ const isAtomObject = (
 };
 
 const UNTITLED_SLIDE_TEXT = 'Untitled Slide';
+
+type TableState = {
+  data: TableCellData[][];
+  rows: number;
+  cols: number;
+  locked: boolean;
+  showOutline: boolean;
+};
+
+const coercePositiveInteger = (value: unknown, fallback: number): number => {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  const integer = Math.floor(numeric);
+  return integer > 0 ? integer : fallback;
+};
+
+const extractTableHeaders = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.map(header => {
+    if (typeof header === 'string') {
+      return header;
+    }
+    if (header == null) {
+      return '';
+    }
+    return String(header);
+  });
+};
+
+const readTableState = (object: SlideObject): (TableState & { headers?: string[] }) => {
+  const props = (object.props ?? {}) as Record<string, unknown> | undefined;
+  const fallbackRows = coercePositiveInteger(props?.rows, DEFAULT_TABLE_ROWS);
+  const fallbackCols = coercePositiveInteger(props?.cols, DEFAULT_TABLE_COLS);
+  const data = normaliseTableData(props?.data, fallbackRows, fallbackCols);
+
+  return {
+    data,
+    rows: data.length,
+    cols: data[0]?.length ?? 0,
+    locked: Boolean(props?.locked),
+    showOutline: props?.showOutline !== false,
+    headers: extractTableHeaders(props?.headers),
+  };
+};
+
+const tableStatesEqual = (a: TableState, b: TableState) => {
+  return (
+    a.data === b.data &&
+    a.rows === b.rows &&
+    a.cols === b.cols &&
+    a.locked === b.locked &&
+    a.showOutline === b.showOutline
+  );
+};
+
+const formattingShallowEqual = (a: TableCellFormatting, b: TableCellFormatting) => {
+  return (
+    a.fontFamily === b.fontFamily &&
+    a.fontSize === b.fontSize &&
+    a.bold === b.bold &&
+    a.italic === b.italic &&
+    a.underline === b.underline &&
+    a.strikethrough === b.strikethrough &&
+    a.align === b.align &&
+    a.color === b.color
+  );
+};
 
 interface SlideCanvasProps {
   card: LayoutCard;
@@ -1193,6 +1277,230 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [],
     );
 
+    const mutateTableState = useCallback(
+      (objectId: string, mutator: (state: TableState) => TableState | null) => {
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'table') {
+          return;
+        }
+
+        const { headers: _headers, ...currentState } = readTableState(object);
+        const nextState = mutator(currentState);
+
+        if (!nextState || tableStatesEqual(currentState, nextState)) {
+          return;
+        }
+
+        onInteract();
+        onBulkUpdate({
+          [objectId]: {
+            props: {
+              ...(object.props || {}),
+              data: nextState.data,
+              rows: nextState.rows,
+              cols: nextState.cols,
+              locked: nextState.locked,
+              showOutline: nextState.showOutline,
+            },
+          },
+        });
+      },
+      [objectsMap, onBulkUpdate, onInteract],
+    );
+
+    const updateTableCellContent = useCallback(
+      (objectId: string, rowIndex: number, colIndex: number, value: string) => {
+        mutateTableState(objectId, state => {
+          if (rowIndex < 0 || colIndex < 0 || rowIndex >= state.rows || colIndex >= state.cols) {
+            return state;
+          }
+
+          const currentCell = state.data[rowIndex][colIndex];
+          if (!currentCell) {
+            return state;
+          }
+
+          if (currentCell.content === value) {
+            return state;
+          }
+
+          const nextData = cloneTableMatrix(state.data);
+          nextData[rowIndex][colIndex] = {
+            ...nextData[rowIndex][colIndex],
+            content: value,
+          };
+
+          return {
+            ...state,
+            data: nextData,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const updateTableCellFormatting = useCallback(
+      (objectId: string, rowIndex: number, colIndex: number, updates: Partial<TableCellFormatting>) => {
+        mutateTableState(objectId, state => {
+          if (rowIndex < 0 || colIndex < 0 || rowIndex >= state.rows || colIndex >= state.cols) {
+            return state;
+          }
+
+          const currentCell = state.data[rowIndex][colIndex];
+          if (!currentCell) {
+            return state;
+          }
+
+          const nextFormatting = { ...currentCell.formatting, ...updates };
+          if (formattingShallowEqual(currentCell.formatting, nextFormatting)) {
+            return state;
+          }
+
+          const nextData = cloneTableMatrix(state.data);
+          nextData[rowIndex][colIndex] = {
+            ...nextData[rowIndex][colIndex],
+            formatting: nextFormatting,
+          };
+
+          return {
+            ...state,
+            data: nextData,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const toggleTableLock = useCallback(
+      (objectId: string) => {
+        mutateTableState(objectId, state => ({
+          ...state,
+          locked: !state.locked,
+        }));
+      },
+      [mutateTableState],
+    );
+
+    const toggleTableOutline = useCallback(
+      (objectId: string) => {
+        mutateTableState(objectId, state => ({
+          ...state,
+          showOutline: !state.showOutline,
+        }));
+      },
+      [mutateTableState],
+    );
+
+    const addRowsToTable = useCallback(
+      (objectId: string, count: number) => {
+        if (count <= 0) {
+          return;
+        }
+
+        mutateTableState(objectId, state => {
+          const columnCount = Math.max(state.cols, 1);
+          const additions = Array.from({ length: count }, () => createEmptyTableRow(columnCount));
+          const nextData = [...state.data, ...additions];
+
+          return {
+            ...state,
+            data: nextData,
+            rows: nextData.length,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const addColumnsToTable = useCallback(
+      (objectId: string, count: number) => {
+        if (count <= 0) {
+          return;
+        }
+
+        mutateTableState(objectId, state => {
+          const nextData = state.data.map(row => [
+            ...row,
+            ...Array.from({ length: count }, () => createEmptyCell()),
+          ]);
+          const nextCols = nextData[0]?.length ?? state.cols;
+
+          return {
+            ...state,
+            data: nextData,
+            cols: nextCols,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const removeRowsFromTable = useCallback(
+      (objectId: string, startIndex: number, count: number) => {
+        if (count <= 0) {
+          return;
+        }
+
+        mutateTableState(objectId, state => {
+          if (state.rows <= 1) {
+            return state;
+          }
+
+          const safeStart = Math.max(0, Math.min(startIndex, state.rows - 1));
+          const available = state.rows - safeStart;
+          const actualCount = Math.min(count, available);
+
+          if (state.rows - actualCount < 1) {
+            return state;
+          }
+
+          const nextData = state.data.filter((_, index) => index < safeStart || index >= safeStart + actualCount);
+
+          return {
+            ...state,
+            data: nextData,
+            rows: nextData.length,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const removeColumnsFromTable = useCallback(
+      (objectId: string, startIndex: number, count: number) => {
+        if (count <= 0) {
+          return;
+        }
+
+        mutateTableState(objectId, state => {
+          if (state.cols <= 1) {
+            return state;
+          }
+
+          const safeStart = Math.max(0, Math.min(startIndex, state.cols - 1));
+          const available = state.cols - safeStart;
+          const actualCount = Math.min(count, available);
+
+          if (state.cols - actualCount < 1) {
+            return state;
+          }
+
+          const nextData = state.data.map(row => [
+            ...row.slice(0, safeStart),
+            ...row.slice(safeStart + actualCount),
+          ]);
+          const nextCols = nextData[0]?.length ?? state.cols;
+
+          return {
+            ...state,
+            data: nextData,
+            cols: nextCols,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
     const commitEditingText = useCallback(() => {
       setEditingTextState(prev => {
         if (!prev) {
@@ -1532,7 +1840,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             }
             if (isAtomObject(object) && onRemoveAtom) {
               onRemoveAtom(object.props.atom.id);
-            } else if (object.type === 'text-box' && onRemoveObject) {
+            } else if ((object.type === 'text-box' || object.type === 'table') && onRemoveObject) {
               onRemoveObject(id);
             }
           });
@@ -1773,6 +2081,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
             const isAccentImageObject = object.type === 'accent-image';
             const isTextBoxObject = object.type === 'text-box';
+            const isTableObject = object.type === 'table';
             const isEditingTextBox =
               isTextBoxObject &&
               editingTextState?.id === object.id &&
@@ -1780,6 +2089,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const textBoxFormatting = isTextBoxObject
               ? extractTextBoxFormatting(object.props as Record<string, unknown> | undefined)
               : null;
+            const tableState = isTableObject ? readTableState(object) : null;
             const featureOverviewAtomId =
               isAtomObject(object) && typeof object.props.atom.atomId === 'string'
                 ? object.props.atom.atomId
@@ -1806,8 +2116,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   isAccentImageObject ? 'bg-muted/30' : 'bg-background/95',
                   isFeatureOverviewAtom
                     ? isSelected
-                      ? 'border-primary shadow-2xl'
-                      : 'border-transparent'
+                    ? 'border-primary shadow-2xl'
+                    : 'border-transparent'
                     : isSelected
                     ? 'border-primary shadow-2xl'
                     : 'border-border/70 hover:border-primary/40',
@@ -1829,7 +2139,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   className={cn(
                     'relative flex-1 overflow-hidden',
                     isAccentImageObject ? undefined : 'p-4',
-                    isTextBoxObject && 'overflow-visible p-0',
+                    (isTextBoxObject || isTableObject) && 'overflow-visible p-0',
                   )}
                 >
                   {isTextBoxObject ? (
@@ -1861,6 +2171,36 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
                       onInteract={onInteract}
                       onToolbarStateChange={handleTextToolbarStateChange}
+                    />
+                  ) : isTableObject && tableState ? (
+                    <ExhibitionTable
+                      id={object.id}
+                      headers={tableState.headers}
+                      data={tableState.data}
+                      rows={tableState.rows}
+                      cols={tableState.cols}
+                      locked={tableState.locked}
+                      showOutline={tableState.showOutline}
+                      canEdit={canEdit}
+                      selectedCell={isSelected ? undefined : null}
+                      onUpdateCell={(row, col, value) => updateTableCellContent(object.id, row, col, value)}
+                      onUpdateCellFormatting={(row, col, updates) =>
+                        updateTableCellFormatting(object.id, row, col, updates)
+                      }
+                      onToggleLock={() => toggleTableLock(object.id)}
+                      onToggleOutline={() => toggleTableOutline(object.id)}
+                      onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
+                      onDeleteColumn={colIndex => removeColumnsFromTable(object.id, colIndex, 1)}
+                      onDelete2Columns={colIndex => removeColumnsFromTable(object.id, colIndex, 2)}
+                      onDeleteRow={rowIndex => removeRowsFromTable(object.id, rowIndex, 1)}
+                      onDelete2Rows={rowIndex => removeRowsFromTable(object.id, rowIndex, 2)}
+                      onAddColumn={() => addColumnsToTable(object.id, 1)}
+                      onAdd2Columns={() => addColumnsToTable(object.id, 2)}
+                      onAddRow={() => addRowsToTable(object.id, 1)}
+                      onAdd2Rows={() => addRowsToTable(object.id, 2)}
+                      onToolbarStateChange={node => handleTextToolbarStateChange(object.id, node)}
+                      onInteract={onInteract}
+                      className={cn('h-full w-full overflow-hidden', 'rounded-2xl bg-background/90 p-3')}
                     />
                   ) : (
                     <div

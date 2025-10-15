@@ -332,6 +332,19 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
 
   const effectiveSelection = selectedCell ?? internalSelection;
 
+  useEffect(() => {
+    if (selectedCell === undefined) {
+      return;
+    }
+
+    if (selectedCell === null) {
+      setInternalSelection(null);
+      return;
+    }
+
+    setInternalSelection(selectedCell);
+  }, [selectedCell]);
+
   const rowCount = useMemo(() => {
     if (typeof rows === 'number') {
       return rows;
