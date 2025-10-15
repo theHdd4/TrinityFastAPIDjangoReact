@@ -1,46 +1,320 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ContextMenu,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
+import TextBoxToolbar from '../textBox/TextBoxToolbar';
+import type { TextAlignOption } from '../textBox/types';
 import {
-  ExhibitionTableTray,
-  type ExhibitionTableTrayProps,
-} from './ExhibitionTableTray';
+  DEFAULT_CELL_FORMATTING,
+  createCellFormatting,
+  createEmptyCell,
+  type TableCellData,
+  type TableCellFormatting,
+} from './constants';
+import { ExhibitionTableTray } from './ExhibitionTableTray';
 
-type TableTrayCallbacks = Omit<
-  ExhibitionTableTrayProps,
-  'locked' | 'rows' | 'cols' | 'selectedCell'
->;
-
-export interface ExhibitionTableProps extends Partial<TableTrayCallbacks> {
+export interface ExhibitionTableProps {
   id: string;
   headers?: string[];
-  data: string[][];
+  data: TableCellData[][];
   locked?: boolean;
+  showOutline?: boolean;
   rows?: number;
   cols?: number;
   selectedCell?: { row: number; col: number } | null;
   onCellSelect?: (cell: { row: number; col: number }) => void;
   onUpdateCell?: (row: number, col: number, value: string) => void;
+  onUpdateCellFormatting?: (row: number, col: number, updates: Partial<TableCellFormatting>) => void;
   className?: string;
+  canEdit?: boolean;
+  onToggleLock?: () => void;
+  onToggleOutline?: () => void;
+  onDelete?: () => void;
+  onDeleteColumn?: (colIndex: number) => void;
+  onDelete2Columns?: (colIndex: number) => void;
+  onDeleteRow?: (rowIndex: number) => void;
+  onDelete2Rows?: (rowIndex: number) => void;
+  onAddColumn?: () => void;
+  onAdd2Columns?: () => void;
+  onAddRow?: () => void;
+  onAdd2Rows?: () => void;
+  onToolbarStateChange?: (toolbar: React.ReactNode | null) => void;
+  onInteract?: () => void;
 }
 
 const noop = () => {};
+
+const clampFontSize = (value: number) => Math.min(Math.max(value, 8), 200);
+
+const normaliseEditableText = (rawValue: string): string => {
+  if (!rawValue) {
+    return '';
+  }
+
+  let value = rawValue.replace(/\u00a0/g, ' ');
+  while (value.endsWith('\n')) {
+    value = value.slice(0, -1);
+  }
+
+  return value;
+};
+
+const sanitiseStoredContent = (rawValue: string): string => {
+  if (!rawValue) {
+    return '';
+  }
+
+  let working = rawValue;
+  const htmlLikePattern = /<[^>]+>/i;
+
+  if (htmlLikePattern.test(working)) {
+    working = working
+      .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+      .replace(/<\/(div|p)>/gi, '\n')
+      .replace(/<div[^>]*>/gi, '')
+      .replace(/<p[^>]*>/gi, '')
+      .replace(/<span[^>]*>/gi, '')
+      .replace(/<\/span>/gi, '')
+      .replace(/<[^>]+>/g, '');
+  }
+
+  if (/&[a-z#0-9]+;/i.test(working) && typeof window !== 'undefined') {
+    const textarea = window.document.createElement('textarea');
+    textarea.innerHTML = working;
+    working = textarea.value;
+  }
+
+  return normaliseEditableText(working);
+};
+
+const buildTextDecoration = (formatting: TableCellFormatting) => {
+  if (formatting.underline && formatting.strikethrough) {
+    return 'underline line-through';
+  }
+  if (formatting.underline) {
+    return 'underline';
+  }
+  if (formatting.strikethrough) {
+    return 'line-through';
+  }
+  return 'none';
+};
+
+interface ContentEditableCellProps {
+  value: string;
+  formatting: TableCellFormatting;
+  editable: boolean;
+  onFocus: () => void;
+  onChange: (value: string) => void;
+  onCommit: (value: string) => void;
+  onInteract?: () => void;
+}
+
+const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
+  value,
+  formatting,
+  editable,
+  onFocus,
+  onChange,
+  onCommit,
+  onInteract,
+}) => {
+  const elementRef = useRef<HTMLDivElement | null>(null);
+  const lastValueRef = useRef<string>('');
+
+  const setDomValue = useCallback((nextValue: string) => {
+    const node = elementRef.current;
+    if (!node) {
+      return;
+    }
+
+    const prepared = sanitiseStoredContent(nextValue ?? '');
+
+    if (lastValueRef.current !== prepared) {
+      node.textContent = prepared;
+      lastValueRef.current = prepared;
+    }
+  }, []);
+
+  const readDomValue = useCallback(() => {
+    const node = elementRef.current;
+    if (!node) {
+      return '';
+    }
+
+    const text = node.textContent ?? '';
+    return normaliseEditableText(text);
+  }, []);
+
+  useEffect(() => {
+    setDomValue(value ?? '');
+  }, [setDomValue, value]);
+
+  const emitChange = useCallback(() => {
+    const nextValue = readDomValue();
+    if (lastValueRef.current !== nextValue) {
+      lastValueRef.current = nextValue;
+      onChange(nextValue);
+    }
+  }, [onChange, readDomValue]);
+
+  const emitCommit = useCallback(() => {
+    const nextValue = readDomValue();
+    if (lastValueRef.current !== nextValue) {
+      lastValueRef.current = nextValue;
+      onCommit(nextValue);
+    }
+  }, [onCommit, readDomValue]);
+
+  const handleInput = useCallback(() => {
+    if (!editable) {
+      return;
+    }
+    onInteract?.();
+    emitChange();
+  }, [editable, emitChange, onInteract]);
+
+  const handleBlur = useCallback(() => {
+    if (!editable) {
+      return;
+    }
+    emitCommit();
+  }, [editable, emitCommit]);
+
+  const handlePaste = useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      if (!editable) {
+        return;
+      }
+
+      event.preventDefault();
+      const plainText = event.clipboardData.getData('text/plain');
+      const ownerDocument = event.currentTarget.ownerDocument;
+      if (plainText && ownerDocument && typeof ownerDocument.execCommand === 'function') {
+        ownerDocument.execCommand('insertText', false, plainText);
+      }
+    },
+    [editable],
+  );
+
+  return (
+    <div
+      ref={node => {
+        elementRef.current = node;
+        if (node) {
+          setDomValue(value ?? '');
+        }
+      }}
+      className="min-h-[40px] w-full px-3 py-2 text-sm focus:outline-none"
+      style={{
+        fontFamily: formatting.fontFamily,
+        fontSize: `${formatting.fontSize}px`,
+        color: formatting.color,
+        fontWeight: formatting.bold ? 600 : 400,
+        fontStyle: formatting.italic ? 'italic' : 'normal',
+        textDecoration: buildTextDecoration(formatting),
+        whiteSpace: 'pre-wrap',
+      }}
+      contentEditable={editable}
+      suppressContentEditableWarning
+      onFocus={onFocus}
+      onInput={handleInput}
+      onBlur={handleBlur}
+      onPaste={handlePaste}
+      spellCheck={false}
+    />
+  );
+};
+
+interface EditableTableCellProps {
+  rowIndex: number;
+  colIndex: number;
+  cell: TableCellData;
+  formatting: TableCellFormatting;
+  isActive: boolean;
+  canEdit: boolean;
+  locked: boolean;
+  showOutline: boolean;
+  onSelect: (cell: { row: number; col: number }) => void;
+  onChange: (value: string) => void;
+  onCommit: (value: string) => void;
+  onInteract?: () => void;
+}
+
+const EditableTableCell: React.FC<EditableTableCellProps> = ({
+  rowIndex,
+  colIndex,
+  cell,
+  formatting,
+  isActive,
+  canEdit,
+  locked,
+  showOutline,
+  onSelect,
+  onChange,
+  onCommit,
+  onInteract,
+}) => {
+  const editable = canEdit && !locked;
+
+  const handleSelect = useCallback(() => {
+    onSelect({ row: rowIndex, col: colIndex });
+  }, [colIndex, onSelect, rowIndex]);
+
+  const handleFocus = useCallback(() => {
+    handleSelect();
+    if (editable) {
+      onInteract?.();
+    }
+  }, [editable, handleSelect, onInteract]);
+
+  return (
+    <td
+      className={cn(
+        'align-top transition-colors',
+        showOutline ? 'border border-border' : 'border border-transparent',
+        editable ? 'cursor-text' : 'cursor-default',
+        isActive && 'bg-primary/10 outline outline-2 outline-primary/60',
+      )}
+      style={{ textAlign: formatting.align }}
+      onClick={() => {
+        handleSelect();
+        if (editable) {
+          onInteract?.();
+        }
+      }}
+    >
+      <ContentEditableCell
+        value={cell?.content ?? ''}
+        formatting={formatting}
+        editable={editable}
+        onFocus={handleFocus}
+        onChange={onChange}
+        onCommit={onCommit}
+        onInteract={onInteract}
+      />
+    </td>
+  );
+};
 
 export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   id,
   headers,
   data,
   locked = false,
+  showOutline = true,
+  canEdit = true,
   rows,
   cols,
   selectedCell,
   onCellSelect,
   onUpdateCell,
+  onUpdateCellFormatting,
   className,
   onToggleLock = noop,
+  onToggleOutline = noop,
   onDelete = noop,
   onDeleteColumn = noop,
   onDelete2Columns = noop,
@@ -50,11 +324,11 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   onAdd2Columns = noop,
   onAddRow = noop,
   onAdd2Rows = noop,
+  onToolbarStateChange,
+  onInteract,
 }) => {
-  const [internalSelection, setInternalSelection] = useState<{
-    row: number;
-    col: number;
-  } | null>(null);
+  const [internalSelection, setInternalSelection] = useState<{ row: number; col: number } | null>(null);
+  const [toolbarFormatting, setToolbarFormatting] = useState<TableCellFormatting>(DEFAULT_CELL_FORMATTING);
 
   const effectiveSelection = selectedCell ?? internalSelection;
 
@@ -79,7 +353,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
     return Array.from({ length: rowCount }, (_, rowIndex) => {
       const sourceRow = data[rowIndex] ?? [];
       return Array.from({ length: colCount }, (_, colIndex) => {
-        return sourceRow[colIndex] ?? '';
+        return sourceRow[colIndex] ?? createEmptyCell();
       });
     });
   }, [data, rowCount, colCount]);
@@ -94,41 +368,177 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
     return Array.from({ length: colCount }, (_, index) => `Column ${index + 1}`);
   }, [headers, colCount]);
 
-  const handleCellSelect = (rowIndex: number, colIndex: number) => {
-    const cell = { row: rowIndex, col: colIndex };
-    setInternalSelection(cell);
-    onCellSelect?.(cell);
-  };
-
-  const handleCellBlur = (
-    rowIndex: number,
-    colIndex: number,
-    event: React.FocusEvent<HTMLTableCellElement>,
-  ) => {
-    if (locked) {
+  useEffect(() => {
+    if (!effectiveSelection) {
+      setToolbarFormatting(DEFAULT_CELL_FORMATTING);
       return;
     }
-    const value = event.currentTarget.textContent ?? '';
-    onUpdateCell?.(rowIndex, colIndex, value);
-  };
+
+    const { row, col } = effectiveSelection;
+    const cell = tableData[row]?.[col];
+    if (cell) {
+      setToolbarFormatting(cell.formatting);
+    } else {
+      setToolbarFormatting(DEFAULT_CELL_FORMATTING);
+    }
+  }, [effectiveSelection, tableData]);
+
+  const handleCellSelect = useCallback(
+    (cell: { row: number; col: number }) => {
+      setInternalSelection(cell);
+      onCellSelect?.(cell);
+    },
+    [onCellSelect],
+  );
+
+  const handleCellInput = useCallback(
+    (rowIndex: number, colIndex: number, value: string) => {
+      if (locked || !canEdit) {
+        return;
+      }
+      onInteract?.();
+      onUpdateCell?.(rowIndex, colIndex, value);
+    },
+    [canEdit, locked, onInteract, onUpdateCell],
+  );
+
+  const handleCellBlur = useCallback(
+    (rowIndex: number, colIndex: number, value: string) => {
+      if (locked || !canEdit) {
+        return;
+      }
+      onInteract?.();
+      onUpdateCell?.(rowIndex, colIndex, value);
+    },
+    [canEdit, locked, onInteract, onUpdateCell],
+  );
+
+  const applyFormatting = useCallback(
+    (updates: Partial<TableCellFormatting>) => {
+      if (!effectiveSelection || !onUpdateCellFormatting) {
+        return;
+      }
+      onInteract?.();
+      setToolbarFormatting(prev => ({ ...prev, ...updates }));
+      onUpdateCellFormatting(effectiveSelection.row, effectiveSelection.col, updates);
+    },
+    [effectiveSelection, onInteract, onUpdateCellFormatting],
+  );
+
+  const handleAlign = useCallback(
+    (align: TextAlignOption) => {
+      applyFormatting({ align });
+    },
+    [applyFormatting],
+  );
+
+  const handleFontFamily = useCallback(
+    (fontFamily: string) => {
+      applyFormatting({ fontFamily });
+    },
+    [applyFormatting],
+  );
+
+  const handleColor = useCallback(
+    (color: string) => {
+      applyFormatting({ color });
+    },
+    [applyFormatting],
+  );
+
+  const handleIncreaseFontSize = useCallback(() => {
+    applyFormatting({ fontSize: clampFontSize(toolbarFormatting.fontSize + 2) });
+  }, [applyFormatting, toolbarFormatting.fontSize]);
+
+  const handleDecreaseFontSize = useCallback(() => {
+    applyFormatting({ fontSize: clampFontSize(toolbarFormatting.fontSize - 2) });
+  }, [applyFormatting, toolbarFormatting.fontSize]);
+
+  const handleToggle = useCallback(
+    (key: keyof Pick<TableCellFormatting, 'bold' | 'italic' | 'underline' | 'strikethrough'>) => {
+      applyFormatting({ [key]: !toolbarFormatting[key] } as Partial<TableCellFormatting>);
+    },
+    [applyFormatting, toolbarFormatting],
+  );
+
+  const toolbarNode = useMemo(() => {
+    if (!canEdit || locked || !effectiveSelection) {
+      return null;
+    }
+
+    return (
+      <TextBoxToolbar
+        fontFamily={toolbarFormatting.fontFamily}
+        onFontFamilyChange={handleFontFamily}
+        fontSize={toolbarFormatting.fontSize}
+        onIncreaseFontSize={handleIncreaseFontSize}
+        onDecreaseFontSize={handleDecreaseFontSize}
+        bold={toolbarFormatting.bold}
+        italic={toolbarFormatting.italic}
+        underline={toolbarFormatting.underline}
+        strikethrough={toolbarFormatting.strikethrough}
+        onToggleBold={() => handleToggle('bold')}
+        onToggleItalic={() => handleToggle('italic')}
+        onToggleUnderline={() => handleToggle('underline')}
+        onToggleStrikethrough={() => handleToggle('strikethrough')}
+        align={toolbarFormatting.align}
+        onAlign={handleAlign}
+        color={toolbarFormatting.color}
+        onColorChange={handleColor}
+        onDelete={canEdit ? onDelete : undefined}
+      />
+    );
+  }, [
+    applyFormatting,
+    canEdit,
+    effectiveSelection,
+    handleAlign,
+    handleColor,
+    handleDecreaseFontSize,
+    handleFontFamily,
+    handleIncreaseFontSize,
+    handleToggle,
+    locked,
+    onDelete,
+    toolbarFormatting,
+  ]);
+
+  useEffect(() => {
+    onToolbarStateChange?.(toolbarNode);
+
+    return () => {
+      if (toolbarNode) {
+        onToolbarStateChange?.(null);
+      }
+    };
+  }, [toolbarNode, onToolbarStateChange]);
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
           className={cn(
-            'inline-block overflow-hidden rounded-xl border border-border bg-background shadow-sm',
+            'h-full w-full overflow-hidden',
             className,
           )}
         >
-          <table className="min-w-[320px] border-collapse" data-table-id={id}>
+          <table
+            className={cn(
+              'h-full w-full table-fixed border-collapse',
+              showOutline ? 'border border-border' : 'border border-transparent',
+            )}
+            data-table-id={id}
+          >
             {displayHeaders.length > 0 && (
-              <thead className="bg-muted/50">
+              <thead className="bg-muted/40">
                 <tr>
                   {displayHeaders.map((header, headerIndex) => (
                     <th
                       key={`${id}-header-${headerIndex}`}
-                      className="border border-border px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                      className={cn(
+                        'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground',
+                        showOutline ? 'border border-border' : 'border border-transparent',
+                      )}
                     >
                       {header}
                     </th>
@@ -139,25 +549,27 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
             <tbody>
               {tableData.map((rowData, rowIndex) => (
                 <tr key={`${id}-row-${rowIndex}`} className="even:bg-muted/20">
-                  {rowData.map((value, colIndex) => {
+                  {rowData.map((cell, colIndex) => {
                     const isActive =
                       effectiveSelection?.row === rowIndex && effectiveSelection?.col === colIndex;
+                    const cellFormatting = cell?.formatting ?? createCellFormatting();
+
                     return (
-                      <td
+                      <EditableTableCell
                         key={`${id}-cell-${rowIndex}-${colIndex}`}
-                        className={cn(
-                          'border border-border px-4 py-3 text-sm text-foreground align-middle transition-colors',
-                          !locked && 'cursor-text',
-                          isActive && 'bg-primary/10 outline outline-2 outline-primary/60',
-                        )}
-                        contentEditable={!locked}
-                        suppressContentEditableWarning
-                        onFocus={() => handleCellSelect(rowIndex, colIndex)}
-                        onClick={() => handleCellSelect(rowIndex, colIndex)}
-                        onBlur={event => handleCellBlur(rowIndex, colIndex, event)}
-                      >
-                        {value}
-                      </td>
+                        rowIndex={rowIndex}
+                        colIndex={colIndex}
+                        cell={cell}
+                        formatting={cellFormatting}
+                        isActive={Boolean(isActive)}
+                        canEdit={canEdit}
+                        locked={locked}
+                        showOutline={showOutline}
+                        onSelect={handleCellSelect}
+                        onChange={value => handleCellInput(rowIndex, colIndex, value)}
+                        onCommit={value => handleCellBlur(rowIndex, colIndex, value)}
+                        onInteract={onInteract}
+                      />
                     );
                   })}
                 </tr>
@@ -169,15 +581,34 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
 
       <ExhibitionTableTray
         locked={locked}
+        canEdit={canEdit}
         rows={rowCount}
         cols={colCount}
+        showOutline={showOutline}
         selectedCell={effectiveSelection}
         onToggleLock={onToggleLock}
+        onToggleOutline={onToggleOutline}
         onDelete={onDelete}
-        onDeleteColumn={onDeleteColumn}
-        onDelete2Columns={onDelete2Columns}
-        onDeleteRow={onDeleteRow}
-        onDelete2Rows={onDelete2Rows}
+        onDeleteColumn={() => {
+          if (effectiveSelection) {
+            onDeleteColumn(effectiveSelection.col);
+          }
+        }}
+        onDelete2Columns={() => {
+          if (effectiveSelection) {
+            onDelete2Columns(effectiveSelection.col);
+          }
+        }}
+        onDeleteRow={() => {
+          if (effectiveSelection) {
+            onDeleteRow(effectiveSelection.row);
+          }
+        }}
+        onDelete2Rows={() => {
+          if (effectiveSelection) {
+            onDelete2Rows(effectiveSelection.row);
+          }
+        }}
         onAddColumn={onAddColumn}
         onAdd2Columns={onAdd2Columns}
         onAddRow={onAddRow}
@@ -186,5 +617,3 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
     </ContextMenu>
   );
 };
-
-export default ExhibitionTable;
