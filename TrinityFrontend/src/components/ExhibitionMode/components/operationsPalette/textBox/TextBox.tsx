@@ -314,6 +314,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
           }`.trim(),
           textAlign: localFormatting.align,
           color: localFormatting.color,
+          whiteSpace: 'pre-wrap',
         }}
       />
       {!canEdit && localFormatting.text.trim().length === 0 && (
