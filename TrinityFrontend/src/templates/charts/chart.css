@@ -43,3 +43,12 @@
 .sort-submenu button {
   transition: background-color 0.15s ease-in-out;
 }
+
+/* Read-only exhibition charts should never render line dots */
+.read-only-chart .recharts-line-dot,
+.read-only-chart .recharts-line .recharts-dot,
+.read-only-chart .recharts-line-dots circle,
+.read-only-chart .recharts-active-dot {
+  display: none !important;
+}
+

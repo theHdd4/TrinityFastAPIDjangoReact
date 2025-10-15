@@ -965,7 +965,7 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
   }
 
   if (chartConfig) {
-    return <RechartsChartRenderer {...chartConfig} />;
+    return <RechartsChartRenderer {...chartConfig} readOnly />;
   }
 
   if (htmlPreview) {

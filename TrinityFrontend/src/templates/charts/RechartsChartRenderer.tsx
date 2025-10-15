@@ -170,6 +170,7 @@ interface Props {
   initialShowDataLabels?: boolean; // Default state for data labels
   showGrid?: boolean; // External control for grid visibility
   chartsPerRow?: number; // For multi pie chart layouts
+  readOnly?: boolean; // Simplified rendering without editing controls
 }
 
 // Excel-like color themes
@@ -495,7 +496,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   showDataLabels: propShowDataLabels, // External control for data labels visibility
   initialShowDataLabels,
   showGrid: propShowGrid, // External control for grid visibility
-  chartsPerRow
+  chartsPerRow,
+  readOnly = false
 }) => {
 
   // State for color theme - simplified approach
@@ -1132,6 +1134,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   // Handle right-click context menu
   const handleContextMenu = (e: React.MouseEvent) => {
+    if (readOnly) {
+      e.preventDefault();
+      return;
+    }
+
     e.preventDefault();
     e.stopPropagation();
 
@@ -3165,6 +3172,49 @@ const RechartsChartRenderer: React.FC<Props> = ({
   };
 
 
+
+  if (readOnly) {
+    const trimmedTitle = (resolvedTitle ?? '').trim();
+
+    const chartNode = (() => {
+      try {
+        return renderChart();
+      } catch {
+        return (
+          <div className="flex h-full items-center justify-center text-red-500">
+            <div className="text-center">
+              <svg className="mx-auto mb-2 h-12 w-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"
+                />
+              </svg>
+              <p className="text-sm">Error rendering chart</p>
+              <p className="mt-1 text-xs text-gray-500">Please check the console for details</p>
+            </div>
+          </div>
+        );
+      }
+    })();
+
+    return (
+      <div className="read-only-chart flex h-full w-full flex-col gap-4">
+        {trimmedTitle.length > 0 && (
+          <h3 className="text-center text-2xl font-semibold text-gray-900">{trimmedTitle}</h3>
+        )}
+        <div
+          className="flex-1 min-h-[300px]"
+          style={{ height: height ? `${height}px` : '100%', width: width ? `${width}px` : '100%' }}
+        >
+          <ResponsiveContainer key={chartRenderKey} width="100%" height="100%">
+            {chartNode}
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-full flex flex-col">
