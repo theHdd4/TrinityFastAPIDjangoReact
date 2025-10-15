@@ -1323,12 +1323,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [clampPosition],
     );
 
-    const handleBackgroundPointerDown = useCallback(
-      (event: React.PointerEvent<HTMLDivElement>) => {
+    const handleBackgroundPointerDown = useCallback(() => {
         if (!canEdit) {
-          return;
-        }
-        if (event.target !== event.currentTarget) {
           return;
         }
         if (editingTextState) {
@@ -1340,6 +1336,42 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       },
       [canEdit, commitEditingText, editingTextState, focusCanvas, onInteract],
     );
+
+    const selectionCount = selectedIds.length;
+
+    useEffect(() => {
+      if (!canEdit || selectionCount === 0) {
+        return;
+      }
+
+      const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+        const target = event.target as Node | null;
+        const node = internalRef.current;
+
+        if (!node) {
+          return;
+        }
+
+        if (target && node.contains(target)) {
+          return;
+        }
+
+        if (editingTextState) {
+          commitEditingText();
+        }
+
+        onInteract();
+        setSelectedIds([]);
+      };
+
+      document.addEventListener('mousedown', handlePointerDown);
+      document.addEventListener('touchstart', handlePointerDown);
+
+      return () => {
+        document.removeEventListener('mousedown', handlePointerDown);
+        document.removeEventListener('touchstart', handlePointerDown);
+      };
+    }, [canEdit, commitEditingText, editingTextState, onInteract, selectionCount]);
 
     const handleObjectPointerDown = useCallback(
       (event: React.PointerEvent<HTMLDivElement>, objectId: string) => {
@@ -1725,6 +1757,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const textBoxFormatting = isTextBoxObject
               ? extractTextBoxFormatting(object.props as Record<string, unknown> | undefined)
               : null;
+            const featureOverviewAtomId =
+              isAtomObject(object) && typeof object.props.atom.atomId === 'string'
+                ? object.props.atom.atomId
+                : null;
+            const isFeatureOverviewAtom = featureOverviewAtomId === 'feature-overview';
 
           return (
             <div
@@ -1744,11 +1781,17 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 className={cn(
                   'relative flex h-full w-full flex-col overflow-hidden rounded-3xl border-2 shadow-xl transition-all',
                   isAccentImageObject ? 'bg-muted/30' : 'bg-background/95',
-                  isSelected ? 'border-primary shadow-2xl' : 'border-border/70 hover:border-primary/40',
+                  isFeatureOverviewAtom
+                    ? isSelected
+                      ? 'border-primary shadow-2xl'
+                      : 'border-transparent'
+                    : isSelected
+                    ? 'border-primary shadow-2xl'
+                    : 'border-border/70 hover:border-primary/40',
                   isTextBoxObject && 'overflow-visible border-transparent bg-transparent shadow-none',
                 )}
               >
-                {isAtomObject(object) && (
+                {isAtomObject(object) && !isFeatureOverviewAtom && (
                   <div className="flex items-center gap-2 border-b border-border/60 bg-muted/10 px-4 py-2">
                     <div className={`h-2.5 w-2.5 rounded-full ${object.props.atom.color}`} />
                     <div className="flex flex-col">
