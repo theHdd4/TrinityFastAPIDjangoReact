@@ -83,7 +83,7 @@ CORS_ALLOW_METHODS = list(default_methods)
 CORS_PREFLIGHT_MAX_AGE = 86400            # 24h cache for pre-flight
 
 # Debug CORS configuration
-print(f"🔧 CORS Configuration:")
+print(f"CORS Configuration:")
 print(f"   HOST_IP: {HOST_IP}")
 print(f"   FRONTEND_PORT: {FRONTEND_PORT}")
 print(f"   _frontend_origin: {_frontend_origin}")

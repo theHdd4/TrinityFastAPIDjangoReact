@@ -116,40 +116,43 @@ class AppViewSet(viewsets.ModelViewSet):
                 # Fetch data from public.usecase if linked
                 if app.usecase_id:
                     try:
+                        from django_tenants.utils import schema_context
                         from apps.trinity_v1_atoms.models import TrinityV1Atom
                         
-                        usecase = UseCase.objects.prefetch_related('molecule_objects').get(id=app.usecase_id)
-                        app_data['modules'] = usecase.modules or []
-                        app_data['molecules'] = usecase.molecules or []
-                        
-                        # Build molecule_atoms and atoms_in_molecules from molecule_objects
-                        molecule_atoms = {}
-                        atoms_in_molecules = []
-                        
-                        for molecule in usecase.molecule_objects.all():
-                            atom_ids = molecule.atoms or []
-                            matching_atoms = TrinityV1Atom.objects.filter(id__in=atom_ids)
+                        # Access UseCase from public schema
+                        with schema_context('public'):
+                            usecase = UseCase.objects.prefetch_related('molecule_objects').get(id=app.usecase_id)
+                            app_data['modules'] = usecase.modules or []
+                            app_data['molecules'] = usecase.molecules or []
                             
-                            atoms_list = []
-                            for atom in matching_atoms:
-                                atom_data = {
-                                    'id': atom.atom_id,
-                                    'name': atom.name,
-                                    'description': atom.description,
-                                    'category': atom.category
+                            # Build molecule_atoms and atoms_in_molecules from molecule_objects
+                            molecule_atoms = {}
+                            atoms_in_molecules = []
+                            
+                            for molecule in usecase.molecule_objects.all():
+                                atom_names = molecule.atoms or []
+                                matching_atoms = TrinityV1Atom.objects.filter(atom_id__in=atom_names)
+                                
+                                atoms_list = []
+                                for atom in matching_atoms:
+                                    atom_data = {
+                                        'id': atom.atom_id,
+                                        'name': atom.name,
+                                        'description': atom.description,
+                                        'category': atom.category
+                                    }
+                                    atoms_list.append(atom_data)
+                                    if atom.atom_id not in atoms_in_molecules:
+                                        atoms_in_molecules.append(atom.atom_id)
+                                
+                                molecule_atoms[molecule.molecule_id] = {
+                                    'id': molecule.molecule_id,
+                                    'name': molecule.name,
+                                    'atoms': atoms_list
                                 }
-                                atoms_list.append(atom_data)
-                                if atom.atom_id not in atoms_in_molecules:
-                                    atoms_in_molecules.append(atom.atom_id)
                             
-                            molecule_atoms[molecule.molecule_id] = {
-                                'id': molecule.molecule_id,
-                                'name': molecule.name,
-                                'atoms': atoms_list
-                            }
-                        
-                        app_data['molecule_atoms'] = molecule_atoms
-                        app_data['atoms_in_molecules'] = atoms_in_molecules
+                            app_data['molecule_atoms'] = molecule_atoms
+                            app_data['atoms_in_molecules'] = atoms_in_molecules
                     except UseCase.DoesNotExist:
                         logger.warning(f"UseCase {app.usecase_id} not found for app {app.slug}")
                 

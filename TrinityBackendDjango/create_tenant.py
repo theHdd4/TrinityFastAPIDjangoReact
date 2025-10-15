@@ -68,11 +68,6 @@ def main():
             user.save()
         print("→ 1b) Default super admin 'neo' already exists")
 
-    # Create additional users for each role. The admin, editor and viewer
-    # accounts are tied to the Quant Matrix AI tenant to demonstrate
-    # client-specific privileges. Passwords for the staff list below are set
-    # to the employee ID provided.
-    # Username for staff members uses their Quant Matrix email address
     email_domain = "quantmatrix.ai"
     role_users = [
         (admin_username, "neo_the_only_one", "admin", "", ""),
@@ -245,6 +240,20 @@ def main():
     except Exception as exc:
         print(f"   ⚠️  Failed to populate molecules: {exc}")
 
+    # Populate trinity_v1_atoms data in public schema
+    try:
+        call_command("populate_trinity_v1_atoms")
+        print("   ✅ Trinity V1 Atoms data populated in public schema")
+    except Exception as exc:
+        print(f"   ⚠️  Failed to populate trinity_v1_atoms: {exc}")
+
+    # Update atoms with tags and color data from frontend
+    try:
+        call_command("update_atoms_from_frontend")
+        print("   ✅ Trinity V1 Atoms updated with tags and color data")
+    except Exception as exc:
+        print(f"   ⚠️  Failed to update atoms from frontend: {exc}")
+
     # Populate use cases if they don't exist
     try:
         call_command("populate_usecases")
@@ -328,6 +337,18 @@ def main():
     Tenant.objects.filter(id=tenant_obj.id).update(
         allowed_apps=allowed_app_ids, users_in_use=len(role_users)
     )
+
+    # Set default tenant environment for all users
+    print(f"\n→ 5) Setting default tenant environment for all users...")
+    from apps.accounts.utils import save_env_var
+    
+    for user in User.objects.all():
+        try:
+            save_env_var(user, 'CLIENT_NAME', tenant_name)  # Use tenant_name, not tenant_schema
+            save_env_var(user, 'CLIENT_ID', f"{tenant_schema}_{user.id}")
+            print(f"   ✅ Set tenant environment for user: {user.username}")
+        except Exception as exc:
+            print(f"   ⚠️  Failed to set environment for {user.username}: {exc}")
 
     print("All done! Tenant and all tables created.\n")
 

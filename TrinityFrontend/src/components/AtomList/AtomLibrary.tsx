@@ -114,17 +114,16 @@ const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse }
     return acc;
   }, {} as Record<string, Atom[]>);
 
-  // Create categories from API data
-  const apiCategories: AtomCategory[] = Object.entries(groupedAtoms).map(([categoryName, categoryAtoms]) => {
-    // Find matching category from hardcoded data for icon and color
-    const hardcodedCategory = atomCategories.find(cat => cat.name === categoryName);
+  // Create categories from API data, maintaining the order from atomCategories
+  const apiCategories: AtomCategory[] = atomCategories.map(hardcodedCategory => {
+    const categoryAtoms = groupedAtoms[hardcodedCategory.name] || [];
     return {
-      name: categoryName,
-      icon: hardcodedCategory?.icon || Search,
-      color: hardcodedCategory?.color || 'bg-gray-500',
+      name: hardcodedCategory.name,
+      icon: hardcodedCategory.icon,
+      color: hardcodedCategory.color,
       atoms: categoryAtoms
     };
-  });
+  }).filter(category => category.atoms.length > 0);
 
   // Use API categories if available, otherwise fallback to hardcoded
   const categoriesToUse = atoms.length > 0 ? apiCategories : atomCategories;
