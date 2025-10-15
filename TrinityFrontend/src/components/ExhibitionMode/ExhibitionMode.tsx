@@ -26,11 +26,17 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   saveExhibitionConfiguration,
+  fetchExhibitionManifest,
   type ExhibitionAtomPayload,
   type ExhibitionComponentPayload,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 import { createTextBoxSlideObject } from './components/operationsPalette/textBox/constants';
+import {
+  buildChartRendererPropsFromManifest,
+  buildTableDataFromManifest,
+  clonePlain,
+} from '@/components/AtomList/atoms/feature-overview/utils/exhibitionManifest';
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
 const SLIDESHOW_ANIMATION_MS = 450;
@@ -782,6 +788,144 @@ const ExhibitionMode = () => {
     setDraggedAtom(null);
   }, [currentSlide]);
 
+  const ensureAtomManifest = useCallback(
+    async (component: DroppedAtom): Promise<DroppedAtom> => {
+      if (!component?.id) {
+        return component;
+      }
+
+      const resolvedContext = projectContext ?? getActiveProjectContext();
+      if (!resolvedContext || !resolvedContext.client_name || !resolvedContext.app_name || !resolvedContext.project_name) {
+        return component;
+      }
+
+      const hasManifest =
+        component.metadata &&
+        typeof component.metadata === 'object' &&
+        (component.metadata as Record<string, unknown>)['visualizationManifest'];
+      if (hasManifest) {
+        return component;
+      }
+
+      try {
+        const response = await fetchExhibitionManifest({
+          client_name: resolvedContext.client_name,
+          app_name: resolvedContext.app_name,
+          project_name: resolvedContext.project_name,
+          component_id: component.id,
+        });
+
+        if (response && response.manifest) {
+          const manifestClone = clonePlain(response.manifest);
+          const nextMetadata: Record<string, any> = {
+            ...(component.metadata || {}),
+            visualizationManifest: manifestClone,
+          };
+
+          if (response.metadata && typeof response.metadata === 'object') {
+            Object.entries(response.metadata).forEach(([key, value]) => {
+              if (value !== undefined) {
+                nextMetadata[key] = value;
+              }
+            });
+          }
+
+          if (response.manifest_id) {
+            nextMetadata.manifestId = response.manifest_id;
+          }
+
+          const manifestChartProps = buildChartRendererPropsFromManifest(manifestClone);
+          if (manifestChartProps) {
+            if (nextMetadata.chartRendererProps == null) {
+              nextMetadata.chartRendererProps = clonePlain(manifestChartProps);
+            }
+
+            const existingChartData = nextMetadata.chartData;
+            const hasExistingChartData = Array.isArray(existingChartData)
+              ? existingChartData.length > 0
+              : Boolean(existingChartData);
+
+            if (!hasExistingChartData) {
+              nextMetadata.chartData = clonePlain(manifestChartProps.data);
+            }
+          }
+
+          const manifestTable = buildTableDataFromManifest(manifestClone);
+          if (manifestTable && nextMetadata.tableData == null) {
+            nextMetadata.tableData = clonePlain(manifestTable);
+          }
+
+          if (!nextMetadata.statisticalDetails) {
+            const summarySnapshot = manifestClone?.data?.summary
+              ? clonePlain(manifestClone.data.summary)
+              : undefined;
+            const timeseriesSnapshot = Array.isArray(manifestClone?.data?.timeseries)
+              ? clonePlain(manifestClone.data.timeseries)
+              : undefined;
+            const fullSnapshot = manifestClone?.data?.statisticalFull
+              ? clonePlain(manifestClone.data.statisticalFull)
+              : undefined;
+
+            if (summarySnapshot || timeseriesSnapshot || fullSnapshot) {
+              nextMetadata.statisticalDetails = {
+                summary: summarySnapshot,
+                timeseries: timeseriesSnapshot,
+                full: fullSnapshot,
+              };
+            }
+          }
+
+          if (!nextMetadata.skuRow && manifestClone?.data?.skuRow) {
+            nextMetadata.skuRow = clonePlain(manifestClone.data.skuRow);
+          }
+
+          if (!nextMetadata.featureContext && manifestClone?.featureContext) {
+            nextMetadata.featureContext = clonePlain(manifestClone.featureContext);
+          }
+
+          if (!nextMetadata.metric && manifestClone?.metric) {
+            nextMetadata.metric = manifestClone.metric;
+          }
+
+          if (!nextMetadata.label && manifestClone?.label) {
+            nextMetadata.label = manifestClone.label;
+          }
+
+          if (!nextMetadata.capturedAt && manifestClone?.capturedAt) {
+            nextMetadata.capturedAt = manifestClone.capturedAt;
+          }
+
+          if (!nextMetadata.chartState && manifestClone?.chart) {
+            nextMetadata.chartState = {
+              chartType: manifestClone.chart.type,
+              theme: manifestClone.chart.theme,
+              showDataLabels: manifestClone.chart.showDataLabels,
+              showAxisLabels: manifestClone.chart.showAxisLabels,
+              showGrid: manifestClone.chart.showGrid,
+              showLegend: manifestClone.chart.showLegend,
+              xAxisField: manifestClone.chart.xField,
+              yAxisField: manifestClone.chart.yField,
+              legendField: manifestClone.chart.legendField,
+              colorPalette: Array.isArray(manifestClone.chart.colorPalette)
+                ? [...manifestClone.chart.colorPalette]
+                : manifestClone.chart.colorPalette,
+            };
+          }
+
+          return {
+            ...component,
+            metadata: nextMetadata,
+          };
+        }
+      } catch (error) {
+        console.warn(`[Exhibition] Unable to fetch manifest for component ${component.id}`, error);
+      }
+
+      return component;
+    },
+    [projectContext],
+  );
+
   const handleDrop = useCallback(
     (
       atom: DroppedAtom,
@@ -790,61 +934,85 @@ const ExhibitionMode = () => {
       origin: 'catalogue' | 'slide' = 'catalogue',
       placement?: { x: number; y: number; width: number; height: number },
     ) => {
-      const sourceCard = cards.find(card => card.id === sourceCardId);
-      const destinationCard = cards.find(card => card.id === targetCardId);
+      const processDrop = async () => {
+        const sourceCard = cards.find(card => card.id === sourceCardId);
+        const destinationCard = cards.find(card => card.id === targetCardId);
 
-      if (!sourceCard || !destinationCard) {
+        if (!sourceCard || !destinationCard) {
+          setDraggedAtom(null);
+          return;
+        }
+
+        const destinationAlreadyHasAtom = destinationCard.atoms.some(a => a.id === atom.id);
+        if (destinationAlreadyHasAtom) {
+          toast({
+            title: 'Component already on slide',
+            description: `${atom.title} is already part of this slide.`,
+          });
+          setDraggedAtom(null);
+          return;
+        }
+
+        const manifestedAtom = await ensureAtomManifest({
+          ...atom,
+          metadata: atom.metadata ? { ...atom.metadata } : undefined,
+        });
+
+        const destinationAtoms = [...destinationCard.atoms, manifestedAtom];
+
+        updateCard(destinationCard.id, { atoms: destinationAtoms });
+        addSlideObject(
+          destinationCard.id,
+          createSlideObjectFromAtom(manifestedAtom, {
+            id: manifestedAtom.id,
+            x: placement?.x ?? 96,
+            y: placement?.y ?? 96,
+            width: placement?.width ?? DEFAULT_CANVAS_OBJECT_WIDTH,
+            height: placement?.height ?? DEFAULT_CANVAS_OBJECT_HEIGHT,
+          }),
+        );
+
+        if (origin === 'catalogue' && Array.isArray(sourceCard.catalogueAtoms)) {
+          const nextCatalogueAtoms = sourceCard.catalogueAtoms.map(existing =>
+            existing.id === manifestedAtom.id ? manifestedAtom : existing,
+          );
+          updateCard(sourceCard.id, { catalogueAtoms: nextCatalogueAtoms });
+        }
+
+        if (origin === 'slide' && sourceCard.id !== destinationCard.id) {
+          const sourceAtoms = sourceCard.atoms.filter(a => a.id !== atom.id);
+          updateCard(sourceCard.id, { atoms: sourceAtoms });
+          removeSlideObject(sourceCard.id, atom.id);
+        }
+
+        const targetIndex = exhibitedCards.findIndex(card => card.id === destinationCard.id);
+        if (targetIndex !== -1) {
+          toast({
+            title: 'Component added',
+            description: `${manifestedAtom.title} moved to slide ${targetIndex + 1}.`,
+          });
+          setCurrentSlide(targetIndex);
+        } else {
+          toast({
+            title: 'Component added',
+            description: `${manifestedAtom.title} moved to a slide.`,
+          });
+        }
+
         setDraggedAtom(null);
-        return;
-      }
+      };
 
-      const destinationAlreadyHasAtom = destinationCard.atoms.some(a => a.id === atom.id);
-      if (destinationAlreadyHasAtom) {
-        toast({
-          title: 'Component already on slide',
-          description: `${atom.title} is already part of this slide.`,
-        });
-        setDraggedAtom(null);
-        return;
-      }
-
-      const destinationAtoms = [...destinationCard.atoms, atom];
-
-      updateCard(destinationCard.id, { atoms: destinationAtoms });
-      addSlideObject(
-        destinationCard.id,
-        createSlideObjectFromAtom(atom, {
-          id: atom.id,
-          x: placement?.x ?? 96,
-          y: placement?.y ?? 96,
-          width: placement?.width ?? DEFAULT_CANVAS_OBJECT_WIDTH,
-          height: placement?.height ?? DEFAULT_CANVAS_OBJECT_HEIGHT,
-        }),
-      );
-
-      if (origin === 'slide' && sourceCard.id !== destinationCard.id) {
-        const sourceAtoms = sourceCard.atoms.filter(a => a.id !== atom.id);
-        updateCard(sourceCard.id, { atoms: sourceAtoms });
-        removeSlideObject(sourceCard.id, atom.id);
-      }
-
-      const targetIndex = exhibitedCards.findIndex(card => card.id === destinationCard.id);
-      if (targetIndex !== -1) {
-        toast({
-          title: 'Component added',
-          description: `${atom.title} moved to slide ${targetIndex + 1}.`,
-        });
-        setCurrentSlide(targetIndex);
-      } else {
-        toast({
-          title: 'Component added',
-          description: `${atom.title} moved to a slide.`,
-        });
-      }
-
-      setDraggedAtom(null);
+      void processDrop();
     },
-    [addSlideObject, cards, exhibitedCards, removeSlideObject, toast, updateCard]
+    [
+      addSlideObject,
+      cards,
+      ensureAtomManifest,
+      exhibitedCards,
+      removeSlideObject,
+      toast,
+      updateCard,
+    ]
   );
 
   const handleRemoveAtom = useCallback(

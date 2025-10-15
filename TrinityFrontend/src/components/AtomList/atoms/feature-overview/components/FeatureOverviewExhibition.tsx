@@ -12,9 +12,17 @@ import {
   type ExhibitionComponentPayload,
   type ExhibitionConfigurationPayload,
 } from '@/lib/exhibition';
-import type { FeatureOverviewExhibitionSelection } from '@/components/LaboratoryMode/store/laboratoryStore';
+import type {
+  FeatureOverviewExhibitionComponentType,
+  FeatureOverviewExhibitionSelection,
+} from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
+import {
+  buildChartRendererPropsFromManifest,
+  buildTableDataFromManifest,
+  clonePlain,
+} from '@/components/AtomList/atoms/feature-overview/utils/exhibitionManifest';
 
 interface FeatureOverviewExhibitionProps {
   atomId: string;
@@ -107,9 +115,9 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
   const selectionCount = selections.length;
   const selectionBadgeLabel = useMemo(() => {
     if (selectionCount === 0) {
-      return '0 combinations';
+      return '0 components';
     }
-    return selectionCount === 1 ? '1 combination' : `${selectionCount} combinations`;
+    return selectionCount === 1 ? '1 component' : `${selectionCount} components`;
   }, [selectionCount]);
 
   const cardIdentifier = cardId || atomId;
@@ -219,32 +227,44 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
       });
 
       const processedSelections = selections.map((selection, index) => {
+        const componentType: FeatureOverviewExhibitionComponentType =
+          selection.componentType ?? 'statistical_summary';
         const dimensionSummary = selection.dimensions
           .map(d => d.value)
           .filter(Boolean)
           .join(' / ');
         const title = selection.label || (dimensionSummary ? `${selection.metric} · ${dimensionSummary}` : selection.metric);
 
+        const manifest = selection.visualizationManifest
+          ? clonePlain(selection.visualizationManifest)
+          : undefined;
+        const manifestId = selection.manifestId || manifest?.id || selection.key;
+        const manifestChartProps = buildChartRendererPropsFromManifest(manifest);
+        const manifestTableData = buildTableDataFromManifest(manifest);
+
         const baseChartState = selection.chartState;
         const fallbackTheme = baseChartState?.theme || 'default';
-        const fallbackXAxis = baseChartState?.xAxisField || selection.featureContext?.xAxis || 'date';
+        const fallbackXAxis = selection.featureContext?.xAxis || baseChartState?.xAxisField || 'date';
         const fallbackYAxis = baseChartState?.yAxisField || selection.metric;
-        const normalisedChartState = {
-          chartType: baseChartState?.chartType || 'line_chart',
-          theme: fallbackTheme,
-          showDataLabels: baseChartState?.showDataLabels ?? false,
-          showAxisLabels: baseChartState?.showAxisLabels ?? true,
-          showGrid: baseChartState?.showGrid ?? true,
-          showLegend: baseChartState?.showLegend ?? true,
-          xAxisField: fallbackXAxis,
-          yAxisField: fallbackYAxis,
-          colorPalette: resolvePalette(fallbackTheme, baseChartState?.colorPalette),
-        };
+        const normalisedChartState =
+          componentType === 'trend_analysis'
+            ? {
+                chartType: baseChartState?.chartType || 'line_chart',
+                theme: fallbackTheme,
+                showDataLabels: baseChartState?.showDataLabels ?? false,
+                showAxisLabels: baseChartState?.showAxisLabels ?? true,
+                showGrid: baseChartState?.showGrid ?? true,
+                showLegend: baseChartState?.showLegend ?? true,
+                xAxisField: fallbackXAxis,
+                yAxisField: fallbackYAxis,
+                colorPalette: resolvePalette(fallbackTheme, baseChartState?.colorPalette),
+              }
+            : undefined;
 
         const featureContextDetails = selection.featureContext
           ? {
               ...selection.featureContext,
-              xAxis: selection.featureContext.xAxis || normalisedChartState.xAxisField,
+              xAxis: selection.featureContext.xAxis || fallbackXAxis,
             }
           : undefined;
 
@@ -257,13 +277,18 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
           : undefined;
 
         return {
-          id: selection.key || `${atomId}-${index}`,
+          id: selection.key || `${atomId}-${index}-${componentType}`,
           title,
-          chartState: normalisedChartState,
+          chartState: componentType === 'trend_analysis' ? normalisedChartState : undefined,
           featureContext: featureContextDetails,
           statisticalDetails,
           selection,
+          componentType,
           sourceAtomTitle: resolvedAtomTitle,
+          manifest,
+          manifestId,
+          manifestChartProps,
+          manifestTableData,
         };
       });
 
@@ -294,7 +319,12 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
           featureContext,
           statisticalDetails,
           selection: baseSelection,
+          componentType,
           sourceAtomTitle: originatingAtomTitle,
+          manifest,
+          manifestId,
+          manifestChartProps,
+          manifestTableData,
         }) => {
           const baseMetadata = {
             metric: baseSelection.metric,
@@ -317,28 +347,53 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
             },
           };
 
+          if (manifest) {
+            baseMetadata.visualizationManifest = manifest;
+          }
+
+          if (manifestId) {
+            baseMetadata.manifestId = manifestId;
+          }
+
+          if (manifestChartProps) {
+            baseMetadata.chartRendererProps = clonePlain(manifestChartProps);
+            baseMetadata.chartData = clonePlain(manifestChartProps.data);
+          } else if (manifest?.data?.timeseries) {
+            baseMetadata.chartData = clonePlain(manifest.data.timeseries);
+          }
+
+          if (manifestTableData) {
+            baseMetadata.tableData = manifestTableData;
+          } else if (manifest?.table?.rows && manifest.table.rows.length > 0) {
+            baseMetadata.tableData = {
+              headers:
+                manifest.table.columns && manifest.table.columns.length > 0
+                  ? [...manifest.table.columns]
+                  : Object.keys(manifest.table.rows[0] ?? {}),
+              rows: manifest.table.rows.map(row => ({ ...row })),
+            };
+          }
+
+          const componentLabel =
+            componentType === 'trend_analysis' ? 'Trend Analysis' : 'Statistical Summary';
+
           return [
             {
-              id: `${id}-summary`,
+              id,
               atomId,
-              title: `${title} · Statistical Summary`,
+              title: `${title} · ${componentLabel}`,
               category: 'Feature Overview',
               color: 'bg-amber-500',
               metadata: {
                 ...baseMetadata,
-                viewType: 'statistical_summary' as const,
+                chartState: componentType === 'trend_analysis' ? normalisedChartState : undefined,
+                viewType:
+                  componentType === 'trend_analysis'
+                    ? ('trend_analysis' as const)
+                    : ('statistical_summary' as const),
               },
-            },
-            {
-              id: `${id}-trend`,
-              atomId,
-              title: `${title} · Trend Analysis`,
-              category: 'Feature Overview',
-              color: 'bg-amber-500',
-              metadata: {
-                ...baseMetadata,
-                viewType: 'trend_analysis' as const,
-              },
+              manifest,
+              manifest_id: manifestId,
             },
           ];
         },
@@ -388,10 +443,10 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
           <div>
             <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
               <ListChecks className="w-4 h-4 text-blue-500" />
-              Selected combinations
+              Selected components
             </div>
             <p className="text-xs text-gray-500 mt-1">
-              Curate dependent variable and dimension pairings from the statistical summary for exhibition mode.
+              Curate dependent variable and dimension pairings from the statistical summary or trend analysis charts for exhibition mode.
             </p>
           </div>
           <Badge variant="secondary" className="text-xs font-medium px-2 py-1">
@@ -401,11 +456,13 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
 
         {selectionCount === 0 ? (
           <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-            No combinations selected yet. Use the Exhibition column in the statistical summary to stage combinations here.
+            No components selected yet. Right-click a statistical summary row or trend analysis chart in the laboratory to stage it for exhibition.
           </div>
         ) : (
           <div className="space-y-3">
             {selections.map(selection => {
+              const componentType: FeatureOverviewExhibitionComponentType =
+                selection.componentType ?? 'statistical_summary';
               const summary = (selection.statisticalDetails?.summary ?? null) as
                 | Record<string, any>
                 | null;
@@ -416,6 +473,8 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                 : [];
               const chartState = selection.chartState;
               const featureContext = selection.featureContext;
+              const showSummaryPairs = componentType === 'statistical_summary' && summaryPairs.length > 0;
+              const showChartDetails = componentType === 'trend_analysis' && chartState;
 
               return (
                 <div
@@ -427,6 +486,9 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                       <p className="text-sm font-semibold text-gray-900">
                         {selection.label || selection.metric}
                       </p>
+                      <Badge variant="secondary" className="text-[10px] uppercase tracking-wide text-gray-600">
+                        {componentType === 'trend_analysis' ? 'Trend analysis chart' : 'Statistical summary'}
+                      </Badge>
                       <div className="flex flex-wrap gap-1">
                         {selection.dimensions.map(dimension => (
                           <Badge key={`${selection.key}-${dimension.name}`} variant="outline" className="text-[11px]">
@@ -449,7 +511,7 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                     )}
                   </div>
 
-                  {summaryPairs.length > 0 && (
+                  {showSummaryPairs && (
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
                       {summaryPairs.map(([key, value]) => (
                         <span key={key} className="font-medium">
@@ -460,7 +522,7 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                     </div>
                   )}
 
-                  {chartState && (
+                  {showChartDetails && chartState && (
                     <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] uppercase tracking-wide text-gray-500">
                       <span>Type: {humanizeLabel(chartState.chartType)}</span>
                       <span>Theme: {humanizeLabel(chartState.theme)}</span>

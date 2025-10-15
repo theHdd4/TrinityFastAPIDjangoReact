@@ -1,22 +1,30 @@
 import React from 'react';
-import { Badge } from '@/components/ui/badge';
-import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
-import TableTemplate from '@/templates/tables/table';
-import {
-  FeatureOverviewChartState,
-  FeatureOverviewDimension,
-  FeatureOverviewFeatureContext,
-  FeatureOverviewMetadata,
-  FeatureOverviewSkuStatisticsSettings,
-  FeatureOverviewStatistics,
-  FeatureOverviewViewType,
-} from './types';
+import { FeatureOverviewComponentProps, FeatureOverviewMetadata, FeatureOverviewStatistics } from './types';
 
-const DEFAULT_TREND_ANALYSIS_DATA: Array<{
-  date: string;
-  salesvalue: number;
-  series: string;
-}> = [
+export type ChartRendererType = 'bar_chart' | 'line_chart' | 'area_chart' | 'pie_chart' | 'scatter_chart';
+
+export interface ChartRendererConfig {
+  type: ChartRendererType;
+  data: Array<Record<string, unknown>>;
+  height: number;
+  xField?: string;
+  yField?: string;
+  yFields?: string[];
+  yAxisLabels?: string[];
+  legendField?: string;
+  colors?: string[];
+  theme?: string;
+  title?: string;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  showLegend?: boolean;
+  showAxisLabels?: boolean;
+  showDataLabels?: boolean;
+  showGrid?: boolean;
+  sortOrder?: 'asc' | 'desc' | null;
+}
+
+const DEFAULT_TREND_ANALYSIS_DATA: Array<{ date: string; salesvalue: number; series: string }> = [
   { date: '2022-04-01', salesvalue: 98542.13, series: 'SalesValue' },
   { date: '2022-05-01', salesvalue: 102384.91, series: 'SalesValue' },
   { date: '2022-06-01', salesvalue: 87651.72, series: 'SalesValue' },
@@ -32,8 +40,7 @@ const DEFAULT_TREND_ANALYSIS_DATA: Array<{
   { date: '2023-04-01', salesvalue: 121852.66, series: 'SalesValue' },
 ];
 
-const cloneDefaultTrendAnalysisData = () =>
-  DEFAULT_TREND_ANALYSIS_DATA.map(point => ({ ...point }));
+const cloneDefaultTrendAnalysisData = () => DEFAULT_TREND_ANALYSIS_DATA.map(point => ({ ...point }));
 
 export const DEFAULT_FEATURE_OVERVIEW_TREND_METADATA: FeatureOverviewMetadata = {
   metric: 'SalesValue',
@@ -66,33 +73,8 @@ export const DEFAULT_FEATURE_OVERVIEW_TREND_METADATA: FeatureOverviewMetadata = 
   viewType: 'trend_analysis',
 };
 
-export const ensureArray = <T,>(value: unknown): T[] => {
-  if (!value) return [];
-  if (Array.isArray(value)) return value as T[];
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (Array.isArray(parsed)) {
-          return parsed as T[];
-        }
-      } catch (error) {
-        console.warn('[FeatureOverview] Failed to parse array JSON payload', error);
-      }
-    }
-  }
-  return [];
-};
-
-export const isRecord = (value: unknown): value is Record<string, unknown> =>
+const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
-
-export const ensureRecordArray = (value: unknown): Array<Record<string, unknown>> => {
-  return ensureArray<unknown>(value)
-    .filter(isRecord)
-    .map(entry => ({ ...entry } as Record<string, unknown>));
-};
 
 const asString = (value: unknown): string | undefined => {
   if (typeof value === 'string') {
@@ -114,365 +96,471 @@ const asBoolean = (value: unknown): boolean | undefined => {
   }
   if (typeof value === 'string') {
     const lowered = value.trim().toLowerCase();
-    if (lowered === 'true') return true;
-    if (lowered === 'false') return false;
-    if (lowered === '1' || lowered === 'yes' || lowered === 'y') return true;
-    if (lowered === '0' || lowered === 'no' || lowered === 'n') return false;
+    if (['true', '1', 'yes', 'y'].includes(lowered)) return true;
+    if (['false', '0', 'no', 'n'].includes(lowered)) return false;
   }
   return undefined;
 };
 
-const safeJsonParse = (value: string): unknown => {
+const safeParseJson = (value: string): unknown => {
   try {
     return JSON.parse(value);
   } catch (error) {
     console.warn('[FeatureOverview] Failed to parse JSON payload', error);
-    return null;
+    return undefined;
   }
 };
 
-const toRecord = (value: unknown): Record<string, unknown> | null => {
-  if (isRecord(value)) {
-    return value;
+const ensureArray = <T,>(value: unknown): T[] => {
+  if (Array.isArray(value)) {
+    return value as T[];
   }
 
   if (typeof value === 'string') {
     const trimmed = value.trim();
-    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-      const parsed = safeJsonParse(trimmed);
-      if (isRecord(parsed)) {
-        return parsed;
+    if ((trimmed.startsWith('[') && trimmed.endsWith(']')) || (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+      const parsed = safeParseJson(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed as T[];
       }
     }
   }
 
-  return null;
+  return [];
 };
 
-const normaliseDimensions = (value: unknown) => {
-  const dimensions = ensureArray<unknown>(value)
-    .map(entry => {
-      const record = toRecord(entry);
-      if (!record) return null;
-      const name =
-        asString(record.name) ??
-        asString(record.dimension) ??
-        asString(record.label);
-      const dimensionValue = asString(record.value) ?? asString(record.key) ?? asString(record.id);
+const ensureRecordArray = (value: unknown): Array<Record<string, unknown>> =>
+  ensureArray<unknown>(value)
+    .filter(isRecord)
+    .map(entry => ({ ...entry }));
 
-      if (!name && !dimensionValue) {
-        return null;
-      }
+const mergeStatistics = (
+  target: FeatureOverviewStatistics | undefined,
+  updates: FeatureOverviewStatistics,
+): FeatureOverviewStatistics => {
+  const next: FeatureOverviewStatistics = target ? { ...target } : {};
 
-      return {
-        ...(name ? { name } : {}),
-        ...(dimensionValue ? { value: dimensionValue } : {}),
-      } as FeatureOverviewDimension;
-    })
-    .filter((dimension): dimension is FeatureOverviewDimension => Boolean(dimension));
+  if (updates.summary && (!next.summary || Object.keys(next.summary).length === 0)) {
+    next.summary = { ...updates.summary };
+  }
+  if (updates.timeseries && updates.timeseries.length > 0 && (!next.timeseries || next.timeseries.length === 0)) {
+    next.timeseries = updates.timeseries.map(entry => ({ ...entry }));
+  }
+  if (updates.full && (!next.full || Object.keys(next.full).length === 0)) {
+    next.full = { ...updates.full };
+  }
 
-  return dimensions.length > 0 ? dimensions : undefined;
+  return next;
 };
 
 const normaliseStatistics = (value: unknown): FeatureOverviewStatistics | undefined => {
-  const record = toRecord(value);
-  if (!record) {
+  if (!value) {
     return undefined;
   }
 
-  let summaryRecord = toRecord(record.summary ?? record['statistical_summary']);
-  if (!summaryRecord) {
-    const summaryEntries = ensureArray<unknown>(record.summary).map(entry => {
-      const summaryItem = toRecord(entry);
-      if (!summaryItem) {
-        return null;
-      }
-
-      const key =
-        asString(summaryItem.key) ??
-        asString(summaryItem.label) ??
-        asString(summaryItem.metric) ??
-        asString(summaryItem.name);
+  if (isRecord(value)) {
+    const summary = isRecord(value.summary) ? { ...value.summary } : undefined;
+    const summaryEntries = ensureArray<unknown>(value.summary)
+      .map(entry => (isRecord(entry) ? entry : null))
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+    const summaryFromEntries = summaryEntries.reduce<Record<string, unknown>>((acc, entry) => {
+      const key = asString(entry.key) ?? asString(entry.label) ?? asString(entry.metric) ?? asString(entry.name);
       if (!key) {
-        return null;
-      }
-
-      const value = summaryItem.value ?? summaryItem.metricValue ?? summaryItem.data;
-      return [key, value] as [string, unknown];
-    });
-
-    const filteredEntries = summaryEntries.filter((entry): entry is [string, unknown] => Boolean(entry));
-    if (filteredEntries.length > 0) {
-      summaryRecord = filteredEntries.reduce<Record<string, unknown>>((acc, [key, value]) => {
-        acc[key] = value;
         return acc;
-      }, {});
+      }
+      acc[key] = entry.value ?? entry.metricValue ?? entry.data;
+      return acc;
+    }, {});
+
+    const timeseries = ensureRecordArray(value.timeseries ?? value['time_series']);
+    const full = isRecord(value.full) ? { ...value.full } : undefined;
+
+    if (!summary && Object.keys(summaryFromEntries).length === 0 && timeseries.length === 0 && !full) {
+      return undefined;
     }
+
+    const stats: FeatureOverviewStatistics = {};
+    if (summary || Object.keys(summaryFromEntries).length > 0) {
+      stats.summary = summary ?? summaryFromEntries;
+    }
+    if (timeseries.length > 0) {
+      stats.timeseries = timeseries;
+    }
+    if (full) {
+      stats.full = full;
+    }
+
+    return stats;
   }
 
-  const summary = summaryRecord ? { ...summaryRecord } : undefined;
-  const timeseries = ensureRecordArray(record.timeseries ?? record['time_series']);
-  const fullRecord = toRecord(record.full);
-
-  if (!summary && timeseries.length === 0 && !fullRecord) {
-    return undefined;
-  }
-
-  const result: FeatureOverviewStatistics = {};
-  if (summary) {
-    result.summary = summary;
-  }
-  if (timeseries.length > 0) {
-    result.timeseries = timeseries;
-  }
-  if (fullRecord) {
-    result.full = fullRecord;
-  }
-
-  return result;
+  return undefined;
 };
 
-const normaliseFeatureContext = (value: unknown): FeatureOverviewFeatureContext | undefined => {
-  const record = toRecord(value);
-  if (!record) {
+const normaliseFeatureContext = (value: unknown) => {
+  if (!isRecord(value)) {
     return undefined;
   }
 
-  const result: FeatureOverviewFeatureContext = {};
-
-  const dataSource = asString(record.dataSource ?? record['data_source']);
+  const result: FeatureOverviewMetadata['featureContext'] = {};
+  const dataSource = asString(value.dataSource ?? value['data_source']);
   if (dataSource) {
     result.dataSource = dataSource;
   }
 
-  const availableMetrics = ensureArray<string>(record.availableMetrics ?? record['available_metrics']).filter(
-    metric => typeof metric === 'string',
+  const xAxis = asString(value.xAxis ?? value['x_axis']);
+  if (xAxis) {
+    result.xAxis = xAxis;
+  }
+
+  const availableMetrics = ensureArray<string>(value.availableMetrics ?? value['available_metrics']).filter(
+    (entry): entry is string => typeof entry === 'string',
   );
   if (availableMetrics.length > 0) {
     result.availableMetrics = availableMetrics;
   }
 
-  const xAxis = asString(record.xAxis ?? record['x_axis']);
-  if (xAxis) {
-    result.xAxis = xAxis;
-  }
-
-  const dimensionMapRecord = toRecord(record.dimensionMap ?? record['dimension_map']);
-  if (dimensionMapRecord) {
-    const dimensionMap = Object.entries(dimensionMapRecord).reduce<Record<string, string[]>>((acc, [key, rawValue]) => {
-      const entries = ensureArray<string>(rawValue).filter(entry => typeof entry === 'string');
-      if (entries.length > 0) {
-        acc[key] = entries;
-      }
-      return acc;
-    }, {});
-
-    if (Object.keys(dimensionMap).length > 0) {
-      result.dimensionMap = dimensionMap;
-    }
-  }
-
   return Object.keys(result).length > 0 ? result : undefined;
 };
 
-const normaliseSkuStatisticsSettings = (value: unknown): FeatureOverviewSkuStatisticsSettings | undefined => {
-  const record = toRecord(value);
-  if (!record) {
+const normaliseChartState = (value: unknown) => {
+  if (!isRecord(value)) {
     return undefined;
   }
 
-  const visibilityRecord = toRecord(record.visibility);
-  const visibility = visibilityRecord
-    ? Object.entries(visibilityRecord).reduce<Record<string, boolean>>((acc, [key, rawValue]) => {
-        const boolValue = asBoolean(rawValue);
-        if (boolValue !== undefined) {
-          acc[key] = boolValue;
-        }
-        return acc;
-      }, {})
-    : undefined;
+  const chartState: FeatureOverviewMetadata['chartState'] = {};
+  const chartType = asString(value.chartType ?? value['chart_type']);
+  if (chartType) chartState.chartType = chartType;
+  const xAxisField = asString(value.xAxisField ?? value['x_axis_field'] ?? value['xAxis']);
+  if (xAxisField) chartState.xAxisField = xAxisField;
+  const yAxisField = asString(value.yAxisField ?? value['y_axis_field'] ?? value['yAxis']);
+  if (yAxisField) chartState.yAxisField = yAxisField;
+  const legendField = asString(value.legendField ?? value['legend_field']);
+  if (legendField) chartState.legendField = legendField;
+  const xAxisLabel = asString(value.xAxisLabel ?? value['x_axis_label']);
+  if (xAxisLabel) chartState.xAxisLabel = xAxisLabel;
+  const yAxisLabel = asString(value.yAxisLabel ?? value['y_axis_label']);
+  if (yAxisLabel) chartState.yAxisLabel = yAxisLabel;
 
-  const tableRows = ensureRecordArray(record.tableRows ?? record['table_rows']);
-  const tableColumns = ensureArray<string>(record.tableColumns ?? record['table_columns']).filter(
-    (column): column is string => typeof column === 'string',
-  );
-
-  if (!visibility && tableRows.length === 0 && tableColumns.length === 0) {
-    return undefined;
-  }
-
-  const result: FeatureOverviewSkuStatisticsSettings = {};
-
-  if (visibility && Object.keys(visibility).length > 0) {
-    result.visibility = visibility;
-  }
-  if (tableRows.length > 0) {
-    result.tableRows = tableRows;
-  }
-  if (tableColumns.length > 0) {
-    result.tableColumns = tableColumns;
-  }
-
-  return result;
-};
-
-const normaliseChartState = (value: unknown): FeatureOverviewChartState | undefined => {
-  const record = toRecord(value);
-  if (!record) {
-    return undefined;
-  }
-
-  const chartState: FeatureOverviewChartState = {};
-
-  const chartType = asString(record.chartType ?? record['chart_type']);
-  if (chartType) {
-    chartState.chartType = chartType;
-  }
-
-  const theme = asString(record.theme);
-  if (theme) {
-    chartState.theme = theme;
-  }
-
-  const showDataLabels = asBoolean(record.showDataLabels ?? record['show_data_labels']);
-  if (showDataLabels !== undefined) {
-    chartState.showDataLabels = showDataLabels;
-  }
-
-  const showAxisLabels = asBoolean(record.showAxisLabels ?? record['show_axis_labels']);
-  if (showAxisLabels !== undefined) {
-    chartState.showAxisLabels = showAxisLabels;
-  }
-
-  const showGrid = asBoolean(record.showGrid ?? record['show_grid']);
-  if (showGrid !== undefined) {
-    chartState.showGrid = showGrid;
-  }
-
-  const showLegend = asBoolean(record.showLegend ?? record['show_legend']);
-  if (showLegend !== undefined) {
-    chartState.showLegend = showLegend;
-  }
-
-  const xAxisField = asString(record.xAxisField ?? record['x_axis_field'] ?? record['xAxis']);
-  if (xAxisField) {
-    chartState.xAxisField = xAxisField;
-  }
-
-  const yAxisField = asString(record.yAxisField ?? record['y_axis_field'] ?? record['yAxis']);
-  if (yAxisField) {
-    chartState.yAxisField = yAxisField;
-  }
-
-  const palette = ensureArray<string>(record.colorPalette ?? record['color_palette']).filter(
-    (color): color is string => typeof color === 'string',
+  const palette = ensureArray<string>(value.colorPalette ?? value['color_palette']).filter(
+    (entry): entry is string => typeof entry === 'string' && entry.length > 0,
   );
   if (palette.length > 0) {
     chartState.colorPalette = palette;
   }
 
-  const legendField = asString(record.legendField ?? record['legend_field']);
-  if (legendField) {
-    chartState.legendField = legendField;
-  }
+  const showLegend = asBoolean(value.showLegend ?? value['show_legend']);
+  if (showLegend !== undefined) chartState.showLegend = showLegend;
+  const showAxisLabels = asBoolean(value.showAxisLabels ?? value['show_axis_labels']);
+  if (showAxisLabels !== undefined) chartState.showAxisLabels = showAxisLabels;
+  const showDataLabels = asBoolean(value.showDataLabels ?? value['show_data_labels']);
+  if (showDataLabels !== undefined) chartState.showDataLabels = showDataLabels;
+  const showGrid = asBoolean(value.showGrid ?? value['show_grid']);
+  if (showGrid !== undefined) chartState.showGrid = showGrid;
 
-  const xAxisLabel = asString(record.xAxisLabel ?? record['x_axis_label']);
-  if (xAxisLabel) {
-    chartState.xAxisLabel = xAxisLabel;
-  }
-
-  const yAxisLabel = asString(record.yAxisLabel ?? record['y_axis_label']);
-  if (yAxisLabel) {
-    chartState.yAxisLabel = yAxisLabel;
-  }
-
-  const rawSortOrder = record.sortOrder ?? record['sort_order'];
-  if (rawSortOrder === null) {
-    chartState.sortOrder = null;
-  }
-
-  const sortOrder = asString(rawSortOrder);
+  const sortOrder = asString(value.sortOrder ?? value['sort_order']);
   if (sortOrder === 'asc' || sortOrder === 'desc') {
     chartState.sortOrder = sortOrder;
+  } else if (value.sortOrder === null || value['sort_order'] === null) {
+    chartState.sortOrder = null;
   }
 
   return Object.keys(chartState).length > 0 ? chartState : undefined;
 };
 
-const parsePossibleJson = (value: unknown): unknown => {
+const normaliseSkuStatisticsSettings = (value: unknown) => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const settings: FeatureOverviewMetadata['skuStatisticsSettings'] = {};
+  const tableRows = ensureRecordArray(value.tableRows ?? value['table_rows']);
+  if (tableRows.length > 0) {
+    settings.tableRows = tableRows;
+  }
+  const tableColumns = ensureArray<string>(value.tableColumns ?? value['table_columns']).filter(
+    (entry): entry is string => typeof entry === 'string',
+  );
+  if (tableColumns.length > 0) {
+    settings.tableColumns = tableColumns;
+  }
+
+  const visibilityRecord = isRecord(value.visibility) ? value.visibility : undefined;
+  if (visibilityRecord) {
+    const visibility = Object.entries(visibilityRecord).reduce<Record<string, boolean>>((acc, [key, raw]) => {
+      const boolValue = asBoolean(raw);
+      if (boolValue !== undefined) {
+        acc[key] = boolValue;
+      }
+      return acc;
+    }, {});
+    if (Object.keys(visibility).length > 0) {
+      settings.visibility = visibility;
+    }
+  }
+
+  return Object.keys(settings).length > 0 ? settings : undefined;
+};
+
+const parsePossibleJson = (value: unknown) => {
   if (typeof value === 'string') {
     const trimmed = value.trim();
     if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-      const parsed = safeJsonParse(trimmed);
-      if (parsed !== null) {
-        return parsed;
-      }
+      return safeParseJson(trimmed) ?? value;
     }
   }
   return value;
 };
 
-const normaliseViewType = (value: unknown): FeatureOverviewViewType => {
+const normaliseViewType = (value: unknown): FeatureOverviewMetadata['viewType'] => {
   const candidate = asString(value)?.toLowerCase();
-  if (candidate === 'trend_analysis' || candidate === 'trend-analysis') {
-    return 'trend_analysis';
-  }
-  return 'statistical_summary';
+  return candidate === 'trend_analysis' || candidate === 'trend-analysis' ? 'trend_analysis' : 'statistical_summary';
 };
 
-export const humanize = (value: string): string =>
-  value
-    .replace(/_/g, ' ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^(.)/, (char: string) => char.toUpperCase());
+const applyVisualizationManifest = (
+  target: FeatureOverviewMetadata,
+  manifestCandidate: unknown,
+) => {
+  if (!isRecord(manifestCandidate)) {
+    return;
+  }
 
-export const formatCell = (value: unknown): string => {
-  if (value == null) {
-    return '—';
+  const manifest = manifestCandidate;
+
+  const metric = asString(manifest.metric);
+  if (metric && !target.metric) {
+    target.metric = metric;
   }
-  if (value instanceof Date) {
-    return value.toLocaleString();
+
+  const label = asString(manifest.label);
+  if (label && !target.label) {
+    target.label = label;
   }
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value.toLocaleString() : String(value);
+
+  const capturedAt = asString(manifest.capturedAt ?? manifest['captured_at']);
+  if (capturedAt && !target.capturedAt) {
+    target.capturedAt = capturedAt;
   }
-  if (typeof value === 'boolean') {
-    return value ? 'Yes' : 'No';
+
+  if (!target.featureContext) {
+    const context = normaliseFeatureContext(manifest.featureContext ?? manifest['feature_context']);
+    if (context) {
+      target.featureContext = context;
+    }
   }
-  return String(value);
+
+  const chartState = normaliseChartState(manifest.chart ?? manifest['chart_state'] ?? manifest['chartState']);
+  if (chartState) {
+    target.chartState = { ...chartState, ...(target.chartState ?? {}) };
+  }
+
+  const data = manifest.data && isRecord(manifest.data) ? manifest.data : undefined;
+  if (data) {
+    const summary = isRecord(data.summary) ? { ...data.summary } : undefined;
+    const timeseries = ensureRecordArray(data.timeseries);
+    const full = isRecord(data.statisticalFull ?? data.full)
+      ? { ...(data.statisticalFull ?? data.full) as Record<string, unknown> }
+      : undefined;
+
+    const stats: FeatureOverviewStatistics = {};
+    if (summary) stats.summary = summary;
+    if (timeseries.length > 0) stats.timeseries = timeseries;
+    if (full) stats.full = full;
+
+    if (Object.keys(stats).length > 0) {
+      target.statisticalDetails = mergeStatistics(target.statisticalDetails, stats);
+    }
+  }
+
+  if (!target.viewType && manifest.componentType) {
+    target.viewType = normaliseViewType(manifest.componentType);
+  }
+
+  const chartConfig = manifest.chart ?? manifest['chartConfig'] ?? manifest['chart_config'];
+  if (chartConfig && !target.chartRendererProps) {
+    target.chartRendererProps = chartConfig;
+  }
 };
 
-export type ChartRendererType = 'bar_chart' | 'line_chart' | 'area_chart' | 'pie_chart' | 'scatter_chart';
+export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverviewMetadata | null => {
+  if (!isRecord(metadata)) {
+    return null;
+  }
 
-export interface ChartRendererConfig {
-  type: ChartRendererType;
-  data: Array<Record<string, unknown>>;
-  height: number;
-  xField?: string;
-  yField?: string;
-  yFields?: string[];
-  yAxisLabels?: string[];
-  legendField?: string;
-  colors?: string[];
-  theme?: string;
-  title?: string;
-  xAxisLabel?: string;
-  yAxisLabel?: string;
-  showLegend?: boolean;
-  showAxisLabels?: boolean;
-  showDataLabels?: boolean;
-  showGrid?: boolean;
-  sortOrder?: 'asc' | 'desc' | null;
-}
+  const nested = isRecord(metadata.metadata)
+    ? { ...metadata, ...(metadata.metadata as Record<string, unknown>) }
+    : metadata;
+
+  const result: FeatureOverviewMetadata = {};
+
+  const metric = asString(nested.metric ?? nested['dependent_variable']);
+  if (metric) {
+    result.metric = metric;
+  }
+
+  const label = asString(nested.label ?? nested.title ?? nested['metric_label']);
+  if (label) {
+    result.label = label;
+  }
+
+  const chartState = normaliseChartState(nested.chartState ?? nested['chart_state']);
+  if (chartState) {
+    result.chartState = chartState;
+  }
+
+  const featureContext = normaliseFeatureContext(nested.featureContext ?? nested['feature_context']);
+  if (featureContext) {
+    result.featureContext = featureContext;
+  }
+
+  const statistics = normaliseStatistics(nested.statisticalDetails ?? nested['statistical_details']);
+  if (statistics) {
+    result.statisticalDetails = statistics;
+  }
+
+  const skuRow = isRecord(nested.skuRow ?? nested['sku_row'])
+    ? { ...(nested.skuRow ?? nested['sku_row']) as Record<string, unknown> }
+    : undefined;
+  if (skuRow) {
+    result.skuRow = skuRow;
+  }
+
+  const capturedAt = asString(nested.capturedAt ?? nested['captured_at']);
+  if (capturedAt) {
+    result.capturedAt = capturedAt;
+  }
+
+  const skuSettings = normaliseSkuStatisticsSettings(
+    nested.skuStatisticsSettings ?? nested['sku_statistics_settings'],
+  );
+  if (skuSettings) {
+    result.skuStatisticsSettings = skuSettings;
+  }
+
+  if ('chartRendererProps' in nested || 'chart_renderer_props' in nested) {
+    result.chartRendererProps = parsePossibleJson(nested.chartRendererProps ?? nested['chart_renderer_props']);
+  }
+  if ('chartRendererConfig' in nested || 'chart_renderer_config' in nested) {
+    result.chartRendererConfig = parsePossibleJson(nested.chartRendererConfig ?? nested['chart_renderer_config']);
+  }
+  if ('chartConfig' in nested) {
+    result.chartConfig = parsePossibleJson(nested.chartConfig);
+  }
+  if ('chart_config' in nested) {
+    result.chart_config = parsePossibleJson(nested.chart_config);
+  }
+
+  const selections = ensureRecordArray(nested.exhibitionSelections ?? nested['exhibition_selections']);
+  const primarySelection = selections[0];
+  const selection = primarySelection && isRecord(primarySelection.metadata)
+    ? { ...primarySelection, ...(primarySelection.metadata as Record<string, unknown>) }
+    : primarySelection;
+
+  if (selection) {
+    if (!result.metric) {
+      const selectionMetric = asString(selection.metric ?? selection['dependent_variable']);
+      if (selectionMetric) {
+        result.metric = selectionMetric;
+      }
+    }
+
+    if (!result.label) {
+      const selectionLabel = asString(selection.label ?? selection.title ?? selection['metric_label']);
+      if (selectionLabel) {
+        result.label = selectionLabel;
+      }
+    }
+
+    if (!result.chartState) {
+      const selectionChartState = normaliseChartState(selection.chartState ?? selection['chart_state']);
+      if (selectionChartState) {
+        result.chartState = selectionChartState;
+      }
+    }
+
+    if (!result.featureContext) {
+      const selectionContext = normaliseFeatureContext(selection.featureContext ?? selection['feature_context']);
+      if (selectionContext) {
+        result.featureContext = selectionContext;
+      }
+    }
+
+    if (!result.statisticalDetails) {
+      const selectionStats = normaliseStatistics(selection.statisticalDetails ?? selection['statistical_details']);
+      if (selectionStats) {
+        result.statisticalDetails = selectionStats;
+      }
+    }
+
+    if (!result.skuRow) {
+      const selectionSkuRow = isRecord(selection.skuRow ?? selection['sku_row'])
+        ? { ...(selection.skuRow ?? selection['sku_row']) as Record<string, unknown> }
+        : undefined;
+      if (selectionSkuRow) {
+        result.skuRow = selectionSkuRow;
+      }
+    }
+
+    if (!result.capturedAt) {
+      const selectionCapturedAt = asString(selection.capturedAt ?? selection['captured_at']);
+      if (selectionCapturedAt) {
+        result.capturedAt = selectionCapturedAt;
+      }
+    }
+
+    if (!result.skuStatisticsSettings) {
+      const selectionSkuSettings = normaliseSkuStatisticsSettings(
+        selection.skuStatisticsSettings ?? selection['sku_statistics_settings'],
+      );
+      if (selectionSkuSettings) {
+        result.skuStatisticsSettings = selectionSkuSettings;
+      }
+    }
+
+    if (!result.chartRendererProps && ('chartRendererProps' in selection || 'chart_renderer_props' in selection)) {
+      result.chartRendererProps = parsePossibleJson(selection.chartRendererProps ?? selection['chart_renderer_props']);
+    }
+    if (!result.chartRendererConfig && ('chartRendererConfig' in selection || 'chart_renderer_config' in selection)) {
+      result.chartRendererConfig = parsePossibleJson(selection.chartRendererConfig ?? selection['chart_renderer_config']);
+    }
+    if (!result.chartConfig && 'chartConfig' in selection) {
+      result.chartConfig = parsePossibleJson(selection.chartConfig);
+    }
+    if (!result.chart_config && 'chart_config' in selection) {
+      result.chart_config = parsePossibleJson(selection.chart_config);
+    }
+
+    applyVisualizationManifest(result, selection.visualizationManifest ?? selection['visualization_manifest']);
+  }
+
+  applyVisualizationManifest(result, nested.visualizationManifest ?? nested['visualization_manifest']);
+
+  const baseViewType = normaliseViewType(nested.viewType ?? nested['view_type']);
+  const selectionViewType = selection ? normaliseViewType(selection.viewType ?? selection['view_type']) : undefined;
+  result.viewType = baseViewType ?? selectionViewType ?? result.viewType ?? 'statistical_summary';
+
+  return Object.keys(result).length > 0 ? result : null;
+};
 
 const DEFAULT_TREND_CHART_HEIGHT = {
   full: 300,
   compact: 220,
 } as const;
 
-export const buildDefaultTrendChartConfig = (variant: 'full' | 'compact'): ChartRendererConfig => ({
+const toRendererType = (value: unknown): ChartRendererType | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const candidate = value.toLowerCase();
+  if (candidate.includes('line')) return 'line_chart';
+  if (candidate.includes('area')) return 'area_chart';
+  if (candidate.includes('scatter')) return 'scatter_chart';
+  if (candidate.includes('pie')) return 'pie_chart';
+  if (candidate.includes('bar') || candidate.includes('column')) return 'bar_chart';
+  return null;
+};
+
+const buildDefaultTrendChartConfig = (variant: FeatureOverviewComponentProps['variant']): ChartRendererConfig => ({
   type: 'line_chart',
   data: cloneDefaultTrendAnalysisData(),
   height: DEFAULT_TREND_CHART_HEIGHT[variant],
@@ -491,125 +579,59 @@ export const buildDefaultTrendChartConfig = (variant: 'full' | 'compact'): Chart
   sortOrder: null,
 });
 
-const toRendererType = (value: unknown): ChartRendererType | null => {
-  if (typeof value !== 'string') {
-    return null;
+const buildFieldFallbacks = (value?: string) => {
+  if (!value) {
+    return [] as string[];
   }
-
-  const normalized = value.toLowerCase();
-  switch (normalized) {
-    case 'bar_chart':
-    case 'bar':
-    case 'bar-chart':
-      return 'bar_chart';
-    case 'line_chart':
-    case 'line':
-    case 'line-chart':
-      return 'line_chart';
-    case 'area_chart':
-    case 'area':
-    case 'area-chart':
-      return 'area_chart';
-    case 'pie_chart':
-    case 'pie':
-    case 'pie-chart':
-      return 'pie_chart';
-    case 'scatter_chart':
-    case 'scatter':
-    case 'scatter-chart':
-      return 'scatter_chart';
-    default:
-      return null;
-  }
-};
-
-const addFallbackCandidate = (fallbacks: string[], candidate?: string | null) => {
-  if (!candidate) {
-    return;
-  }
-
-  const trimmed = candidate.trim();
+  const trimmed = value.trim();
   if (!trimmed) {
-    return;
+    return [] as string[];
   }
-
-  if (!fallbacks.includes(trimmed)) {
-    fallbacks.push(trimmed);
-  }
-};
-
-const buildFieldFallbacks = (
-  field: string | undefined,
-  additional: string[],
-): string[] => {
-  const fallbacks: string[] = [];
-
-  if (typeof field === 'string' && field.length > 0) {
-    const trimmed = field.trim();
-    addFallbackCandidate(fallbacks, trimmed);
-    addFallbackCandidate(fallbacks, trimmed.toLowerCase());
-
-    const snake = trimmed
-      .replace(/([a-z\d])([A-Z])/g, '$1_$2')
-      .replace(/[\s-]+/g, '_');
-    addFallbackCandidate(fallbacks, snake);
-    addFallbackCandidate(fallbacks, snake.toLowerCase());
-
-    const condensed = trimmed.replace(/[\s_-]+/g, '');
-    addFallbackCandidate(fallbacks, condensed);
-    addFallbackCandidate(fallbacks, condensed.toLowerCase());
-  }
-
-  additional.forEach(candidate => addFallbackCandidate(fallbacks, candidate));
-
-  return fallbacks;
+  const snake = trimmed.replace(/([a-z\d])([A-Z])/g, '$1_$2').replace(/[\s-]+/g, '_');
+  const condensed = trimmed.replace(/[\s_-]+/g, '');
+  return Array.from(
+    new Set([trimmed, trimmed.toLowerCase(), snake, snake.toLowerCase(), condensed, condensed.toLowerCase()]),
+  );
 };
 
 const sanitizeTimeseries = (
-  entries: Array<Record<string, unknown>>,
+  rows: Array<Record<string, unknown>>,
   xField: string,
   yField: string,
 ): Array<Record<string, unknown>> => {
-  const xFieldFallbacks = buildFieldFallbacks(xField, ['date', 'timestamp', 'time', 'index', 'period']);
-  const yFieldFallbacks = buildFieldFallbacks(yField, ['value', 'metricValue', 'metric_value', 'metricvalue', 'y']);
+  const xCandidates = [...buildFieldFallbacks(xField), 'date', 'timestamp', 'time', 'index', 'period'];
+  const yCandidates = [...buildFieldFallbacks(yField), 'value', 'metricValue', 'metric_value', 'metricvalue', 'y'];
 
-  return entries
-    .map((entry, index) => {
-      const normalised: Record<string, unknown> = { ...entry };
+  return rows
+    .map((row, index) => {
+      const normalised: Record<string, unknown> = { ...row };
 
-      const resolvedX = xFieldFallbacks.find(field => entry[field] != null);
+      const resolvedX = xCandidates.find(candidate => row[candidate] != null);
       if (resolvedX) {
-        normalised[xField] = entry[resolvedX];
+        normalised[xField] = row[resolvedX];
       } else if (normalised[xField] == null) {
         normalised[xField] = index + 1;
       }
 
-      const resolvedYField = yFieldFallbacks.find(field => entry[field] != null);
-      if (!resolvedYField) {
+      const resolvedY = yCandidates.find(candidate => row[candidate] != null);
+      if (!resolvedY) {
         return null;
       }
 
-      const rawValue = entry[resolvedYField];
-      const numericValue =
-        typeof rawValue === 'number'
-          ? rawValue
-          : typeof rawValue === 'string'
-          ? Number(rawValue)
-          : Number.NaN;
-
+      const rawValue = row[resolvedY];
+      const numericValue = typeof rawValue === 'number' ? rawValue : Number(rawValue);
       if (!Number.isFinite(numericValue)) {
         return null;
       }
 
       normalised[yField] = numericValue;
-
       return normalised;
     })
     .filter((entry): entry is Record<string, unknown> => Boolean(entry));
 };
 
 const prepareChartData = (
-  stats: FeatureOverviewStatistics | undefined,
+  stats: FeatureOverviewMetadata['statisticalDetails'],
   xField: string,
   yField: string,
 ): Array<Record<string, unknown>> => {
@@ -634,44 +656,26 @@ const prepareChartData = (
   return [];
 };
 
-const findMatchingKey = (row: Record<string, unknown>, candidate?: string) => {
-  if (!candidate) {
-    return undefined;
-  }
-
-  const lower = candidate.toLowerCase();
-  return Object.keys(row).find(key => key.toLowerCase() === lower);
-};
-
-const ensureRenderableChartConfig = (
-  config: ChartRendererConfig | null,
-): ChartRendererConfig | null => {
+const ensureRenderableChartConfig = (config: ChartRendererConfig | null): ChartRendererConfig | null => {
   if (!config) {
     return null;
   }
 
-  const data = Array.isArray(config.data) ? config.data : [];
-  if (data.length === 0) {
+  if (!Array.isArray(config.data) || config.data.length === 0) {
     return null;
   }
 
-  const firstRow = (data.find(entry => entry && typeof entry === 'object') as Record<string, unknown>) ?? {};
-  const sanitizedConfig: ChartRendererConfig = { ...config };
-
-  if (sanitizedConfig.xField) {
-    const resolvedX = findMatchingKey(firstRow, sanitizedConfig.xField);
-    if (resolvedX) {
-      sanitizedConfig.xField = resolvedX;
-    }
+  const firstRow = config.data.find(entry => isRecord(entry)) as Record<string, unknown> | undefined;
+  if (!firstRow) {
+    return null;
   }
 
-  if (sanitizedConfig.legendField) {
-    const resolvedLegend = findMatchingKey(firstRow, sanitizedConfig.legendField);
-    if (!resolvedLegend) {
-      delete sanitizedConfig.legendField;
-      sanitizedConfig.showLegend = false;
-    } else {
-      sanitizedConfig.legendField = resolvedLegend;
+  const normalised: ChartRendererConfig = { ...config };
+
+  if (normalised.xField && !(normalised.xField in firstRow)) {
+    const fallback = Object.keys(firstRow).find(key => key.toLowerCase() === normalised.xField!.toLowerCase());
+    if (fallback) {
+      normalised.xField = fallback;
     }
   }
 
@@ -679,43 +683,38 @@ const ensureRenderableChartConfig = (
     .filter(([, value]) => typeof value === 'number' && Number.isFinite(value))
     .map(([key]) => key);
 
-  if (numericKeys.length === 0) {
-    return sanitizedConfig;
-  }
-
-  const resolvedY = sanitizedConfig.yField
-    ? findMatchingKey(firstRow, sanitizedConfig.yField) ?? null
-    : null;
-
-  if (!resolvedY) {
-    const fallbackY = numericKeys.find(
-      key => key !== sanitizedConfig.xField && key !== sanitizedConfig.legendField,
-    );
-
-    if (fallbackY) {
-      sanitizedConfig.yField = fallbackY;
-      if (!sanitizedConfig.yAxisLabel) {
-        sanitizedConfig.yAxisLabel = humanize(fallbackY);
+  if (!normalised.yField || !numericKeys.includes(normalised.yField)) {
+    const fallback = normalised.yField
+      ? Object.keys(firstRow).find(key => key.toLowerCase() === normalised.yField!.toLowerCase())
+      : undefined;
+    if (fallback && numericKeys.includes(fallback)) {
+      normalised.yField = fallback;
+    } else if (numericKeys.length > 0) {
+      normalised.yField = numericKeys[0];
+      if (!normalised.yAxisLabel) {
+        normalised.yAxisLabel = humanize(numericKeys[0]);
       }
     }
-
-    return sanitizedConfig;
   }
 
-  sanitizedConfig.yField = resolvedY;
-  return sanitizedConfig;
+  if (normalised.legendField && !(normalised.legendField in firstRow)) {
+    const legendFallback = Object.keys(firstRow).find(key => key.toLowerCase() === normalised.legendField!.toLowerCase());
+    if (legendFallback) {
+      normalised.legendField = legendFallback;
+    } else {
+      delete normalised.legendField;
+      normalised.showLegend = false;
+    }
+  }
+
+  return normalised;
 };
 
 const parseDirectChartRendererConfig = (
   metadata: FeatureOverviewMetadata,
-  variant: 'full' | 'compact',
+  variant: FeatureOverviewComponentProps['variant'],
 ): ChartRendererConfig | null => {
-  const candidate =
-    metadata.chartRendererProps ??
-    metadata.chartRendererConfig ??
-    metadata.chart_config ??
-    metadata.chartConfig;
-
+  const candidate = metadata.chartRendererProps ?? metadata.chartRendererConfig ?? metadata.chart_config ?? metadata.chartConfig;
   if (!isRecord(candidate)) {
     return null;
   }
@@ -725,20 +724,15 @@ const parseDirectChartRendererConfig = (
     toRendererType(candidate['chart_type']) ||
     toRendererType(candidate['chartType']);
 
-  const data = ensureRecordArray(
-    candidate.data ?? candidate['filtered_data'] ?? candidate['filteredData'],
-  );
-
+  const data = ensureRecordArray(candidate.data ?? candidate['filtered_data'] ?? candidate['filteredData']);
   if (!type || data.length === 0) {
     return null;
   }
 
-  const height = DEFAULT_TREND_CHART_HEIGHT[variant];
-
   const config: ChartRendererConfig = {
     type,
     data,
-    height,
+    height: DEFAULT_TREND_CHART_HEIGHT[variant],
   };
 
   if (typeof candidate.xField === 'string') config.xField = candidate.xField;
@@ -746,61 +740,48 @@ const parseDirectChartRendererConfig = (
   if (typeof candidate.yField === 'string') config.yField = candidate.yField;
   if (typeof candidate['y_field'] === 'string') config.yField = candidate['y_field'] as string;
 
-  const yFieldsCandidate = candidate.yFields ?? candidate['y_fields'];
-  if (Array.isArray(yFieldsCandidate)) {
-    const normalized = yFieldsCandidate.filter(field => typeof field === 'string') as string[];
-    if (normalized.length > 0) {
-      config.yFields = normalized;
+  const yFields = candidate.yFields ?? candidate['y_fields'];
+  if (Array.isArray(yFields)) {
+    const normalised = yFields.filter(field => typeof field === 'string') as string[];
+    if (normalised.length > 0) {
+      config.yFields = normalised;
     }
   }
 
-  const yAxisLabelsCandidate = candidate.yAxisLabels ?? candidate['y_axis_labels'];
-  if (Array.isArray(yAxisLabelsCandidate)) {
-    const normalized = yAxisLabelsCandidate.filter(label => typeof label === 'string') as string[];
-    if (normalized.length > 0) {
-      config.yAxisLabels = normalized;
+  const yAxisLabels = candidate.yAxisLabels ?? candidate['y_axis_labels'];
+  if (Array.isArray(yAxisLabels)) {
+    const normalised = yAxisLabels.filter(label => typeof label === 'string') as string[];
+    if (normalised.length > 0) {
+      config.yAxisLabels = normalised;
     }
   }
 
-  const legendFieldCandidate = candidate.legendField ?? candidate['legend_field'];
-  if (Array.isArray(legendFieldCandidate)) {
-    const normalized = legendFieldCandidate.find(value => typeof value === 'string') as string | undefined;
-    if (normalized) {
-      config.legendField = normalized;
-    }
-  } else if (typeof legendFieldCandidate === 'string') {
-    config.legendField = legendFieldCandidate;
+  const legendField = candidate.legendField ?? candidate['legend_field'];
+  if (typeof legendField === 'string') {
+    config.legendField = legendField;
   }
 
-  const colorsCandidate = candidate.colors ?? candidate.palette;
-  if (Array.isArray(colorsCandidate)) {
-    const normalized = colorsCandidate.filter(color => typeof color === 'string') as string[];
-    if (normalized.length > 0) {
-      config.colors = normalized;
+  const colors = candidate.colors ?? candidate.palette;
+  if (Array.isArray(colors)) {
+    const normalised = colors.filter(color => typeof color === 'string') as string[];
+    if (normalised.length > 0) {
+      config.colors = normalised;
     }
   }
 
-  if (typeof candidate.theme === 'string') {
-    config.theme = candidate.theme;
-  }
-  if (typeof candidate.title === 'string') {
-    config.title = candidate.title;
-  }
-  if (typeof candidate.xAxisLabel === 'string') {
-    config.xAxisLabel = candidate.xAxisLabel;
-  }
-  if (typeof candidate.yAxisLabel === 'string') {
-    config.yAxisLabel = candidate.yAxisLabel;
-  }
+  if (typeof candidate.theme === 'string') config.theme = candidate.theme;
+  if (typeof candidate.title === 'string') config.title = candidate.title;
+  if (typeof candidate.xAxisLabel === 'string') config.xAxisLabel = candidate.xAxisLabel;
+  if (typeof candidate.yAxisLabel === 'string') config.yAxisLabel = candidate.yAxisLabel;
 
   if (typeof candidate.showLegend === 'boolean') config.showLegend = candidate.showLegend;
   if (typeof candidate.showAxisLabels === 'boolean') config.showAxisLabels = candidate.showAxisLabels;
   if (typeof candidate.showDataLabels === 'boolean') config.showDataLabels = candidate.showDataLabels;
   if (typeof candidate.showGrid === 'boolean') config.showGrid = candidate.showGrid;
 
-  const sortOrderCandidate = candidate.sortOrder ?? candidate['sort_order'];
-  if (sortOrderCandidate === 'asc' || sortOrderCandidate === 'desc' || sortOrderCandidate === null) {
-    config.sortOrder = sortOrderCandidate;
+  const sortOrder = candidate.sortOrder ?? candidate['sort_order'];
+  if (sortOrder === 'asc' || sortOrder === 'desc' || sortOrder === null) {
+    config.sortOrder = sortOrder;
   }
 
   return config;
@@ -808,7 +789,7 @@ const parseDirectChartRendererConfig = (
 
 const createChartRendererConfig = (
   metadata: FeatureOverviewMetadata,
-  variant: 'full' | 'compact',
+  variant: FeatureOverviewComponentProps['variant'],
 ): ChartRendererConfig | null => {
   const chartState = metadata.chartState ?? {};
   const xField = chartState.xAxisField || 'index';
@@ -820,12 +801,10 @@ const createChartRendererConfig = (
     return null;
   }
 
-  const height = DEFAULT_TREND_CHART_HEIGHT[variant];
-
   return {
     type,
     data,
-    height,
+    height: DEFAULT_TREND_CHART_HEIGHT[variant],
     xField,
     yField,
     legendField: chartState.legendField,
@@ -846,7 +825,7 @@ const createChartRendererConfig = (
 
 export const deriveChartConfig = (
   metadata: FeatureOverviewMetadata,
-  variant: 'full' | 'compact',
+  variant: FeatureOverviewComponentProps['variant'],
 ): ChartRendererConfig | null =>
   ensureRenderableChartConfig(
     parseDirectChartRendererConfig(metadata, variant) ??
@@ -854,9 +833,7 @@ export const deriveChartConfig = (
       buildDefaultTrendChartConfig(variant),
   );
 
-export const extractSummaryEntries = (
-  stats: FeatureOverviewStatistics | undefined,
-): Array<[string, unknown]> => {
+export const extractSummaryEntries = (stats: FeatureOverviewStatistics | undefined): Array<[string, unknown]> => {
   if (!stats || !isRecord(stats.summary)) {
     return [];
   }
@@ -864,321 +841,13 @@ export const extractSummaryEntries = (
   return Object.entries(stats.summary).filter(([, value]) => value != null && typeof value !== 'object');
 };
 
-export const buildSkuTableModel = (
-  settings: FeatureOverviewMetadata['skuStatisticsSettings'],
-  variant: 'full' | 'compact',
-): { columns: string[]; rows: Array<Record<string, unknown>>; total: number } | null => {
-  if (!settings) {
-    return null;
-  }
-
-  const columns = Array.isArray(settings.tableColumns)
-    ? settings.tableColumns.filter(column => typeof column === 'string')
-    : [];
-  const rows = ensureRecordArray(settings.tableRows);
-
-  if (columns.length === 0 || rows.length === 0) {
-    return null;
-  }
-
-  const limit = variant === 'compact' ? 3 : 6;
-
-  return {
-    columns,
-    rows: rows.slice(0, limit),
-    total: rows.length,
-  };
-};
-
-export const extractSkuRowEntries = (skuRow: Record<string, unknown> | undefined) => {
-  if (!isRecord(skuRow)) {
-    return [];
-  }
-
-  return Object.entries(skuRow).filter(([, value]) => value != null && typeof value !== 'object');
-};
-
-export const collectDimensions = (metadata: FeatureOverviewMetadata) =>
-  Array.isArray(metadata.dimensions)
-    ? metadata.dimensions.filter(dimension => dimension && (dimension.name || dimension.value))
-    : [];
-
-export const collectCombinationEntries = (metadata: FeatureOverviewMetadata) =>
-  metadata.combination && isRecord(metadata.combination)
-    ? Object.entries(metadata.combination)
-    : [];
-
-export const buildContextEntries = (metadata: FeatureOverviewMetadata) =>
-  [
-    metadata.featureContext?.dataSource
-      ? { label: 'Data source', value: metadata.featureContext.dataSource }
-      : null,
-    metadata.featureContext?.xAxis
-      ? { label: 'X-axis', value: metadata.featureContext.xAxis }
-      : null,
-    metadata.capturedAt
-      ? {
-          label: 'Captured',
-          value: new Date(metadata.capturedAt).toLocaleString(),
-        }
-      : null,
-  ].filter((entry): entry is { label: string; value: string } => Boolean(entry));
-
-export const renderChart = (config: ChartRendererConfig | null) => {
-  if (!config) {
-    return (
-      <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
-        Chart data will appear here after the component captures a visualization in laboratory mode.
-      </div>
-    );
-  }
-
-  return <RechartsChartRenderer {...config} />;
-};
-
-export const renderTable = (
-  model: ReturnType<typeof buildSkuTableModel>,
-): React.ReactNode => {
-  if (!model) {
-    return (
-      <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-        Statistical summary will be displayed here after saving combinations in laboratory mode.
-      </div>
-    );
-  }
-
-  return (
-    <TableTemplate
-      minimizable={false}
-      headers={model.columns.map(column => (
-        <span key={column} className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {humanize(column)}
-        </span>
-      ))}
-      customHeader={{
-        title: 'Sample combinations',
-        subtitle:
-          model.rows.length < model.total ? `Showing ${model.rows.length} of ${model.total}` : undefined,
-      }}
-      bodyClassName="max-h-none"
-    >
-      {model.rows.map((row, rowIndex) => (
-        <tr key={rowIndex} className="table-row">
-          {model.columns.map(column => (
-            <td key={column} className="table-cell px-4 py-3 text-sm text-foreground/80">
-              {formatCell(row[column])}
-            </td>
-          ))}
-        </tr>
-      ))}
-    </TableTemplate>
-  );
-};
-
-export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverviewMetadata | null => {
-  const record = toRecord(metadata);
-  if (!record) {
-    return null;
-  }
-
-  const nested = toRecord(record.metadata);
-  const base = nested ? { ...record, ...nested } : record;
-
-  const result: FeatureOverviewMetadata = {};
-
-  const metric = asString(base['metric'] ?? base['dependent_variable']);
-  if (metric) {
-    result.metric = metric;
-  }
-
-  const combination = toRecord(base['combination'] ?? base['combination_details']);
-  if (combination) {
-    result.combination = { ...combination };
-  }
-
-  const dimensions = normaliseDimensions(base['dimensions'] ?? base['dimension_combinations']);
-  if (dimensions) {
-    result.dimensions = dimensions;
-  }
-
-  const label = asString(base['label'] ?? base['title'] ?? base['metric_label']);
-  if (label) {
-    result.label = label;
-  }
-
-  const chartState = normaliseChartState(base['chartState'] ?? base['chart_state']);
-  if (chartState) {
-    result.chartState = chartState;
-  }
-
-  const featureContext = normaliseFeatureContext(base['featureContext'] ?? base['feature_context']);
-  if (featureContext) {
-    result.featureContext = featureContext;
-  }
-
-  const statisticalDetails = normaliseStatistics(base['statisticalDetails'] ?? base['statistical_details']);
-  if (statisticalDetails) {
-    result.statisticalDetails = statisticalDetails;
-  }
-
-  const skuRow = toRecord(base['skuRow'] ?? base['sku_row']);
-  if (skuRow) {
-    result.skuRow = skuRow;
-  }
-
-  const capturedAt = asString(base['capturedAt'] ?? base['captured_at']);
-  if (capturedAt) {
-    result.capturedAt = capturedAt;
-  }
-
-  const skuStatisticsSettings = normaliseSkuStatisticsSettings(
-    base['skuStatisticsSettings'] ?? base['sku_statistics_settings'],
-  );
-  if (skuStatisticsSettings) {
-    result.skuStatisticsSettings = skuStatisticsSettings;
-  }
-
-  const selections = ensureRecordArray(base['exhibitionSelections'] ?? base['exhibition_selections']);
-  const primarySelection = selections.length > 0 ? selections[0] : null;
-  const primarySelectionRecord = primarySelection ? toRecord(primarySelection) : null;
-  const selectionNested = primarySelectionRecord?.metadata && isRecord(primarySelectionRecord.metadata)
-    ? { ...primarySelectionRecord, ...(primarySelectionRecord.metadata as Record<string, unknown>) }
-    : primarySelectionRecord ?? null;
-
-  if (selectionNested) {
-    if (!result.metric) {
-      const fallbackMetric = asString(selectionNested['metric'] ?? selectionNested['dependent_variable']);
-      if (fallbackMetric) {
-        result.metric = fallbackMetric;
-      }
-    }
-
-    if (!result.combination) {
-      const selectionCombination = toRecord(selectionNested['combination'] ?? selectionNested['combination_details']);
-      if (selectionCombination) {
-        result.combination = { ...selectionCombination };
-      }
-    }
-
-    if (!result.dimensions) {
-      const selectionDimensions = normaliseDimensions(
-        selectionNested['dimensions'] ?? selectionNested['dimension_combinations'],
-      );
-      if (selectionDimensions) {
-        result.dimensions = selectionDimensions;
-      }
-    }
-
-    if (!result.label) {
-      const selectionLabel = asString(
-        selectionNested['label'] ?? selectionNested['title'] ?? selectionNested['metric_label'],
-      );
-      if (selectionLabel) {
-        result.label = selectionLabel;
-      }
-    }
-
-    if (!result.chartState) {
-      const selectionChartState = normaliseChartState(
-        selectionNested['chartState'] ?? selectionNested['chart_state'],
-      );
-      if (selectionChartState) {
-        result.chartState = selectionChartState;
-      }
-    }
-
-    if (!result.featureContext) {
-      const selectionFeatureContext = normaliseFeatureContext(
-        selectionNested['featureContext'] ?? selectionNested['feature_context'],
-      );
-      if (selectionFeatureContext) {
-        result.featureContext = selectionFeatureContext;
-      }
-    }
-
-    if (!result.statisticalDetails) {
-      const selectionStats = normaliseStatistics(
-        selectionNested['statisticalDetails'] ?? selectionNested['statistical_details'],
-      );
-      if (selectionStats) {
-        result.statisticalDetails = selectionStats;
-      }
-    }
-
-    if (!result.skuRow) {
-      const selectionSkuRow = toRecord(selectionNested['skuRow'] ?? selectionNested['sku_row']);
-      if (selectionSkuRow) {
-        result.skuRow = selectionSkuRow;
-      }
-    }
-
-    if (!result.capturedAt) {
-      const selectionCapturedAt = asString(
-        selectionNested['capturedAt'] ?? selectionNested['captured_at'],
-      );
-      if (selectionCapturedAt) {
-        result.capturedAt = selectionCapturedAt;
-      }
-    }
-
-    if (!result.skuStatisticsSettings) {
-      const selectionSkuSettings = normaliseSkuStatisticsSettings(
-        selectionNested['skuStatisticsSettings'] ?? selectionNested['sku_statistics_settings'],
-      );
-      if (selectionSkuSettings) {
-        result.skuStatisticsSettings = selectionSkuSettings;
-      }
-    }
-  }
-
-  if ('chartRendererProps' in base || 'chart_renderer_props' in base) {
-    result.chartRendererProps = parsePossibleJson(
-      base['chartRendererProps'] ?? base['chart_renderer_props'],
-    );
-  }
-
-  if ('chartRendererConfig' in base || 'chart_renderer_config' in base) {
-    result.chartRendererConfig = parsePossibleJson(
-      base['chartRendererConfig'] ?? base['chart_renderer_config'],
-    );
-  }
-
-  if ('chartConfig' in base) {
-    result.chartConfig = parsePossibleJson(base['chartConfig']);
-  }
-
-  if ('chart_config' in base) {
-    result.chart_config = parsePossibleJson(base['chart_config']);
-  }
-
-  if (!result.chartRendererProps && selectionNested && ('chartRendererProps' in selectionNested || 'chart_renderer_props' in selectionNested)) {
-    result.chartRendererProps = parsePossibleJson(
-      selectionNested['chartRendererProps'] ?? selectionNested['chart_renderer_props'],
-    );
-  }
-
-  if (!result.chartRendererConfig && selectionNested && ('chartRendererConfig' in selectionNested || 'chart_renderer_config' in selectionNested)) {
-    result.chartRendererConfig = parsePossibleJson(
-      selectionNested['chartRendererConfig'] ?? selectionNested['chart_renderer_config'],
-    );
-  }
-
-  if (!result.chartConfig && selectionNested && 'chartConfig' in selectionNested) {
-    result.chartConfig = parsePossibleJson(selectionNested['chartConfig']);
-  }
-
-  if (!result.chart_config && selectionNested && 'chart_config' in selectionNested) {
-    result.chart_config = parsePossibleJson(selectionNested['chart_config']);
-  }
-
-  const baseViewType = normaliseViewType(base['viewType'] ?? base['view_type']);
-  const selectionViewType = selectionNested
-    ? normaliseViewType(selectionNested['viewType'] ?? selectionNested['view_type'])
-    : undefined;
-  result.viewType = baseViewType ?? selectionViewType;
-
-  return result;
-};
+const humanize = (value: string): string =>
+  value
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^(.)/, (char: string) => char.toUpperCase());
 
 export const renderSummaryEntries = (entries: Array<[string, unknown]>) => {
   if (entries.length === 0) {
@@ -1190,81 +859,9 @@ export const renderSummaryEntries = (entries: Array<[string, unknown]>) => {
       {entries.map(([key, value]) => (
         <div key={key} className="rounded-xl bg-muted/25 p-3">
           <dt className="text-xs font-semibold uppercase text-muted-foreground">{humanize(key)}</dt>
-          <dd className="text-base font-semibold text-foreground">{formatCell(value)}</dd>
+          <dd className="text-base font-semibold text-foreground">{value == null ? '—' : String(value)}</dd>
         </div>
       ))}
     </dl>
-  );
-};
-
-export const renderSkuDetails = (entries: Array<[string, unknown]>) => {
-  if (entries.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="rounded-xl border border-border/60 bg-muted/15 p-4">
-      <div className="mb-3 text-xs font-semibold uppercase text-muted-foreground">Highlighted SKU</div>
-      <dl className="grid gap-2 sm:grid-cols-2">
-        {entries.map(([key, value]) => (
-          <div key={key} className="rounded-lg bg-background/70 p-3">
-            <dt className="text-xs font-semibold uppercase text-muted-foreground">{humanize(key)}</dt>
-            <dd className="text-sm text-foreground">{formatCell(value)}</dd>
-          </div>
-        ))}
-      </dl>
-    </div>
-  );
-};
-
-export const renderContextEntries = (
-  entries: ReturnType<typeof buildContextEntries>,
-): React.ReactNode => {
-  if (entries.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-      {entries.map(entry => (
-        <div key={entry.label}>
-          <span className="font-semibold text-foreground">{entry.label}:</span> {entry.value}
-        </div>
-      ))}
-    </div>
-  );
-};
-
-export const renderDimensions = (dimensions: ReturnType<typeof collectDimensions>) => {
-  if (dimensions.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      {dimensions.map((dimension, index) => (
-        <Badge key={`${dimension.name}-${dimension.value}-${index}`} variant="outline" className="text-xs">
-          {dimension.name ? `${humanize(dimension.name)}: ` : ''}
-          {dimension.value || '—'}
-        </Badge>
-      ))}
-    </div>
-  );
-};
-
-export const renderCombinationEntries = (entries: ReturnType<typeof collectCombinationEntries>) => {
-  if (entries.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="grid gap-2 text-sm sm:grid-cols-2">
-      {entries.map(([key, value]) => (
-        <div key={key} className="rounded-xl bg-muted/25 p-3">
-          <div className="text-xs font-semibold uppercase text-muted-foreground">{humanize(key)}</div>
-          <div className="text-sm text-foreground">{formatCell(value)}</div>
-        </div>
-      ))}
-    </div>
   );
 };

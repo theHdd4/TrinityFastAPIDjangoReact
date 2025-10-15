@@ -100,10 +100,56 @@ export interface FeatureOverviewExhibitionSelectionDimension {
   value: string;
 }
 
+export type FeatureOverviewExhibitionComponentType =
+  | 'statistical_summary'
+  | 'trend_analysis';
+
 export interface FeatureOverviewExhibitionSelectionStatistics {
   summary?: Record<string, any>;
   timeseries?: Array<Record<string, any>>;
   full?: Record<string, any>;
+}
+
+export interface FeatureOverviewVisualizationManifestChart {
+  type: string;
+  theme?: string;
+  showLegend?: boolean;
+  showAxisLabels?: boolean;
+  showDataLabels?: boolean;
+  showGrid?: boolean;
+  xField?: string;
+  yField?: string;
+  yFields?: string[];
+  colorPalette?: string[];
+  legendField?: string;
+}
+
+export interface FeatureOverviewVisualizationManifestTable {
+  columns: string[];
+  rows: Array<Record<string, any>>;
+  visibility?: Record<string, boolean>;
+}
+
+export interface FeatureOverviewVisualizationManifestData {
+  summary?: Record<string, any>;
+  timeseries?: Array<Record<string, any>>;
+  skuRow?: Record<string, any>;
+  combination?: Record<string, string>;
+  statisticalFull?: Record<string, any>;
+}
+
+export interface FeatureOverviewVisualizationManifest {
+  id: string;
+  version: string;
+  componentType: FeatureOverviewExhibitionComponentType;
+  metric: string;
+  label?: string;
+  dimensions: FeatureOverviewExhibitionSelectionDimension[];
+  capturedAt: string;
+  data: FeatureOverviewVisualizationManifestData;
+  chart?: FeatureOverviewVisualizationManifestChart;
+  table?: FeatureOverviewVisualizationManifestTable;
+  featureContext?: FeatureOverviewExhibitionSelectionContext;
 }
 
 export interface FeatureOverviewExhibitionSelectionChartState {
@@ -128,6 +174,7 @@ export interface FeatureOverviewExhibitionSelectionContext {
 export interface FeatureOverviewExhibitionSelection {
   key: string;
   metric: string;
+  componentType?: FeatureOverviewExhibitionComponentType;
   combination: Record<string, string>;
   dimensions: FeatureOverviewExhibitionSelectionDimension[];
   rowId?: string | number;
@@ -137,6 +184,8 @@ export interface FeatureOverviewExhibitionSelection {
   featureContext?: FeatureOverviewExhibitionSelectionContext;
   skuRow?: Record<string, any>;
   capturedAt?: string;
+  manifestId?: string;
+  visualizationManifest?: FeatureOverviewVisualizationManifest;
 }
 
 export interface FeatureOverviewSettings {

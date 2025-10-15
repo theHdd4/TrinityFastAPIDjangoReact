@@ -177,6 +177,28 @@ const parseMetadataRecord = (value: unknown): Record<string, any> | undefined =>
   return undefined;
 };
 
+const parseManifestRecord = (value: unknown): Record<string, any> | undefined => {
+  if (isRecord(value)) {
+    return { ...value };
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (isRecord(parsed)) {
+          return { ...parsed };
+        }
+      } catch (error) {
+        console.warn('[Exhibition] Unable to parse manifest payload', error);
+      }
+    }
+  }
+
+  return undefined;
+};
+
 const looksLikeFeatureOverviewMetadata = (metadata: Record<string, any> | undefined): boolean => {
   if (!metadata) {
     return false;
@@ -524,7 +546,10 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     ? candidate.color.trim()
     : FALLBACK_COLOR;
 
-  const metadata = parseMetadataRecord(candidate.metadata);
+  const metadata = parseMetadataRecord(candidate.metadata) ?? {};
+  const manifest = parseManifestRecord((candidate as Record<string, unknown>).manifest);
+  const manifestIdRaw = (candidate as Record<string, unknown>).manifest_id;
+  const manifestId = isNonEmptyString(manifestIdRaw) ? manifestIdRaw.trim() : undefined;
 
   const id = resolvedId ?? resolvedAtomId ?? `atom-${Math.random().toString(36).slice(2, 10)}`;
   let atomId = resolvedAtomId ?? id;
@@ -537,6 +562,14 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
       category.toLowerCase().includes('feature overview'))
   ) {
     atomId = 'feature-overview';
+  }
+
+  if (manifest && metadata.visualizationManifest == null) {
+    metadata.visualizationManifest = manifest;
+  }
+
+  if (manifestId && typeof manifestId === 'string') {
+    metadata.manifestId = manifestId;
   }
 
   return {

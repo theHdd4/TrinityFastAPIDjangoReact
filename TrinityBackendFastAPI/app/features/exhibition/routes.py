@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from .schemas import ExhibitionConfigurationIn, ExhibitionConfigurationOut
+from .schemas import ExhibitionConfigurationIn, ExhibitionConfigurationOut, ExhibitionManifestOut
 from .service import ExhibitionStorage
 
 router = APIRouter(prefix="/exhibition", tags=["Exhibition"])
@@ -43,3 +43,17 @@ async def save_configuration(
     saved = await storage.save_configuration(payload)
 
     return {"status": "ok", "updated_at": saved.get("updated_at")}
+
+
+@router.get("/manifest", response_model=ExhibitionManifestOut)
+async def get_manifest(
+    component_id: str = Query(..., min_length=1),
+    client_name: str = Query(..., min_length=1),
+    app_name: str = Query(..., min_length=1),
+    project_name: str = Query(..., min_length=1),
+) -> ExhibitionManifestOut:
+    record = await storage.get_manifest(client_name, app_name, project_name, component_id)
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exhibition manifest not found")
+
+    return ExhibitionManifestOut(**record)

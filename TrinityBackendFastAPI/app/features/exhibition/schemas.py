@@ -18,6 +18,14 @@ class ExhibitionComponent(BaseModel):
         default=None,
         description="Additional metadata captured for the exhibited component",
     )
+    manifest: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Serialised visualisation manifest for the component",
+    )
+    manifest_id: Optional[str] = Field(
+        default=None,
+        description="Stable identifier for the stored manifest",
+    )
 
 
 class ExhibitionAtomEntry(BaseModel):
@@ -47,3 +55,24 @@ class ExhibitionConfigurationOut(ExhibitionConfigurationBase):
 
     class Config:
         orm_mode = True
+
+
+class ExhibitionManifestOut(BaseModel):
+    """Read-only representation of an exhibited component manifest."""
+
+    component_id: str = Field(..., description="Identifier of the requested exhibition component")
+    manifest: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Serialised manifest payload for the component",
+    )
+    manifest_id: Optional[str] = Field(
+        default=None,
+        description="Stable manifest identifier if available",
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Associated metadata stored alongside the manifest",
+    )
+    atom_id: Optional[str] = Field(default=None, description="Identifier of the parent atom")
+    atom_name: Optional[str] = Field(default=None, description="Display name of the parent atom")
+    updated_at: Optional[datetime] = Field(default=None, description="Last update timestamp for the manifest")
