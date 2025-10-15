@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -48,6 +48,47 @@ const noop = () => {};
 
 const clampFontSize = (value: number) => Math.min(Math.max(value, 8), 200);
 
+const normaliseEditableText = (rawValue: string): string => {
+  if (!rawValue) {
+    return '';
+  }
+
+  let value = rawValue.replace(/\u00a0/g, ' ');
+  while (value.endsWith('\n')) {
+    value = value.slice(0, -1);
+  }
+
+  return value;
+};
+
+const sanitiseStoredContent = (rawValue: string): string => {
+  if (!rawValue) {
+    return '';
+  }
+
+  let working = rawValue;
+  const htmlLikePattern = /<[^>]+>/i;
+
+  if (htmlLikePattern.test(working)) {
+    working = working
+      .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+      .replace(/<\/(div|p)>/gi, '\n')
+      .replace(/<div[^>]*>/gi, '')
+      .replace(/<p[^>]*>/gi, '')
+      .replace(/<span[^>]*>/gi, '')
+      .replace(/<\/span>/gi, '')
+      .replace(/<[^>]+>/g, '');
+  }
+
+  if (/&[a-z#0-9]+;/i.test(working) && typeof window !== 'undefined') {
+    const textarea = window.document.createElement('textarea');
+    textarea.innerHTML = working;
+    working = textarea.value;
+  }
+
+  return normaliseEditableText(working);
+};
+
 const buildTextDecoration = (formatting: TableCellFormatting) => {
   if (formatting.underline && formatting.strikethrough) {
     return 'underline line-through';
@@ -59,6 +100,203 @@ const buildTextDecoration = (formatting: TableCellFormatting) => {
     return 'line-through';
   }
   return 'none';
+};
+
+interface ContentEditableCellProps {
+  value: string;
+  formatting: TableCellFormatting;
+  editable: boolean;
+  onFocus: () => void;
+  onChange: (value: string) => void;
+  onCommit: (value: string) => void;
+  onInteract?: () => void;
+}
+
+const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
+  value,
+  formatting,
+  editable,
+  onFocus,
+  onChange,
+  onCommit,
+  onInteract,
+}) => {
+  const elementRef = useRef<HTMLDivElement | null>(null);
+  const lastValueRef = useRef<string>('');
+
+  const setDomValue = useCallback((nextValue: string) => {
+    const node = elementRef.current;
+    if (!node) {
+      return;
+    }
+
+    const prepared = sanitiseStoredContent(nextValue ?? '');
+
+    if (lastValueRef.current !== prepared) {
+      node.textContent = prepared;
+      lastValueRef.current = prepared;
+    }
+  }, []);
+
+  const readDomValue = useCallback(() => {
+    const node = elementRef.current;
+    if (!node) {
+      return '';
+    }
+
+    const text = node.textContent ?? '';
+    return normaliseEditableText(text);
+  }, []);
+
+  useEffect(() => {
+    setDomValue(value ?? '');
+  }, [setDomValue, value]);
+
+  const emitChange = useCallback(() => {
+    const nextValue = readDomValue();
+    if (lastValueRef.current !== nextValue) {
+      lastValueRef.current = nextValue;
+      onChange(nextValue);
+    }
+  }, [onChange, readDomValue]);
+
+  const emitCommit = useCallback(() => {
+    const nextValue = readDomValue();
+    if (lastValueRef.current !== nextValue) {
+      lastValueRef.current = nextValue;
+      onCommit(nextValue);
+    }
+  }, [onCommit, readDomValue]);
+
+  const handleInput = useCallback(() => {
+    if (!editable) {
+      return;
+    }
+    onInteract?.();
+    emitChange();
+  }, [editable, emitChange, onInteract]);
+
+  const handleBlur = useCallback(() => {
+    if (!editable) {
+      return;
+    }
+    emitCommit();
+  }, [editable, emitCommit]);
+
+  const handlePaste = useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      if (!editable) {
+        return;
+      }
+
+      event.preventDefault();
+      const plainText = event.clipboardData.getData('text/plain');
+      const ownerDocument = event.currentTarget.ownerDocument;
+      if (plainText && ownerDocument && typeof ownerDocument.execCommand === 'function') {
+        ownerDocument.execCommand('insertText', false, plainText);
+      }
+    },
+    [editable],
+  );
+
+  return (
+    <div
+      ref={node => {
+        elementRef.current = node;
+        if (node) {
+          setDomValue(value ?? '');
+        }
+      }}
+      className="min-h-[40px] w-full px-3 py-2 text-sm focus:outline-none"
+      style={{
+        fontFamily: formatting.fontFamily,
+        fontSize: `${formatting.fontSize}px`,
+        color: formatting.color,
+        fontWeight: formatting.bold ? 600 : 400,
+        fontStyle: formatting.italic ? 'italic' : 'normal',
+        textDecoration: buildTextDecoration(formatting),
+        whiteSpace: 'pre-wrap',
+      }}
+      contentEditable={editable}
+      suppressContentEditableWarning
+      onFocus={onFocus}
+      onInput={handleInput}
+      onBlur={handleBlur}
+      onPaste={handlePaste}
+      spellCheck={false}
+    />
+  );
+};
+
+interface EditableTableCellProps {
+  rowIndex: number;
+  colIndex: number;
+  cell: TableCellData;
+  formatting: TableCellFormatting;
+  isActive: boolean;
+  canEdit: boolean;
+  locked: boolean;
+  showOutline: boolean;
+  onSelect: (cell: { row: number; col: number }) => void;
+  onChange: (value: string) => void;
+  onCommit: (value: string) => void;
+  onInteract?: () => void;
+}
+
+const EditableTableCell: React.FC<EditableTableCellProps> = ({
+  rowIndex,
+  colIndex,
+  cell,
+  formatting,
+  isActive,
+  canEdit,
+  locked,
+  showOutline,
+  onSelect,
+  onChange,
+  onCommit,
+  onInteract,
+}) => {
+  const editable = canEdit && !locked;
+
+  const handleSelect = useCallback(() => {
+    onSelect({ row: rowIndex, col: colIndex });
+  }, [colIndex, onSelect, rowIndex]);
+
+  const handleFocus = useCallback(() => {
+    handleSelect();
+    if (editable) {
+      onInteract?.();
+    }
+  }, [editable, handleSelect, onInteract]);
+
+  return (
+    <td
+      className={cn(
+        'align-top transition-colors',
+        showOutline ? 'border border-border' : 'border border-transparent',
+        editable ? 'cursor-text' : 'cursor-default',
+        isActive && 'bg-primary/10 outline outline-2 outline-primary/60',
+      )}
+      style={{ textAlign: formatting.align }}
+      onClick={() => {
+        handleSelect();
+        if (editable) {
+          onInteract?.();
+        }
+      }}
+    >
+      <ContentEditableCell
+        value={cell?.content ?? ''}
+        formatting={formatting}
+        editable={editable}
+        onFocus={handleFocus}
+        onChange={onChange}
+        onCommit={onCommit}
+        onInteract={onInteract}
+      />
+    </td>
+  );
 };
 
 export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
@@ -146,8 +384,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   }, [effectiveSelection, tableData]);
 
   const handleCellSelect = useCallback(
-    (rowIndex: number, colIndex: number) => {
-      const cell = { row: rowIndex, col: colIndex };
+    (cell: { row: number; col: number }) => {
       setInternalSelection(cell);
       onCellSelect?.(cell);
     },
@@ -155,24 +392,22 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   );
 
   const handleCellInput = useCallback(
-    (rowIndex: number, colIndex: number, event: React.FormEvent<HTMLDivElement>) => {
+    (rowIndex: number, colIndex: number, value: string) => {
       if (locked || !canEdit) {
         return;
       }
       onInteract?.();
-      const value = event.currentTarget.innerHTML ?? '';
       onUpdateCell?.(rowIndex, colIndex, value);
     },
     [canEdit, locked, onInteract, onUpdateCell],
   );
 
   const handleCellBlur = useCallback(
-    (rowIndex: number, colIndex: number, event: React.FocusEvent<HTMLDivElement>) => {
+    (rowIndex: number, colIndex: number, value: string) => {
       if (locked || !canEdit) {
         return;
       }
       onInteract?.();
-      const value = event.currentTarget.innerHTML ?? '';
       onUpdateCell?.(rowIndex, colIndex, value);
     },
     [canEdit, locked, onInteract, onUpdateCell],
@@ -320,40 +555,21 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
                     const cellFormatting = cell?.formatting ?? createCellFormatting();
 
                     return (
-                      <td
+                      <EditableTableCell
                         key={`${id}-cell-${rowIndex}-${colIndex}`}
-                        className={cn(
-                          'align-top transition-colors',
-                          showOutline ? 'border border-border' : 'border border-transparent',
-                          !locked && canEdit ? 'cursor-text' : 'cursor-default',
-                          isActive && 'bg-primary/10 outline outline-2 outline-primary/60',
-                        )}
-                        style={{ textAlign: cellFormatting.align }}
-                        onClick={() => {
-                          handleCellSelect(rowIndex, colIndex);
-                          if (!locked && canEdit) {
-                            onInteract?.();
-                          }
-                        }}
-                      >
-                        <div
-                          className="min-h-[40px] w-full px-3 py-2 text-sm focus:outline-none"
-                          style={{
-                            fontFamily: cellFormatting.fontFamily,
-                            fontSize: `${cellFormatting.fontSize}px`,
-                            color: cellFormatting.color,
-                            fontWeight: cellFormatting.bold ? 600 : 400,
-                            fontStyle: cellFormatting.italic ? 'italic' : 'normal',
-                            textDecoration: buildTextDecoration(cellFormatting),
-                          }}
-                          contentEditable={canEdit && !locked}
-                          suppressContentEditableWarning
-                          onFocus={() => handleCellSelect(rowIndex, colIndex)}
-                          onBlur={event => handleCellBlur(rowIndex, colIndex, event)}
-                          onInput={event => handleCellInput(rowIndex, colIndex, event)}
-                          dangerouslySetInnerHTML={{ __html: cell?.content ?? '' }}
-                        />
-                      </td>
+                        rowIndex={rowIndex}
+                        colIndex={colIndex}
+                        cell={cell}
+                        formatting={cellFormatting}
+                        isActive={Boolean(isActive)}
+                        canEdit={canEdit}
+                        locked={locked}
+                        showOutline={showOutline}
+                        onSelect={handleCellSelect}
+                        onChange={value => handleCellInput(rowIndex, colIndex, value)}
+                        onCommit={value => handleCellBlur(rowIndex, colIndex, value)}
+                        onInteract={onInteract}
+                      />
                     );
                   })}
                 </tr>
