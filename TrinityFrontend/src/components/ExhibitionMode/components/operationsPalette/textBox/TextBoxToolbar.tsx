@@ -88,7 +88,10 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
   const controlChipClasses = 'h-8 rounded-full px-3 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40';
 
   return (
-    <div className="relative flex items-center gap-2 rounded-full border border-border/70 bg-background/95 px-4 py-3 text-sm shadow-[0_24px_48px_-22px_rgba(124,58,237,0.45)] backdrop-blur-lg">
+    <div
+      className="relative flex items-center gap-2 rounded-full border border-border/70 bg-background/95 px-4 py-3 text-sm shadow-[0_24px_48px_-22px_rgba(124,58,237,0.45)] backdrop-blur-lg"
+      data-text-toolbar-root
+    >
 
       <Popover>
         <PopoverTrigger asChild>
@@ -109,6 +112,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           side="bottom"
           align="start"
           className="z-[4000] w-52 max-h-64 overflow-y-auto rounded-xl border border-border/70 bg-background/95 p-2 shadow-2xl"
+          data-text-toolbar-root
         >
           <div className="space-y-1">
             {FONT_OPTIONS.map(option => (
@@ -278,6 +282,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           side="top"
           align="center"
           className="z-[4000] w-48 rounded-xl border border-border/70 bg-background/95 p-3 shadow-2xl"
+          data-text-toolbar-root
         >
           <div className="flex items-center justify-between gap-2">
             <input

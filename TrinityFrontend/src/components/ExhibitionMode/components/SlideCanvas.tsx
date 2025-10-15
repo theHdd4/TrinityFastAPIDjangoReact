@@ -1344,16 +1344,39 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         return;
       }
 
+      const resolveTargetElement = (eventTarget: EventTarget | null): Element | null => {
+        if (!eventTarget) {
+          return null;
+        }
+
+        if (eventTarget instanceof Element) {
+          return eventTarget;
+        }
+
+        if (eventTarget instanceof Node) {
+          return eventTarget.parentElement;
+        }
+
+        return null;
+      };
+
       const handlePointerDown = (event: MouseEvent | TouchEvent) => {
-        const target = event.target as Node | null;
         const node = internalRef.current;
 
         if (!node) {
           return;
         }
 
-        if (target && node.contains(target)) {
-          return;
+        const targetElement = resolveTargetElement(event.target);
+
+        if (targetElement) {
+          if (node.contains(targetElement)) {
+            return;
+          }
+
+          if (targetElement.closest('[data-text-toolbar-root]')) {
+            return;
+          }
         }
 
         if (editingTextState) {
