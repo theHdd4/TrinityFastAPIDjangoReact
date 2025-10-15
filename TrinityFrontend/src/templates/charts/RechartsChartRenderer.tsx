@@ -2363,7 +2363,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
           const formatDateTickMultiLine = d3.timeFormat('%d-%B-%y');
           
           return (
-            <LineChart data={pivotedLineData} margin={getChartMargins()}>
+            <LineChart
+              data={pivotedLineData}
+              margin={getChartMargins()}
+              className="explore-chart-line"
+            >
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForLine}
@@ -2424,8 +2428,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   name={seriesKey}
                   stroke={palette[idx % palette.length]}
                   strokeWidth={2}
-                  dot={{ r: 0 }}
-                  activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }}
+                  dot={false}
+                  activeDot={false}
                 >
                   {currentShowDataLabels && (
                     <LabelList
@@ -2541,19 +2545,13 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 />
               )}
               {/* Primary Line */}
-              <Line 
-                type="monotone" 
-                dataKey={yKey} 
-                stroke={palette[0]} 
+              <Line
+                type="monotone"
+                dataKey={yKey}
+                stroke={palette[0]}
                 strokeWidth={2}
-                dot={{ fill: palette[0], strokeWidth: 0, r: 0 }}
-                activeDot={{ 
-                  r: 6, 
-                  fill: palette[0], 
-                  stroke: 'white', 
-                  strokeWidth: 3,
-                  style: { cursor: 'pointer' }
-                }}
+                dot={false}
+                activeDot={false}
                 yAxisId={0}
               >
                 {currentShowDataLabels && (
@@ -2568,19 +2566,13 @@ const RechartsChartRenderer: React.FC<Props> = ({
               </Line>
               {/* Secondary Line - only if we have dual Y-axes */}
               {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
-                <Line 
-                  type="monotone" 
-                  dataKey={yKeys[1] || yFields[1]} 
-                  stroke={palette[1]} 
+                <Line
+                  type="monotone"
+                  dataKey={yKeys[1] || yFields[1]}
+                  stroke={palette[1]}
                   strokeWidth={2}
-                  dot={{ fill: palette[1], strokeWidth: 0, r: 0 }}
-                  activeDot={{ 
-                    r: 6, 
-                    fill: palette[1], 
-                    stroke: 'white', 
-                    strokeWidth: 3,
-                    style: { cursor: 'pointer' }
-                  }}
+                  dot={false}
+                  activeDot={false}
                   yAxisId={1}
                 >
                   {currentShowDataLabels && (

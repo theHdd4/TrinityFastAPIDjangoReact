@@ -1811,7 +1811,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   <Button
                     size="icon"
                     variant="ghost"
-                    className="absolute top-3 right-3 z-30 h-9 w-9 text-muted-foreground hover:text-destructive"
+                    className={cn(
+                      'absolute top-3 right-3 z-30 h-9 w-9 text-muted-foreground hover:text-destructive opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100',
+                      isSelected && 'opacity-100',
+                    )}
                     onPointerDown={event => event.stopPropagation()}
                     onClick={() => onRemoveAtom(object.props.atom.id)}
                     type="button"
