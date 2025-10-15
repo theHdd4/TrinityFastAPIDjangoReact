@@ -22,10 +22,14 @@ export type ManifestChartRendererProps = {
   colors?: string[];
   legendField?: string;
   theme?: string;
+  title?: string;
   showLegend?: boolean;
   showAxisLabels?: boolean;
   showDataLabels?: boolean;
   showGrid?: boolean;
+  xAxisLabel?: string;
+  yAxisLabel?: string;
+  sortOrder?: 'asc' | 'desc' | null;
 };
 
 const normaliseManifestChartType = (
@@ -66,6 +70,8 @@ export const buildChartRendererPropsFromManifest = (
     ? manifest.chart.yFields.filter((field): field is string => typeof field === 'string' && field.length > 0)
     : undefined;
 
+  const sortOrder = manifest.chart.sortOrder;
+
   return {
     type: chartType,
     data: manifestData,
@@ -76,10 +82,19 @@ export const buildChartRendererPropsFromManifest = (
     colors: manifest.chart.colorPalette,
     legendField: manifest.chart.legendField,
     theme: manifest.chart.theme,
+    title: manifest.label ?? manifest.metric,
     showLegend: manifest.chart.showLegend,
     showAxisLabels: manifest.chart.showAxisLabels,
     showDataLabels: manifest.chart.showDataLabels,
     showGrid: manifest.chart.showGrid,
+    xAxisLabel: manifest.chart.xAxisLabel,
+    yAxisLabel: manifest.chart.yAxisLabel,
+    sortOrder:
+      sortOrder === 'asc' || sortOrder === 'desc'
+        ? sortOrder
+        : sortOrder === null
+        ? null
+        : undefined,
   };
 };
 

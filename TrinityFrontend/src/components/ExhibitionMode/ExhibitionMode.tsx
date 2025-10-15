@@ -26,6 +26,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   saveExhibitionConfiguration,
+  saveExhibitionLayout,
   fetchExhibitionManifest,
   type ExhibitionAtomPayload,
   type ExhibitionComponentPayload,
@@ -719,11 +720,24 @@ const ExhibitionMode = () => {
         .map(mapCardToAtomEntry)
         .filter((entry): entry is ExhibitionAtomPayload => entry !== null);
 
+      const slideObjectsToPersist = cards.reduce<Record<string, any[]>>((acc, card) => {
+        const objects = slideObjectsByCardId[card.id] ?? [];
+        acc[card.id] = JSON.parse(JSON.stringify(objects));
+        return acc;
+      }, {} as Record<string, any[]>);
+
       await saveExhibitionConfiguration({
         client_name: context.client_name,
         app_name: context.app_name,
         project_name: context.project_name,
         atoms: atomsToPersist,
+      });
+      await saveExhibitionLayout({
+        client_name: context.client_name,
+        app_name: context.app_name,
+        project_name: context.project_name,
+        cards: cardsToPersist,
+        slide_objects: slideObjectsToPersist,
       });
       persistCardsLocally(cardsToPersist);
       toast({ title: 'Exhibition saved', description: 'Your exhibition updates have been saved.' });

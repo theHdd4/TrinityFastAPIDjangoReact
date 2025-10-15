@@ -352,34 +352,14 @@ const TrendAnalysisChart: React.FC<{ config: ChartRendererConfig }> = ({ config 
       .curve(d3.curveMonotoneX);
 
     series.forEach(entry => {
-      const seriesGroup = chartGroup.append('g').attr('class', `trend-series-${entry.id}`);
-
-      seriesGroup
+      chartGroup
         .append('path')
+        .attr('class', `trend-series-${entry.id}`)
         .datum(entry.points)
         .attr('fill', 'none')
         .attr('stroke', entry.color)
         .attr('stroke-width', 3)
         .attr('d', lineGenerator);
-
-      seriesGroup
-        .selectAll('circle')
-        .data(entry.points)
-        .join('circle')
-        .attr('r', 4)
-        .attr('fill', '#fff')
-        .attr('stroke', entry.color)
-        .attr('stroke-width', 2)
-        .attr('cx', point => {
-          if (xType === 'date') {
-            return (xScale as d3.ScaleTime<number, number>)(point.xValue as Date);
-          }
-          if (xType === 'number') {
-            return (xScale as d3.ScaleLinear<number, number>)(Number(point.xValue));
-          }
-          return (xScale as d3.ScalePoint<string>)(String(point.xValue)) ?? 0;
-        })
-        .attr('cy', point => yScale(point.y));
     });
 
     if (config.showAxisLabels !== false) {
@@ -423,7 +403,7 @@ const TrendAnalysisChart: React.FC<{ config: ChartRendererConfig }> = ({ config 
       <div ref={containerRef} className="w-full overflow-hidden">
         <svg ref={svgRef} role="img" aria-label={config.title ?? 'Trend analysis chart'} />
       </div>
-      {config.showLegend !== false && series.length > 1 && (
+      {config.showLegend !== false && series.length > 0 && (
         <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
           {series.map(entry => (
             <div key={entry.id} className="flex items-center gap-2">

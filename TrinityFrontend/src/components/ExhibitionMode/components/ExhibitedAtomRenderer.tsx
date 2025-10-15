@@ -965,11 +965,7 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
   }
 
   if (chartConfig) {
-    return (
-      <div className="rounded-2xl border border-border bg-background/80 p-4 shadow-sm">
-        <RechartsChartRenderer {...chartConfig} />
-      </div>
-    );
+    return <RechartsChartRenderer {...chartConfig} readOnly />;
   }
 
   if (htmlPreview) {

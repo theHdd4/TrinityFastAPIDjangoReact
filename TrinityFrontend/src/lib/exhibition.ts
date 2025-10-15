@@ -42,6 +42,18 @@ export interface ExhibitionManifestResponse {
   updated_at?: string;
 }
 
+export interface ExhibitionLayoutPayload {
+  client_name: string;
+  app_name: string;
+  project_name: string;
+  cards: any[];
+  slide_objects: Record<string, any[]>;
+}
+
+export interface ExhibitionLayoutResponse extends ExhibitionLayoutPayload {
+  updated_at?: string;
+}
+
 const defaultHeaders = {
   'Content-Type': 'application/json',
 };
@@ -106,4 +118,39 @@ export async function fetchExhibitionManifest(
   }
 
   return response.json() as Promise<ExhibitionManifestResponse>;
+}
+
+export async function saveExhibitionLayout(payload: ExhibitionLayoutPayload): Promise<void> {
+  const response = await fetch(`${EXHIBITION_API}/layout`, {
+    method: 'POST',
+    headers: defaultHeaders,
+    credentials: 'include',
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || 'Failed to save exhibition layout');
+  }
+}
+
+export async function fetchExhibitionLayout(
+  params: ExhibitionConfigurationQuery,
+): Promise<ExhibitionLayoutResponse | null> {
+  const search = new URLSearchParams(params as Record<string, string>);
+  const response = await fetch(`${EXHIBITION_API}/layout?${search.toString()}`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || 'Failed to fetch exhibition layout');
+  }
+
+  return response.json() as Promise<ExhibitionLayoutResponse>;
 }

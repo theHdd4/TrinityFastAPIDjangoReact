@@ -4,6 +4,8 @@ import {
   fetchExhibitionConfiguration,
   ExhibitionAtomPayload,
   ExhibitionComponentPayload,
+  fetchExhibitionLayout,
+  type ExhibitionLayoutResponse,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 
@@ -673,6 +675,63 @@ const extractCards = (cards: LayoutCard[] | unknown): LayoutCard[] => {
     .filter((card): card is LayoutCard => card !== null);
 };
 
+const normaliseSavedSlideObject = (value: unknown): SlideObject | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = isNonEmptyString(value.id) ? value.id.trim() : null;
+  if (!id) {
+    return null;
+  }
+
+  const type = isNonEmptyString(value.type) ? value.type.trim() : 'atom';
+  const toNumber = (input: unknown, fallback: number): number => {
+    if (typeof input === 'number' && Number.isFinite(input)) {
+      return input;
+    }
+    const parsed = Number(input);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const props = isRecord(value.props) ? { ...value.props } : {};
+
+  const groupId = isNonEmptyString(value.groupId) ? value.groupId.trim() : null;
+
+  return {
+    id,
+    type,
+    x: toNumber(value.x, 0),
+    y: toNumber(value.y, 0),
+    width: toNumber(value.width, DEFAULT_CANVAS_OBJECT_WIDTH),
+    height: toNumber(value.height, DEFAULT_CANVAS_OBJECT_HEIGHT),
+    zIndex: toNumber(value.zIndex, 1),
+    groupId,
+    props,
+  };
+};
+
+const normaliseLayoutSlideObjects = (
+  raw: Record<string, unknown> | undefined,
+): Record<string, SlideObject[]> => {
+  if (!raw || typeof raw !== 'object') {
+    return {};
+  }
+
+  return Object.entries(raw).reduce<Record<string, SlideObject[]>>((acc, [cardId, value]) => {
+    if (!isNonEmptyString(cardId) || !Array.isArray(value)) {
+      return acc;
+    }
+
+    const objects = value
+      .map(entry => normaliseSavedSlideObject(entry))
+      .filter((entry): entry is SlideObject => entry !== null);
+
+    acc[cardId] = objects;
+    return acc;
+  }, {} as Record<string, SlideObject[]>);
+};
+
 const createBlankSlide = (): LayoutCard =>
   withPresentationDefaults({
     id: `exhibition-slide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -800,6 +859,8 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   loadSavedConfiguration: async (explicitContext?: ProjectContext | null) => {
     let loadedCards: LayoutCard[] = [];
     let catalogueEntries: ExhibitionAtomPayload[] = [];
+    let layoutCards: LayoutCard[] = [];
+    let layoutSlideObjects: Record<string, SlideObject[]> = {};
     const resolvedContext = normaliseProjectContext(explicitContext ?? getActiveProjectContext());
     const contextLabel = resolvedContext
       ? `${resolvedContext.client_name}/${resolvedContext.app_name}/${resolvedContext.project_name}`
@@ -838,6 +899,26 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
             })
             .filter((card): card is LayoutCard => card !== null);
         }
+
+        try {
+          const layoutResponse: ExhibitionLayoutResponse | null = await fetchExhibitionLayout(resolvedContext);
+          if (layoutResponse) {
+            layoutCards = extractCards(layoutResponse.cards);
+            layoutSlideObjects = normaliseLayoutSlideObjects(layoutResponse.slide_objects);
+            console.info(
+              `[Exhibition] Retrieved exhibition layout with ${layoutCards.length} slide card(s) from trinity_db.exhibition_list_configuration for ${contextLabel}`,
+            );
+          } else {
+            console.info(
+              `[Exhibition] No exhibition layout entry found for ${contextLabel} in trinity_db.exhibition_list_configuration`,
+            );
+          }
+        } catch (error) {
+          console.warn(
+            `[Exhibition] Failed to fetch exhibition layout for ${contextLabel} from trinity_db.exhibition_list_configuration`,
+            error,
+          );
+        }
       } catch (error) {
         console.warn(
           `[Exhibition] Failed to fetch exhibition catalogue for ${contextLabel} from trinity_db.exhibition_catalogue`,
@@ -857,13 +938,17 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
       const remoteCards = loadedCards.map(withPresentationDefaults);
       const hasRemoteCards = remoteCards.length > 0;
+      const hasLayoutCards = layoutCards.length > 0;
+      const preparedLayoutCards = hasLayoutCards ? layoutCards.map(withPresentationDefaults) : [];
       const preservedCards = state.cards.map(withPresentationDefaults);
       const baseCards = shouldResetSlides ? [] : preservedCards;
 
       let ensuredCards: LayoutCard[] = [];
       let insertedBlankSlide = false;
 
-      if (baseCards.length > 0) {
+      if (hasLayoutCards) {
+        ensuredCards = preparedLayoutCards;
+      } else if (baseCards.length > 0) {
         ensuredCards = baseCards;
       } else if (hasRemoteCards) {
         ensuredCards = [];
@@ -879,7 +964,8 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
       const nextSlideObjects: Record<string, SlideObject[]> = {};
       ensuredCards.forEach(card => {
-        nextSlideObjects[card.id] = synchroniseSlideObjects(state.slideObjectsByCardId[card.id], card);
+        const savedObjects = layoutSlideObjects[card.id] ?? state.slideObjectsByCardId[card.id];
+        nextSlideObjects[card.id] = synchroniseSlideObjects(savedObjects, card);
       });
 
       console.info(
