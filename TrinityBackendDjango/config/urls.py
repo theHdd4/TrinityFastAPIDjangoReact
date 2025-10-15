@@ -22,4 +22,6 @@ urlpatterns = [
     path("api/audit/", include("apps.audit.urls")),
     path("api/session/", include("apps.session_state.urls")),
     path("api/usecases/", include("apps.usecase.urls")),
+    path("api/", include("apps.molecules.urls")),
+    path("api/", include("apps.trinity_v1_atoms.urls")),
 ]

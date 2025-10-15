@@ -243,7 +243,13 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   }, [nodes, edges]); // eslint-disable-line react-hooks/exhaustive-deps -- omit onCanvasMoleculesUpdate from deps
 
   return (
-    <div ref={reactFlowWrapper} className="h-full bg-gradient-to-br from-background via-background to-secondary/10 rounded-xl border-2 border-border overflow-hidden shadow-lg">
+    <div ref={reactFlowWrapper} className="h-full relative bg-gradient-to-br from-slate-50 via-background to-blue-50/30 rounded-2xl border-2 border-border/50 overflow-hidden shadow-2xl backdrop-blur-sm">
+      {/* Animated Background Pattern */}
+      <div className="absolute inset-0 opacity-30">
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-secondary/5"></div>
+        <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_50%_50%,rgba(59,130,246,0.1),transparent_50%)]"></div>
+      </div>
+      
       <ReactFlowProvider>
         <ReactFlow
           nodes={nodes}
@@ -261,8 +267,8 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           fitView
           proOptions={{ hideAttribution: true }}
           defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
-          minZoom={0.2}
-          maxZoom={2}
+          minZoom={0.1}
+          maxZoom={3}
           zoomOnScroll={true}
           zoomOnPinch={true}
           zoomOnDoubleClick={true}
@@ -273,31 +279,57 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
             animated: true,
             style: { 
               stroke: 'hsl(var(--primary))', 
-              strokeWidth: 2
+              strokeWidth: 3,
+              strokeDasharray: '0',
+              filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))'
             },
             markerEnd: {
               type: 'arrowclosed',
               color: 'hsl(var(--primary))',
-              width: 20,
-              height: 20
+              width: 24,
+              height: 24
             }
           }}
         >
           <Background 
-            gap={24} 
-            size={2}
-            color="hsl(var(--border))" 
+            gap={32} 
+            size={1.5}
+            color="hsl(var(--primary))" 
             variant="dots"
-            className="opacity-40"
+            className="opacity-20"
           />
           <Controls 
-            className="!bg-card !border-2 !border-border !rounded-xl !shadow-lg"
+            className="!bg-white/90 !backdrop-blur-md !border-2 !border-white/20 !rounded-2xl !shadow-xl !p-2"
             showZoom={true}
             showFitView={true}
             showInteractive={false}
+            position="top-right"
           />
         </ReactFlow>
       </ReactFlowProvider>
+      
+      {/* Floating Action Hints - Positioned at top */}
+      {nodes.length === 0 && canEdit && (
+        <div className="absolute top-6 left-1/2 transform -translate-x-1/2 pointer-events-none">
+          <div className="text-center space-y-3 p-4 bg-white/80 backdrop-blur-sm rounded-xl shadow-lg border border-white/20 floating-hint">
+            {/* Icon at the top */}
+            <div className="w-8 h-8 mx-auto bg-gradient-to-br from-primary to-primary/60 rounded-lg flex items-center justify-center shadow-md">
+              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+            </div>
+            
+            {/* Text content below the icon */}
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-gray-800">Start Building Your Workflow</h3>
+              <div className="text-xs text-gray-600 max-w-xs space-y-1">
+                <p>Drag molecules from the sidebar to create your workflow.</p>
+                <p>Connect them to build your data pipeline.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

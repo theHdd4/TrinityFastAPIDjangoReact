@@ -39,7 +39,7 @@ const MoleculeList: React.FC<MoleculeListProps> = ({ canEdit }) => {
         setLoading(true);
         console.log(`Fetching molecules for app: ${appSlug}`);
 
-        const response = await fetch(`${USECASES_API}/molecules-by-slug/${appSlug}/`, {
+        const response = await fetch(`${USECASES_API}/usecases/molecules-by-slug/${appSlug}/`, {
           credentials: 'include'
         });
 

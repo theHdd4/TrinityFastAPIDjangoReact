@@ -8,9 +8,10 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles } from 'lucide-react';
 import Header from '@/components/Header';
 import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
-import { REGISTRY_API, USECASES_API } from '@/lib/api';
+import { REGISTRY_API } from '@/lib/api';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface BackendApp {
   id: number;
@@ -38,46 +39,70 @@ const Apps = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
 
+  const { isAuthenticated, user } = useAuth();
+
   useEffect(() => {
     const loadApps = async () => {
-      console.log('Fetching apps from usecase API...');
+      // Check if user is authenticated first
+      if (!isAuthenticated || !user) {
+        console.log('❌ User not authenticated, skipping apps fetch');
+        setLoading(false);
+        return;
+      }
+
+      console.log('🔍 Fetching tenant-accessible apps from registry API...');
+      console.log('🔗 API URL:', `${REGISTRY_API}/apps/`);
+      console.log('👤 User:', user.username);
       setLoading(true);
       try {
-        // Fetch apps from our usecase API
-        const usecaseRes = await fetch(`${USECASES_API}/apps-for-frontend/`, { credentials: 'include' });
-        console.log('Usecase apps response status', usecaseRes.status);
+        // Fetch apps from registry API (tenant-specific, filtered by access)
+        const registryRes = await fetch(`${REGISTRY_API}/apps/`, { 
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+        console.log('📊 Registry apps response status:', registryRes.status);
+        console.log('📊 Registry apps response headers:', Object.fromEntries(registryRes.headers.entries()));
         
-        if (usecaseRes.ok) {
-          const usecaseData = await usecaseRes.json();
-          console.log('Loaded usecase apps', usecaseData);
+        if (registryRes.ok) {
+          const registryData = await registryRes.json();
+          console.log('✅ Loaded tenant apps:', registryData);
+          console.log('📱 Number of apps:', registryData.length);
           
-          if (usecaseData.success && usecaseData.apps) {
-            setApps(usecaseData.apps);
+          // The registry API now returns enriched data with molecules and atoms
+          if (Array.isArray(registryData)) {
+            setApps(registryData);
             
-            // Also fetch registry apps for mapping
-            const registryRes = await fetch(`${REGISTRY_API}/apps/`, { credentials: 'include' });
-            if (registryRes.ok) {
-              const registryData: BackendApp[] = await registryRes.json();
-              const map: Record<string, number> = {};
-              registryData.forEach((a) => {
-                map[a.slug] = a.id;
-              });
-              setAppMap(map);
-            }
+            // Build app map for navigation
+            const map: Record<string, number> = {};
+            registryData.forEach((a: any) => {
+              map[a.slug] = a.id;
+            });
+            setAppMap(map);
+            console.log('🗺️ App map created:', map);
+          } else {
+            console.log('❌ Response is not an array:', typeof registryData);
           }
         } else {
-          const text = await usecaseRes.text();
-          console.log('Failed to load usecase apps:', text);
+          const text = await registryRes.text();
+          console.log('❌ Failed to load tenant apps:', text);
+          
+          // If 403, the session might be expired
+          if (registryRes.status === 403) {
+            console.log('🔄 Session expired, redirecting to login...');
+            // The AuthContext will handle this automatically
+          }
         }
       } catch (err) {
-        console.log('Apps fetch error', err);
+        console.log('💥 Apps fetch error:', err);
       } finally {
         setLoading(false);
       }
     };
 
     loadApps();
-  }, []);
+  }, [isAuthenticated, user]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {

@@ -67,6 +67,10 @@ export const USECASES_API =
   normalizeUrl(import.meta.env.VITE_USECASES_API) ||
   `${backendOrigin}${djangoPrefix}/usecases`;
 
+export const TRINITY_V1_ATOMS_API =
+  normalizeUrl(import.meta.env.VITE_TRINITY_V1_ATOMS_API) ||
+  `${backendOrigin}${djangoPrefix}`;
+
 export const TENANTS_API =
   normalizeUrl(import.meta.env.VITE_TENANTS_API) ||
   `${backendOrigin}${djangoPrefix}/tenants`;

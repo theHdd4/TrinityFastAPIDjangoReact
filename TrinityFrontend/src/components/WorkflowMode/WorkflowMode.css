@@ -1,0 +1,102 @@
+/* Custom scrollbar for WorkflowMode */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--primary)) hsl(var(--border));
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: hsl(var(--border) / 0.3);
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(var(--primary) / 0.6);
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--primary) / 0.8);
+}
+
+/* Smooth animations for molecule nodes */
+.molecule-node-enter {
+  opacity: 0;
+  transform: scale(0.8) translateY(20px);
+}
+
+.molecule-node-enter-active {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.molecule-node-exit {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+
+.molecule-node-exit-active {
+  opacity: 0;
+  transform: scale(0.8) translateY(-20px);
+  transition: all 0.2s ease-in;
+}
+
+/* Connection line animations */
+.react-flow__edge-path {
+  stroke-dasharray: 5;
+  animation: dash 0.5s linear infinite;
+}
+
+@keyframes dash {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+/* Glow effects for selected nodes */
+.molecule-node-selected {
+  box-shadow: 0 0 20px hsl(var(--primary) / 0.3);
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.3);
+  }
+  50% {
+    box-shadow: 0 0 30px hsl(var(--primary) / 0.5);
+  }
+}
+
+/* Floating action hints animation */
+.floating-hint {
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* Background pattern animation */
+.background-pattern {
+  animation: background-move 20s linear infinite;
+}
+
+@keyframes background-move {
+  0% {
+    transform: translateX(0) translateY(0);
+  }
+  100% {
+    transform: translateX(-32px) translateY(-32px);
+  }
+}

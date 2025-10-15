@@ -22,19 +22,30 @@ class UseCaseViewSet(viewsets.ModelViewSet):
         API endpoint that serves apps in the format expected by the frontend.
         This replaces the hardcoded apps array in Apps.tsx
         """
-        apps = UseCase.objects.all().order_by('name')
+        apps = UseCase.objects.prefetch_related('molecule_objects').all().order_by('name')
         
         frontend_apps = []
         for app in apps:
+            # Get molecule details from the many-to-many relationship
+            molecule_details = []
+            for mol in app.molecule_objects.all():
+                molecule_details.append({
+                    'id': mol.molecule_id,
+                    'type': mol.type,
+                    'title': mol.name,
+                    'subtitle': mol.subtitle,
+                    'tag': mol.tag,
+                    'atoms': mol.atoms
+                })
+            
             frontend_apps.append({
                 'id': app.id,
                 'name': app.name,
                 'slug': app.slug,
                 'description': app.description,
                 'modules': app.modules or [],
-                'molecules': app.molecules or [],
-                'molecule_atoms': app.molecule_atoms or {},
-                'atoms_in_molecules': app.atoms_in_molecules or []
+                'molecules': app.molecules or [],  # JSON array of molecule IDs
+                'molecule_details': molecule_details
             })
         
         return Response({
@@ -50,20 +61,26 @@ class UseCaseViewSet(viewsets.ModelViewSet):
         Used by the workflow area to display app-specific molecules.
         """
         try:
-            app = UseCase.objects.get(slug=slug)
+            from apps.trinity_v1_atoms.models import TrinityV1Atom
             
-            # Transform molecule_atoms dict to array format for frontend
+            app = UseCase.objects.prefetch_related('molecule_objects').get(slug=slug)
+            
+            # Get molecules from the many-to-many relationship
             molecules_list = []
-            if app.molecule_atoms:
-                for mol_id, mol_data in app.molecule_atoms.items():
-                    molecules_list.append({
-                        'id': mol_data.get('id', mol_id),
-                        'type': mol_data.get('title', ''),
-                        'title': mol_data.get('title', ''),
-                        'subtitle': mol_data.get('subtitle', ''),
-                        'tag': mol_data.get('tag', ''),
-                        'atoms': mol_data.get('atoms', [])
-                    })
+            for mol in app.molecule_objects.all():
+                # Get atom names from trinity_v1_atoms table
+                atom_ids = mol.atoms or []
+                matching_atoms = TrinityV1Atom.objects.filter(id__in=atom_ids)
+                atom_names = [atom.name for atom in matching_atoms]
+                
+                molecules_list.append({
+                    'id': mol.molecule_id,
+                    'type': mol.type,
+                    'title': mol.name,
+                    'subtitle': mol.subtitle,
+                    'tag': mol.tag,
+                    'atoms': atom_names  # Return atom names instead of IDs
+                })
             
             return Response({
                 'success': True,
@@ -93,9 +110,7 @@ def apps_api(request):
             'name': app.name,
             'description': app.description,
             'modules': app.modules or [],
-            'molecules': app.molecules or [],
-            'molecule_atoms': app.molecule_atoms or {},
-            'atoms_in_molecules': app.atoms_in_molecules or []
+            'molecules': app.molecules or []  # JSON array of molecule IDs
         })
     
     return JsonResponse({

@@ -7,8 +7,10 @@ import { Play } from 'lucide-react';
 import Header from '@/components/Header';
 import WorkflowCanvas from './components/WorkflowCanvas';
 import MoleculeList from '@/components/MoleculeList/MoleculeList';
+import WorkflowAuxiliaryMenu from './components/WorkflowAuxiliaryMenu';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
+import './WorkflowMode.css';
 
 interface SelectedAtom {
   atomName: string;
@@ -197,43 +199,73 @@ const WorkflowMode = () => {
       <Header />
       
       {/* Workflow Header */}
-      <div className="bg-card border-b border-border px-8 py-6 flex-shrink-0">
+      <div className="bg-gradient-to-r from-card via-card to-card/95 border-b border-border/50 px-8 py-8 flex-shrink-0 backdrop-blur-sm">
         <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-3xl font-semibold text-foreground mb-2">Workflow Mode</h2>
-            <p className="text-muted-foreground">
-              Drag molecules from the list onto the workflow canvas. Connect molecules by drawing arrows between them.
-            </p>
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary/80 rounded-2xl flex items-center justify-center shadow-lg">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-4xl font-bold text-foreground mb-1">Workflow Mode</h2>
+                <p className="text-muted-foreground text-lg">
+                  Design your data pipeline by connecting molecules and selecting atoms
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-primary"></div>
+                <span>Drag molecules to canvas</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-secondary"></div>
+                <span>Connect with arrows</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-accent"></div>
+                <span>Select atoms to render</span>
+              </div>
+            </div>
           </div>
           
           <div className="flex items-center space-x-4">
             <Button
-              className={`bg-primary text-primary-foreground px-6 ${
-                canEdit ? 'hover:bg-primary/90' : 'opacity-50 cursor-not-allowed'
+              className={`bg-gradient-to-r from-primary to-primary/90 text-primary-foreground px-8 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 ${
+                canEdit ? 'hover:scale-105' : 'opacity-50 cursor-not-allowed'
               }`}
               onClick={canEdit ? renderWorkflow : undefined}
               disabled={!canEdit}
             >
-              <Play className="w-4 h-4 mr-2" />
-              Render Workflow
+              <Play className="w-5 h-5 mr-3" />
+              <span className="font-semibold">Render Workflow</span>
             </Button>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 flex">
+      <div className="flex-1 flex overflow-hidden">
         {/* Molecule List */}
-        <div className={`w-80 bg-card border-r border-border ${canEdit ? '' : 'cursor-not-allowed'}`}>
+        <div className={`w-80 bg-gradient-to-b from-card to-card/95 border-r border-border/50 backdrop-blur-sm ${canEdit ? '' : 'cursor-not-allowed'}`}>
           <MoleculeList canEdit={canEdit} />
         </div>
 
         {/* Workflow Canvas */}
-        <div className={`flex-1 p-8 ${canEdit ? '' : 'cursor-not-allowed'}`}>
-          <WorkflowCanvas
-            onMoleculeSelect={handleMoleculeSelect}
-            onCanvasMoleculesUpdate={handleCanvasMoleculesUpdate}
-            canEdit={canEdit}
-          />
+        <div className={`flex-1 p-6 ${canEdit ? '' : 'cursor-not-allowed'}`}>
+          <div className="h-full rounded-2xl overflow-hidden shadow-2xl">
+            <WorkflowCanvas
+              onMoleculeSelect={handleMoleculeSelect}
+              onCanvasMoleculesUpdate={handleCanvasMoleculesUpdate}
+              canEdit={canEdit}
+            />
+          </div>
+        </div>
+
+        {/* Workflow Auxiliary Menu - Blank menu on the right */}
+        <div className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
+          <WorkflowAuxiliaryMenu />
         </div>
       </div>
     </div>

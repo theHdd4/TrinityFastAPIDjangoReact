@@ -118,6 +118,12 @@ SHARED_APPS = [
     
     # UseCase app - stores app definitions in public schema
     "apps.usecase",
+    
+    # Molecules app - stores molecule definitions in public schema
+    "apps.molecules",
+    
+    # Trinity V1 Atoms app - stores atom definitions in public schema
+    "apps.trinity_v1_atoms",
 ]
 
 TENANT_APPS = [

@@ -36,8 +36,11 @@ logger = logging.getLogger(__name__)
 
 class AppViewSet(viewsets.ModelViewSet):
     """
-    CRUD for App templates.
-    Admin-only for writes; read-only for all authenticated users.
+    CRUD for App templates in tenant schema.
+    
+    This viewset controls which apps (from public.usecase) are accessible to the current tenant.
+    Only enabled apps are shown to non-admin users.
+    Admin users can see all apps (enabled and disabled) for tenant management.
     """
     queryset = App.objects.all()
     serializer_class = AppSerializer
@@ -47,7 +50,12 @@ class AppViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
+        
+        # Filter to only show enabled apps for non-admin users
         if not user.is_staff:
+            qs = qs.filter(is_enabled=True)
+            
+            # Additional role-based filtering
             try:
                 from apps.roles.models import UserRole
 
@@ -57,17 +65,99 @@ class AppViewSet(viewsets.ModelViewSet):
                     allowed.update(role.allowed_apps or [])
                 if allowed:
                     qs = qs.filter(id__in=allowed)
-                else:
-                    qs = qs.none()
             except Exception:
-                qs = qs.none()
-        return qs
+                # If roles don't exist or error, just show enabled apps
+                pass
+        
+        # Order by name for consistent display
+        return qs.order_by('name')
 
     def get_permissions(self):
         if self.action in ("create", "update", "partial_update", "destroy"):
             return [permissions.IsAdminUser()]
         return super().get_permissions()
 
+    def list(self, request, *args, **kwargs):
+        """
+        List apps accessible to this tenant with full molecule/atom data from public.usecase
+        Uses API-level tenant switching based on user's environment variables.
+        """
+        from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+        from apps.usecase.models import UseCase
+        
+        # Get user's tenant schema
+        schema_name = get_user_tenant_schema(request.user)
+        if not schema_name:
+            logger.warning(f"No tenant schema found for user {request.user.username}")
+            return Response([])
+        
+        logger.info(f"🔄 Switching to tenant schema: {schema_name} for user {request.user.username}")
+        
+        # Switch to user's tenant schema
+        with switch_to_user_tenant(request.user):
+            logger.info(f"✅ Now in tenant schema: {schema_name}")
+            # Get apps from the user's tenant schema
+            queryset = self.filter_queryset(self.get_queryset())
+            logger.info(f"📊 Queryset count: {queryset.count()}")
+            
+            enriched_apps = []
+            for app in queryset:
+                app_data = {
+                    'id': app.id,
+                    'name': app.name,
+                    'slug': app.slug,
+                    'description': app.description,
+                    'modules': [],
+                    'molecules': [],
+                    'molecule_atoms': {},
+                    'atoms_in_molecules': []
+                }
+                
+                # Fetch data from public.usecase if linked
+                if app.usecase_id:
+                    try:
+                        from apps.trinity_v1_atoms.models import TrinityV1Atom
+                        
+                        usecase = UseCase.objects.prefetch_related('molecule_objects').get(id=app.usecase_id)
+                        app_data['modules'] = usecase.modules or []
+                        app_data['molecules'] = usecase.molecules or []
+                        
+                        # Build molecule_atoms and atoms_in_molecules from molecule_objects
+                        molecule_atoms = {}
+                        atoms_in_molecules = []
+                        
+                        for molecule in usecase.molecule_objects.all():
+                            atom_ids = molecule.atoms or []
+                            matching_atoms = TrinityV1Atom.objects.filter(id__in=atom_ids)
+                            
+                            atoms_list = []
+                            for atom in matching_atoms:
+                                atom_data = {
+                                    'id': atom.atom_id,
+                                    'name': atom.name,
+                                    'description': atom.description,
+                                    'category': atom.category
+                                }
+                                atoms_list.append(atom_data)
+                                if atom.atom_id not in atoms_in_molecules:
+                                    atoms_in_molecules.append(atom.atom_id)
+                            
+                            molecule_atoms[molecule.molecule_id] = {
+                                'id': molecule.molecule_id,
+                                'name': molecule.name,
+                                'atoms': atoms_list
+                            }
+                        
+                        app_data['molecule_atoms'] = molecule_atoms
+                        app_data['atoms_in_molecules'] = atoms_in_molecules
+                    except UseCase.DoesNotExist:
+                        logger.warning(f"UseCase {app.usecase_id} not found for app {app.slug}")
+                
+                enriched_apps.append(app_data)
+            
+            logger.info(f"Found {len(enriched_apps)} apps for tenant {schema_name}")
+            return Response(enriched_apps)
+    
     def retrieve(self, request, *args, **kwargs):
         load_env_vars(request.user)
         app_obj = self.get_object()

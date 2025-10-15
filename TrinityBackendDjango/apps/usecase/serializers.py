@@ -10,7 +10,7 @@ class UseCaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = UseCase
         fields = [
-            'id', 'name', 'slug', 'description',
+            'id', 'name', 'slug', 'description', 'modules', 'molecules',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

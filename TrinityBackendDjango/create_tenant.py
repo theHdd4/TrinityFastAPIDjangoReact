@@ -238,29 +238,76 @@ def main():
     except Exception as exc:
         print(f"   ⚠️  Failed to sync atoms: {exc}")
 
-    # Seed default App templates if none exist
-    from apps.registry.models import App
+    # Populate molecules data in public schema
+    try:
+        call_command("populate_molecules")
+        print("   ✅ Molecules data populated in public schema")
+    except Exception as exc:
+        print(f"   ⚠️  Failed to populate molecules: {exc}")
 
-    default_apps = [
-        ("Marketing Mix Modeling", "marketing-mix", "Preset: Pre-process + Build"),
-        ("Forecasting Analysis", "forecasting", "Preset: Pre-process + Explore"),
-        ("Promo Effectiveness", "promo-effectiveness", "Preset: Explore + Build"),
-        ("Blank App", "blank", "Start from an empty canvas"),
+    # Populate use cases if they don't exist
+    try:
+        call_command("populate_usecases")
+        print("   ✅ Use cases populated in public schema")
+    except Exception as exc:
+        print(f"   ⚠️  Failed to populate use cases: {exc}")
+
+    # Assign molecules to use cases
+    try:
+        call_command("assign_molecules_to_usecases")
+        print("   ✅ Molecules assigned to use cases")
+    except Exception as exc:
+        print(f"   ⚠️  Failed to assign molecules to use cases: {exc}")
+
+    # Grant app access from public.usecase table
+    from apps.registry.models import App
+    from apps.usecase.models import UseCase
+
+    # Default apps to grant access to new tenants
+    default_app_slugs = [
+        "marketing-mix",
+        "forecasting", 
+        "promo-effectiveness",
+        "blank"
     ]
 
+    print(f"\n→ 4) Granting app access from public.usecase table...")
+    
     allowed_app_ids = []
-    # Ensure we're operating within the tenant schema when seeding data
+    # Ensure we're operating within the tenant schema when granting access
     with schema_context(tenant_schema):
-        for name, slug, desc in default_apps:
-            obj, created = App.objects.get_or_create(
-                slug=slug,
-                defaults={"name": name, "description": desc},
-            )
-            allowed_app_ids.append(obj.id)
-            if created:
-                print(f"   → Created App template '{name}'")
-            else:
-                print(f"   → App template '{name}' already exists")
+        for slug in default_app_slugs:
+            try:
+                # Get app from public.usecase
+                usecase = UseCase.objects.get(slug=slug)
+                
+                # Create or update tenant's registry.App
+                obj, created = App.objects.update_or_create(
+                    usecase_id=usecase.id,
+                    defaults={
+                        "name": usecase.name,
+                        "slug": usecase.slug,
+                        "description": usecase.description,
+                        "is_enabled": True,
+                        "custom_config": {
+                            "molecules": usecase.molecules,  # Include molecules data
+                            "modules": usecase.modules       # Include modules data
+                        }
+                    }
+                )
+                allowed_app_ids.append(obj.id)
+                
+                if created:
+                    print(f"   ✅ Granted access: {usecase.name} (UseCase ID: {usecase.id})")
+                    print(f"       Molecules: {usecase.molecules}")
+                else:
+                    print(f"   ♻️  Updated access: {usecase.name} (UseCase ID: {usecase.id})")
+                    print(f"       Molecules: {usecase.molecules}")
+                    
+            except UseCase.DoesNotExist:
+                print(f"   ⚠️  App '{slug}' not found in public.usecase - skipping")
+                print(f"       Run: python manage.py populate_usecases")
+                continue
 
         from apps.roles.models import UserRole
 
