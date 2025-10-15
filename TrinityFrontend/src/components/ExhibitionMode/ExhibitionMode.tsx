@@ -32,6 +32,7 @@ import {
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 import { createTextBoxSlideObject } from './components/operationsPalette/textBox/constants';
+import { createTableSlideObject } from './components/operationsPalette/tables/constants';
 import {
   buildChartRendererPropsFromManifest,
   buildTableDataFromManifest,
@@ -134,6 +135,13 @@ const ExhibitionMode = () => {
       return (crypto as Crypto).randomUUID();
     }
     return `textbox-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }, []);
+
+  const generateTableId = useCallback(() => {
+    if (typeof crypto !== 'undefined' && typeof (crypto as Crypto).randomUUID === 'function') {
+      return (crypto as Crypto).randomUUID();
+    }
+    return `table-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }, []);
 
   const clearAutoAdvanceTimer = useCallback(() => {
@@ -1181,6 +1189,25 @@ const ExhibitionMode = () => {
       }),
     );
   }, [addSlideObject, currentSlide, exhibitedCards, generateTextBoxId, slideObjectsByCardId]);
+
+  const handleCreateTable = useCallback(() => {
+    const targetCard = exhibitedCards[currentSlide];
+    if (!targetCard) {
+      return;
+    }
+
+    const existingObjects = slideObjectsByCardId[targetCard.id] ?? [];
+    const existingTables = existingObjects.filter(object => object.type === 'table').length;
+    const offset = existingTables * 32;
+
+    addSlideObject(
+      targetCard.id,
+      createTableSlideObject(generateTableId(), {
+        x: 140 + offset,
+        y: 160 + offset,
+      }),
+    );
+  }, [addSlideObject, currentSlide, exhibitedCards, generateTableId, slideObjectsByCardId]);
   const slideWrapperStyle: React.CSSProperties | undefined = isSlideshowActive
     ? {
         opacity: slideshowOpacity,
@@ -1381,6 +1408,7 @@ const ExhibitionMode = () => {
             onExport={() => setIsExportOpen(true)}
             onGridView={() => setShowGridView(true)}
             onCreateTextBox={handleCreateTextBox}
+            onCreateTable={handleCreateTable}
             canEdit={canEdit}
           />
         )}

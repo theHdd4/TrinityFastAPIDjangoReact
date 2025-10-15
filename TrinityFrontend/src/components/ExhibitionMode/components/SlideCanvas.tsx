@@ -44,6 +44,13 @@ import {
 import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
 import { SlideTextBoxObject } from './operationsPalette/textBox/TextBox';
 import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from './operationsPalette/textBox/constants';
+import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
+import {
+  DEFAULT_TABLE_COLS,
+  DEFAULT_TABLE_ROWS,
+  createEmptyTableData,
+  normaliseTableData,
+} from './operationsPalette/tables/constants';
 import type { TextBoxFormatting } from './operationsPalette/textBox/types';
 
 interface CanvasDropPlacement {
@@ -1668,6 +1675,174 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
       if (object.type === 'text-box') {
         return null;
+      }
+
+      if (object.type === 'table') {
+        const props = (object.props as Record<string, unknown>) ?? {};
+        const fallbackRows = Number.isFinite(props.rows)
+          ? Math.max(1, Math.floor(props.rows as number))
+          : DEFAULT_TABLE_ROWS;
+        const fallbackCols = Number.isFinite(props.cols)
+          ? Math.max(1, Math.floor(props.cols as number))
+          : DEFAULT_TABLE_COLS;
+        const tableData = normaliseTableData(props.data ?? props.cells, fallbackRows, fallbackCols);
+        const rowCount = tableData.length;
+        const colCount = tableData[0]?.length ?? 0;
+        const storedLocked = Boolean(props.locked);
+
+        const applyTableUpdate = (updater: (current: string[][]) => string[][]) => {
+          if (!canEdit) {
+            return;
+          }
+          const nextMatrix = updater(tableData);
+          const safeRows = Math.max(nextMatrix.length, 1);
+          const safeCols = Math.max(
+            nextMatrix.reduce((max, row) => Math.max(max, row.length), 0),
+            1,
+          );
+          const normalised = normaliseTableData(nextMatrix, safeRows, safeCols);
+          onInteract();
+          onBulkUpdate({
+            [object.id]: {
+              props: {
+                ...(object.props || {}),
+                data: normalised,
+                rows: normalised.length,
+                cols: normalised[0]?.length ?? 0,
+              },
+            },
+          });
+        };
+
+        const addEmptyRows = (count: number) => {
+          if (count <= 0) {
+            return;
+          }
+          applyTableUpdate(current => {
+            const next = current.map(row => [...row]);
+            const targetCols = current[0]?.length ?? DEFAULT_TABLE_COLS;
+            for (let index = 0; index < count; index += 1) {
+              next.push(Array.from({ length: targetCols }, () => ''));
+            }
+            return next;
+          });
+        };
+
+        const addEmptyColumns = (count: number) => {
+          if (count <= 0) {
+            return;
+          }
+          applyTableUpdate(current => {
+            if (current.length === 0) {
+              return createEmptyTableData(1, Math.max(count, 1));
+            }
+            return current.map(row => {
+              const nextRow = [...row];
+              for (let index = 0; index < count; index += 1) {
+                nextRow.push('');
+              }
+              return nextRow;
+            });
+          });
+        };
+
+        const deleteRowsRange = (startIndex: number, count: number) => {
+          if (count <= 0) {
+            return;
+          }
+          applyTableUpdate(current => {
+            if (current.length <= 1) {
+              return current;
+            }
+            const start = Math.max(0, Math.min(startIndex, current.length - 1));
+            const end = Math.min(current.length, start + count);
+            const next = current.filter((_, index) => index < start || index >= end);
+            if (next.length === 0) {
+              const cols = current[0]?.length ?? DEFAULT_TABLE_COLS;
+              return createEmptyTableData(1, cols);
+            }
+            return next;
+          });
+        };
+
+        const deleteColumnsRange = (startIndex: number, count: number) => {
+          if (count <= 0) {
+            return;
+          }
+          applyTableUpdate(current => {
+            const cols = current[0]?.length ?? 0;
+            if (cols <= 1) {
+              return current;
+            }
+            const start = Math.max(0, Math.min(startIndex, cols - 1));
+            const end = Math.min(cols, start + count);
+            return current.map(row => {
+              const nextRow = row.filter((_, index) => index < start || index >= end);
+              if (nextRow.length === 0) {
+                return [''];
+              }
+              return nextRow;
+            });
+          });
+        };
+
+        const handleToggleLock = () => {
+          if (!canEdit) {
+            return;
+          }
+          onInteract();
+          onBulkUpdate({
+            [object.id]: {
+              props: {
+                ...(object.props || {}),
+                locked: !storedLocked,
+              },
+            },
+          });
+        };
+
+        return (
+          <ExhibitionTable
+            id={object.id}
+            data={tableData}
+            rows={rowCount}
+            cols={colCount}
+            locked={storedLocked}
+            canEdit={canEdit}
+            onUpdateCell={(rowIndex, colIndex, value) => {
+              if (!canEdit) {
+                return;
+              }
+              const safeRow = Math.max(0, Math.min(rowIndex, tableData.length - 1));
+              const safeCol = Math.max(0, Math.min(colIndex, (tableData[safeRow]?.length ?? 1) - 1));
+              applyTableUpdate(current => {
+                const next = current.map(row => [...row]);
+                if (!next[safeRow]) {
+                  return current;
+                }
+                next[safeRow][safeCol] = typeof value === 'string' ? value : String(value ?? '');
+                return next;
+              });
+            }}
+            onAddRow={() => addEmptyRows(1)}
+            onAdd2Rows={() => addEmptyRows(2)}
+            onAddColumn={() => addEmptyColumns(1)}
+            onAdd2Columns={() => addEmptyColumns(2)}
+            onDeleteRow={rowIndex => deleteRowsRange(rowIndex, 1)}
+            onDelete2Rows={rowIndex => deleteRowsRange(rowIndex, 2)}
+            onDeleteColumn={colIndex => deleteColumnsRange(colIndex, 1)}
+            onDelete2Columns={colIndex => deleteColumnsRange(colIndex, 2)}
+            onDelete={() => {
+              if (!canEdit) {
+                return;
+              }
+              onInteract();
+              onRemoveObject?.(object.id);
+            }}
+            onToggleLock={handleToggleLock}
+            className="h-full w-full overflow-auto"
+          />
+        );
       }
 
       if (typeof object.props?.text === 'string') {

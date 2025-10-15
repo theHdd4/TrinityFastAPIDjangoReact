@@ -18,6 +18,7 @@ interface OperationsPaletteProps {
   onExport?: () => void;
   onGridView?: () => void;
   onCreateTextBox?: () => void;
+  onCreateTable?: () => void;
   canEdit?: boolean;
 }
 
@@ -26,6 +27,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
   onExport,
   onGridView,
   onCreateTextBox,
+  onCreateTable,
   canEdit = true,
 }) => {
   const operations = useMemo<PaletteOperation[]>(
@@ -33,10 +35,10 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
       createAiAssistantOperation(),
       createTextOperation({ onCreateTextBox, canEdit }),
       createImagesOperation(),
-      createTablesOperation(),
+      createTablesOperation({ onCreateTable, canEdit }),
       createChartsOperation(),
     ],
-    [onCreateTextBox, canEdit],
+    [onCreateTextBox, onCreateTable, canEdit],
   );
 
   const tools = useMemo<PaletteOperation[]>(

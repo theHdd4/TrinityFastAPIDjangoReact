@@ -20,6 +20,7 @@ import {
 
 export interface ExhibitionTableTrayProps {
   locked: boolean;
+  canEdit?: boolean;
   rows: number;
   cols: number;
   selectedCell: { row: number; col: number } | null;
@@ -37,6 +38,7 @@ export interface ExhibitionTableTrayProps {
 
 export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
   locked,
+  canEdit = true,
   rows,
   cols,
   selectedCell,
@@ -53,34 +55,34 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
 }) => {
   return (
     <ContextMenuContent className="w-64">
-      <ContextMenuItem disabled={locked}>
+      <ContextMenuItem disabled={locked || !canEdit}>
         <Copy className="mr-2 h-4 w-4" />
         Copy
         <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
       </ContextMenuItem>
-      <ContextMenuItem disabled={locked}>
+      <ContextMenuItem disabled={locked || !canEdit}>
         <Clipboard className="mr-2 h-4 w-4" />
         Copy style
         <ContextMenuShortcut>Ctrl+Alt+C</ContextMenuShortcut>
       </ContextMenuItem>
-      <ContextMenuItem disabled={locked}>
+      <ContextMenuItem disabled={locked || !canEdit}>
         <Clipboard className="mr-2 h-4 w-4" />
         Paste
         <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
       </ContextMenuItem>
-      <ContextMenuItem disabled={locked}>
+      <ContextMenuItem disabled={locked || !canEdit}>
         <Files className="mr-2 h-4 w-4" />
         Duplicate
         <ContextMenuShortcut>Ctrl+D</ContextMenuShortcut>
       </ContextMenuItem>
-      <ContextMenuItem onClick={onDelete} disabled={locked}>
+      <ContextMenuItem onClick={onDelete} disabled={locked || !canEdit}>
         <Trash2 className="mr-2 h-4 w-4" />
         Delete table
       </ContextMenuItem>
 
       <ContextMenuSeparator />
 
-      <ContextMenuItem onClick={onToggleLock}>
+      <ContextMenuItem onClick={onToggleLock} disabled={!canEdit}>
         <Lock className="mr-2 h-4 w-4" />
         {locked ? 'Unlock' : 'Lock'}
         <ContextMenuShortcut>Alt+Shift+L</ContextMenuShortcut>
@@ -90,28 +92,28 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
 
       <ContextMenuItem
         onClick={onDeleteColumn}
-        disabled={locked || !selectedCell || cols <= 1}
+        disabled={locked || !selectedCell || cols <= 1 || !canEdit}
       >
         <Minus className="mr-2 h-4 w-4" />
         Delete column
       </ContextMenuItem>
       <ContextMenuItem
         onClick={onDelete2Columns}
-        disabled={locked || !selectedCell || cols <= 2}
+        disabled={locked || !selectedCell || cols <= 2 || !canEdit}
       >
         <Minus className="mr-2 h-4 w-4" />
         Delete 2 columns
       </ContextMenuItem>
       <ContextMenuItem
         onClick={onDeleteRow}
-        disabled={locked || !selectedCell || rows <= 1}
+        disabled={locked || !selectedCell || rows <= 1 || !canEdit}
       >
         <Minus className="mr-2 h-4 w-4" />
         Delete row
       </ContextMenuItem>
       <ContextMenuItem
         onClick={onDelete2Rows}
-        disabled={locked || !selectedCell || rows <= 2}
+        disabled={locked || !selectedCell || rows <= 2 || !canEdit}
       >
         <Minus className="mr-2 h-4 w-4" />
         Delete 2 rows
@@ -119,38 +121,38 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
 
       <ContextMenuSeparator />
 
-      <ContextMenuItem onClick={onAddColumn} disabled={locked}>
+      <ContextMenuItem onClick={onAddColumn} disabled={locked || !canEdit}>
         <Plus className="mr-2 h-4 w-4" />
         Add column
       </ContextMenuItem>
-      <ContextMenuItem onClick={onAdd2Columns} disabled={locked}>
+      <ContextMenuItem onClick={onAdd2Columns} disabled={locked || !canEdit}>
         <Plus className="mr-2 h-4 w-4" />
         Add 2 columns
       </ContextMenuItem>
-      <ContextMenuItem onClick={onAddRow} disabled={locked}>
+      <ContextMenuItem onClick={onAddRow} disabled={locked || !canEdit}>
         <Plus className="mr-2 h-4 w-4" />
         Add row
       </ContextMenuItem>
-      <ContextMenuItem onClick={onAdd2Rows} disabled={locked}>
+      <ContextMenuItem onClick={onAdd2Rows} disabled={locked || !canEdit}>
         <Plus className="mr-2 h-4 w-4" />
         Add 2 rows
       </ContextMenuItem>
 
       <ContextMenuSeparator />
 
-      <ContextMenuItem disabled={locked}>
+      <ContextMenuItem disabled={locked || !canEdit}>
         <AlignHorizontalSpaceAround className="mr-2 h-4 w-4" />
         Size columns equally
       </ContextMenuItem>
-      <ContextMenuItem disabled={locked}>
+      <ContextMenuItem disabled={locked || !canEdit}>
         <AlignVerticalSpaceAround className="mr-2 h-4 w-4" />
         Size row to content
       </ContextMenuItem>
-      <ContextMenuItem disabled={locked}>
+      <ContextMenuItem disabled={locked || !canEdit}>
         <AlignHorizontalSpaceAround className="mr-2 h-4 w-4" />
         Size columns to content
       </ContextMenuItem>
-      <ContextMenuItem disabled={locked}>
+      <ContextMenuItem disabled={locked || !canEdit}>
         <Grid3x3 className="mr-2 h-4 w-4" />
         Merge cells
       </ContextMenuItem>

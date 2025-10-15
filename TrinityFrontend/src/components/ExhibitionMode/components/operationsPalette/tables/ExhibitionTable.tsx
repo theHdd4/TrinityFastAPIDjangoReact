@@ -4,17 +4,9 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
-import {
-  ExhibitionTableTray,
-  type ExhibitionTableTrayProps,
-} from './ExhibitionTableTray';
+import { ExhibitionTableTray } from './ExhibitionTableTray';
 
-type TableTrayCallbacks = Omit<
-  ExhibitionTableTrayProps,
-  'locked' | 'rows' | 'cols' | 'selectedCell'
->;
-
-export interface ExhibitionTableProps extends Partial<TableTrayCallbacks> {
+export interface ExhibitionTableProps {
   id: string;
   headers?: string[];
   data: string[][];
@@ -25,6 +17,17 @@ export interface ExhibitionTableProps extends Partial<TableTrayCallbacks> {
   onCellSelect?: (cell: { row: number; col: number }) => void;
   onUpdateCell?: (row: number, col: number, value: string) => void;
   className?: string;
+  canEdit?: boolean;
+  onToggleLock?: () => void;
+  onDelete?: () => void;
+  onDeleteColumn?: (colIndex: number) => void;
+  onDelete2Columns?: (colIndex: number) => void;
+  onDeleteRow?: (rowIndex: number) => void;
+  onDelete2Rows?: (rowIndex: number) => void;
+  onAddColumn?: () => void;
+  onAdd2Columns?: () => void;
+  onAddRow?: () => void;
+  onAdd2Rows?: () => void;
 }
 
 const noop = () => {};
@@ -34,6 +37,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   headers,
   data,
   locked = false,
+  canEdit = true,
   rows,
   cols,
   selectedCell,
@@ -105,7 +109,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
     colIndex: number,
     event: React.FocusEvent<HTMLTableCellElement>,
   ) => {
-    if (locked) {
+    if (locked || !canEdit) {
       return;
     }
     const value = event.currentTarget.textContent ?? '';
@@ -150,7 +154,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
                           !locked && 'cursor-text',
                           isActive && 'bg-primary/10 outline outline-2 outline-primary/60',
                         )}
-                        contentEditable={!locked}
+                        contentEditable={canEdit && !locked}
                         suppressContentEditableWarning
                         onFocus={() => handleCellSelect(rowIndex, colIndex)}
                         onClick={() => handleCellSelect(rowIndex, colIndex)}
@@ -169,15 +173,32 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
 
       <ExhibitionTableTray
         locked={locked}
+        canEdit={canEdit}
         rows={rowCount}
         cols={colCount}
         selectedCell={effectiveSelection}
         onToggleLock={onToggleLock}
         onDelete={onDelete}
-        onDeleteColumn={onDeleteColumn}
-        onDelete2Columns={onDelete2Columns}
-        onDeleteRow={onDeleteRow}
-        onDelete2Rows={onDelete2Rows}
+        onDeleteColumn={() => {
+          if (effectiveSelection) {
+            onDeleteColumn(effectiveSelection.col);
+          }
+        }}
+        onDelete2Columns={() => {
+          if (effectiveSelection) {
+            onDelete2Columns(effectiveSelection.col);
+          }
+        }}
+        onDeleteRow={() => {
+          if (effectiveSelection) {
+            onDeleteRow(effectiveSelection.row);
+          }
+        }}
+        onDelete2Rows={() => {
+          if (effectiveSelection) {
+            onDelete2Rows(effectiveSelection.row);
+          }
+        }}
         onAddColumn={onAddColumn}
         onAdd2Columns={onAdd2Columns}
         onAddRow={onAddRow}
