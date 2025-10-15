@@ -6,6 +6,7 @@ import Table from "@/templates/tables/table";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FEATURE_OVERVIEW_API } from "@/lib/api";
+import { resolvePalette } from "@/components/AtomList/atoms/feature-overview/utils/colorPalettes";
 import { fetchDimensionMapping } from "@/lib/dimensions";
 import { BarChart3, TrendingUp, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Plus, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
@@ -93,6 +94,23 @@ const parseNumericValue = (raw: string): number | null => {
 
   const value = Number(normalized);
   return Number.isFinite(value) ? value : null;
+};
+
+const humanizeAxisLabel = (value?: string | null): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return trimmed
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .replace(/^./, char => char.toUpperCase());
 };
 
 type LoadedSkuDataset = {
@@ -1130,21 +1148,25 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         yFieldCandidates.add(metric);
       }
 
-      const chart =
-        componentType === "trend_analysis" && chartState
-          ? {
-              type: chartState.chartType,
-              theme: chartState.theme,
-              showLegend: chartState.showLegend,
-              showAxisLabels: chartState.showAxisLabels,
-              showDataLabels: chartState.showDataLabels,
-              showGrid: chartState.showGrid,
-              xField: chartState.xAxisField,
-              yField: chartState.yAxisField ?? metric,
-              yFields: Array.from(yFieldCandidates).filter(Boolean),
-              colorPalette: chartState.colorPalette,
-            }
-          : undefined;
+        const chart =
+          componentType === "trend_analysis" && chartState
+            ? {
+                type: chartState.chartType,
+                theme: chartState.theme,
+                showLegend: chartState.showLegend,
+                showAxisLabels: chartState.showAxisLabels,
+                showDataLabels: chartState.showDataLabels,
+                showGrid: chartState.showGrid,
+                xField: chartState.xAxisField,
+                yField: chartState.yAxisField ?? metric,
+                yFields: Array.from(yFieldCandidates).filter(Boolean),
+                colorPalette: chartState.colorPalette,
+                legendField: chartState.legendField,
+                xAxisLabel: chartState.xAxisLabel,
+                yAxisLabel: chartState.yAxisLabel,
+                sortOrder: chartState.sortOrder ?? null,
+              }
+            : undefined;
 
       const table =
         componentType === "statistical_summary" && skuSnapshot
@@ -1204,6 +1226,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         );
 
         const capturedAt = new Date().toISOString();
+        const resolvedXAxisLabel = humanizeAxisLabel(settings?.xAxis) || humanizeAxisLabel(xAxisField) || xAxisField;
+        const resolvedYAxisLabel = humanizeAxisLabel(metric) || metric;
         const chartStateSnapshot:
           | FeatureOverviewExhibitionSelectionChartState
           | undefined =
@@ -1217,6 +1241,10 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                 showLegend,
                 xAxisField,
                 yAxisField: metric,
+                xAxisLabel: resolvedXAxisLabel,
+                yAxisLabel: resolvedYAxisLabel,
+                sortOrder: chartSortOrder ?? null,
+                colorPalette: resolvePalette(chartTheme),
               }
             : undefined;
 
