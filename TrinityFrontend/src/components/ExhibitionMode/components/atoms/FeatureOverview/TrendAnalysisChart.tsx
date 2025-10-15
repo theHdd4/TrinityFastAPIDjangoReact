@@ -403,7 +403,7 @@ const TrendAnalysisChart: React.FC<{ config: ChartRendererConfig }> = ({ config 
       <div ref={containerRef} className="w-full overflow-hidden">
         <svg ref={svgRef} role="img" aria-label={config.title ?? 'Trend analysis chart'} />
       </div>
-      {config.showLegend !== false && series.length > 0 && (
+      {config.showLegend !== false && series.length > 1 && (
         <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
           {series.map(entry => (
             <div key={entry.id} className="flex items-center gap-2">

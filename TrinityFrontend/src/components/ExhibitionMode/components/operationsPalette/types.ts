@@ -10,5 +10,6 @@ export interface PaletteOperation {
 
 export interface OperationFactoryDeps {
   onCreateTextBox?: () => void;
+  onCreateTable?: () => void;
   canEdit?: boolean;
 }
