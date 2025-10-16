@@ -9,24 +9,33 @@ import type { TextAlignOption } from '../textBox/types';
 import {
   DEFAULT_CELL_FORMATTING,
   createCellFormatting,
+  createDefaultHeaderCell,
   createEmptyCell,
   type TableCellData,
   type TableCellFormatting,
 } from './constants';
 import { ExhibitionTableTray } from './ExhibitionTableTray';
 
+export interface TableSelection {
+  row: number;
+  col: number;
+  region?: 'header' | 'body';
+}
+
 export interface ExhibitionTableProps {
   id: string;
-  headers?: string[];
+  headers?: TableCellData[];
   data: TableCellData[][];
   locked?: boolean;
   showOutline?: boolean;
   rows?: number;
   cols?: number;
-  selectedCell?: { row: number; col: number } | null;
-  onCellSelect?: (cell: { row: number; col: number }) => void;
+  selectedCell?: TableSelection | null;
+  onCellSelect?: (cell: TableSelection) => void;
   onUpdateCell?: (row: number, col: number, value: string) => void;
   onUpdateCellFormatting?: (row: number, col: number, updates: Partial<TableCellFormatting>) => void;
+  onUpdateHeader?: (col: number, value: string) => void;
+  onUpdateHeaderFormatting?: (col: number, updates: Partial<TableCellFormatting>) => void;
   className?: string;
   canEdit?: boolean;
   onToggleLock?: () => void;
@@ -238,7 +247,7 @@ interface EditableTableCellProps {
   canEdit: boolean;
   locked: boolean;
   showOutline: boolean;
-  onSelect: (cell: { row: number; col: number }) => void;
+  onSelect: (cell: TableSelection) => void;
   onChange: (value: string) => void;
   onCommit: (value: string) => void;
   onInteract?: () => void;
@@ -261,7 +270,7 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
   const editable = canEdit && !locked;
 
   const handleSelect = useCallback(() => {
-    onSelect({ row: rowIndex, col: colIndex });
+    onSelect({ row: rowIndex, col: colIndex, region: 'body' });
   }, [colIndex, onSelect, rowIndex]);
 
   const handleFocus = useCallback(() => {
@@ -301,6 +310,75 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
   );
 };
 
+interface EditableHeaderCellProps {
+  colIndex: number;
+  cell: TableCellData;
+  formatting: TableCellFormatting;
+  isActive: boolean;
+  canEdit: boolean;
+  locked: boolean;
+  showOutline: boolean;
+  onSelect: (cell: TableSelection) => void;
+  onChange: (value: string) => void;
+  onCommit: (value: string) => void;
+  onInteract?: () => void;
+}
+
+const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
+  colIndex,
+  cell,
+  formatting,
+  isActive,
+  canEdit,
+  locked,
+  showOutline,
+  onSelect,
+  onChange,
+  onCommit,
+  onInteract,
+}) => {
+  const editable = canEdit && !locked;
+
+  const handleSelect = useCallback(() => {
+    onSelect({ row: -1, col: colIndex, region: 'header' });
+  }, [colIndex, onSelect]);
+
+  const handleFocus = useCallback(() => {
+    handleSelect();
+    if (editable) {
+      onInteract?.();
+    }
+  }, [editable, handleSelect, onInteract]);
+
+  return (
+    <th
+      className={cn(
+        'align-middle transition-colors',
+        showOutline ? 'border border-border' : 'border border-transparent',
+        editable ? 'cursor-text' : 'cursor-default',
+        isActive && 'bg-primary/10 outline outline-2 outline-primary/60',
+      )}
+      style={{ textAlign: formatting.align }}
+      onClick={() => {
+        handleSelect();
+        if (editable) {
+          onInteract?.();
+        }
+      }}
+    >
+      <ContentEditableCell
+        value={cell?.content ?? ''}
+        formatting={formatting}
+        editable={editable}
+        onFocus={handleFocus}
+        onChange={onChange}
+        onCommit={onCommit}
+        onInteract={onInteract}
+      />
+    </th>
+  );
+};
+
 export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   id,
   headers,
@@ -314,6 +392,8 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   onCellSelect,
   onUpdateCell,
   onUpdateCellFormatting,
+  onUpdateHeader,
+  onUpdateHeaderFormatting,
   className,
   onToggleLock = noop,
   onToggleOutline = noop,
@@ -329,10 +409,13 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   onToolbarStateChange,
   onInteract,
 }) => {
-  const [internalSelection, setInternalSelection] = useState<{ row: number; col: number } | null>(null);
+  const [internalSelection, setInternalSelection] = useState<TableSelection | null>(null);
   const [toolbarFormatting, setToolbarFormatting] = useState<TableCellFormatting>(DEFAULT_CELL_FORMATTING);
 
   const effectiveSelection = selectedCell ?? internalSelection;
+  const selectionRegion = effectiveSelection
+    ? effectiveSelection.region ?? (effectiveSelection.row === -1 ? 'header' : 'body')
+    : null;
 
   useEffect(() => {
     if (selectedCell === undefined) {
@@ -358,10 +441,9 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
     if (typeof cols === 'number') {
       return cols;
     }
-    if (Array.isArray(headers) && headers.length > 0) {
-      return headers.length;
-    }
-    return data[0]?.length ?? 0;
+    const headerCount = Array.isArray(headers) ? headers.length : 0;
+    const dataCount = data[0]?.length ?? 0;
+    return Math.max(headerCount, dataCount);
   }, [cols, headers, data]);
 
   const tableData = useMemo(() => {
@@ -373,19 +455,38 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
     });
   }, [data, rowCount, colCount]);
 
-  const displayHeaders = useMemo(() => {
-    if (headers && headers.length === colCount) {
-      return headers;
-    }
+  const headerCells = useMemo(() => {
     if (colCount === 0) {
-      return [] as string[];
+      return [] as TableCellData[];
     }
-    return Array.from({ length: colCount }, (_, index) => `Column ${index + 1}`);
+
+    return Array.from({ length: colCount }, (_, index) => {
+      const source = headers?.[index];
+      if (source) {
+        return {
+          content: source.content ?? '',
+          formatting: source.formatting ?? createCellFormatting({ bold: true }),
+          rowSpan: source.rowSpan,
+          colSpan: source.colSpan,
+        };
+      }
+      return createDefaultHeaderCell(index);
+    });
   }, [headers, colCount]);
 
   useEffect(() => {
     if (!effectiveSelection) {
       setToolbarFormatting(DEFAULT_CELL_FORMATTING);
+      return;
+    }
+
+    if (selectionRegion === 'header') {
+      const header = headerCells[effectiveSelection.col];
+      if (header) {
+        setToolbarFormatting(header.formatting ?? DEFAULT_CELL_FORMATTING);
+      } else {
+        setToolbarFormatting(DEFAULT_CELL_FORMATTING);
+      }
       return;
     }
 
@@ -396,48 +497,89 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
     } else {
       setToolbarFormatting(DEFAULT_CELL_FORMATTING);
     }
-  }, [effectiveSelection, tableData]);
+  }, [effectiveSelection, headerCells, selectionRegion, tableData]);
 
-  const handleCellSelect = useCallback(
-    (cell: { row: number; col: number }) => {
+  const handleSelection = useCallback(
+    (cell: TableSelection) => {
       setInternalSelection(cell);
       onCellSelect?.(cell);
     },
     [onCellSelect],
   );
 
-  const handleCellInput = useCallback(
+  const handleBodyCellInput = useCallback(
     (rowIndex: number, colIndex: number, value: string) => {
-      if (locked || !canEdit) {
+      if (locked || !canEdit || !onUpdateCell) {
         return;
       }
       onInteract?.();
-      onUpdateCell?.(rowIndex, colIndex, value);
+      onUpdateCell(rowIndex, colIndex, value);
     },
     [canEdit, locked, onInteract, onUpdateCell],
   );
 
-  const handleCellBlur = useCallback(
+  const handleBodyCellCommit = useCallback(
     (rowIndex: number, colIndex: number, value: string) => {
-      if (locked || !canEdit) {
+      if (locked || !canEdit || !onUpdateCell) {
         return;
       }
       onInteract?.();
-      onUpdateCell?.(rowIndex, colIndex, value);
+      onUpdateCell(rowIndex, colIndex, value);
     },
     [canEdit, locked, onInteract, onUpdateCell],
+  );
+
+  const handleHeaderInput = useCallback(
+    (colIndex: number, value: string) => {
+      if (locked || !canEdit || !onUpdateHeader) {
+        return;
+      }
+      onInteract?.();
+      onUpdateHeader(colIndex, value);
+    },
+    [canEdit, locked, onInteract, onUpdateHeader],
+  );
+
+  const handleHeaderCommit = useCallback(
+    (colIndex: number, value: string) => {
+      if (locked || !canEdit || !onUpdateHeader) {
+        return;
+      }
+      onInteract?.();
+      onUpdateHeader(colIndex, value);
+    },
+    [canEdit, locked, onInteract, onUpdateHeader],
   );
 
   const applyFormatting = useCallback(
     (updates: Partial<TableCellFormatting>) => {
-      if (!effectiveSelection || !onUpdateCellFormatting) {
+      if (!effectiveSelection) {
+        return;
+      }
+
+      if (selectionRegion === 'header') {
+        if (!onUpdateHeaderFormatting) {
+          return;
+        }
+        onInteract?.();
+        setToolbarFormatting(prev => ({ ...prev, ...updates }));
+        onUpdateHeaderFormatting(effectiveSelection.col, updates);
+        return;
+      }
+      if (!onUpdateCellFormatting) {
         return;
       }
       onInteract?.();
       setToolbarFormatting(prev => ({ ...prev, ...updates }));
       onUpdateCellFormatting(effectiveSelection.row, effectiveSelection.col, updates);
     },
-    [effectiveSelection, onInteract, onUpdateCellFormatting],
+    [
+      effectiveSelection,
+      onInteract,
+      onUpdateCellFormatting,
+      onUpdateHeaderFormatting,
+      selectionRegion,
+    ],
   );
 
   const handleAlign = useCallback(
@@ -504,7 +646,6 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
       />
     );
   }, [
-    applyFormatting,
     canEdit,
     effectiveSelection,
     handleAlign,
@@ -544,20 +685,31 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
             )}
             data-table-id={id}
           >
-            {displayHeaders.length > 0 && (
+            {headerCells.length > 0 && (
               <thead className="bg-muted/40">
                 <tr>
-                  {displayHeaders.map((header, headerIndex) => (
-                    <th
-                      key={`${id}-header-${headerIndex}`}
-                      className={cn(
-                        'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground',
-                        showOutline ? 'border border-border' : 'border border-transparent',
-                      )}
-                    >
-                      {header}
-                    </th>
-                  ))}
+                  {headerCells.map((headerCell, headerIndex) => {
+                    const headerFormatting = headerCell?.formatting ?? createCellFormatting({ bold: true });
+                    const isActiveHeader =
+                      selectionRegion === 'header' && effectiveSelection?.col === headerIndex;
+
+                    return (
+                      <EditableHeaderCell
+                        key={`${id}-header-${headerIndex}`}
+                        colIndex={headerIndex}
+                        cell={headerCell}
+                        formatting={headerFormatting}
+                        isActive={Boolean(isActiveHeader)}
+                        canEdit={canEdit}
+                        locked={locked}
+                        showOutline={showOutline}
+                        onSelect={handleSelection}
+                        onChange={value => handleHeaderInput(headerIndex, value)}
+                        onCommit={value => handleHeaderCommit(headerIndex, value)}
+                        onInteract={onInteract}
+                      />
+                    );
+                  })}
                 </tr>
               </thead>
             )}
@@ -566,7 +718,9 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
                 <tr key={`${id}-row-${rowIndex}`} className="even:bg-muted/20">
                   {rowData.map((cell, colIndex) => {
                     const isActive =
-                      effectiveSelection?.row === rowIndex && effectiveSelection?.col === colIndex;
+                      selectionRegion === 'body' &&
+                      effectiveSelection?.row === rowIndex &&
+                      effectiveSelection?.col === colIndex;
                     const cellFormatting = cell?.formatting ?? createCellFormatting();
 
                     return (
@@ -580,9 +734,9 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
                         canEdit={canEdit}
                         locked={locked}
                         showOutline={showOutline}
-                        onSelect={handleCellSelect}
-                        onChange={value => handleCellInput(rowIndex, colIndex, value)}
-                        onCommit={value => handleCellBlur(rowIndex, colIndex, value)}
+                        onSelect={handleSelection}
+                        onChange={value => handleBodyCellInput(rowIndex, colIndex, value)}
+                        onCommit={value => handleBodyCellCommit(rowIndex, colIndex, value)}
                         onInteract={onInteract}
                       />
                     );
@@ -605,22 +759,22 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
         onToggleOutline={onToggleOutline}
         onDelete={onDelete}
         onDeleteColumn={() => {
-          if (effectiveSelection) {
+          if (effectiveSelection && effectiveSelection.col >= 0) {
             onDeleteColumn(effectiveSelection.col);
           }
         }}
         onDelete2Columns={() => {
-          if (effectiveSelection) {
+          if (effectiveSelection && effectiveSelection.col >= 0) {
             onDelete2Columns(effectiveSelection.col);
           }
         }}
         onDeleteRow={() => {
-          if (effectiveSelection) {
+          if (effectiveSelection && selectionRegion === 'body' && effectiveSelection.row >= 0) {
             onDeleteRow(effectiveSelection.row);
           }
         }}
         onDelete2Rows={() => {
-          if (effectiveSelection) {
+          if (effectiveSelection && selectionRegion === 'body' && effectiveSelection.row >= 0) {
             onDelete2Rows(effectiveSelection.row);
           }
         }}
