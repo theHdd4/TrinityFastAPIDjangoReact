@@ -98,14 +98,17 @@ const ExhibitionMode = () => {
     | null
   >(null);
   const [showThumbnails, setShowThumbnails] = useState(false);
-  const [showNotes, setShowNotes] = useState(false);
   const [showGridView, setShowGridView] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'horizontal' | 'vertical'>('horizontal');
   const [isCatalogueOpen, setIsCatalogueOpen] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [undoAvailable, setUndoAvailable] = useState(false);
-  const [operationsPalettePanel, setOperationsPalettePanel] = useState<ReactNode | null>(null);
+  const [operationsPanelState, setOperationsPanelState] = useState<
+    | { type: 'custom'; node: ReactNode }
+    | { type: 'notes' }
+    | null
+  >(null);
   const [notes, setNotes] = useState<Record<number, string>>(() => {
     if (typeof window === 'undefined') {
       return {};
@@ -203,13 +206,13 @@ const ExhibitionMode = () => {
 
   useEffect(() => {
     if (isFullscreen) {
-      setOperationsPalettePanel(null);
+      setOperationsPanelState(null);
     }
   }, [isFullscreen]);
 
   useEffect(() => {
     if (!canEdit) {
-      setOperationsPalettePanel(null);
+      setOperationsPanelState(null);
     }
   }, [canEdit]);
 
@@ -311,7 +314,7 @@ const ExhibitionMode = () => {
     setIsSlideshowActive(true);
     setShowThumbnails(false);
     setShowGridView(false);
-    setShowNotes(false);
+    setOperationsPanelState(null);
 
     if (!isFullscreen) {
       setIsFullscreen(true);
@@ -326,7 +329,6 @@ const ExhibitionMode = () => {
     isFullscreen,
     clearSlideshowTimers,
     setShowGridView,
-    setShowNotes,
     setShowThumbnails,
     viewMode,
   ]);
@@ -1131,7 +1133,7 @@ const ExhibitionMode = () => {
     [cards, currentSlide, exhibitedCards, removeSlideObject, toast, updateCard]
   );
 
-  const handleNotesChange = (slideIndex: number, value: string) => {
+  const handleNotesChange = useCallback((slideIndex: number, value: string) => {
     setNotes(prev => {
       const next = { ...prev };
       if (!value.trim()) {
@@ -1141,7 +1143,7 @@ const ExhibitionMode = () => {
       }
       return next;
     });
-  };
+  }, []);
 
   const handleAddSlide = useCallback(() => {
     if (!canEdit) {
@@ -1163,6 +1165,47 @@ const ExhibitionMode = () => {
       description: 'A new slide has been added to your presentation.',
     });
   }, [addBlankSlide, canEdit, currentSlide, exhibitedCards.length, toast]);
+
+  const handleOperationsPalettePanelChange = useCallback((panel: ReactNode | null) => {
+    if (panel) {
+      setOperationsPanelState({ type: 'custom', node: panel });
+      return;
+    }
+
+    setOperationsPanelState(prev => {
+      if (prev?.type === 'notes') {
+        return prev;
+      }
+      return null;
+    });
+  }, []);
+
+  const handleShowNotesPanel = useCallback(() => {
+    setOperationsPanelState({ type: 'notes' });
+  }, []);
+
+  const handleCloseNotesPanel = useCallback(() => {
+    setOperationsPanelState(null);
+  }, []);
+
+  const operationsPalettePanel = useMemo(() => {
+    if (!operationsPanelState) {
+      return null;
+    }
+
+    if (operationsPanelState.type === 'notes') {
+      return (
+        <SlideNotes
+          currentSlide={currentSlide}
+          notes={notes}
+          onNotesChange={handleNotesChange}
+          onClose={handleCloseNotesPanel}
+        />
+      );
+    }
+
+    return operationsPanelState.node;
+  }, [currentSlide, handleCloseNotesPanel, handleNotesChange, notes, operationsPanelState]);
 
   const handleToggleViewMode = useCallback(() => {
     if (isSlideshowActive) {
@@ -1431,12 +1474,12 @@ const ExhibitionMode = () => {
                   canEdit={canEdit}
                   onPresentationChange={handlePresentationChange}
                   onRemoveAtom={handleRemoveAtom}
-                  onShowNotes={() => setShowNotes(true)}
+                  onShowNotes={handleShowNotesPanel}
                   viewMode="horizontal"
                   isActive
                   onTitleChange={handleTitleChange}
                   presenterName={presenterDisplayName}
-                  onPositionPanelChange={setOperationsPalettePanel}
+                  onPositionPanelChange={handleOperationsPalettePanelChange}
                 />
               ) : (
                 emptyCanvas
@@ -1460,12 +1503,12 @@ const ExhibitionMode = () => {
                     canEdit={canEdit}
                     onPresentationChange={handlePresentationChange}
                     onRemoveAtom={handleRemoveAtom}
-                    onShowNotes={() => setShowNotes(true)}
+                    onShowNotes={handleShowNotesPanel}
                     viewMode="vertical"
                     isActive={currentSlide === index}
                     onTitleChange={handleTitleChange}
                     presenterName={presenterDisplayName}
-                    onPositionPanelChange={setOperationsPalettePanel}
+                    onPositionPanelChange={handleOperationsPalettePanelChange}
                   />
                 </div>
               ))}
@@ -1474,15 +1517,6 @@ const ExhibitionMode = () => {
             emptyCanvas
           )}
         </div>
-
-        {showNotes && (
-          <SlideNotes
-            currentSlide={currentSlide}
-            notes={notes}
-            onNotesChange={handleNotesChange}
-            onClose={() => setShowNotes(false)}
-          />
-        )}
 
         {!isFullscreen && (
           <OperationsPalette
