@@ -7,6 +7,7 @@ import {
   parseShapeObjectProps,
   type ShapeDefinition,
   type ShapeObjectProps,
+  type ShapeStrokeStyle,
 } from './constants';
 
 interface SlideShapeObjectProps {
@@ -77,6 +78,14 @@ export const SlideShapeObject: React.FC<SlideShapeObjectProps> = ({
     [onInteract, onUpdateProps],
   );
 
+  const handleStrokeStyleChange = useCallback(
+    (style: ShapeStrokeStyle) => {
+      onInteract();
+      onUpdateProps({ strokeStyle: style });
+    },
+    [onInteract, onUpdateProps],
+  );
+
   const handleOpacityChange = useCallback(
     (opacity: number) => {
       onInteract();
@@ -106,11 +115,13 @@ export const SlideShapeObject: React.FC<SlideShapeObjectProps> = ({
         fill={parsed.fill}
         stroke={parsed.stroke}
         strokeWidth={parsed.strokeWidth}
+        strokeStyle={parsed.strokeStyle}
         opacity={parsed.opacity}
         supportsFill={supportsFill}
         onFillChange={supportsFill ? handleFillChange : undefined}
         onStrokeChange={handleStrokeChange}
         onStrokeWidthChange={handleStrokeWidthChange}
+        onStrokeStyleChange={handleStrokeStyleChange}
         onOpacityChange={handleOpacityChange}
         onBringToFront={handleBringToFront}
         onSendToBack={handleSendToBack}
@@ -127,12 +138,14 @@ export const SlideShapeObject: React.FC<SlideShapeObjectProps> = ({
     handleOpacityChange,
     handleSendToBack,
     handleStrokeChange,
+    handleStrokeStyleChange,
     handleStrokeWidthChange,
     onDelete,
     onRequestPositionPanel,
     parsed.fill,
     parsed.opacity,
     parsed.stroke,
+    parsed.strokeStyle,
     parsed.strokeWidth,
     supportsFill,
   ]);
@@ -173,6 +186,7 @@ export const SlideShapeObject: React.FC<SlideShapeObjectProps> = ({
         fill={parsed.fill}
         stroke={parsed.stroke}
         strokeWidth={parsed.strokeWidth}
+        strokeStyle={parsed.strokeStyle}
         opacity={parsed.opacity}
         className="h-full w-full"
       />

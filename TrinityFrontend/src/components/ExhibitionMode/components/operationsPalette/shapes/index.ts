@@ -8,5 +8,5 @@ export {
   SHAPE_DEFINITIONS,
   SHAPE_CATEGORIES,
 } from './constants';
-export type { ShapeDefinition, ShapeCategory } from './constants';
+export type { ShapeDefinition, ShapeCategory, ShapeStrokeStyle } from './constants';
 export { ShapeRenderer } from './ShapeRenderer';

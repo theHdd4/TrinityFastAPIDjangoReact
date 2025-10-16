@@ -1,40 +1,23 @@
 import React from 'react';
-import {
-  Check,
-  ChevronsDown,
-  ChevronsUp,
-  Minus,
-  Move,
-  Palette as PaletteIcon,
-  Plus,
-  Sparkles,
-  Trash2,
-} from 'lucide-react';
+import { Check, ChevronsDown, ChevronsUp, Minus, Move, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { type ShapeStrokeStyle } from './constants';
 
 interface ShapeToolbarProps {
   label: string;
   fill: string;
   stroke: string;
   strokeWidth: number;
+  strokeStyle: ShapeStrokeStyle;
   opacity: number;
   supportsFill: boolean;
   onFillChange?: (color: string) => void;
   onStrokeChange: (color: string) => void;
   onStrokeWidthChange: (width: number) => void;
+  onStrokeStyleChange: (style: ShapeStrokeStyle) => void;
   onOpacityChange: (opacity: number) => void;
   onBringToFront: () => void;
   onSendToBack: () => void;
@@ -78,18 +61,32 @@ const OUTLINE_COLORS: readonly string[] = [
   '#000000',
 ];
 
-const OUTLINE_WIDTH_OPTIONS: readonly number[] = [1, 2, 3, 4, 6, 8, 12];
+type OutlineStyleOptionId = 'none' | ShapeStrokeStyle;
+
+const OUTLINE_STYLE_OPTIONS: readonly {
+  id: OutlineStyleOptionId;
+  label: string;
+  style?: ShapeStrokeStyle;
+}[] = [
+  { id: 'none', label: 'No outline' },
+  { id: 'solid', label: 'Solid', style: 'solid' },
+  { id: 'dashed', label: 'Dashed', style: 'dashed' },
+  { id: 'dash-dot', label: 'Dash dot', style: 'dash-dot' },
+  { id: 'dotted', label: 'Dotted', style: 'dotted' },
+];
 
 const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
   label,
   fill,
   stroke,
   strokeWidth,
+  strokeStyle,
   opacity,
   supportsFill,
   onFillChange,
   onStrokeChange,
   onStrokeWidthChange,
+  onStrokeStyleChange,
   onOpacityChange,
   onBringToFront,
   onSendToBack,
@@ -97,6 +94,8 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
   onRequestPosition,
   onDelete,
 }) => {
+  const defaultStrokeWidth = supportsFill ? 2 : 6;
+
   const handleToolbarMouseDown = (event: React.MouseEvent) => {
     event.preventDefault();
   };
@@ -118,29 +117,51 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
 
   const handleOutlineColorSelect = (color: string) => {
     onStrokeChange(color);
+    if (strokeWidth <= 0) {
+      onStrokeWidthChange(defaultStrokeWidth);
+    }
   };
 
   const handleNoOutline = () => {
     onStrokeChange('transparent');
     onStrokeWidthChange(0);
+    onStrokeStyleChange('solid');
   };
 
   const handleResetOutline = () => {
     onStrokeChange('#111827');
-    onStrokeWidthChange(supportsFill ? 2 : 6);
+    onStrokeWidthChange(defaultStrokeWidth);
+    onStrokeStyleChange('solid');
+  };
+
+  const handleStrokeWidthSliderChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const next = clampStrokeWidth(Number(event.target.value));
+    onStrokeWidthChange(next);
+  };
+
+  const handleOutlineStyleSelect = (option: OutlineStyleOptionId) => {
+    if (option === 'none') {
+      handleNoOutline();
+      return;
+    }
+
+    const nextStyle = option as ShapeStrokeStyle;
+    if (stroke === 'transparent') {
+      const fallbackColor = supportsFill ? fill : '#111827';
+      onStrokeChange(fallbackColor);
+    }
+
+    if (strokeWidth <= 0) {
+      onStrokeWidthChange(defaultStrokeWidth);
+    }
+
+    onStrokeStyleChange(nextStyle);
   };
 
   const isOutlineDisabled = stroke === 'transparent' || strokeWidth <= 0;
   const displayedStrokeWidth = Math.round(strokeWidth);
-
-  const outlinePreviewStyle = isOutlineDisabled
-    ? {
-        backgroundImage:
-          'linear-gradient(45deg, rgba(148, 163, 184, 0.6) 25%, transparent 25%), linear-gradient(-45deg, rgba(148, 163, 184, 0.6) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(148, 163, 184, 0.6) 75%), linear-gradient(-45deg, transparent 75%, rgba(148, 163, 184, 0.6) 75%)',
-        backgroundSize: '8px 8px',
-        backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0',
-      }
-    : { backgroundColor: stroke };
+  const outlineIndicatorColor = isOutlineDisabled ? '#94a3b8' : stroke;
+  const activeStrokeStyle = strokeStyle ?? 'solid';
 
   const fillButton = (
     <Popover>
@@ -185,38 +206,95 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
-          size="sm"
+          size="icon"
           type="button"
-          className="flex h-8 shrink-0 items-center gap-2 rounded-full border border-border/60 bg-background/80 px-3 text-[11px] font-medium text-foreground hover:bg-muted/40"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border/60 bg-background/80 p-0 text-foreground hover:bg-muted/40"
           onMouseDown={handleToolbarMouseDown}
         >
-          <span className="flex items-center gap-2">
-            <span className="relative flex h-5 w-5 items-center justify-center rounded-full border border-border/60 bg-background">
-              <span className="absolute inset-[3px] rounded-full shadow-inner" style={outlinePreviewStyle} />
-            </span>
-            <span>Outline</span>
+          <span className="sr-only">Outline options</span>
+          <span className="relative flex h-6 w-6 items-center justify-center rounded-full bg-background">
+            {isOutlineDisabled ? (
+              <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
+                <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.5" fill="none" />
+                <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
+                <path
+                  d="M3.5 13.5 C6 11 8.5 9.5 10 11.2 C11.5 12.9 13.5 7.5 16.5 6"
+                  stroke={outlineIndicatorColor}
+                  strokeWidth={2}
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <circle cx="5.5" cy="14.5" r="1.2" fill={outlineIndicatorColor} />
+              </svg>
+            )}
           </span>
-          <span className="ml-1 text-[10px] text-muted-foreground">
-            {isOutlineDisabled ? 'None' : `${displayedStrokeWidth} px`}
-          </span>
-          <span className="ml-1 text-[9px] text-muted-foreground">▼</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         side="top"
         align="start"
-        className="z-[4000] w-60 rounded-xl border border-border/70 bg-background/95 p-2 shadow-2xl"
+        className="z-[4000] w-72 rounded-2xl border border-border/70 bg-background/95 p-3 shadow-2xl"
       >
-        <DropdownMenuLabel className="px-2 text-[11px] font-semibold text-muted-foreground">Outline</DropdownMenuLabel>
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger
-            className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium text-foreground hover:bg-muted/40"
-            onMouseDown={handleToolbarMouseDown}
-          >
-            <PaletteIcon className="h-4 w-4 text-muted-foreground" />
-            <span>Color</span>
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-64 rounded-xl border border-border/60 bg-background/95 p-3 shadow-xl">
+        <DropdownMenuLabel className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Outline
+        </DropdownMenuLabel>
+        <div className="mt-2 flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            {OUTLINE_STYLE_OPTIONS.map(option => {
+              const isActive = option.id === 'none'
+                ? isOutlineDisabled
+                : !isOutlineDisabled && activeStrokeStyle === option.style;
+
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => handleOutlineStyleSelect(option.id)}
+                  onMouseDown={handleToolbarMouseDown}
+                  className={cn(
+                    'flex h-9 w-9 items-center justify-center rounded-xl border border-border/60 bg-background transition-colors hover:border-primary/60 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                    isActive && 'border-primary bg-primary/10 text-primary shadow-sm',
+                  )}
+                  aria-label={option.label}
+                >
+                  {option.id === 'none' ? (
+                    <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
+                      <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.4" fill="none" />
+                      <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.4" strokeLinecap="round" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 32 18" className="h-5 w-6" aria-hidden>
+                      <line
+                        x1="4"
+                        y1="9"
+                        x2="28"
+                        y2="9"
+                        stroke={outlineIndicatorColor}
+                        strokeWidth={2.6}
+                        strokeLinecap="round"
+                        strokeDasharray={
+                          option.style === 'dashed'
+                            ? '8 6'
+                            : option.style === 'dash-dot'
+                            ? '10 6 3 6'
+                            : option.style === 'dotted'
+                            ? '2 6'
+                            : undefined
+                        }
+                      />
+                    </svg>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <span className="text-[11px] font-semibold text-muted-foreground">Color</span>
             <div className="grid grid-cols-6 gap-2">
               {OUTLINE_COLORS.map(color => {
                 const isActive = !isOutlineDisabled && stroke.toLowerCase() === color.toLowerCase();
@@ -227,7 +305,7 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
                     onClick={() => handleOutlineColorSelect(color)}
                     onMouseDown={handleToolbarMouseDown}
                     className={cn(
-                      'relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-border/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                      'relative flex h-8 w-8 items-center justify-center rounded-full border border-border/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
                       isActive && 'border-primary ring-2 ring-primary/60 ring-offset-1 ring-offset-background',
                     )}
                     style={{ backgroundColor: color }}
@@ -242,20 +320,23 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
                 onClick={handleNoOutline}
                 onMouseDown={handleToolbarMouseDown}
                 className={cn(
-                  'relative flex h-8 w-8 items-center justify-center rounded-full border-2 border-border/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                  'relative flex h-8 w-8 items-center justify-center rounded-full border border-border/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
                   isOutlineDisabled && 'border-primary ring-2 ring-primary/60 ring-offset-1 ring-offset-background',
                 )}
                 aria-label="Remove outline"
               >
-                <span className="absolute inset-[1px] rounded-full" style={outlinePreviewStyle} />
-                {isOutlineDisabled && <Check className="relative z-10 h-3 w-3 text-white" />}
+                <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
+                  <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.4" fill="none" />
+                  <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
               </button>
             </div>
-            <div className="mt-3 flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <input
                 type="color"
                 value={stroke === 'transparent' ? '#111827' : stroke}
                 onChange={event => handleOutlineColorSelect(event.target.value)}
+                onMouseDown={handleToolbarMouseDown}
                 className="h-10 w-full cursor-pointer rounded-lg border border-border"
               />
               <Button
@@ -266,62 +347,27 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
                 onClick={handleResetOutline}
                 onMouseDown={handleToolbarMouseDown}
               >
-                Default
+                Reset
               </Button>
             </div>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-        <DropdownMenuSeparator />
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger
-            className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-xs font-medium text-foreground hover:bg-muted/40"
-            onMouseDown={handleToolbarMouseDown}
-          >
-            <span>Weight</span>
-            <span className="text-[11px] text-muted-foreground">{displayedStrokeWidth} px</span>
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-44 rounded-xl border border-border/60 bg-background/95 p-2 shadow-xl">
-            <div className="flex flex-col gap-1">
-              {OUTLINE_WIDTH_OPTIONS.map(option => {
-                const isActive = Math.abs(strokeWidth - option) < 0.5;
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    onClick={() => onStrokeWidthChange(option)}
-                    onMouseDown={handleToolbarMouseDown}
-                    className={cn(
-                      'flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/40',
-                      isActive && 'bg-primary/10 text-primary',
-                    )}
-                  >
-                    <span>{option} px</span>
-                    {isActive && <Check className="h-3.5 w-3.5" />}
-                  </button>
-                );
-              })}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <span className="font-semibold">Stroke weight</span>
+              <span>{displayedStrokeWidth} px</span>
             </div>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={event => {
-            event.preventDefault();
-            handleNoOutline();
-          }}
-          className="rounded-lg px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/40"
-        >
-          No outline
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={event => {
-            event.preventDefault();
-            handleResetOutline();
-          }}
-          className="rounded-lg px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/40"
-        >
-          Reset outline
-        </DropdownMenuItem>
+            <input
+              type="range"
+              min={0}
+              max={60}
+              value={displayedStrokeWidth}
+              onChange={handleStrokeWidthSliderChange}
+              onMouseDown={handleToolbarMouseDown}
+              className="h-1.5 w-full cursor-pointer accent-primary"
+            />
+          </div>
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );

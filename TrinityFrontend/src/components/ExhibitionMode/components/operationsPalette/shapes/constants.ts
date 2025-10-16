@@ -16,11 +16,16 @@ export type ShapeGeometry =
   | { kind: 'line'; x1: number; y1: number; x2: number; y2: number }
   | { kind: 'path'; d: string };
 
+export type ShapeStrokeStyle = 'solid' | 'dashed' | 'dash-dot' | 'dotted';
+
+const SHAPE_STROKE_STYLES: readonly ShapeStrokeStyle[] = ['solid', 'dashed', 'dash-dot', 'dotted'] as const;
+
 export interface ShapeObjectProps {
   shapeId: string;
   fill: string;
   stroke: string;
   strokeWidth: number;
+  strokeStyle: ShapeStrokeStyle;
   opacity: number;
 }
 
@@ -55,6 +60,7 @@ const SHAPE_DEFAULTS: ShapeObjectProps = {
   fill: '#111827',
   stroke: 'transparent',
   strokeWidth: 0,
+  strokeStyle: 'solid',
   opacity: 1,
 };
 
@@ -360,6 +366,11 @@ export const parseShapeObjectProps = (
     typeof props?.stroke === 'string' && props.stroke.trim().length > 0 ? props.stroke : defaults.stroke;
   const strokeWidthRaw = Number(props?.strokeWidth);
   const strokeWidth = Number.isFinite(strokeWidthRaw) ? Math.max(0, strokeWidthRaw) : defaults.strokeWidth;
+  const strokeStyle =
+    typeof props?.strokeStyle === 'string' &&
+    SHAPE_STROKE_STYLES.includes(props.strokeStyle as ShapeStrokeStyle)
+      ? (props.strokeStyle as ShapeStrokeStyle)
+      : defaults.strokeStyle;
   const opacityRaw = Number(props?.opacity);
   const opacity = Number.isFinite(opacityRaw) ? Math.min(Math.max(opacityRaw, 0), 1) : defaults.opacity;
 
@@ -368,6 +379,7 @@ export const parseShapeObjectProps = (
     fill,
     stroke,
     strokeWidth,
+    strokeStyle,
     opacity,
   };
 };

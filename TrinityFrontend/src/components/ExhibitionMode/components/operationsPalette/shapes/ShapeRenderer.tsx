@@ -1,21 +1,36 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
-import { getDefaultShapeProps, type ShapeDefinition } from './constants';
+import { getDefaultShapeProps, type ShapeDefinition, type ShapeStrokeStyle } from './constants';
 
 interface ShapeRendererProps {
   definition: ShapeDefinition;
   fill?: string;
   stroke?: string;
   strokeWidth?: number;
+  strokeStyle?: ShapeStrokeStyle;
   opacity?: number;
   className?: string;
 }
+
+const getDashPattern = (style: ShapeStrokeStyle | undefined, width: number): string | undefined => {
+  switch (style) {
+    case 'dashed':
+      return `${Math.max(width * 3, 12)} ${Math.max(width * 2, 8)}`;
+    case 'dash-dot':
+      return `${Math.max(width * 3, 12)} ${Math.max(width * 1.8, 6)} ${Math.max(width, 4)} ${Math.max(width * 1.8, 6)}`;
+    case 'dotted':
+      return `${Math.max(width, 4)} ${Math.max(width * 1.6, 6)}`;
+    default:
+      return undefined;
+  }
+};
 
 export const ShapeRenderer: React.FC<ShapeRendererProps> = ({
   definition,
   fill,
   stroke,
   strokeWidth,
+  strokeStyle,
   opacity,
   className,
 }) => {
@@ -46,6 +61,9 @@ export const ShapeRenderer: React.FC<ShapeRendererProps> = ({
 
   const svgOpacity = typeof opacity === 'number' && Number.isFinite(opacity) ? opacity : defaults.opacity;
 
+  const dashArray =
+    strokeStyle && resolvedStrokeWidth > 0 ? getDashPattern(strokeStyle, resolvedStrokeWidth) : undefined;
+
   const styleProps = {
     fill: isLineShape ? 'none' : resolvedFill,
     stroke: resolvedStroke,
@@ -53,6 +71,7 @@ export const ShapeRenderer: React.FC<ShapeRendererProps> = ({
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
     vectorEffect: 'non-scaling-stroke' as const,
+    strokeDasharray: dashArray,
   };
 
   useLayoutEffect(() => {
@@ -76,16 +95,11 @@ export const ShapeRenderer: React.FC<ShapeRendererProps> = ({
 
     const safeWidth = Math.max(paddedWidth, 1);
     const safeHeight = Math.max(paddedHeight, 1);
-    const scale = Math.min(100 / safeWidth, 100 / safeHeight);
-
-    const scaledWidth = safeWidth * scale;
-    const scaledHeight = safeHeight * scale;
-    const offsetX = (100 - scaledWidth) / 2;
-    const offsetY = (100 - scaledHeight) / 2;
-
-    const translateX = offsetX - paddedX * scale;
-    const translateY = offsetY - paddedY * scale;
-    const nextTransform = `translate(${translateX}, ${translateY}) scale(${scale})`;
+    const scaleX = 100 / safeWidth;
+    const scaleY = 100 / safeHeight;
+    const translateX = -paddedX * scaleX;
+    const translateY = -paddedY * scaleY;
+    const nextTransform = `translate(${translateX}, ${translateY}) scale(${scaleX}, ${scaleY})`;
 
     setTransform(prev => (prev === nextTransform ? prev : nextTransform));
   }, [definition, resolvedStroke, resolvedStrokeWidth]);
@@ -140,7 +154,12 @@ export const ShapeRenderer: React.FC<ShapeRendererProps> = ({
   }
 
   return (
-    <svg viewBox="0 0 100 100" className={cn('h-full w-full', className)} role="presentation">
+    <svg
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      className={cn('h-full w-full', className)}
+      role="presentation"
+    >
       <g transform={transform}>
         <g ref={contentGroupRef} opacity={svgOpacity} data-shape-content>
           {content}
