@@ -24,8 +24,8 @@ interface ExhibitedAtomEntry {
   selections: FeatureOverviewExhibitionSelection[];
 }
 
-interface AtomCategoryInfo {
-  name: string;
+interface AtomInfo {
+  title: string;
   icon: LucideIcon;
   color: string;
 }
@@ -72,17 +72,17 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
     [exhibitedAtoms],
   );
 
-  const fallbackCategoryInfo = React.useMemo<AtomCategoryInfo>(
-    () => ({ name: 'Other', icon: FolderKanban, color: 'bg-slate-500' }),
+  const fallbackAtomInfo = React.useMemo<AtomInfo>(
+    () => ({ title: 'Atom', icon: FolderKanban, color: 'bg-slate-500' }),
     [],
   );
 
-  const atomCategoryMap = React.useMemo(() => {
-    const map = new Map<string, AtomCategoryInfo>();
+  const atomInfoMap = React.useMemo(() => {
+    const map = new Map<string, AtomInfo>();
     atomCategories.forEach((category) => {
       category.atoms.forEach((atom) => {
         map.set(atom.id, {
-          name: category.name,
+          title: atom.title,
           icon: category.icon,
           color: category.color,
         });
@@ -91,59 +91,46 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
     return map;
   }, [atomCategories]);
 
-  const categoryGroups = React.useMemo(() => {
-    const groups = new Map<string, { info: AtomCategoryInfo; entries: ExhibitedAtomEntry[]; total: number }>();
+  const atomPanels = React.useMemo(
+    () =>
+      exhibitedAtoms.map((entry) => {
+        const info = atomInfoMap.get(entry.atomTypeId) ?? fallbackAtomInfo;
+        const title = entry.atomTitle ?? info.title;
+        return {
+          key: `${entry.cardId}-${entry.atomId}`,
+          info: {
+            title: title || info.title,
+            icon: info.icon,
+            color: info.color,
+          },
+          entry,
+          total: entry.selections.length,
+        };
+      }),
+    [atomInfoMap, exhibitedAtoms, fallbackAtomInfo],
+  );
 
-    exhibitedAtoms.forEach((entry) => {
-      const info = atomCategoryMap.get(entry.atomTypeId) ?? fallbackCategoryInfo;
-      if (!groups.has(info.name)) {
-        groups.set(info.name, { info, entries: [], total: 0 });
-      }
-      const bucket = groups.get(info.name);
-      if (!bucket) {
-        return;
-      }
-      bucket.entries.push(entry);
-      bucket.total += entry.selections.length;
-    });
-
-    const ordered: Array<{ info: AtomCategoryInfo; entries: ExhibitedAtomEntry[]; total: number }> = [];
-    atomCategories.forEach((category) => {
-      const existing = groups.get(category.name);
-      if (existing) {
-        ordered.push(existing);
-        groups.delete(category.name);
-      }
-    });
-
-    groups.forEach((group) => {
-      ordered.push(group);
-    });
-
-    return ordered;
-  }, [atomCategories, atomCategoryMap, exhibitedAtoms, fallbackCategoryInfo]);
-
-  const [expandedCategory, setExpandedCategory] = React.useState<string | null>(null);
+  const [expandedAtomKey, setExpandedAtomKey] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (categoryGroups.length === 0) {
-      if (expandedCategory !== null) {
-        setExpandedCategory(null);
+    if (atomPanels.length === 0) {
+      if (expandedAtomKey !== null) {
+        setExpandedAtomKey(null);
       }
       return;
     }
 
-    const activeCategoryExists = expandedCategory
-      ? categoryGroups.some((group) => group.info.name === expandedCategory)
+    const activeExists = expandedAtomKey
+      ? atomPanels.some((panel) => panel.key === expandedAtomKey)
       : false;
 
-    if (!expandedCategory || !activeCategoryExists) {
-      setExpandedCategory((current) => {
-        const next = categoryGroups[0]?.info.name ?? null;
+    if (!expandedAtomKey || !activeExists) {
+      setExpandedAtomKey((current) => {
+        const next = atomPanels[0]?.key ?? null;
         return current === next ? current : next;
       });
     }
-  }, [categoryGroups, expandedCategory]);
+  }, [atomPanels, expandedAtomKey]);
 
   const handleRemoveSelection = React.useCallback(
     (atomId: string, key: string) => {
@@ -197,45 +184,45 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 p-4 space-y-4">
-        {categoryGroups.length === 0 ? (
+        {atomPanels.length === 0 ? (
           <div className="text-sm text-gray-600">
             Stage components for exhibition from the laboratory to view them here.
           </div>
         ) : (
-          categoryGroups.map((group) => {
-            const Icon = group.info.icon ?? FolderKanban;
-            const isExpanded = expandedCategory === group.info.name;
-            const totalLabel = group.total === 1 ? '1 component' : `${group.total} components`;
+          atomPanels.map((panel) => {
+            const Icon = panel.info.icon ?? FolderKanban;
+            const isExpanded = expandedAtomKey === panel.key;
+            const totalLabel = panel.total === 1 ? '1 component' : `${panel.total} components`;
 
             return (
               <div
-                key={group.info.name}
+                key={panel.key}
                 className="rounded-xl border border-gray-200 bg-white/70 shadow-sm transition hover:border-gray-300"
               >
                 <button
                   type="button"
                   className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left"
                   onClick={() =>
-                    setExpandedCategory((current) => (current === group.info.name ? null : group.info.name))
+                    setExpandedAtomKey((current) => (current === panel.key ? null : panel.key))
                   }
                 >
                   <span className="flex items-center gap-3">
                     <span
                       className={clsx(
                         'flex h-10 w-10 items-center justify-center rounded-full text-white shadow-sm',
-                        group.info.color,
+                        panel.info.color,
                       )}
                     >
                       <Icon className="h-5 w-5" />
                     </span>
                     <span>
-                      <span className="block text-sm font-semibold text-gray-900">{group.info.name}</span>
+                      <span className="block text-sm font-semibold text-gray-900">{panel.info.title}</span>
                       <span className="text-xs text-gray-500">{totalLabel}</span>
                     </span>
                   </span>
                   <span className="flex items-center gap-2">
                     <span className="flex h-7 min-w-[28px] items-center justify-center rounded-full bg-emerald-100 px-2 text-sm font-semibold text-emerald-700">
-                      {group.total}
+                      {panel.total}
                     </span>
                     <ChevronDown
                       className={clsx('h-4 w-4 text-gray-500 transition-transform', isExpanded && 'rotate-180')}
@@ -245,18 +232,16 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
 
                 {isExpanded && (
                   <div className="space-y-4 border-t border-gray-200 bg-white/80 px-4 py-4">
-                    {group.entries.map((entry) => (
-                      <div key={`${entry.cardId}-${entry.atomId}`} className="min-w-0">
-                        <FeatureOverviewExhibition
-                          atomId={entry.atomId}
-                          cardId={entry.cardId}
-                          atomColor={entry.atomColor}
-                          selections={entry.selections}
-                          onRemoveSelection={(key) => handleRemoveSelection(entry.atomId, key)}
-                          onRenameSelection={(key, name) => handleRenameSelection(entry.atomId, key, name)}
-                        />
-                      </div>
-                    ))}
+                    <div className="min-w-0">
+                      <FeatureOverviewExhibition
+                        atomId={panel.entry.atomId}
+                        cardId={panel.entry.cardId}
+                        atomColor={panel.entry.atomColor}
+                        selections={panel.entry.selections}
+                        onRemoveSelection={(key) => handleRemoveSelection(panel.entry.atomId, key)}
+                        onRenameSelection={(key, name) => handleRenameSelection(panel.entry.atomId, key, name)}
+                      />
+                    </div>
                   </div>
                 )}
               </div>
