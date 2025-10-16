@@ -5,6 +5,10 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Send, X, Bot, User, Sparkles, RotateCcw, Clock, Settings, Paperclip, Mic, Plus, Trash2, MessageCircle, Minimize2, Maximize2 } from 'lucide-react';
 import { TRINITY_AI_API } from '@/lib/api';
+import { useLaboratoryStore } from '../LaboratoryMode/store/laboratoryStore';
+
+// FastAPI base URL for laboratory card creation
+const FAST_API_BASE_URL = import.meta.env.VITE_FASTAPI_BASE_URL || 'http://localhost:8001';
 
 // Add CSS for fade-in animation and slow pulse
 const fadeInStyle = `
@@ -73,6 +77,23 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ isCollapsed, onTo
   const [isResizing, setIsResizing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
+  
+  // Laboratory store for refreshing canvas
+  const { setCards } = useLaboratoryStore();
+  
+  // Function to refresh Laboratory canvas after card creation
+  const refreshLaboratoryCanvas = async () => {
+    try {
+      console.log('🔄 Refreshing Laboratory canvas after card creation...');
+      
+      // Method 1: Try to reload the page to refresh Laboratory configuration
+      console.log('🔄 Reloading page to refresh Laboratory configuration...');
+      window.location.reload();
+      
+    } catch (error) {
+      console.error('❌ Failed to refresh Laboratory canvas:', error);
+    }
+  };
 
   // Chat management functions
   const createNewChat = () => {
@@ -261,9 +282,99 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ isCollapsed, onTo
 
       const data = await response.json();
       
+      // Check if response contains workflow JSON
+      let workflowJSON = null;
+      let smartResponse = data.response || 'I received your message but couldn\'t generate a proper response.';
+      
+      try {
+        // Try to extract JSON from response
+        const responseText = data.response || '';
+        const jsonStart = responseText.indexOf('{');
+        
+        if (jsonStart !== -1) {
+          const jsonText = responseText.substring(jsonStart);
+          workflowJSON = JSON.parse(jsonText);
+          
+          // Extract smart_response (text before JSON)
+          smartResponse = responseText.substring(0, jsonStart).trim();
+          
+          console.log('🎯 Workflow JSON detected:', workflowJSON);
+          console.log('💬 Smart Response:', smartResponse);
+          
+          // Execute workflow using LangChain orchestrator (backend handles execution)
+          if (workflowJSON && workflowJSON.workflow && workflowJSON.workflow.length > 0) {
+            console.log('🚀 Calling orchestration endpoint to execute workflow...');
+            
+            // Call the orchestrate endpoint which uses LangChain to execute steps
+            try {
+              const orchestrateResponse = await fetch(`${TRINITY_AI_API}/superagent/orchestrate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: currentInput }),
+                signal: AbortSignal.timeout(180000) // 3 minute timeout
+              });
+              
+              if (orchestrateResponse.ok) {
+                const orchestrateData = await orchestrateResponse.json();
+                console.log('✅ Orchestration complete:', orchestrateData);
+                
+                // Handle partial success - show cards even if workflow doesn't complete fully
+                if (orchestrateData.success) {
+                  smartResponse += `\n\n✅ Workflow executed successfully!`;
+                  
+                  // Add execution details
+                  if (orchestrateData.steps_executed) {
+                    smartResponse += `\n📊 Executed ${orchestrateData.steps_executed} steps in ${orchestrateData.execution_time?.toFixed(2) || '?'}s`;
+                  }
+                  
+                  // Show final response from workflow
+                  if (orchestrateData.final_response) {
+                    smartResponse += `\n\n${orchestrateData.final_response}`;
+                  }
+                  
+                  // Refresh Laboratory canvas if workflow was successful
+                  await refreshLaboratoryCanvas();
+                } else {
+                  // Check for partial success - cards created even if later steps failed
+                  if (orchestrateData.steps_results && orchestrateData.steps_results.length > 0) {
+                    const cardCreationSteps = orchestrateData.steps_results.filter((step: any) => 
+                      step.action === 'CARD_CREATION' && step.success
+                    );
+                    
+                    if (cardCreationSteps.length > 0) {
+                      smartResponse += `\n\n✅ Card(s) created successfully! (${cardCreationSteps.length} card${cardCreationSteps.length > 1 ? 's' : ''})`;
+                      cardCreationSteps.forEach((step: any, index: number) => {
+                        const cardId = step.result?.id || 'unknown';
+                        smartResponse += `\n📋 Card ${index + 1}: ${cardId}`;
+                      });
+                      
+                      // Refresh Laboratory canvas after successful card creation
+                      await refreshLaboratoryCanvas();
+                    }
+                  }
+                  
+                  smartResponse += `\n\n⚠️ Workflow encountered issues after card creation.`;
+                  if (orchestrateData.errors && orchestrateData.errors.length > 0) {
+                    smartResponse += `\n\nErrors: ${orchestrateData.errors.join(', ')}`;
+                  }
+                }
+              } else {
+                console.error('Orchestration endpoint failed:', orchestrateResponse.status);
+                smartResponse += `\n\n⚠️ Workflow execution failed (HTTP ${orchestrateResponse.status})`;
+              }
+            } catch (orchestrateError) {
+              console.error('Orchestration error:', orchestrateError);
+              smartResponse += `\n\n⚠️ Workflow execution failed: ${orchestrateError instanceof Error ? orchestrateError.message : 'Unknown error'}`;
+            }
+          }
+        }
+      } catch (parseError) {
+        console.log('No workflow JSON in response, showing as regular message');
+      }
+      
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: data.response || 'I received your message but couldn\'t generate a proper response.',
+        content: smartResponse,
         sender: 'ai',
         timestamp: new Date()
       };
@@ -415,7 +526,7 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ isCollapsed, onTo
 
       {/* Chat Messages */}
       <ScrollArea className="h-[480px] bg-white">
-        <div ref={messagesEndRef} className="p-6 space-y-6">
+        <div className="p-6 space-y-6">
           {messages.map((message) => (
             <div
               key={message.id}
@@ -474,6 +585,9 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ isCollapsed, onTo
               </div>
             </div>
           )}
+          
+          {/* Scroll anchor - placed at the end to scroll to bottom */}
+          <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
 

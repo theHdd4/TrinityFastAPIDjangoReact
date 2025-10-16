@@ -931,6 +931,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     };
   }, []);
 
+
   useEffect(() => {
     if (!isCanvasLoading) {
       return;
