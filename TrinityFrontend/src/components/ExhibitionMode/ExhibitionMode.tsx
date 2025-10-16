@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Download, FileText, Grid3x3, Presentation, Save, Share2, Undo2 } from 'lucide-react';
 import Header from '@/components/Header';
@@ -105,6 +105,7 @@ const ExhibitionMode = () => {
   const [isCatalogueOpen, setIsCatalogueOpen] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [undoAvailable, setUndoAvailable] = useState(false);
+  const [operationsPalettePanel, setOperationsPalettePanel] = useState<ReactNode | null>(null);
   const [notes, setNotes] = useState<Record<number, string>>(() => {
     if (typeof window === 'undefined') {
       return {};
@@ -199,6 +200,18 @@ const ExhibitionMode = () => {
     });
     return lookup;
   }, [exhibitedCards]);
+
+  useEffect(() => {
+    if (isFullscreen) {
+      setOperationsPalettePanel(null);
+    }
+  }, [isFullscreen]);
+
+  useEffect(() => {
+    if (!canEdit) {
+      setOperationsPalettePanel(null);
+    }
+  }, [canEdit]);
 
   const runSlideTransition = useCallback(
     (targetIndex: number, direction: 'forward' | 'backward' = 'forward') => {
@@ -1424,6 +1437,7 @@ const ExhibitionMode = () => {
                   isActive
                   onTitleChange={handleTitleChange}
                   presenterName={presenterDisplayName}
+                  onPositionPanelChange={setOperationsPalettePanel}
                 />
               ) : (
                 emptyCanvas
@@ -1452,6 +1466,7 @@ const ExhibitionMode = () => {
                     isActive={currentSlide === index}
                     onTitleChange={handleTitleChange}
                     presenterName={presenterDisplayName}
+                    onPositionPanelChange={setOperationsPalettePanel}
                   />
                 </div>
               ))}
@@ -1478,6 +1493,7 @@ const ExhibitionMode = () => {
             onCreateTextBox={handleCreateTextBox}
             onCreateTable={handleCreateTable}
             canEdit={canEdit}
+            positionPanel={operationsPalettePanel}
           />
         )}
       </div>

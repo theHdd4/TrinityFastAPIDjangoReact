@@ -1,5 +1,4 @@
 import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import {
   User,
   Calendar,
@@ -198,6 +197,7 @@ interface SlideCanvasProps {
   isActive?: boolean;
   onTitleChange?: (title: string, cardId: string) => void;
   presenterName?: string | null;
+  onPositionPanelChange?: (panel: ReactNode | null) => void;
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -214,6 +214,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   isActive = false,
   onTitleChange,
   presenterName,
+  onPositionPanelChange,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -227,7 +228,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const formatPanelRef = useRef<HTMLDivElement | null>(null);
   const formatToggleRef = useRef<HTMLButtonElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const [positionPanelPortal, setPositionPanelPortal] = useState<HTMLElement | null>(null);
 
   const slideObjects = useExhibitionStore(
     useCallback(state => state.slideObjectsByCardId[card.id] ?? [], [card.id]),
@@ -323,22 +323,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       ...card.presentationSettings,
     });
   }, [card]);
-
-  useEffect(() => {
-    if (typeof document === 'undefined') {
-      return;
-    }
-
-    let portalRoot = document.getElementById('exhibition-position-panel-root') as HTMLElement | null;
-
-    if (!portalRoot) {
-      portalRoot = document.createElement('div');
-      portalRoot.id = 'exhibition-position-panel-root';
-      document.body.appendChild(portalRoot);
-    }
-
-    setPositionPanelPortal(portalRoot);
-  }, []);
 
   useEffect(() => {
     if (!canEdit) {
@@ -699,27 +683,22 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     setPositionPanelTarget(null);
   }, []);
 
-  const positionPanelOverlay = useMemo(() => {
-    if (!canEdit || !positionPanelObject || !positionPanelPortal) {
+  const positionPanelNode = useMemo(() => {
+    if (!canEdit || !positionPanelObject) {
       return null;
     }
 
-    return createPortal(
-      <div className="fixed inset-0 z-[60] flex justify-end pointer-events-none">
-        <div className="pointer-events-auto flex h-full w-[22rem] max-w-full translate-x-0 flex-col p-6 transition-transform duration-200">
-          <TextBoxPositionPanel
-            object={positionPanelObject}
-            onClose={closePositionPanel}
-            onBringForward={() => handleBringForward(positionPanelObject.id)}
-            onSendBackward={() => handleSendBackward(positionPanelObject.id)}
-            onBringToFront={() => handlePanelBringToFront(positionPanelObject.id)}
-            onSendToBack={() => handlePanelSendToBack(positionPanelObject.id)}
-            onAlign={alignment => alignTextBoxToCanvas(positionPanelObject.id, alignment)}
-            onGeometryChange={updates => updateTextBoxGeometry(positionPanelObject.id, updates)}
-          />
-        </div>
-      </div>,
-      positionPanelPortal,
+    return (
+      <TextBoxPositionPanel
+        object={positionPanelObject}
+        onClose={closePositionPanel}
+        onBringForward={() => handleBringForward(positionPanelObject.id)}
+        onSendBackward={() => handleSendBackward(positionPanelObject.id)}
+        onBringToFront={() => handlePanelBringToFront(positionPanelObject.id)}
+        onSendToBack={() => handlePanelSendToBack(positionPanelObject.id)}
+        onAlign={alignment => alignTextBoxToCanvas(positionPanelObject.id, alignment)}
+        onGeometryChange={updates => updateTextBoxGeometry(positionPanelObject.id, updates)}
+      />
     );
   }, [
     alignTextBoxToCanvas,
@@ -730,9 +709,30 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     handlePanelSendToBack,
     handleSendBackward,
     positionPanelObject,
-    positionPanelPortal,
     updateTextBoxGeometry,
   ]);
+
+  const lastProvidedPositionPanel = useRef<ReactNode | null>(null);
+
+  useEffect(() => {
+    if (!onPositionPanelChange) {
+      return;
+    }
+
+    if (positionPanelNode !== lastProvidedPositionPanel.current) {
+      onPositionPanelChange(positionPanelNode);
+      lastProvidedPositionPanel.current = positionPanelNode;
+    }
+  }, [onPositionPanelChange, positionPanelNode]);
+
+  useEffect(() => {
+    return () => {
+      if (onPositionPanelChange && lastProvidedPositionPanel.current) {
+        onPositionPanelChange(null);
+        lastProvidedPositionPanel.current = null;
+      }
+    };
+  }, [onPositionPanelChange]);
 
   const handleAtomRemove = (atomId: string) => {
     if (!canEdit) {
@@ -830,8 +830,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         );
 
   return (
-    <>
-      <div className={containerClasses}>
+    <div className={containerClasses}>
         <div
           className={cn(
             'mx-auto transition-all duration-300 p-8',
@@ -1307,8 +1306,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         )}
         </div>
       </div>
-      {positionPanelOverlay}
-    </>
   );
 };
 
