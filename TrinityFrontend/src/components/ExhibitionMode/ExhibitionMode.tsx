@@ -34,6 +34,7 @@ import {
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 import { createTextBoxSlideObject } from './components/operationsPalette/textBox/constants';
 import { createTableSlideObject } from './components/operationsPalette/tables/constants';
+import { ShapesPanel, createShapeSlideObject, type ShapeDefinition } from './components/operationsPalette/shapes';
 import {
   buildChartRendererPropsFromManifest,
   buildTableDataFromManifest,
@@ -107,6 +108,7 @@ const ExhibitionMode = () => {
   const [operationsPanelState, setOperationsPanelState] = useState<
     | { type: 'custom'; node: ReactNode }
     | { type: 'notes' }
+    | { type: 'shapes' }
     | null
   >(null);
   const [notes, setNotes] = useState<Record<number, string>>(() => {
@@ -147,6 +149,13 @@ const ExhibitionMode = () => {
       return (crypto as Crypto).randomUUID();
     }
     return `table-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }, []);
+
+  const generateShapeId = useCallback(() => {
+    if (typeof crypto !== 'undefined' && typeof (crypto as Crypto).randomUUID === 'function') {
+      return (crypto as Crypto).randomUUID();
+    }
+    return `shape-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }, []);
 
   const clearAutoAdvanceTimer = useCallback(() => {
@@ -1173,7 +1182,7 @@ const ExhibitionMode = () => {
     }
 
     setOperationsPanelState(prev => {
-      if (prev?.type === 'notes') {
+      if (prev?.type === 'notes' || prev?.type === 'shapes') {
         return prev;
       }
       return null;
@@ -1185,6 +1194,14 @@ const ExhibitionMode = () => {
   }, []);
 
   const handleCloseNotesPanel = useCallback(() => {
+    setOperationsPanelState(null);
+  }, []);
+
+  const handleOpenShapesPanel = useCallback(() => {
+    setOperationsPanelState(prev => (prev?.type === 'shapes' ? null : { type: 'shapes' }));
+  }, []);
+
+  const handleCloseShapesPanel = useCallback(() => {
     setOperationsPanelState(null);
   }, []);
 
@@ -1204,8 +1221,27 @@ const ExhibitionMode = () => {
       );
     }
 
+    if (operationsPanelState.type === 'shapes') {
+      return (
+        <ShapesPanel
+          onSelectShape={handleShapeSelect}
+          onClose={handleCloseShapesPanel}
+          canEdit={canEdit}
+        />
+      );
+    }
+
     return operationsPanelState.node;
-  }, [currentSlide, handleCloseNotesPanel, handleNotesChange, notes, operationsPanelState]);
+  }, [
+    canEdit,
+    currentSlide,
+    handleCloseNotesPanel,
+    handleCloseShapesPanel,
+    handleNotesChange,
+    handleShapeSelect,
+    notes,
+    operationsPanelState,
+  ]);
 
   const handleToggleViewMode = useCallback(() => {
     if (isSlideshowActive) {
@@ -1229,6 +1265,14 @@ const ExhibitionMode = () => {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [currentSlide, exhibitedCards, viewMode]);
+
+  useEffect(() => {
+    if (canEdit) {
+      return;
+    }
+
+    setOperationsPanelState(prev => (prev?.type === 'shapes' ? null : prev));
+  }, [canEdit]);
 
   const hasSlides = exhibitedCards.length > 0;
   const disableDownload = exhibitedCards.length === 0;
@@ -1331,6 +1375,39 @@ const ExhibitionMode = () => {
       }),
     );
   }, [addSlideObject, currentSlide, exhibitedCards, generateTableId, slideObjectsByCardId]);
+
+  const handleShapeSelect = useCallback(
+    (shape: ShapeDefinition) => {
+      if (!canEdit) {
+        return;
+      }
+
+      const targetCard = exhibitedCards[currentSlide];
+      if (!targetCard) {
+        return;
+      }
+
+      const existingObjects = slideObjectsByCardId[targetCard.id] ?? [];
+      const existingShapes = existingObjects.filter(object => object.type === 'shape').length;
+      const offset = existingShapes * 28;
+
+      addSlideObject(
+        targetCard.id,
+        createShapeSlideObject(generateShapeId(), shape, {
+          x: 160 + offset,
+          y: 160 + offset,
+        }),
+      );
+    },
+    [
+      addSlideObject,
+      canEdit,
+      currentSlide,
+      exhibitedCards,
+      generateShapeId,
+      slideObjectsByCardId,
+    ],
+  );
   const slideWrapperStyle: React.CSSProperties | undefined = isSlideshowActive
     ? {
         opacity: slideshowOpacity,
@@ -1525,6 +1602,7 @@ const ExhibitionMode = () => {
             onGridView={() => setShowGridView(true)}
             onCreateTextBox={handleCreateTextBox}
             onCreateTable={handleCreateTable}
+            onOpenShapesPanel={handleOpenShapesPanel}
             canEdit={canEdit}
             positionPanel={operationsPalettePanel}
           />

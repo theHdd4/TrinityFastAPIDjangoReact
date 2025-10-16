@@ -24,6 +24,7 @@ import type { TextBoxFormatting } from './operationsPalette/textBox/types';
 import { TextBoxPositionPanel } from './operationsPalette/textBox/TextBoxPositionPanel';
 import { CardFormattingPanel } from './operationsPalette/CardFormattingPanel';
 import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
+import { SlideShapeObject } from './operationsPalette/shapes';
 import {
   DEFAULT_TABLE_COLS,
   DEFAULT_TABLE_ROWS,
@@ -1843,7 +1844,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             }
             if (isAtomObject(object) && onRemoveAtom) {
               onRemoveAtom(object.props.atom.id);
-            } else if ((object.type === 'text-box' || object.type === 'table') && onRemoveObject) {
+            } else if (
+              (object.type === 'text-box' || object.type === 'table' || object.type === 'shape') &&
+              onRemoveObject
+            ) {
               onRemoveObject(id);
             }
           });
@@ -2036,6 +2040,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         return null;
       }
 
+      if (object.type === 'shape') {
+        return <SlideShapeObject props={object.props as Record<string, unknown> | undefined} />;
+      }
+
       if (typeof object.props?.text === 'string') {
         return <p className="text-sm leading-relaxed text-muted-foreground">{object.props.text}</p>;
       }
@@ -2086,6 +2094,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const isAccentImageObject = object.type === 'accent-image';
             const isTextBoxObject = object.type === 'text-box';
             const isTableObject = object.type === 'table';
+            const isShapeObject = object.type === 'shape';
             const isEditingTextBox =
               isTextBoxObject &&
               editingTextState?.id === object.id &&
@@ -2117,15 +2126,21 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               <div
                 className={cn(
                   'relative flex h-full w-full flex-col overflow-hidden rounded-3xl border-2 shadow-xl transition-all',
-                  isAccentImageObject ? 'bg-muted/30' : 'bg-background/95',
+                  isShapeObject
+                    ? 'border-transparent bg-transparent shadow-none'
+                    : isAccentImageObject
+                    ? 'bg-muted/30'
+                    : 'bg-background/95',
                   isFeatureOverviewAtom
                     ? isSelected
-                    ? 'border-primary shadow-2xl'
-                    : 'border-transparent'
-                    : isSelected
-                    ? 'border-primary shadow-2xl'
-                    : 'border-border/70 hover:border-primary/40',
+                      ? 'border-primary shadow-2xl'
+                      : 'border-transparent'
+                    : !isShapeObject &&
+                      (isSelected
+                        ? 'border-primary shadow-2xl'
+                        : 'border-border/70 hover:border-primary/40'),
                   isTextBoxObject && 'overflow-visible border-transparent bg-transparent shadow-none',
+                  isShapeObject && isSelected && 'ring-2 ring-primary/40',
                 )}
                 style={{
                   transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
@@ -2148,6 +2163,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     'relative flex-1 overflow-hidden',
                     isAccentImageObject ? undefined : 'p-4',
                     (isTextBoxObject || isTableObject) && 'overflow-visible p-0',
+                    isShapeObject && 'flex items-center justify-center overflow-visible p-0',
                   )}
                 >
                   {isTextBoxObject ? (
@@ -2217,6 +2233,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onInteract={onInteract}
                       className={cn('h-full w-full overflow-hidden', 'rounded-2xl bg-background/90 p-3')}
                     />
+                  ) : isShapeObject ? (
+                    renderObjectContent(object)
                   ) : (
                     <div
                       className={cn(
@@ -2238,6 +2256,21 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     )}
                     onPointerDown={event => event.stopPropagation()}
                     onClick={() => onRemoveAtom(object.props.atom.id)}
+                    type="button"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+                {canEdit && isShapeObject && onRemoveObject && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className={cn(
+                      'absolute top-3 right-3 z-30 h-9 w-9 text-muted-foreground hover:text-destructive opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100',
+                      isSelected && 'opacity-100',
+                    )}
+                    onPointerDown={event => event.stopPropagation()}
+                    onClick={() => onRemoveObject(object.id)}
                     type="button"
                   >
                     <Trash2 className="h-4 w-4" />

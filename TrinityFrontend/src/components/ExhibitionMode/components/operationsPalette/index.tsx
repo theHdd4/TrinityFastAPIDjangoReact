@@ -8,6 +8,7 @@ import { createAiAssistantOperation } from './operations/ai-assistant';
 import { createTextOperation } from './operations/text';
 import { createImagesOperation } from './operations/images';
 import { createTablesOperation } from './operations/tables';
+import { createShapesOperation } from './operations/shapes';
 import { createChartsOperation } from './operations/charts';
 import { createTemplatesTool } from './tools/templates';
 import { createThemesTool } from './tools/themes';
@@ -21,6 +22,7 @@ interface OperationsPaletteProps {
   onGridView?: () => void;
   onCreateTextBox?: () => void;
   onCreateTable?: () => void;
+  onOpenShapesPanel?: () => void;
   canEdit?: boolean;
   positionPanel?: ReactNode | null;
 }
@@ -31,6 +33,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
   onGridView,
   onCreateTextBox,
   onCreateTable,
+  onOpenShapesPanel,
   canEdit = true,
   positionPanel = null,
 }) => {
@@ -40,9 +43,10 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
       createTextOperation({ onCreateTextBox, canEdit }),
       createImagesOperation(),
       createTablesOperation({ onCreateTable, canEdit }),
+      createShapesOperation({ onOpenShapesPanel, canEdit }),
       createChartsOperation(),
     ],
-    [onCreateTextBox, onCreateTable, canEdit],
+    [onCreateTextBox, onCreateTable, onOpenShapesPanel, canEdit],
   );
 
   const tools = useMemo<PaletteOperation[]>(
