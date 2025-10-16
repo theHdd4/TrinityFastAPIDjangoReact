@@ -1,10 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import clsx from 'clsx';
-import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { ChevronDown, Image, ListChecks, Loader2, PencilLine, Send, Settings2 } from 'lucide-react';
+import { ChevronDown, Image, PencilLine, Settings2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import {
@@ -14,10 +12,16 @@ import {
   type ExhibitionComponentPayload,
   type ExhibitionConfigurationPayload,
 } from '@/lib/exhibition';
+import {
+  buildBaseDescriptor,
+  buildDefaultHighlightedName,
+  buildPrefixedDescriptor,
+  getComponentPrefix,
+  sanitizeSegment,
+} from '@/components/AtomList/atoms/feature-overview/utils/exhibitionLabels';
 import type {
   FeatureOverviewExhibitionComponentType,
   FeatureOverviewExhibitionSelection,
-  FeatureOverviewExhibitionSelectionDimension,
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
@@ -29,6 +33,11 @@ import {
 } from '@/components/AtomList/atoms/feature-overview/utils/exhibitionManifest';
 import { resolvePalette } from '@/components/AtomList/atoms/feature-overview/utils/colorPalettes';
 
+export interface FeatureOverviewExhibitionHandle {
+  exhibit: () => Promise<void>;
+  getSelectionCount: () => number;
+}
+
 interface FeatureOverviewExhibitionProps {
   atomId: string;
   cardId?: string | null;
@@ -36,7 +45,6 @@ interface FeatureOverviewExhibitionProps {
   selections: FeatureOverviewExhibitionSelection[];
   onRemoveSelection?: (key: string) => void;
   onRenameSelection?: (key: string, name: string) => void;
-  showHeader?: boolean;
 }
 
 type VisibilityToggleKey = 'componentTitle' | 'allowEdit';
@@ -58,52 +66,6 @@ const VISIBILITY_TOGGLES: Array<{ key: VisibilityToggleKey; label: string; descr
     description: 'Permit collaborators to adjust this component while in exhibition mode.',
   },
 ];
-
-const sanitizeSegment = (value?: string | null): string => {
-  if (typeof value !== 'string') {
-    return '';
-  }
-  return value.trim();
-};
-
-const buildBaseDescriptor = (selection: FeatureOverviewExhibitionSelection): string => {
-  const dimensionSegments = Array.isArray(selection.dimensions)
-    ? selection.dimensions
-        .map((dimension: FeatureOverviewExhibitionSelectionDimension) =>
-          sanitizeSegment(dimension.value) || sanitizeSegment(dimension.name),
-        )
-        .filter(Boolean)
-    : [];
-
-  const yAxisSegment =
-    sanitizeSegment(selection.chartState?.yAxisLabel) ||
-    sanitizeSegment(selection.chartState?.yAxisField) ||
-    sanitizeSegment(selection.metric);
-
-  const segments = [...dimensionSegments, yAxisSegment].filter(Boolean);
-
-  return segments.join(' - ');
-};
-
-const buildDefaultEditableName = (selection: FeatureOverviewExhibitionSelection): string => {
-  const baseDescriptor = buildBaseDescriptor(selection);
-  return baseDescriptor ? `The component details: ${baseDescriptor}` : 'The component details';
-};
-
-const getComponentPrefix = (componentType?: FeatureOverviewExhibitionComponentType): string =>
-  componentType === 'trend_analysis' ? 'Trend Analysis' : 'SKU Stats';
-
-const buildDefaultHighlightedName = (
-  selection: FeatureOverviewExhibitionSelection,
-  componentType?: FeatureOverviewExhibitionComponentType,
-): string => {
-  const defaultEditableName = buildDefaultEditableName(selection);
-  const prefix = getComponentPrefix(componentType);
-  if (!prefix) {
-    return defaultEditableName;
-  }
-  return defaultEditableName ? `${prefix} - ${defaultEditableName}` : prefix;
-};
 
 interface ProcessedSelection {
   id: string;
@@ -251,15 +213,21 @@ const normaliseSelectionForExhibition = ({
   };
 };
 
-const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
-  atomId,
-  cardId,
-  atomColor,
-  selections,
-  onRemoveSelection: _onRemoveSelection,
-  onRenameSelection,
-  showHeader = true,
-}) => {
+const FeatureOverviewExhibition = React.forwardRef<
+  FeatureOverviewExhibitionHandle,
+  FeatureOverviewExhibitionProps
+>(
+  (
+    {
+      atomId,
+      cardId,
+      atomColor,
+      selections,
+      onRemoveSelection: _onRemoveSelection,
+      onRenameSelection,
+    },
+    ref,
+  ) => {
   const [isSaving, setIsSaving] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draftNames, setDraftNames] = useState<Record<string, string>>({});
@@ -270,12 +238,6 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
   const loadSavedConfiguration = useExhibitionStore(state => state.loadSavedConfiguration);
 
   const selectionCount = selections.length;
-  const selectionBadgeLabel = useMemo(() => {
-    if (selectionCount === 0) {
-      return '0 components';
-    }
-    return selectionCount === 1 ? '1 component' : `${selectionCount} components`;
-  }, [selectionCount]);
 
   const cardIdentifier = cardId || atomId;
   const sourceAtomTitle = useLaboratoryStore(state => {
@@ -361,7 +323,7 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
 
   const highlightBackgroundClass = atomColor && atomColor.trim().length > 0 ? atomColor : 'bg-amber-100';
 
-  const handleExhibit = async () => {
+  const handleExhibit = React.useCallback(async () => {
     if (selectionCount === 0) {
       toast({
         title: 'Select combinations to exhibit',
@@ -422,34 +384,34 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
         return identifier !== cardIdentifier;
       });
 
-    const exhibitedComponents: ExhibitionComponentPayload[] = processedSelections.flatMap(
-      ({
-        id,
-        title,
-        componentType,
-        metadata,
-        manifest,
-        manifestId,
-      }) => {
-        const componentLabel =
-          componentType === 'trend_analysis' ? 'Trend Analysis' : 'Statistical Summary';
+      const exhibitedComponents: ExhibitionComponentPayload[] = processedSelections.flatMap(
+        ({
+          id,
+          title,
+          componentType,
+          metadata,
+          manifest,
+          manifestId,
+        }) => {
+          const componentLabel =
+            componentType === 'trend_analysis' ? 'Trend Analysis' : 'Statistical Summary';
 
-        const metadataPayload = clonePlain(metadata);
+          const metadataPayload = clonePlain(metadata);
 
-        return [
-          {
-            id,
-            atomId,
-            title: `${title} · ${componentLabel}`,
-            category: 'Feature Overview',
-            color: 'bg-amber-500',
-            metadata: metadataPayload,
-            manifest,
-            manifest_id: manifestId,
-          },
-        ];
-      },
-    );
+          return [
+            {
+              id,
+              atomId,
+              title: `${title} · ${componentLabel}`,
+              category: 'Feature Overview',
+              color: 'bg-amber-500',
+              metadata: metadataPayload,
+              manifest,
+              manifest_id: manifestId,
+            },
+          ];
+        },
+      );
 
       const newEntry: ExhibitionAtomPayload = {
         id: cardIdentifier,
@@ -486,256 +448,246 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [
+    selectionCount,
+    toast,
+    selections,
+    processedSelections,
+    loadSavedConfiguration,
+    cardId,
+    atomId,
+    resolvedAtomTitle,
+    visibility,
+  ]);
+
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      exhibit: handleExhibit,
+      getSelectionCount: () => selectionCount,
+    }),
+    [handleExhibit, selectionCount],
+  );
 
   return (
     <div className="space-y-4">
-      <Card className={clsx('p-4 border border-gray-200 shadow-sm space-y-4', !showHeader && 'pt-4')}>
-        {showHeader && (
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-                <ListChecks className="w-4 h-4 text-blue-500" />
-                {resolvedAtomTitle || 'Selected components'}
-              </div>
-              <p className="mt-1 text-xs font-medium text-gray-500">Components staged for exhibition</p>
-            </div>
-            <Badge variant="secondary" className="text-xs font-medium px-2 py-1">
-              {selectionBadgeLabel}
-            </Badge>
-          </div>
-        )}
+      {selectionCount === 0 ? (
+        <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+          No components have been staged for exhibition yet. Mark feature overview insights for exhibition to see them here.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {selections.map((selection, index) => {
+            const processed = processedSelections[index];
+            if (!processed) {
+              return null;
+            }
 
-        {selectionCount === 0 ? (
-          <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-            No components have been staged for exhibition yet. Mark feature overview insights for exhibition to see them here.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {selections.map((selection, index) => {
-              const processed = processedSelections[index];
-              if (!processed) {
-                return null;
+            const componentType = processed.componentType;
+            const descriptorInput = {
+              metric: selection.metric,
+              dimensions: selection.dimensions,
+              chartState: selection.chartState,
+            };
+            const typePrefix = getComponentPrefix(componentType);
+            const defaultHighlightedName = buildDefaultHighlightedName(descriptorInput, componentType);
+            const currentEditableName = sanitizeSegment(selection.label) || defaultHighlightedName;
+            const baseDescriptor = buildBaseDescriptor(descriptorInput) || 'Not specified';
+            const displayActualName = buildPrefixedDescriptor(descriptorInput, componentType) || typePrefix;
+            const isEditing = editingKey === selection.key;
+            const draftValue = draftNames[selection.key] ?? currentEditableName;
+            const isPreviewOpen = expandedPreviewSelections[selection.key] ?? false;
+            const isSettingsOpen = openSettingsSelections[selection.key] ?? false;
+
+            const startEditing = () => {
+              setDraftNames(prev => ({ ...prev, [selection.key]: currentEditableName }));
+              setEditingKey(selection.key);
+            };
+
+            const updateDraft = (value: string) => {
+              setDraftNames(prev => ({ ...prev, [selection.key]: value }));
+            };
+
+            const finishEditing = (shouldSave: boolean) => {
+              setEditingKey(null);
+              setDraftNames(prev => {
+                const { [selection.key]: _discarded, ...rest } = prev;
+                return rest;
+              });
+
+              if (!shouldSave || !onRenameSelection) {
+                return;
               }
 
-              const componentType = processed.componentType;
-              const typePrefix = getComponentPrefix(componentType);
-              const defaultHighlightedName = buildDefaultHighlightedName(selection, componentType);
-              const currentEditableName = sanitizeSegment(selection.label) || defaultHighlightedName;
-              const baseDescriptor = buildBaseDescriptor(selection) || 'Not specified';
-              const displayActualName = `${typePrefix}${baseDescriptor ? ` - ${baseDescriptor}` : ''}`;
-              const isEditing = editingKey === selection.key;
-              const draftValue = draftNames[selection.key] ?? currentEditableName;
-              const isPreviewOpen = expandedPreviewSelections[selection.key] ?? false;
-              const isSettingsOpen = openSettingsSelections[selection.key] ?? false;
+              const proposedName = draftValue.trim();
+              const nextName = proposedName.length > 0 ? proposedName : defaultHighlightedName;
+              onRenameSelection(selection.key, nextName);
+            };
 
-              const startEditing = () => {
-                setDraftNames(prev => ({ ...prev, [selection.key]: currentEditableName }));
-                setEditingKey(selection.key);
-              };
+            const togglePreview = () => {
+              setExpandedPreviewSelections(prev => ({
+                ...prev,
+                [selection.key]: !isPreviewOpen,
+              }));
+            };
 
-              const updateDraft = (value: string) => {
-                setDraftNames(prev => ({ ...prev, [selection.key]: value }));
-              };
+            const toggleSettings = () => {
+              setOpenSettingsSelections(prev => ({
+                ...prev,
+                [selection.key]: !isSettingsOpen,
+              }));
+            };
 
-              const finishEditing = (shouldSave: boolean) => {
-                setEditingKey(null);
-                setDraftNames(prev => {
-                  const { [selection.key]: _discarded, ...rest } = prev;
-                  return rest;
-                });
+            const highlightClasses = clsx(
+              'flex w-full flex-wrap items-center gap-2 rounded-md px-2 py-1 text-sm font-semibold text-black shadow-sm',
+              highlightBackgroundClass,
+            );
 
-                if (!shouldSave || !onRenameSelection) {
-                  return;
-                }
+            const showDetailSections = isSettingsOpen || isPreviewOpen;
 
-                const proposedName = draftValue.trim();
-                const nextName = proposedName.length > 0 ? proposedName : defaultHighlightedName;
-                onRenameSelection(selection.key, nextName);
-              };
-
-              const togglePreview = () => {
-                setExpandedPreviewSelections(prev => ({
-                  ...prev,
-                  [selection.key]: !isPreviewOpen,
-                }));
-              };
-
-              const toggleSettings = () => {
-                setOpenSettingsSelections(prev => ({
-                  ...prev,
-                  [selection.key]: !isSettingsOpen,
-                }));
-              };
-
-              const highlightClasses = clsx(
-                'flex w-full flex-wrap items-center gap-2 rounded-md px-2 py-1 text-sm font-semibold text-black shadow-sm',
-                highlightBackgroundClass,
-              );
-
-              const showDetailSections = isSettingsOpen || isPreviewOpen;
-
-              return (
-                <div
-                  key={selection.key}
-                  className="rounded-lg border border-gray-200 bg-white/80 px-3 py-3 shadow-sm space-y-3"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      {isEditing ? (
-                        <div className={highlightClasses}>
-                          <Input
-                            value={draftValue}
-                            onChange={event => updateDraft(event.target.value)}
-                            onBlur={() => finishEditing(true)}
-                            onKeyDown={event => {
-                              if (event.key === 'Enter') {
-                                event.preventDefault();
-                                finishEditing(true);
-                              }
-                              if (event.key === 'Escape') {
-                                event.preventDefault();
-                                finishEditing(false);
-                              }
-                            }}
-                            autoFocus
-                            className="h-8 flex-1 min-w-0 border border-black/10 bg-white/70 text-sm font-semibold text-black focus-visible:ring-emerald-500"
-                          />
-                        </div>
-                      ) : (
-                        <div className={clsx(highlightClasses, 'justify-between')}>
-                          <span className="truncate">{currentEditableName}</span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {!isEditing && onRenameSelection && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-gray-500 hover:text-gray-700"
-                          onClick={startEditing}
-                        >
-                          <PencilLine className="h-4 w-4" />
-                          <span className="sr-only">Rename component</span>
-                        </Button>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-gray-500 hover:text-gray-700"
-                        onClick={toggleSettings}
-                      >
-                        <Settings2 className="h-4 w-4" />
-                        <span className="sr-only">Toggle visibility settings</span>
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-gray-500 hover:text-gray-700"
-                        onClick={togglePreview}
-                        aria-expanded={isPreviewOpen}
-                      >
-                        <ChevronDown className={clsx('h-4 w-4 transition-transform', isPreviewOpen && 'rotate-180')} />
-                        <span className="sr-only">Toggle preview</span>
-                      </Button>
-                    </div>
+            return (
+              <div
+                key={selection.key}
+                className="rounded-lg border border-gray-200 bg-white/80 px-3 py-3 shadow-sm space-y-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    {isEditing ? (
+                      <div className={highlightClasses}>
+                        <Input
+                          value={draftValue}
+                          onChange={event => updateDraft(event.target.value)}
+                          onBlur={() => finishEditing(true)}
+                          onKeyDown={event => {
+                            if (event.key === 'Enter') {
+                              event.preventDefault();
+                              finishEditing(true);
+                            }
+                            if (event.key === 'Escape') {
+                              event.preventDefault();
+                              finishEditing(false);
+                            }
+                          }}
+                          autoFocus
+                          className="h-8 flex-1 min-w-0 border border-black/10 bg-white/70 text-sm font-semibold text-black focus-visible:ring-emerald-500"
+                        />
+                      </div>
+                    ) : (
+                      <div className={clsx(highlightClasses, 'justify-between')}>
+                        <span className="truncate">{currentEditableName}</span>
+                      </div>
+                    )}
                   </div>
-
-                  <p className="text-xs font-medium text-gray-700">{displayActualName}</p>
-
-                  {showDetailSections && (
-                    <div className="space-y-4 border-t border-gray-200 pt-3">
-                      {isSettingsOpen && (
-                        <div>
-                          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-700">
-                            <Settings2 className="h-3.5 w-3.5" />
-                            Visibility settings
-                          </div>
-                          <div className="mt-2 space-y-2">
-                            {VISIBILITY_TOGGLES.map(toggle => (
-                              <label
-                                key={toggle.key}
-                                className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-white/70 px-3 py-2 text-xs text-gray-700"
-                              >
-                                <span className="flex-1">
-                                  <span className="block font-medium text-gray-800">{toggle.label}</span>
-                                  {toggle.description && (
-                                    <span className="mt-0.5 block text-[11px] text-gray-500">{toggle.description}</span>
-                                  )}
-                                </span>
-                                <input
-                                  type="checkbox"
-                                  className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                                  checked={visibility[toggle.key]}
-                                  onChange={() => toggleVisibilitySetting(toggle.key)}
-                                />
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {isPreviewOpen && (
-                        <div>
-                          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-700">
-                            <Image className="h-3.5 w-3.5" />
-                            Preview snapshot
-                          </div>
-                          <div className="mt-2 rounded-md border border-gray-200 bg-white/80 p-2">
-                            <div className="pointer-events-none select-none">
-                              <div className="overflow-auto">
-                                <ExhibitionFeatureOverview metadata={processed.metadata} variant="full" />
-                              </div>
-                              {visibility.componentTitle && (
-                                <p className="mt-3 text-center text-sm font-semibold text-gray-900">
-                                  {displayActualName}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {!isEditing && onRenameSelection && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-gray-500 hover:text-gray-700"
+                        onClick={startEditing}
+                        disabled={isSaving}
+                      >
+                        <PencilLine className="h-4 w-4" />
+                        <span className="sr-only">Rename component</span>
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-gray-500 hover:text-gray-700"
+                      onClick={toggleSettings}
+                      disabled={isSaving}
+                    >
+                      <Settings2 className="h-4 w-4" />
+                      <span className="sr-only">Toggle visibility settings</span>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-gray-500 hover:text-gray-700"
+                      onClick={togglePreview}
+                      aria-expanded={isPreviewOpen}
+                      disabled={isSaving}
+                    >
+                      <ChevronDown className={clsx('h-4 w-4 transition-transform', isPreviewOpen && 'rotate-180')} />
+                      <span className="sr-only">Toggle preview</span>
+                    </Button>
+                  </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
 
-      <div className="space-y-2">
-        <Button
-          type="button"
-          className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white"
-          size="lg"
-          onClick={handleExhibit}
-          disabled={isSaving || selectionCount === 0}
-        >
-          {isSaving ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Saving…
-            </>
-          ) : (
-            <>
-              <Send className="mr-2 h-4 w-4" />
-              Exhibit
-            </>
-          )}
-        </Button>
-        {selectionCount === 0 && (
-          <p className="text-xs text-gray-500 text-center">
-            Select at least one combination from the statistical summary to enable the Exhibit action.
-          </p>
-        )}
-      </div>
+                <p className="text-xs font-medium text-gray-700">{displayActualName}</p>
+
+                {showDetailSections && (
+                  <div className="space-y-4 border-t border-gray-200 pt-3">
+                    {isSettingsOpen && (
+                      <div>
+                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-700">
+                          <Settings2 className="h-3.5 w-3.5" />
+                          Visibility settings
+                        </div>
+                        <div className="mt-2 space-y-2">
+                          {VISIBILITY_TOGGLES.map(toggle => (
+                            <label
+                              key={toggle.key}
+                              className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-white/70 px-3 py-2 text-xs text-gray-700"
+                            >
+                              <span className="flex-1">
+                                <span className="block font-medium text-gray-800">{toggle.label}</span>
+                                {toggle.description && (
+                                  <span className="mt-0.5 block text-[11px] text-gray-500">{toggle.description}</span>
+                                )}
+                              </span>
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                                checked={visibility[toggle.key]}
+                                onChange={() => toggleVisibilitySetting(toggle.key)}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {isPreviewOpen && (
+                      <div>
+                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-700">
+                          <Image className="h-3.5 w-3.5" />
+                          Preview snapshot
+                        </div>
+                        <div className="mt-2 rounded-md border border-gray-200 bg-white/80 p-2">
+                          <div className="pointer-events-none select-none">
+                            <div className="overflow-auto">
+                              <ExhibitionFeatureOverview metadata={processed.metadata} variant="full" />
+                            </div>
+                            {visibility.componentTitle && (
+                              <p className="mt-3 text-center text-sm font-semibold text-gray-900">
+                                {displayActualName}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {selectionCount === 0 && (
+        <p className="text-xs text-gray-500 text-center">
+          Select at least one combination from the statistical summary to enable the Exhibit action.
+        </p>
+      )}
     </div>
   );
-};
+});
+
+FeatureOverviewExhibition.displayName = 'FeatureOverviewExhibition';
 
 export default FeatureOverviewExhibition;
