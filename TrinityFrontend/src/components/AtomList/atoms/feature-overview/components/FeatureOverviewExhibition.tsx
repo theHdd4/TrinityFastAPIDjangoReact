@@ -36,32 +36,28 @@ interface FeatureOverviewExhibitionProps {
   selections: FeatureOverviewExhibitionSelection[];
   onRemoveSelection?: (key: string) => void;
   onRenameSelection?: (key: string, name: string) => void;
+  showHeader?: boolean;
 }
 
-type VisibilityToggleKey =
-  | 'headers'
-  | 'dataTypes'
-  | 'uniqueCounts'
-  | 'sampleValues'
-  | 'qualityMetrics';
+type VisibilityToggleKey = 'componentTitle' | 'allowEdit';
 
 const DEFAULT_VISIBILITY: Record<VisibilityToggleKey, boolean> = {
-  headers: true,
-  dataTypes: true,
-  uniqueCounts: true,
-  sampleValues: true,
-  qualityMetrics: true,
+  componentTitle: true,
+  allowEdit: false,
 };
 
-const VISIBILITY_TOGGLES: Array<{ key: VisibilityToggleKey; label: string }> = [
-  { key: 'headers', label: 'Show column headers' },
-  { key: 'dataTypes', label: 'Display data types' },
-  { key: 'uniqueCounts', label: 'Show unique counts' },
-  { key: 'sampleValues', label: 'Include sample values' },
-  { key: 'qualityMetrics', label: 'Show data quality metrics' },
+const VISIBILITY_TOGGLES: Array<{ key: VisibilityToggleKey; label: string; description?: string }> = [
+  {
+    key: 'componentTitle',
+    label: 'Enable Component Title',
+    description: 'Display the component title beneath the visualization on slides.',
+  },
+  {
+    key: 'allowEdit',
+    label: 'Allow edit in exhibition',
+    description: 'Permit collaborators to adjust this component while in exhibition mode.',
+  },
 ];
-
-const PREVIEW_SCALE = 0.8;
 
 const sanitizeSegment = (value?: string | null): string => {
   if (typeof value !== 'string') {
@@ -207,6 +203,10 @@ const normaliseSelectionForExhibition = ({
       tableRows: stagedRows.map(row => ({ ...row })),
       tableColumns: stagedColumns.length > 0 ? [...stagedColumns] : undefined,
     },
+    exhibitionControls: {
+      enableComponentTitle: visibility.componentTitle,
+      allowEditInExhibition: visibility.allowEdit,
+    },
     viewType: componentType === 'trend_analysis' ? 'trend_analysis' : 'statistical_summary',
   };
 
@@ -258,6 +258,7 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
   selections,
   onRemoveSelection: _onRemoveSelection,
   onRenameSelection,
+  showHeader = true,
 }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -489,16 +490,21 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
 
   return (
     <div className="space-y-4">
-      <Card className="p-4 border border-gray-200 shadow-sm space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-            <ListChecks className="w-4 h-4 text-blue-500" />
-            Selected components
+      <Card className={clsx('p-4 border border-gray-200 shadow-sm space-y-4', !showHeader && 'pt-4')}>
+        {showHeader && (
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                <ListChecks className="w-4 h-4 text-blue-500" />
+                {resolvedAtomTitle || 'Selected components'}
+              </div>
+              <p className="mt-1 text-xs font-medium text-gray-500">Components staged for exhibition</p>
+            </div>
+            <Badge variant="secondary" className="text-xs font-medium px-2 py-1">
+              {selectionBadgeLabel}
+            </Badge>
           </div>
-          <Badge variant="secondary" className="text-xs font-medium px-2 py-1">
-            {selectionBadgeLabel}
-          </Badge>
-        </div>
+        )}
 
         {selectionCount === 0 ? (
           <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
@@ -653,9 +659,14 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                             {VISIBILITY_TOGGLES.map(toggle => (
                               <label
                                 key={toggle.key}
-                                className="flex items-center justify-between rounded-md border border-gray-200 bg-white/70 px-3 py-2 text-xs text-gray-700"
+                                className="flex items-center justify-between gap-3 rounded-md border border-gray-200 bg-white/70 px-3 py-2 text-xs text-gray-700"
                               >
-                                <span className="font-medium">{toggle.label}</span>
+                                <span className="flex-1">
+                                  <span className="block font-medium text-gray-800">{toggle.label}</span>
+                                  {toggle.description && (
+                                    <span className="mt-0.5 block text-[11px] text-gray-500">{toggle.description}</span>
+                                  )}
+                                </span>
                                 <input
                                   type="checkbox"
                                   className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
@@ -674,17 +685,16 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                             <Image className="h-3.5 w-3.5" />
                             Preview snapshot
                           </div>
-                          <div className="mt-2 overflow-hidden rounded-md border border-gray-200 bg-white/80 p-2">
-                            <div className="pointer-events-none select-none flex justify-center">
-                              <div
-                                className="origin-top"
-                                style={{
-                                  transform: `scale(${PREVIEW_SCALE})`,
-                                  transformOrigin: 'top center',
-                                }}
-                              >
-                                <ExhibitionFeatureOverview metadata={processed.metadata} variant="compact" />
+                          <div className="mt-2 rounded-md border border-gray-200 bg-white/80 p-2">
+                            <div className="pointer-events-none select-none">
+                              <div className="overflow-auto">
+                                <ExhibitionFeatureOverview metadata={processed.metadata} variant="full" />
                               </div>
+                              {visibility.componentTitle && (
+                                <p className="mt-3 text-center text-sm font-semibold text-gray-900">
+                                  {displayActualName}
+                                </p>
+                              )}
                             </div>
                           </div>
                         </div>
