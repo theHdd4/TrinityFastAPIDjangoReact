@@ -24,6 +24,7 @@ from app.features.exhibition.endpoint import router as exhibition_router
 from app.features.explore.endpoint import router as explore_router
 from app.features.correlation.endpoint import router as correlation_router
 from app.features.build_autoregressive.endpoint import router as autoregressive_router
+from app.features.laboratory.endpoint import router as laboratory_router
 
 api_router = APIRouter()
 text_router = APIRouter()
@@ -48,6 +49,7 @@ api_router.include_router(user_apps_router)
 api_router.include_router(clustering_router)
 api_router.include_router(chart_maker_router)
 api_router.include_router(explore_router)
+api_router.include_router(laboratory_router)
 
 api_router.include_router(build_model_router)
 api_router.include_router(scenario_planner_router)

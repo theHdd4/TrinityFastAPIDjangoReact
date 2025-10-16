@@ -131,6 +131,10 @@ export const INSIGHT_API = `${TRINITY_AI_API}/insights`;
 
 export const LAB_ACTIONS_API = `${REGISTRY_API}/laboratory-actions`;
 
+export const LABORATORY_API =
+  normalizeUrl(import.meta.env.VITE_LABORATORY_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/laboratory`;
+
 export const CLASSIFIER_API =
   normalizeUrl(import.meta.env.VITE_CLASSIFIER_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/classify`;
