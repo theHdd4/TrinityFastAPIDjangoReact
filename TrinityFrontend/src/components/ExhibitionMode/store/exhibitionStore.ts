@@ -49,7 +49,7 @@ export type SlideshowTransition = 'fade' | 'slide' | 'zoom';
 
 export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   cardColor: 'purple',
-  cardWidth: 'M',
+  cardWidth: 'L',
   contentAlignment: 'center',
   fullBleed: false,
   cardLayout: DEFAULT_CARD_LAYOUT,
