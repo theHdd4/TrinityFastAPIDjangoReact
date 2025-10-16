@@ -900,7 +900,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                     size="icon"
                     variant="secondary"
                     className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
-                    onClick={() => onShowNotes?.()}
+                    onClick={() => {
+                      setShowFormatPanel(false);
+                      setPositionPanelTarget(null);
+                      onShowNotes?.();
+                    }}
                     type="button"
                   >
                     <StickyNote className="h-4 w-4" />
