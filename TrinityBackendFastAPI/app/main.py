@@ -1,6 +1,7 @@
 import os
 import socket
 from typing import Iterable, List
+from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -87,7 +88,28 @@ def _default_cors_origins() -> List[str]:
     ports = [frontend_port, "8080", "8081"]
 
     if host_ip:
-        defaults.extend(_iter_host_variants([host_ip], ports))
+        parsed_host = ""
+
+        if "://" in host_ip:
+            parsed = urlparse(host_ip)
+            if parsed.scheme and parsed.netloc:
+                defaults.append(f"{parsed.scheme}://{parsed.netloc}")
+            parsed_host = parsed.hostname or ""
+        else:
+            # Support HOST_IP values that may already include an explicit port.
+            if ":" in host_ip:
+                host, _, explicit_port = host_ip.rpartition(":")
+                host = host.strip()
+                explicit_port = explicit_port.strip()
+                if host and explicit_port:
+                    defaults.append(f"http://{host}:{explicit_port}")
+                    defaults.append(f"https://{host}:{explicit_port}")
+                    parsed_host = host
+            else:
+                parsed_host = host_ip
+
+        if parsed_host:
+            defaults.extend(_iter_host_variants([parsed_host], ports))
 
     defaults.extend(_iter_host_variants(_detect_runtime_hosts(), ports))
 
