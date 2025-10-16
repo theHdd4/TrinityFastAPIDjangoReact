@@ -151,16 +151,23 @@ const Login = () => {
       <LoginAnimation active={showAnimation} onComplete={handleAnimationComplete} />
       
       {/* Back to Home Button */}
-      <Button
-        variant="ghost"
-        onClick={() => navigate('/')}
-        className={`absolute top-6 left-6 z-20 text-[#fec107] hover:text-[#e0ad06] hover:bg-transparent font-mono font-light transition-all duration-300 border-0 ${
+      <div
+        className={`absolute top-6 left-6 z-20 transition-opacity duration-500 ${
           showAnimation ? 'opacity-0 pointer-events-none' : 'opacity-100'
         }`}
       >
-        <BackToAppsIcon className="w-4 h-4 mr-2 text-[#fec107]" />
-        Back to Home
-      </Button>
+        <div className="rounded-lg border border-white/10 bg-white/5 backdrop-blur-lg text-white shadow-2xl overflow-hidden">
+          <Button
+            variant="ghost"
+            type="button"
+            onClick={() => navigate('/')}
+            className="flex items-center gap-2 px-4 py-2 text-[#fec107] hover:text-[#e0ad06] hover:bg-white/10 font-mono font-light transition-colors duration-300 rounded-lg"
+          >
+            <BackToAppsIcon className="w-4 h-4 text-[#fec107]" />
+            Back to Home
+          </Button>
+        </div>
+      </div>
       
       <video
         autoPlay
