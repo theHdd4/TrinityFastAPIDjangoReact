@@ -89,7 +89,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
 
   return (
     <div
-      className="relative flex items-center gap-2 rounded-full border border-border/70 bg-background/95 px-4 py-3 text-sm shadow-[0_24px_48px_-22px_rgba(124,58,237,0.45)] backdrop-blur-lg"
+      className="relative flex w-full max-w-[min(100%,56rem)] flex-wrap items-center justify-center gap-x-2 gap-y-3 rounded-full border border-border/70 bg-background/95 px-4 py-3 text-sm shadow-[0_24px_48px_-22px_rgba(124,58,237,0.45)] backdrop-blur-lg"
       data-text-toolbar-root
     >
 
