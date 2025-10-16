@@ -15,6 +15,7 @@ interface ExhibitionPanelProps {
 interface ExhibitedAtomEntry {
   atomId: string;
   cardId: string;
+  atomColor?: string;
   selections: FeatureOverviewExhibitionSelection[];
 }
 
@@ -37,9 +38,11 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
           : [];
 
         if (selections.length > 0) {
+          const atomColor = typeof atom.color === 'string' ? atom.color : undefined;
           entries.push({
             atomId: atom.id,
             cardId: card.id,
+            atomColor,
             selections,
           });
         }
@@ -116,6 +119,7 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
               <FeatureOverviewExhibition
                 atomId={entry.atomId}
                 cardId={entry.cardId}
+                atomColor={entry.atomColor}
                 selections={entry.selections}
                 onRemoveSelection={(key) => handleRemoveSelection(entry.atomId, key)}
                 onRenameSelection={(key, name) => handleRenameSelection(entry.atomId, key, name)}
