@@ -246,52 +246,58 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
                 <div className="flex items-center justify-between gap-2">
                   <button
                     type="button"
-                    className="flex flex-1 items-center justify-between gap-4 px-4 py-3 text-left"
+                    className="flex flex-1 items-center gap-3 px-4 py-3 text-left"
                     onClick={() =>
                       setExpandedAtomKey((current) => (current === panel.key ? null : panel.key))
                     }
                   >
-                    <span className="flex items-center gap-3">
-                      <span
-                        className={clsx(
-                          'flex h-10 w-10 items-center justify-center rounded-full text-white shadow-sm',
-                          panel.info.color,
-                        )}
-                      >
-                        <Icon className="h-5 w-5" />
-                      </span>
-                      <span>
-                        <span className="block text-sm font-semibold text-gray-900">{panel.info.title}</span>
-                        <span className="text-xs text-gray-500">{totalLabel}</span>
-                      </span>
+                    <span
+                      className={clsx(
+                        'flex h-10 w-10 items-center justify-center rounded-full text-white shadow-sm',
+                        panel.info.color,
+                      )}
+                    >
+                      <Icon className="h-5 w-5" />
                     </span>
-                    <span className="flex items-center gap-2">
-                      <span className="flex h-7 min-w-[28px] items-center justify-center rounded-full bg-emerald-100 px-2 text-sm font-semibold text-emerald-700">
-                        {panel.total}
-                      </span>
-                      <ChevronDown
-                        className={clsx('h-4 w-4 text-gray-500 transition-transform', isExpanded && 'rotate-180')}
-                      />
+                    <span>
+                      <span className="block text-sm font-semibold text-gray-900">{panel.info.title}</span>
+                      <span className="text-xs text-gray-500">{totalLabel}</span>
                     </span>
                   </button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="mr-3 h-8 w-8 text-gray-500 hover:text-gray-700"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void handleExhibitAtom(panel.key);
-                    }}
-                    disabled={panel.total === 0 || isAtomExhibiting || isExhibitingAll}
-                  >
-                    {isAtomExhibiting ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Play className="h-4 w-4" />
-                    )}
-                    <span className="sr-only">Exhibit components from {panel.info.title}</span>
-                  </Button>
+                  <div className="flex items-center gap-1 pr-3">
+                    <button
+                      type="button"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                      onClick={() =>
+                        setExpandedAtomKey((current) => (current === panel.key ? null : panel.key))
+                      }
+                      aria-expanded={isExpanded}
+                      aria-controls={`${panel.key}-exhibition-list`}
+                    >
+                      <ChevronDown
+                        className={clsx('h-4 w-4 transition-transform', isExpanded && 'rotate-180')}
+                      />
+                      <span className="sr-only">Toggle {panel.info.title} exhibition list</span>
+                    </button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-gray-500 hover:text-gray-700"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleExhibitAtom(panel.key);
+                      }}
+                      disabled={panel.total === 0 || isAtomExhibiting || isExhibitingAll}
+                    >
+                      {isAtomExhibiting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Play className="h-4 w-4" />
+                      )}
+                      <span className="sr-only">Exhibit components from {panel.info.title}</span>
+                    </Button>
+                  </div>
                 </div>
 
                 <div
@@ -299,6 +305,7 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
                     'space-y-4 border-t border-gray-200 bg-white/80 px-4 py-4',
                     !isExpanded && 'hidden',
                   )}
+                  id={`${panel.key}-exhibition-list`}
                   aria-hidden={!isExpanded}
                 >
                   <FeatureOverviewExhibition

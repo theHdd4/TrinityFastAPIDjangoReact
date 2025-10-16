@@ -12,10 +12,16 @@ import {
   type ExhibitionComponentPayload,
   type ExhibitionConfigurationPayload,
 } from '@/lib/exhibition';
+import {
+  buildBaseDescriptor,
+  buildDefaultHighlightedName,
+  buildPrefixedDescriptor,
+  getComponentPrefix,
+  sanitizeSegment,
+} from '@/components/AtomList/atoms/feature-overview/utils/exhibitionLabels';
 import type {
   FeatureOverviewExhibitionComponentType,
   FeatureOverviewExhibitionSelection,
-  FeatureOverviewExhibitionSelectionDimension,
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
@@ -60,52 +66,6 @@ const VISIBILITY_TOGGLES: Array<{ key: VisibilityToggleKey; label: string; descr
     description: 'Permit collaborators to adjust this component while in exhibition mode.',
   },
 ];
-
-const sanitizeSegment = (value?: string | null): string => {
-  if (typeof value !== 'string') {
-    return '';
-  }
-  return value.trim();
-};
-
-const buildBaseDescriptor = (selection: FeatureOverviewExhibitionSelection): string => {
-  const dimensionSegments = Array.isArray(selection.dimensions)
-    ? selection.dimensions
-        .map((dimension: FeatureOverviewExhibitionSelectionDimension) =>
-          sanitizeSegment(dimension.value) || sanitizeSegment(dimension.name),
-        )
-        .filter(Boolean)
-    : [];
-
-  const yAxisSegment =
-    sanitizeSegment(selection.chartState?.yAxisLabel) ||
-    sanitizeSegment(selection.chartState?.yAxisField) ||
-    sanitizeSegment(selection.metric);
-
-  const segments = [...dimensionSegments, yAxisSegment].filter(Boolean);
-
-  return segments.join(' - ');
-};
-
-const buildDefaultEditableName = (selection: FeatureOverviewExhibitionSelection): string => {
-  const baseDescriptor = buildBaseDescriptor(selection);
-  return baseDescriptor ? `The component details: ${baseDescriptor}` : 'The component details';
-};
-
-const getComponentPrefix = (componentType?: FeatureOverviewExhibitionComponentType): string =>
-  componentType === 'trend_analysis' ? 'Trend Analysis' : 'SKU Stats';
-
-const buildDefaultHighlightedName = (
-  selection: FeatureOverviewExhibitionSelection,
-  componentType?: FeatureOverviewExhibitionComponentType,
-): string => {
-  const defaultEditableName = buildDefaultEditableName(selection);
-  const prefix = getComponentPrefix(componentType);
-  if (!prefix) {
-    return defaultEditableName;
-  }
-  return defaultEditableName ? `${prefix} - ${defaultEditableName}` : prefix;
-};
 
 interface ProcessedSelection {
   id: string;
@@ -524,11 +484,16 @@ const FeatureOverviewExhibition = React.forwardRef<
             }
 
             const componentType = processed.componentType;
+            const descriptorInput = {
+              metric: selection.metric,
+              dimensions: selection.dimensions,
+              chartState: selection.chartState,
+            };
             const typePrefix = getComponentPrefix(componentType);
-            const defaultHighlightedName = buildDefaultHighlightedName(selection, componentType);
+            const defaultHighlightedName = buildDefaultHighlightedName(descriptorInput, componentType);
             const currentEditableName = sanitizeSegment(selection.label) || defaultHighlightedName;
-            const baseDescriptor = buildBaseDescriptor(selection) || 'Not specified';
-            const displayActualName = `${typePrefix}${baseDescriptor ? ` - ${baseDescriptor}` : ''}`;
+            const baseDescriptor = buildBaseDescriptor(descriptorInput) || 'Not specified';
+            const displayActualName = buildPrefixedDescriptor(descriptorInput, componentType) || typePrefix;
             const isEditing = editingKey === selection.key;
             const draftValue = draftNames[selection.key] ?? currentEditableName;
             const isPreviewOpen = expandedPreviewSelections[selection.key] ?? false;
