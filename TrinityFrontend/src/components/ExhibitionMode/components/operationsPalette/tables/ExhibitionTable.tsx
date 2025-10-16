@@ -485,6 +485,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   onUpdateHeader,
   onUpdateHeaderFormatting,
   className,
+  styleId = DEFAULT_TABLE_STYLE_ID,
   onToggleLock = noop,
   onToggleOutline = noop,
   onDelete = noop,
@@ -498,6 +499,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   onAdd2Rows = noop,
   onToolbarStateChange,
   onInteract,
+  onStyleChange = noop,
 }) => {
   const [internalSelection, setInternalSelection] = useState<TableSelection | null>(null);
   const [toolbarFormatting, setToolbarFormatting] = useState<TableCellFormatting>(DEFAULT_CELL_FORMATTING);
