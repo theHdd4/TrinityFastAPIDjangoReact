@@ -70,6 +70,26 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
     [getAtom, updateAtomSettings],
   );
 
+  const handleRenameSelection = React.useCallback(
+    (atomId: string, key: string, name: string) => {
+      const atom = getAtom(atomId);
+      if (!atom) {
+        return;
+      }
+
+      const currentSelections = Array.isArray(atom.settings?.exhibitionSelections)
+        ? (atom.settings.exhibitionSelections as FeatureOverviewExhibitionSelection[])
+        : [];
+
+      const nextSelections = currentSelections.map((selection) =>
+        selection.key === key ? { ...selection, label: name } : selection,
+      );
+
+      updateAtomSettings(atomId, { exhibitionSelections: nextSelections });
+    },
+    [getAtom, updateAtomSettings],
+  );
+
   return (
     <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-80">
       <div className="p-3 border-b border-gray-200 flex items-center justify-between">
@@ -98,6 +118,7 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
                 cardId={entry.cardId}
                 selections={entry.selections}
                 onRemoveSelection={(key) => handleRemoveSelection(entry.atomId, key)}
+                onRenameSelection={(key, name) => handleRenameSelection(entry.atomId, key, name)}
               />
             </div>
           ))
