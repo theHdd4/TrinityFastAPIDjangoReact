@@ -101,6 +101,7 @@ def _default_cors_origins() -> List[str]:
         "10.2.1.207",
         "172.22.64.1",
         "10.2.3.55",
+        "10.2.3.238",
     ]
 
     local_hosts = [
@@ -136,7 +137,7 @@ def _load_cors_settings() -> Tuple[List[str], bool]:
         origins = [origin.strip() for origin in configured.split(",") if origin.strip()]
         return (origins, False)
 
-    return (_default_cors_origins(), True)
+    return (_default_cors_origins(), False)
 
 
 app = FastAPI()
