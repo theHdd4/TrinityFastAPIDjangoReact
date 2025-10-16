@@ -257,16 +257,17 @@ const FeatureOverviewExhibition = React.forwardRef<
   FeatureOverviewExhibitionHandle,
   FeatureOverviewExhibitionProps
 >(
-  {
-    atomId,
-    cardId,
-    atomColor,
-    selections,
-    onRemoveSelection: _onRemoveSelection,
-    onRenameSelection,
-  },
-  ref,
-) => {
+  (
+    {
+      atomId,
+      cardId,
+      atomColor,
+      selections,
+      onRemoveSelection: _onRemoveSelection,
+      onRenameSelection,
+    },
+    ref,
+  ) => {
   const [isSaving, setIsSaving] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draftNames, setDraftNames] = useState<Record<string, string>>({});
