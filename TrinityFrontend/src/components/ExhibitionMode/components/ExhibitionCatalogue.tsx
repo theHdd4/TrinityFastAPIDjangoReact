@@ -313,7 +313,7 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
   }, [groups, expandedGroupKey]);
 
   return (
-    <div className="flex h-full w-80 flex-col border-l border-gray-200 bg-white transition-all duration-300">
+    <div className="flex h-full w-80 flex-col rounded-lg border border-gray-200 bg-white shadow-sm transition-all duration-300">
       <div className="p-3 border-b border-gray-200 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <GalleryHorizontal className="w-4 h-4 text-gray-700" />
