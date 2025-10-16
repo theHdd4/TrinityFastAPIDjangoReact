@@ -1335,8 +1335,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         title: alreadySelected ? "Exhibition staging updated" : "Component staged for exhibition",
         description:
           descriptor.label
-            ? `${descriptor.label} is now available in the Exhibition tab.`
-            : "This component is now available in the Exhibition tab.",
+            ? `${descriptor.label} is now available in the Exhibition panel.`
+            : "This component is now available in the Exhibition panel.",
       });
     },
     [createSelectionDescriptor, exhibitionSelections, toast, updateExhibitionSelection],

@@ -2,15 +2,18 @@ import React, { useState } from 'react';
 import SettingsPanel from './SettingsPanel/';
 import SavedDataFramesPanel from './SavedDataFramesPanel';
 import HelpPanel from './HelpPanel/';
+import ExhibitionPanel from './ExhibitionPanel';
 import { SuperagentAIPanel } from '@/components/TrinityAI';
-import { Settings, Database, HelpCircle, Sparkles } from 'lucide-react';
+import { Settings, Database, HelpCircle, Sparkles, GalleryHorizontal } from 'lucide-react';
 
 interface Props {
   selectedAtomId?: string;
   selectedCardId?: string;
   cardExhibited?: boolean;
-  active?: 'settings' | 'frames' | 'help' | 'superagent' | null;
-  onActiveChange?: (active: 'settings' | 'frames' | 'help' | 'superagent' | null) => void;
+  active?: 'settings' | 'frames' | 'help' | 'superagent' | 'exhibition' | null;
+  onActiveChange?: (
+    active: 'settings' | 'frames' | 'help' | 'superagent' | 'exhibition' | null,
+  ) => void;
 }
 
 const AuxiliaryMenu: React.FC<Props> = ({
@@ -20,11 +23,15 @@ const AuxiliaryMenu: React.FC<Props> = ({
   active: activeProp,
   onActiveChange
 }) => {
-  const [internalActive, setInternalActive] = useState<'settings' | 'frames' | 'help' | 'superagent' | null>(null);
+  const [internalActive, setInternalActive] = useState<
+    'settings' | 'frames' | 'help' | 'superagent' | 'exhibition' | null
+  >(null);
   const controlled = activeProp !== undefined;
   const active = controlled ? activeProp : internalActive;
 
-  const setActive = (value: 'settings' | 'frames' | 'help' | 'superagent' | null) => {
+  const setActive = (
+    value: 'settings' | 'frames' | 'help' | 'superagent' | 'exhibition' | null,
+  ) => {
     if (controlled) {
       onActiveChange?.(value);
     } else {
@@ -35,6 +42,7 @@ const AuxiliaryMenu: React.FC<Props> = ({
   const openSettings = () => setActive(active === 'settings' ? null : 'settings');
   const openFrames = () => setActive(active === 'frames' ? null : 'frames');
   const openHelp = () => setActive(active === 'help' ? null : 'help');
+  const openExhibition = () => setActive(active === 'exhibition' ? null : 'exhibition');
   const openSuperagent = () => setActive(active === 'superagent' ? null : 'superagent');
 
   return (
@@ -71,6 +79,8 @@ const AuxiliaryMenu: React.FC<Props> = ({
         />
       )}
 
+      {active === 'exhibition' && <ExhibitionPanel onToggle={() => setActive(null)} />}
+
       {/* Icons Column - Always visible and stays on the right */}
       <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
         <div className="p-3 border-b border-gray-200 flex items-center justify-between">
@@ -98,8 +108,8 @@ const AuxiliaryMenu: React.FC<Props> = ({
           </button>
         </div>
         <div className="p-3 border-b border-gray-200 flex items-center justify-between">
-          <button 
-            onClick={openSuperagent} 
+          <button
+            onClick={openSuperagent}
             className={`inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground rounded-md p-1 h-8 w-8 ${
               active === 'superagent' ? 'bg-accent text-accent-foreground' : ''
             }`}
@@ -107,6 +117,18 @@ const AuxiliaryMenu: React.FC<Props> = ({
             data-superagent-ai="true"
           >
             <Sparkles className="w-4 h-4 text-[#666666]" />
+          </button>
+        </div>
+        <div className="p-3 border-b border-gray-200 flex items-center justify-between">
+          <button
+            onClick={openExhibition}
+            className={`inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground rounded-md p-1 h-8 w-8 ${
+              active === 'exhibition' ? 'bg-accent text-accent-foreground' : ''
+            }`}
+            title="Exhibition"
+            data-exhibition-panel-toggle="true"
+          >
+            <GalleryHorizontal className="w-4 h-4 text-gray-600" />
           </button>
         </div>
         <div className="p-3 border-b border-gray-200 flex items-center justify-between">
