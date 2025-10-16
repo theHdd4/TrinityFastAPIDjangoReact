@@ -304,6 +304,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
         data-placeholder={DEFAULT_TEXT_BOX_TEXT}
+        data-textbox-editable={canEdit && isEditing ? 'true' : undefined}
         style={{
           fontSize: `${localFormatting.fontSize}px`,
           fontFamily: localFormatting.fontFamily,

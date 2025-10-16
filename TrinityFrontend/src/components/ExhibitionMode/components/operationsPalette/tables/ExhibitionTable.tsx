@@ -98,6 +98,53 @@ const sanitiseStoredContent = (rawValue: string): string => {
   return normaliseEditableText(working);
 };
 
+const LIST_LINE_SEPARATOR = /\r?\n/;
+const BULLET_PATTERN = /^\s*[•-]\s+/;
+const NUMBERED_PATTERN = /^\s*\d+[.)]?\s+/;
+
+const stripListPrefix = (line: string): string => {
+  if (BULLET_PATTERN.test(line)) {
+    return line.replace(BULLET_PATTERN, '');
+  }
+  if (NUMBERED_PATTERN.test(line)) {
+    return line.replace(NUMBERED_PATTERN, '');
+  }
+  return line;
+};
+
+const toggleBulletedListContent = (value: string): string => {
+  const lines = value.split(LIST_LINE_SEPARATOR);
+  const isBulleted = lines.every(line => line.trim().length === 0 || BULLET_PATTERN.test(line));
+
+  if (isBulleted) {
+    return lines.map(line => line.replace(BULLET_PATTERN, '')).join('\n');
+  }
+
+  return lines
+    .map(line => {
+      const base = stripListPrefix(line).trimStart();
+      return base.length > 0 ? `• ${base}` : '• ';
+    })
+    .join('\n');
+};
+
+const toggleNumberedListContent = (value: string): string => {
+  const lines = value.split(LIST_LINE_SEPARATOR);
+  const isNumbered = lines.every(line => line.trim().length === 0 || NUMBERED_PATTERN.test(line));
+
+  if (isNumbered) {
+    return lines.map(line => line.replace(NUMBERED_PATTERN, '')).join('\n');
+  }
+
+  return lines
+    .map((line, index) => {
+      const base = stripListPrefix(line).trimStart();
+      const prefix = `${index + 1}. `;
+      return base.length > 0 ? `${prefix}${base}` : prefix;
+    })
+    .join('\n');
+};
+
 const buildTextDecoration = (formatting: TableCellFormatting) => {
   if (formatting.underline && formatting.strikethrough) {
     return 'underline line-through';
@@ -551,6 +598,60 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
     [canEdit, locked, onInteract, onUpdateHeader],
   );
 
+  const applyListTransformation = useCallback(
+    (transformer: (value: string) => string) => {
+      if (!effectiveSelection) {
+        return;
+      }
+
+      if (selectionRegion === 'header') {
+        if (!onUpdateHeader) {
+          return;
+        }
+        const headerIndex = effectiveSelection.col;
+        const headerCell = headerCells[headerIndex];
+        if (!headerCell) {
+          return;
+        }
+
+        const nextValue = transformer(headerCell.content ?? '');
+        if (nextValue !== (headerCell.content ?? '')) {
+          handleHeaderInput(headerIndex, nextValue);
+        }
+        return;
+      }
+
+      const { row, col } = effectiveSelection;
+      const targetRow = tableData[row];
+      const targetCell = targetRow?.[col];
+      if (!targetCell) {
+        return;
+      }
+
+      const nextValue = transformer(targetCell.content ?? '');
+      if (nextValue !== (targetCell.content ?? '')) {
+        handleBodyCellInput(row, col, nextValue);
+      }
+    },
+    [
+      effectiveSelection,
+      handleBodyCellInput,
+      handleHeaderInput,
+      headerCells,
+      onUpdateHeader,
+      selectionRegion,
+      tableData,
+    ],
+  );
+
+  const handleBulletedList = useCallback(() => {
+    applyListTransformation(toggleBulletedListContent);
+  }, [applyListTransformation]);
+
+  const handleNumberedList = useCallback(() => {
+    applyListTransformation(toggleNumberedListContent);
+  }, [applyListTransformation]);
+
   const applyFormatting = useCallback(
     (updates: Partial<TableCellFormatting>) => {
       if (!effectiveSelection) {
@@ -640,6 +741,8 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
         onToggleStrikethrough={() => handleToggle('strikethrough')}
         align={toolbarFormatting.align}
         onAlign={handleAlign}
+        onBulletedList={handleBulletedList}
+        onNumberedList={handleNumberedList}
         color={toolbarFormatting.color}
         onColorChange={handleColor}
         onDelete={canEdit ? onDelete : undefined}
@@ -648,10 +751,12 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   }, [
     canEdit,
     effectiveSelection,
+    handleBulletedList,
     handleAlign,
     handleColor,
     handleDecreaseFontSize,
     handleFontFamily,
+    handleNumberedList,
     handleIncreaseFontSize,
     handleToggle,
     locked,
