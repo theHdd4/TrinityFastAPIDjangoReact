@@ -1,9 +1,63 @@
+import os
+import socket
+from typing import Iterable, List
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from app.api.router import api_router, text_router
-import os
-from typing import List
 from DataStorageRetrieval.arrow_client import load_env_from_redis
+
+
+def _iter_host_variants(hosts: Iterable[str], ports: Iterable[str]) -> Iterable[str]:
+    """Yield HTTP/HTTPS origin variants for the provided hosts."""
+
+    for host in hosts:
+        host = host.strip()
+        if not host:
+            continue
+
+        yielded = set()
+        for port in ports:
+            origin = f"http://{host}:{port}"
+            if origin not in yielded:
+                yielded.add(origin)
+                yield origin
+
+        https_origin = f"https://{host}"
+        if https_origin not in yielded:
+            yielded.add(https_origin)
+            yield https_origin
+
+
+def _detect_runtime_hosts() -> List[str]:
+    """Best-effort detection of container/network IPs for CORS rules."""
+
+    hosts: List[str] = []
+
+    try:
+        hostname = socket.gethostname()
+        _, _, host_ips = socket.gethostbyname_ex(hostname)
+        for ip in host_ips:
+            if ip and ip not in hosts:
+                hosts.append(ip)
+    except OSError:
+        # ``socket.gethostbyname_ex`` can fail in minimal container setups.
+        pass
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            # Connecting without sending packets allows us to inspect the
+            # outbound interface IP address used for default routing.
+            sock.connect(("8.8.8.8", 80))
+            ip = sock.getsockname()[0]
+            if ip and ip not in hosts:
+                hosts.append(ip)
+    except OSError:
+        # Fall back gracefully when network access is unavailable.
+        pass
+
+    return hosts
 
 
 def _default_cors_origins() -> List[str]:
@@ -30,15 +84,12 @@ def _default_cors_origins() -> List[str]:
         "http://localhost:8080",
     ]
 
+    ports = [frontend_port, "8080", "8081"]
+
     if host_ip:
-        defaults.extend(
-            [
-                f"http://{host_ip}:{frontend_port}",
-                f"http://{host_ip}:8080",
-                f"http://{host_ip}:8081",
-                f"https://{host_ip}",
-            ]
-        )
+        defaults.extend(_iter_host_variants([host_ip], ports))
+
+    defaults.extend(_iter_host_variants(_detect_runtime_hosts(), ports))
 
     defaults.extend(
         [
