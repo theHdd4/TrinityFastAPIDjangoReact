@@ -2,7 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Eye, ListChecks, Loader2, Send, X } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { ListChecks, Loader2, PencilLine, Send } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 import {
@@ -15,6 +16,7 @@ import {
 import type {
   FeatureOverviewExhibitionComponentType,
   FeatureOverviewExhibitionSelection,
+  FeatureOverviewExhibitionSelectionDimension,
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
@@ -30,52 +32,50 @@ interface FeatureOverviewExhibitionProps {
   cardId?: string | null;
   selections: FeatureOverviewExhibitionSelection[];
   onRemoveSelection?: (key: string) => void;
+  onRenameSelection?: (key: string, name: string) => void;
 }
 
-const INITIAL_VISIBILITY = {
-  headers: true,
-  dataTypes: true,
-  uniqueCounts: true,
-  sampleValues: false,
-  qualityMetrics: false,
-};
-
-type VisibilityKey = keyof typeof INITIAL_VISIBILITY;
-
-const formatStatValue = (value: unknown): string => {
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) {
-      return String(value);
-    }
-    return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  }
-
-  if (value == null) {
-    return '—';
-  }
-
-  if (typeof value === 'string') {
-    return value.trim() === '' ? '—' : value;
-  }
-
-  return String(value);
-};
-
-const humanizeLabel = (value?: string | null): string => {
-  if (!value) {
+const sanitizeSegment = (value?: string | null): string => {
+  if (typeof value !== 'string') {
     return '';
   }
-  return value.replace(/_/g, ' ');
+  return value.trim();
+};
+
+const buildBaseDescriptor = (selection: FeatureOverviewExhibitionSelection): string => {
+  const dimensionSegments = Array.isArray(selection.dimensions)
+    ? selection.dimensions
+        .map((dimension: FeatureOverviewExhibitionSelectionDimension) =>
+          sanitizeSegment(dimension.value) || sanitizeSegment(dimension.name),
+        )
+        .filter(Boolean)
+    : [];
+
+  const yAxisSegment =
+    sanitizeSegment(selection.chartState?.yAxisLabel) ||
+    sanitizeSegment(selection.chartState?.yAxisField) ||
+    sanitizeSegment(selection.metric);
+
+  const segments = [...dimensionSegments, yAxisSegment].filter(Boolean);
+
+  return segments.join(' - ');
+};
+
+const buildDefaultEditableName = (selection: FeatureOverviewExhibitionSelection): string => {
+  const baseDescriptor = buildBaseDescriptor(selection);
+  return baseDescriptor ? `The component details: ${baseDescriptor}` : 'The component details';
 };
 
 const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
   atomId,
   cardId,
   selections,
-  onRemoveSelection,
+  onRemoveSelection: _onRemoveSelection,
+  onRenameSelection,
 }) => {
-  const [visibility, setVisibility] = useState(INITIAL_VISIBILITY);
   const [isSaving, setIsSaving] = useState(false);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [draftNames, setDraftNames] = useState<Record<string, string>>({});
   const { toast } = useToast();
   const loadSavedConfiguration = useExhibitionStore(state => state.loadSavedConfiguration);
 
@@ -124,13 +124,6 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
 
     return 'Exhibited Atom';
   }, [atomId, sourceAtomTitle]);
-
-  const toggleVisibility = (key: VisibilityKey) => {
-    setVisibility(prev => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
-  };
 
   const handleExhibit = async () => {
     if (selectionCount === 0) {
@@ -415,14 +408,9 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
     <div className="space-y-4">
       <Card className="p-4 border border-gray-200 shadow-sm space-y-4">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
-              <ListChecks className="w-4 h-4 text-blue-500" />
-              Selected components
-            </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Curate dependent variable and dimension pairings from the statistical summary or trend analysis charts for exhibition mode.
-            </p>
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+            <ListChecks className="w-4 h-4 text-blue-500" />
+            Selected components
           </div>
           <Badge variant="secondary" className="text-xs font-medium px-2 py-1">
             {selectionBadgeLabel}
@@ -431,157 +419,93 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
 
         {selectionCount === 0 ? (
           <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
-            No components selected yet. Right-click a statistical summary row or trend analysis chart in the laboratory to stage it for exhibition.
+            No components have been staged for exhibition yet. Mark feature overview insights for exhibition to see them here.
           </div>
         ) : (
           <div className="space-y-3">
             {selections.map(selection => {
-              const componentType: FeatureOverviewExhibitionComponentType =
-                selection.componentType ?? 'statistical_summary';
-              const summary = (selection.statisticalDetails?.summary ?? null) as
-                | Record<string, any>
-                | null;
-              const summaryPairs = summary
-                ? Object.entries(summary).filter(([, value]) =>
-                    value !== undefined && value !== null && typeof value !== 'object',
-                  )
-                : [];
-              const chartState = selection.chartState;
-              const featureContext = selection.featureContext;
-              const showSummaryPairs = componentType === 'statistical_summary' && summaryPairs.length > 0;
-              const showChartDetails = componentType === 'trend_analysis' && chartState;
+              const defaultEditableName = buildDefaultEditableName(selection);
+              const currentEditableName = sanitizeSegment(selection.label) || defaultEditableName;
+              const baseDescriptor = buildBaseDescriptor(selection);
+              const actualName = baseDescriptor || 'Not specified';
+              const isEditing = editingKey === selection.key;
+              const draftValue = draftNames[selection.key] ?? currentEditableName;
+
+              const startEditing = () => {
+                setDraftNames(prev => ({ ...prev, [selection.key]: currentEditableName }));
+                setEditingKey(selection.key);
+              };
+
+              const updateDraft = (value: string) => {
+                setDraftNames(prev => ({ ...prev, [selection.key]: value }));
+              };
+
+              const finishEditing = (shouldSave: boolean) => {
+                setEditingKey(null);
+                setDraftNames(prev => {
+                  const { [selection.key]: _discarded, ...rest } = prev;
+                  return rest;
+                });
+
+                if (!shouldSave || !onRenameSelection) {
+                  return;
+                }
+
+                const proposedName = draftValue.trim();
+                const nextName = proposedName.length > 0 ? proposedName : defaultEditableName;
+                onRenameSelection(selection.key, nextName);
+              };
 
               return (
                 <div
                   key={selection.key}
-                  className="rounded-md border border-gray-200 bg-white/80 px-3 py-3 shadow-sm flex flex-col gap-3"
+                  className="rounded-lg border border-gray-200 bg-white/80 px-3 py-3 shadow-sm space-y-2"
                 >
-                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                    <div className="space-y-1">
-                      <p className="text-sm font-semibold text-gray-900">
-                        {selection.label || selection.metric}
-                      </p>
-                      <Badge variant="secondary" className="text-[10px] uppercase tracking-wide text-gray-600">
-                        {componentType === 'trend_analysis' ? 'Trend analysis chart' : 'Statistical summary'}
-                      </Badge>
-                      <div className="flex flex-wrap gap-1">
-                        {selection.dimensions.map(dimension => (
-                          <Badge key={`${selection.key}-${dimension.name}`} variant="outline" className="text-[11px]">
-                            {dimension.name}: {dimension.value || '—'}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
-                    {onRemoveSelection && (
+                  <div className="flex items-start justify-between gap-2">
+                    {isEditing ? (
+                      <Input
+                        value={draftValue}
+                        onChange={event => updateDraft(event.target.value)}
+                        onBlur={() => finishEditing(true)}
+                        onKeyDown={event => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            finishEditing(true);
+                          }
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            finishEditing(false);
+                          }
+                        }}
+                        autoFocus
+                        className="text-sm font-semibold text-emerald-700 focus-visible:ring-emerald-500"
+                      />
+                    ) : (
+                      <span className="text-sm font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md">
+                        {currentEditableName}
+                      </span>
+                    )}
+
+                    {!isEditing && onRenameSelection && (
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="ml-auto text-gray-500 hover:text-gray-700"
-                        onClick={() => onRemoveSelection(selection.key)}
+                        className="h-8 w-8 text-gray-500 hover:text-gray-700"
+                        onClick={startEditing}
                       >
-                        <X className="h-4 w-4" />
-                        <span className="sr-only">Remove selection</span>
+                        <PencilLine className="h-4 w-4" />
+                        <span className="sr-only">Rename component</span>
                       </Button>
                     )}
                   </div>
 
-                  {showSummaryPairs && (
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
-                      {summaryPairs.map(([key, value]) => (
-                        <span key={key} className="font-medium">
-                          {humanizeLabel(key)}:{' '}
-                          <span className="font-normal">{formatStatValue(value)}</span>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {showChartDetails && chartState && (
-                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] uppercase tracking-wide text-gray-500">
-                      <span>Type: {humanizeLabel(chartState.chartType)}</span>
-                      <span>Theme: {humanizeLabel(chartState.theme)}</span>
-                      <span>Labels: {chartState.showDataLabels ? 'On' : 'Off'}</span>
-                      <span>Axis Labels: {chartState.showAxisLabels ? 'On' : 'Off'}</span>
-                      <span>X: {humanizeLabel(chartState.xAxisField)}</span>
-                      <span>Y: {humanizeLabel(chartState.yAxisField)}</span>
-                    </div>
-                  )}
-
-                  {featureContext && (
-                    <div className="text-[11px] text-gray-400 flex flex-wrap gap-x-3 gap-y-1">
-                      {featureContext.dataSource && <span>Data: {featureContext.dataSource}</span>}
-                      {featureContext.xAxis && <span>X axis: {featureContext.xAxis}</span>}
-                      {Array.isArray(featureContext.availableMetrics) && featureContext.availableMetrics.length > 0 && (
-                        <span>Y axes: {featureContext.availableMetrics.join(', ')}</span>
-                      )}
-                    </div>
-                  )}
-
-                  {selection.capturedAt && (
-                    <div className="text-[10px] text-gray-400">
-                      Captured at {new Date(selection.capturedAt).toLocaleString()}
-                    </div>
-                  )}
+                  <p className="text-xs text-gray-600 font-medium">{actualName}</p>
                 </div>
               );
             })}
           </div>
         )}
-      </Card>
-
-      <Card className="p-4 border border-gray-200 shadow-sm">
-        <div className="flex items-center space-x-2 mb-4">
-          <Eye className="w-4 h-4 text-green-500" />
-          <h4 className="font-medium text-gray-900">Visibility Settings</h4>
-        </div>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-700">Show column headers</span>
-            <input
-              type="checkbox"
-              className="rounded border-gray-300"
-              checked={visibility.headers}
-              onChange={() => toggleVisibility('headers')}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-700">Display data types</span>
-            <input
-              type="checkbox"
-              className="rounded border-gray-300"
-              checked={visibility.dataTypes}
-              onChange={() => toggleVisibility('dataTypes')}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-700">Show unique counts</span>
-            <input
-              type="checkbox"
-              className="rounded border-gray-300"
-              checked={visibility.uniqueCounts}
-              onChange={() => toggleVisibility('uniqueCounts')}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-700">Include sample values</span>
-            <input
-              type="checkbox"
-              className="rounded border-gray-300"
-              checked={visibility.sampleValues}
-              onChange={() => toggleVisibility('sampleValues')}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-700">Show data quality metrics</span>
-            <input
-              type="checkbox"
-              className="rounded border-gray-300"
-              checked={visibility.qualityMetrics}
-              onChange={() => toggleVisibility('qualityMetrics')}
-            />
-          </div>
-        </div>
       </Card>
 
       <div className="space-y-2">
