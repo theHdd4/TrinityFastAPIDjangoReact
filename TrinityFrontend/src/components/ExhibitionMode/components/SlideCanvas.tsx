@@ -659,30 +659,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     updateTextBoxGeometry,
   ]);
 
-  const operationsPanelNode = formatPanelNode ?? positionPanelNode;
-
-  const lastProvidedOperationsPanel = useRef<ReactNode | null>(null);
-
-  useEffect(() => {
-    if (!onPositionPanelChange) {
-      return;
-    }
-
-    if (operationsPanelNode !== lastProvidedOperationsPanel.current) {
-      onPositionPanelChange(operationsPanelNode);
-      lastProvidedOperationsPanel.current = operationsPanelNode;
-    }
-  }, [onPositionPanelChange, operationsPanelNode]);
-
-  useEffect(() => {
-    return () => {
-      if (onPositionPanelChange && lastProvidedOperationsPanel.current) {
-        onPositionPanelChange(null);
-        lastProvidedOperationsPanel.current = null;
-      }
-    };
-  }, [onPositionPanelChange]);
-
   const handleAtomRemove = (atomId: string) => {
     if (!canEdit) {
       return;
@@ -801,6 +777,33 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     showFormatPanel,
     updateSettings,
   ]);
+
+  const operationsPanelNode = useMemo(
+    () => formatPanelNode ?? positionPanelNode,
+    [formatPanelNode, positionPanelNode],
+  );
+
+  const lastProvidedOperationsPanel = useRef<ReactNode | null>(null);
+
+  useEffect(() => {
+    if (!onPositionPanelChange) {
+      return;
+    }
+
+    if (operationsPanelNode !== lastProvidedOperationsPanel.current) {
+      onPositionPanelChange(operationsPanelNode);
+      lastProvidedOperationsPanel.current = operationsPanelNode;
+    }
+  }, [onPositionPanelChange, operationsPanelNode]);
+
+  useEffect(() => {
+    return () => {
+      if (onPositionPanelChange && lastProvidedOperationsPanel.current) {
+        onPositionPanelChange(null);
+        lastProvidedOperationsPanel.current = null;
+      }
+    };
+  }, [onPositionPanelChange]);
 
   const containerClasses =
     viewMode === 'horizontal'
