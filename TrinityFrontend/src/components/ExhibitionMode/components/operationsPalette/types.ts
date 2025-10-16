@@ -11,5 +11,6 @@ export interface PaletteOperation {
 export interface OperationFactoryDeps {
   onCreateTextBox?: () => void;
   onCreateTable?: () => void;
+  onOpenShapesPanel?: () => void;
   canEdit?: boolean;
 }
