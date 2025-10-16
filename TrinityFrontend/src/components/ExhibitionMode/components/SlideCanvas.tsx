@@ -1,31 +1,7 @@
 import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  User,
-  Calendar,
-  Sparkles,
-  StickyNote,
-  Image as ImageIcon,
-  Palette,
-  Layout,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
-  Maximize2,
-  RotateCcw,
-  Settings,
-  Plus,
-  Trash2,
-} from 'lucide-react';
+import { User, Calendar, Sparkles, StickyNote, Settings, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Switch } from '@/components/ui/switch';
-import { Separator } from '@/components/ui/separator';
 import {
   useExhibitionStore,
   CardLayout,
@@ -46,6 +22,7 @@ import { SlideTextBoxObject } from './operationsPalette/textBox/TextBox';
 import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from './operationsPalette/textBox/constants';
 import type { TextBoxFormatting } from './operationsPalette/textBox/types';
 import { TextBoxPositionPanel } from './operationsPalette/textBox/TextBoxPositionPanel';
+import { CardFormattingPanel } from './operationsPalette/CardFormattingPanel';
 import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
 import {
   DEFAULT_TABLE_COLS,
@@ -225,8 +202,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const [activeTextToolbar, setActiveTextToolbar] = useState<ReactNode | null>(null);
   const [positionPanelTarget, setPositionPanelTarget] = useState<{ objectId: string } | null>(null);
   const accentImageInputRef = useRef<HTMLInputElement | null>(null);
-  const formatPanelRef = useRef<HTMLDivElement | null>(null);
-  const formatToggleRef = useRef<HTMLButtonElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
 
   const slideObjects = useExhibitionStore(
@@ -346,38 +321,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   }, [canEdit, positionPanelObject, positionPanelTarget]);
 
   useEffect(() => {
-    if (!showFormatPanel) {
-      return;
-    }
-
-    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
-      const target = event.target as Node | null;
-
-      if (!target) {
-        return;
-      }
-
-      if (formatPanelRef.current?.contains(target)) {
-        return;
-      }
-
-      if (formatToggleRef.current?.contains(target)) {
-        return;
-      }
-
-      setShowFormatPanel(false);
-    };
-
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('touchstart', handlePointerDown);
-
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('touchstart', handlePointerDown);
-    };
-  }, [showFormatPanel]);
-
-  useEffect(() => {
     if (nonStructuralObjects.length > 0) {
       setHasInteracted(true);
     } else {
@@ -385,45 +328,48 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
   }, [card.id, nonStructuralObjects.length]);
 
-  const updateSettings = (partial: Partial<PresentationSettings>) => {
-    setSettings(prev => {
-      if (!canEdit) {
-        return prev;
-      }
-
-      const merged = { ...prev, ...partial } as PresentationSettings;
-
-      if ('cardLayout' in partial && !('cardColor' in partial)) {
-        const targetLayout = partial.cardLayout ?? prev.cardLayout;
-        const mappedColor = layoutDefaultColors[targetLayout];
-        if (!merged.accentImage && mappedColor && merged.cardColor !== mappedColor) {
-          merged.cardColor = mappedColor;
+  const updateSettings = useCallback(
+    (partial: Partial<PresentationSettings>) => {
+      setSettings(prev => {
+        if (!canEdit) {
+          return prev;
         }
-      }
 
-      if ('accentImage' in partial && !partial.accentImage) {
-        const fallbackColor = layoutDefaultColors[merged.cardLayout] ?? 'default';
-        merged.cardColor = fallbackColor;
-        merged.accentImage = null;
-      }
+        const merged = { ...prev, ...partial } as PresentationSettings;
 
-      if ('accentImageName' in partial && !partial.accentImageName) {
-        merged.accentImageName = null;
-      }
+        if ('cardLayout' in partial && !('cardColor' in partial)) {
+          const targetLayout = partial.cardLayout ?? prev.cardLayout;
+          const mappedColor = layoutDefaultColors[targetLayout];
+          if (!merged.accentImage && mappedColor && merged.cardColor !== mappedColor) {
+            merged.cardColor = mappedColor;
+          }
+        }
 
-      onPresentationChange?.(merged, card.id);
-      return merged;
-    });
-  };
+        if ('accentImage' in partial && !partial.accentImage) {
+          const fallbackColor = layoutDefaultColors[merged.cardLayout] ?? 'default';
+          merged.cardColor = fallbackColor;
+          merged.accentImage = null;
+        }
 
-  const resetSettings = () => {
+        if ('accentImageName' in partial && !partial.accentImageName) {
+          merged.accentImageName = null;
+        }
+
+        onPresentationChange?.(merged, card.id);
+        return merged;
+      });
+    },
+    [canEdit, card.id, layoutDefaultColors, onPresentationChange],
+  );
+
+  const resetSettings = useCallback(() => {
     if (!canEdit) {
       return;
     }
     const defaults = { ...DEFAULT_PRESENTATION_SETTINGS };
     setSettings(defaults);
     onPresentationChange?.(defaults, card.id);
-  };
+  }, [canEdit, card.id, onPresentationChange]);
 
   const layoutConfig = useMemo(() => {
     const shared = {
@@ -521,6 +467,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       if (!canEdit) {
         return;
       }
+      setShowFormatPanel(false);
       setPositionPanelTarget({ objectId });
     },
     [canEdit],
@@ -712,24 +659,26 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     updateTextBoxGeometry,
   ]);
 
-  const lastProvidedPositionPanel = useRef<ReactNode | null>(null);
+  const operationsPanelNode = formatPanelNode ?? positionPanelNode;
+
+  const lastProvidedOperationsPanel = useRef<ReactNode | null>(null);
 
   useEffect(() => {
     if (!onPositionPanelChange) {
       return;
     }
 
-    if (positionPanelNode !== lastProvidedPositionPanel.current) {
-      onPositionPanelChange(positionPanelNode);
-      lastProvidedPositionPanel.current = positionPanelNode;
+    if (operationsPanelNode !== lastProvidedOperationsPanel.current) {
+      onPositionPanelChange(operationsPanelNode);
+      lastProvidedOperationsPanel.current = operationsPanelNode;
     }
-  }, [onPositionPanelChange, positionPanelNode]);
+  }, [onPositionPanelChange, operationsPanelNode]);
 
   useEffect(() => {
     return () => {
-      if (onPositionPanelChange && lastProvidedPositionPanel.current) {
+      if (onPositionPanelChange && lastProvidedOperationsPanel.current) {
         onPositionPanelChange(null);
-        lastProvidedPositionPanel.current = null;
+        lastProvidedOperationsPanel.current = null;
       }
     };
   }, [onPositionPanelChange]);
@@ -795,29 +744,63 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     });
   };
 
-  const handleAccentImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canEdit) {
-      return;
-    }
-
-    const file = event.target.files?.[0];
-    event.target.value = '';
-
-    if (!file) {
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result !== 'string' || reader.result.length === 0) {
+  const handleAccentImageChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      if (!canEdit) {
         return;
       }
 
-      updateSettings({ accentImage: reader.result, accentImageName: file.name });
-    };
+      const file = event.target.files?.[0];
+      event.target.value = '';
 
-    reader.readAsDataURL(file);
-  };
+      if (!file) {
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result !== 'string' || reader.result.length === 0) {
+          return;
+        }
+
+        updateSettings({ accentImage: reader.result, accentImageName: file.name });
+      };
+
+      reader.readAsDataURL(file);
+    },
+    [canEdit, updateSettings],
+  );
+
+  const handleCloseFormatPanel = useCallback(() => {
+    setShowFormatPanel(false);
+  }, []);
+
+  const formatPanelNode = useMemo(() => {
+    if (!canEdit || !showFormatPanel) {
+      return null;
+    }
+
+    return (
+      <CardFormattingPanel
+        settings={settings}
+        canEdit={canEdit}
+        onUpdateSettings={updateSettings}
+        onReset={resetSettings}
+        onAccentImageChange={handleAccentImageChange}
+        accentImageInputRef={accentImageInputRef}
+        onClose={handleCloseFormatPanel}
+      />
+    );
+  }, [
+    accentImageInputRef,
+    canEdit,
+    handleAccentImageChange,
+    handleCloseFormatPanel,
+    resetSettings,
+    settings,
+    showFormatPanel,
+    updateSettings,
+  ]);
 
   const containerClasses =
     viewMode === 'horizontal'
@@ -831,12 +814,12 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
 
   return (
     <div className={containerClasses}>
-        <div
-          className={cn(
-            'mx-auto transition-all duration-300 p-8',
-            cardWidthClass,
-          )}
-        >
+      <div
+        className={cn(
+          'mx-auto transition-all duration-300 p-8',
+          cardWidthClass,
+        )}
+      >
         {viewMode === 'vertical' && (
           <div className="mb-4 flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -851,13 +834,13 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         )}
 
         <div className="space-y-4">
-            {canEdit && activeTextToolbar && (
-              <div className="relative mb-4 flex w-full justify-center">
-                <div className="z-30 drop-shadow-xl">{activeTextToolbar}</div>
-              </div>
-            )}
+          {canEdit && activeTextToolbar && (
+            <div className="relative mb-4 flex w-full justify-center">
+              <div className="z-30 drop-shadow-xl">{activeTextToolbar}</div>
+            </div>
+          )}
 
-            <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-2 text-foreground">
               <User className="h-4 w-4" />
               <span className="font-semibold">Exhibition presenter:</span>
@@ -922,11 +905,13 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   <Button
                     size="icon"
                     variant="secondary"
-                    className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
-                    onClick={() => setShowFormatPanel(!showFormatPanel)}
+                    className={cn(
+                      'h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background transition-colors',
+                      showFormatPanel && 'border border-primary/40 text-primary'
+                    )}
+                    onClick={() => setShowFormatPanel(prev => !prev)}
                     disabled={!canEdit}
                     type="button"
-                    ref={formatToggleRef}
                   >
                     <Settings className="h-4 w-4" />
                   </Button>
@@ -995,344 +980,18 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             </div>
           )}
 
-          {showFormatPanel && (
-            <div
-              ref={formatPanelRef}
-              className="absolute right-0 top-12 z-30 w-80 rounded-xl border-2 border-border bg-background p-4 shadow-2xl sm:right-3"
-            >
-              <h3 className="mb-4 text-sm font-semibold">Card Formatting</h3>
-
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Layout</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <Button
-                      size="icon"
-                      variant={settings.cardLayout === 'none' ? 'default' : 'outline'}
-                      className="h-12 w-12 rounded-lg"
-                      onClick={() => updateSettings({ cardLayout: 'none' })}
-                      type="button"
-                      disabled={!canEdit}
-                    >
-                      <span className="sr-only">No layout</span>
-                      <div className="flex h-6 w-6 items-center justify-center">
-                        <div className="h-6 w-6 rounded border-2 border-current" />
-                      </div>
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant={settings.cardLayout === 'top' ? 'default' : 'outline'}
-                      className="h-12 w-12 rounded-lg"
-                      onClick={() => updateSettings({ cardLayout: 'top' })}
-                      type="button"
-                      disabled={!canEdit}
-                    >
-                      <span className="sr-only">Top layout</span>
-                      <div className="flex h-6 w-6 flex-col">
-                        <div className="h-2 rounded-t border-2 border-current bg-current/20" />
-                        <div className="flex-1 rounded-b border-2 border-current" />
-                      </div>
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant={settings.cardLayout === 'bottom' ? 'default' : 'outline'}
-                      className="h-12 w-12 rounded-lg"
-                      onClick={() => updateSettings({ cardLayout: 'bottom' })}
-                      type="button"
-                      disabled={!canEdit}
-                    >
-                      <span className="sr-only">Bottom layout</span>
-                      <div className="flex h-6 w-6 flex-col">
-                        <div className="flex-1 rounded-t border-2 border-current" />
-                        <div className="h-2 rounded-b border-2 border-current bg-current/20" />
-                      </div>
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant={settings.cardLayout === 'right' ? 'default' : 'outline'}
-                      className="h-12 w-12 rounded-lg"
-                      onClick={() => updateSettings({ cardLayout: 'right' })}
-                      type="button"
-                      disabled={!canEdit}
-                    >
-                      <span className="sr-only">Right layout</span>
-                      <div className="flex h-6 w-6">
-                        <div className="flex-1 rounded-l border-2 border-current" />
-                        <div className="w-2 rounded-r border-2 border-current bg-current/20" />
-                      </div>
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant={settings.cardLayout === 'left' ? 'default' : 'outline'}
-                      className="h-12 w-12 rounded-lg"
-                      onClick={() => updateSettings({ cardLayout: 'left' })}
-                      type="button"
-                      disabled={!canEdit}
-                    >
-                      <span className="sr-only">Left layout</span>
-                      <div className="flex h-6 w-6">
-                        <div className="w-2 rounded-l border-2 border-current bg-current/20" />
-                        <div className="flex-1 rounded-r border-2 border-current" />
-                      </div>
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant={settings.cardLayout === 'full' ? 'default' : 'outline'}
-                      className="h-12 w-12 rounded-lg"
-                      onClick={() => updateSettings({ cardLayout: 'full' })}
-                      type="button"
-                      disabled={!canEdit}
-                    >
-                      <span className="sr-only">Entire background layout</span>
-                      <div className="h-6 w-6 rounded border-2 border-current bg-current/20" />
-                    </Button>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Accent image</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {settings.accentImage && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs text-destructive"
-                        onClick={() => updateSettings({ accentImage: null, accentImageName: null })}
-                        disabled={!canEdit}
-                        type="button"
-                      >
-                        Remove
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 text-xs text-primary"
-                      onClick={() => accentImageInputRef.current?.click()}
-                      disabled={!canEdit}
-                      type="button"
-                    >
-                      {settings.accentImage ? 'Change' : 'Upload'}
-                    </Button>
-                  </div>
-                </div>
-
-                {settings.accentImage && (
-                  <div className="space-y-2">
-                    <div className="relative h-24 overflow-hidden rounded-lg border border-border">
-                      <img
-                        src={settings.accentImage}
-                        alt="Accent"
-                        className="h-full w-full object-cover"
-                      />
-                      {settings.accentImageName && (
-                        <div className="absolute bottom-0 left-0 right-0 bg-background/90 px-2 py-1 text-[11px] truncate">
-                          {settings.accentImageName}
-                        </div>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      Accent images replace the card color for this slide layout.
-                    </p>
-                  </div>
-                )}
-
-                <input
-                  ref={accentImageInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleAccentImageChange}
-                  className="hidden"
-                />
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Palette className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Card color</span>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs capitalize"
-                        disabled={!canEdit || Boolean(settings.accentImage)}
-                      >
-                        {settings.cardColor}
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="bg-background">
-                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'default' })}>Default</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'blue' })}>Blue</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'purple' })}>Purple</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'green' })}>Green</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'orange' })}>Orange</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Layout className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Full-bleed card</span>
-                  </div>
-                  <Switch
-                    checked={settings.fullBleed}
-                    onCheckedChange={value => updateSettings({ fullBleed: value })}
-                    disabled={!canEdit}
-                  />
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <AlignCenter className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Content alignment</span>
-                  </div>
-                  <div className="flex gap-1">
-                    <Button
-                      size="icon"
-                      variant={settings.contentAlignment === 'top' ? 'default' : 'outline'}
-                      className="h-7 w-7"
-                      onClick={() => updateSettings({ contentAlignment: 'top' })}
-                      disabled={!canEdit}
-                    >
-                      <AlignLeft className="h-3 w-3 rotate-90" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant={settings.contentAlignment === 'center' ? 'default' : 'outline'}
-                      className="h-7 w-7"
-                      onClick={() => updateSettings({ contentAlignment: 'center' })}
-                      disabled={!canEdit}
-                    >
-                      <AlignCenter className="h-3 w-3 rotate-90" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant={settings.contentAlignment === 'bottom' ? 'default' : 'outline'}
-                      className="h-7 w-7"
-                      onClick={() => updateSettings({ contentAlignment: 'bottom' })}
-                      disabled={!canEdit}
-                    >
-                      <AlignRight className="h-3 w-3 rotate-90" />
-                    </Button>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Maximize2 className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Card width</span>
-                  </div>
-                  <div className="flex gap-1">
-                    <Button
-                      size="sm"
-                      variant={settings.cardWidth === 'M' ? 'default' : 'outline'}
-                      className="h-7 px-3 text-xs"
-                      onClick={() => updateSettings({ cardWidth: 'M' })}
-                      disabled={!canEdit}
-                    >
-                      M
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={settings.cardWidth === 'L' ? 'default' : 'outline'}
-                      className="h-7 px-3 text-xs"
-                      onClick={() => updateSettings({ cardWidth: 'L' })}
-                      disabled={!canEdit}
-                    >
-                      L
-                    </Button>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Backdrop</span>
-                  <Button size="sm" variant="ghost" className="h-7 text-xs text-primary">
-                    <Plus className="mr-1 h-3 w-3" />
-                    Add
-                  </Button>
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Card headers & footers</span>
-                  <Button size="sm" variant="ghost" className="h-7 text-xs text-primary">
-                    Edit
-                  </Button>
-                </div>
-
-                <Separator />
-
-                <Button
-                  variant="outline"
-                  className="w-full justify-start text-sm"
-                  onClick={resetSettings}
-                  type="button"
-                  disabled={!canEdit}
-                >
-                  <RotateCcw className="mr-2 h-4 w-4" />
-                  Reset styling
-                </Button>
-              </div>
+          {viewMode === 'horizontal' && (
+            <div className="mt-6 text-center">
+              <span className="inline-block px-4 py-2 bg-muted rounded-full text-sm font-medium text-muted-foreground">
+                Slide {slideNumber} of {totalSlides}
+              </span>
             </div>
           )}
         </div>
-
-        {viewMode === 'horizontal' && (
-          <div className="mt-6 text-center">
-            <span className="inline-block px-4 py-2 bg-muted rounded-full text-sm font-medium text-muted-foreground">
-              Slide {slideNumber} of {totalSlides}
-            </span>
-          </div>
-        )}
-        </div>
       </div>
+    </div>
   );
 };
-
-interface CanvasStageProps {
-  canEdit: boolean;
-  objects: SlideObject[];
-  isDragOver: boolean;
-  showEmptyState: boolean;
-  layout: CardLayout;
-  cardColor: CardColor;
-  accentImage?: string | null;
-  accentImageName?: string | null;
-  titleObjectId?: string | null;
-  onCanvasDragOver: (event: React.DragEvent) => void;
-  onCanvasDragLeave: () => void;
-  onCanvasDrop: (event: React.DragEvent) => void;
-  onInteract: () => void;
-  onRemoveAtom?: (atomId: string) => void;
-  onBringToFront: (objectIds: string[]) => void;
-  onSendToBack: (objectIds: string[]) => void;
-  onBulkUpdate: (updates: Record<string, Partial<SlideObject>>) => void;
-  onGroupObjects: (objectIds: string[], groupId: string | null) => void;
-  onTitleCommit?: (text: string) => void;
-  onRemoveObject?: (objectId: string) => void;
-  onTextToolbarChange?: (toolbar: ReactNode | null) => void;
-  onRequestPositionPanel?: (objectId: string) => void;
-}
 
 const MIN_OBJECT_WIDTH = 220;
 const MIN_OBJECT_HEIGHT = 120;
