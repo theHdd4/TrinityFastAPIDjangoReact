@@ -8,6 +8,17 @@ export const DEFAULT_TABLE_HEIGHT = 260;
 
 export type TableTextAlign = 'left' | 'center' | 'right';
 
+export interface TableSelectionPoint {
+  row: number;
+  col: number;
+}
+
+export interface TableSelection {
+  region: 'header' | 'body';
+  anchor: TableSelectionPoint;
+  focus: TableSelectionPoint;
+}
+
 export interface TableCellFormatting {
   fontFamily: string;
   fontSize: number;
@@ -202,6 +213,32 @@ const toMatrix = (value: unknown): TableCellData[][] | null => {
 };
 
 const TABLE_STYLES: TableStyleDefinition[] = [
+  {
+    id: 'transparent',
+    label: 'Transparent',
+    category: 'Light',
+    table: {
+      background: 'transparent',
+      borderColor: 'rgba(148, 163, 184, 0.45)',
+    },
+    header: {
+      background: 'transparent',
+      textColor: DEFAULT_CELL_COLOR,
+      borderColor: 'rgba(148, 163, 184, 0.35)',
+    },
+    body: {
+      oddBackground: 'transparent',
+      evenBackground: 'transparent',
+      textColor: DEFAULT_CELL_COLOR,
+      borderColor: 'rgba(148, 163, 184, 0.25)',
+    },
+    preview: {
+      header: 'rgba(148, 163, 184, 0.28)',
+      odd: 'rgba(148, 163, 184, 0.1)',
+      even: 'rgba(148, 163, 184, 0.18)',
+      border: 'rgba(148, 163, 184, 0.38)',
+    },
+  },
   {
     id: 'light-slate',
     label: 'Slate',

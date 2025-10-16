@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Copy,
   Clipboard,
@@ -24,9 +24,64 @@ import {
   ContextMenuLabel,
 } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
-import { TABLE_STYLE_GROUPS, type TableStyleDefinition } from './constants';
+import { TABLE_STYLE_GROUPS, type TableSelection, type TableStyleDefinition } from './constants';
 
 const noop = () => {};
+
+const clampIndex = (value: number, min: number, max: number) => {
+  if (max < min) {
+    return min;
+  }
+  return Math.min(Math.max(value, min), max);
+};
+
+interface ColumnSelectionBounds {
+  start: number;
+  end: number;
+}
+
+interface RowSelectionBounds {
+  start: number;
+  end: number;
+}
+
+const deriveColumnSelectionBounds = (
+  selection: TableSelection | null | undefined,
+  colCount: number,
+): ColumnSelectionBounds | null => {
+  if (!selection || colCount <= 0) {
+    return null;
+  }
+
+  const maxCol = colCount - 1;
+  const start = clampIndex(Math.min(selection.anchor.col, selection.focus.col), 0, maxCol);
+  const end = clampIndex(Math.max(selection.anchor.col, selection.focus.col), 0, maxCol);
+
+  if (start > end) {
+    return null;
+  }
+
+  return { start, end };
+};
+
+const deriveRowSelectionBounds = (
+  selection: TableSelection | null | undefined,
+  rowCount: number,
+): RowSelectionBounds | null => {
+  if (!selection || selection.region !== 'body' || rowCount <= 0) {
+    return null;
+  }
+
+  const maxRow = rowCount - 1;
+  const start = clampIndex(Math.min(selection.anchor.row, selection.focus.row), 0, maxRow);
+  const end = clampIndex(Math.max(selection.anchor.row, selection.focus.row), 0, maxRow);
+
+  if (start > end) {
+    return null;
+  }
+
+  return { start, end };
+};
 
 const parseHexColor = (value: string): { r: number; g: number; b: number } | null => {
   const hex = value.trim().replace(/^#/, '');
@@ -75,7 +130,7 @@ export interface ExhibitionTableTrayProps {
   rows: number;
   cols: number;
   showOutline?: boolean;
-  selectedCell: { row: number; col: number; region?: 'header' | 'body' } | null;
+  selectedCell: TableSelection | null;
   styleId?: string;
   onToggleLock: () => void;
   onToggleOutline?: () => void;
@@ -112,10 +167,24 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
   onAdd2Rows,
   onSelectStyle = noop,
 }) => {
-  const isHeaderSelected = selectedCell?.region === 'header' || selectedCell?.row === -1;
-  const hasColumnSelection = Boolean(selectedCell && selectedCell.col >= 0);
-  const hasBodySelection = Boolean(selectedCell && !isHeaderSelected && selectedCell.row >= 0);
+  const columnSelection = useMemo(() => deriveColumnSelectionBounds(selectedCell, cols), [cols, selectedCell]);
+  const rowSelection = useMemo(() => deriveRowSelectionBounds(selectedCell, rows), [rows, selectedCell]);
+  const selectedColumnCount = columnSelection ? columnSelection.end - columnSelection.start + 1 : 0;
+  const selectedRowCount = rowSelection ? rowSelection.end - rowSelection.start + 1 : 0;
+  const hasColumnSelection = Boolean(columnSelection);
+  const hasBodySelection = Boolean(rowSelection);
   const disableStyleSelection = locked || !canEdit;
+  const doubleColumnRemoval = Math.max(2, selectedColumnCount || 0);
+  const doubleRowRemoval = Math.max(2, selectedRowCount || 0);
+  const remainingColumnsAfterDelete = cols - selectedColumnCount;
+  const remainingColumnsAfterDeleteTwo = cols - doubleColumnRemoval;
+  const remainingRowsAfterDelete = rows - selectedRowCount;
+  const remainingRowsAfterDeleteTwo = rows - doubleRowRemoval;
+
+  const deleteColumnLabel = selectedColumnCount > 1 ? `Delete ${selectedColumnCount} columns` : 'Delete column';
+  const deleteRowLabel = selectedRowCount > 1 ? `Delete ${selectedRowCount} rows` : 'Delete row';
+  const deleteTwoColumnsLabel = doubleColumnRemoval > 2 ? `Delete ${doubleColumnRemoval} columns` : 'Delete 2 columns';
+  const deleteTwoRowsLabel = doubleRowRemoval > 2 ? `Delete ${doubleRowRemoval} rows` : 'Delete 2 rows';
 
   const renderStylePreview = (style: TableStyleDefinition) => {
     const rowConfigs: Array<{
@@ -287,31 +356,55 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
 
       <ContextMenuItem
         onClick={onDeleteColumn}
-        disabled={locked || !hasColumnSelection || cols <= 1 || !canEdit}
+        disabled={
+          locked ||
+          !hasColumnSelection ||
+          selectedColumnCount <= 0 ||
+          remainingColumnsAfterDelete < 1 ||
+          !canEdit
+        }
       >
         <Minus className="mr-2 h-4 w-4" />
-        Delete column
+        {deleteColumnLabel}
       </ContextMenuItem>
       <ContextMenuItem
         onClick={onDelete2Columns}
-        disabled={locked || !hasColumnSelection || cols <= 2 || !canEdit}
+        disabled={
+          locked ||
+          !hasColumnSelection ||
+          selectedColumnCount <= 0 ||
+          remainingColumnsAfterDeleteTwo < 1 ||
+          !canEdit
+        }
       >
         <Minus className="mr-2 h-4 w-4" />
-        Delete 2 columns
+        {deleteTwoColumnsLabel}
       </ContextMenuItem>
       <ContextMenuItem
         onClick={onDeleteRow}
-        disabled={locked || !hasBodySelection || rows <= 1 || !canEdit}
+        disabled={
+          locked ||
+          !hasBodySelection ||
+          selectedRowCount <= 0 ||
+          remainingRowsAfterDelete < 1 ||
+          !canEdit
+        }
       >
         <Minus className="mr-2 h-4 w-4" />
-        Delete row
+        {deleteRowLabel}
       </ContextMenuItem>
       <ContextMenuItem
         onClick={onDelete2Rows}
-        disabled={locked || !hasBodySelection || rows <= 2 || !canEdit}
+        disabled={
+          locked ||
+          !hasBodySelection ||
+          selectedRowCount <= 0 ||
+          remainingRowsAfterDeleteTwo < 1 ||
+          !canEdit
+        }
       >
         <Minus className="mr-2 h-4 w-4" />
-        Delete 2 rows
+        {deleteTwoRowsLabel}
       </ContextMenuItem>
 
       <ContextMenuSeparator />
