@@ -15,7 +15,7 @@ import {
 } from './store/exhibitionStore';
 import { ExhibitionCatalogue } from './components/ExhibitionCatalogue';
 import { SlideCanvas } from './components/SlideCanvas';
-import { OperationsPalette } from './components/operationsPalette';
+import { OperationsPalette, POSITION_PANEL_WIDTH } from './components/operationsPalette';
 import { SlideNavigation } from './components/SlideNavigation';
 import { SlideThumbnails } from './components/SlideThumbnails';
 import { SlideNotes } from './components/SlideNotes';
@@ -1335,6 +1335,8 @@ const ExhibitionMode = () => {
     );
   }
 
+  const isPositionPanelOpen = !isFullscreen && operationsPalettePanel !== null;
+
   return (
     <div
       ref={containerRef}
@@ -1482,6 +1484,14 @@ const ExhibitionMode = () => {
             notes={notes}
             onNotesChange={handleNotesChange}
             onClose={() => setShowNotes(false)}
+          />
+        )}
+
+        {isPositionPanelOpen && (
+          <div
+            aria-hidden="true"
+            className="flex-shrink-0"
+            style={{ width: POSITION_PANEL_WIDTH }}
           />
         )}
 
