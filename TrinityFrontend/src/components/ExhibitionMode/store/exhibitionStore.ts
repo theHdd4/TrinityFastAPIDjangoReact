@@ -88,6 +88,7 @@ export interface SlideObject {
   width: number;
   height: number;
   zIndex: number;
+  rotation: number;
   groupId?: string | null;
   props: Record<string, unknown>;
 }
@@ -114,6 +115,7 @@ export const createSlideObjectFromAtom = (
   width: DEFAULT_CANVAS_OBJECT_WIDTH,
   height: DEFAULT_CANVAS_OBJECT_HEIGHT,
   zIndex: 1,
+  rotation: 0,
   groupId: null,
   props: { atom } as Record<string, unknown>,
   ...overrides,
@@ -146,7 +148,9 @@ interface ExhibitionStore {
   bulkUpdateSlideObjects: (cardId: string, updates: Record<string, Partial<SlideObject>>) => void;
   removeSlideObject: (cardId: string, objectId: string) => void;
   bringSlideObjectsToFront: (cardId: string, objectIds: string[]) => void;
+  bringSlideObjectsForward: (cardId: string, objectIds: string[]) => void;
   sendSlideObjectsToBack: (cardId: string, objectIds: string[]) => void;
+  sendSlideObjectsBackward: (cardId: string, objectIds: string[]) => void;
   groupSlideObjects: (cardId: string, objectIds: string[], groupId: string | null) => void;
   reset: () => void;
 }
@@ -406,6 +410,7 @@ const synchroniseSlideObjects = (
       width: typeof base?.width === 'number' ? base.width : DEFAULT_TITLE_OBJECT_WIDTH,
       height: typeof base?.height === 'number' ? base.height : DEFAULT_TITLE_OBJECT_HEIGHT,
       zIndex: resolvedZIndex,
+      rotation: typeof base?.rotation === 'number' ? base.rotation : 0,
       groupId: base?.groupId ?? null,
       props: ensureTitleProps(baseProps),
     };
@@ -497,6 +502,7 @@ const synchroniseSlideObjects = (
           width: DEFAULT_ACCENT_IMAGE_OBJECT_WIDTH,
           height: DEFAULT_ACCENT_IMAGE_OBJECT_HEIGHT,
           zIndex: 1,
+          rotation: 0,
           groupId: null,
           props: {
             src: accentImage,
@@ -706,6 +712,7 @@ const normaliseSavedSlideObject = (value: unknown): SlideObject | null => {
     width: toNumber(value.width, DEFAULT_CANVAS_OBJECT_WIDTH),
     height: toNumber(value.height, DEFAULT_CANVAS_OBJECT_HEIGHT),
     zIndex: toNumber(value.zIndex, 1),
+    rotation: toNumber(value.rotation, 0),
     groupId,
     props,
   };
@@ -1232,6 +1239,40 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       };
     });
   },
+  bringSlideObjectsForward: (cardId: string, objectIds: string[]) => {
+    set(state => {
+      const existing = state.slideObjectsByCardId[cardId] ?? [];
+      if (existing.length === 0 || objectIds.length === 0) {
+        return {};
+      }
+
+      const targetSet = new Set(objectIds);
+      const next = [...existing];
+
+      for (let index = next.length - 1; index > 0; index -= 1) {
+        const previous = next[index - 1];
+        const current = next[index];
+
+        if (!targetSet.has(previous.id)) {
+          continue;
+        }
+
+        if (targetSet.has(current.id)) {
+          continue;
+        }
+
+        next[index - 1] = current;
+        next[index] = previous;
+      }
+
+      return {
+        slideObjectsByCardId: {
+          ...state.slideObjectsByCardId,
+          [cardId]: normaliseZIndices(next),
+        },
+      };
+    });
+  },
   sendSlideObjectsToBack: (cardId: string, objectIds: string[]) => {
     set(state => {
       const existing = state.slideObjectsByCardId[cardId] ?? [];
@@ -1243,6 +1284,40 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       const next = existing
         .filter(object => targetSet.has(object.id))
         .concat(existing.filter(object => !targetSet.has(object.id)));
+
+      return {
+        slideObjectsByCardId: {
+          ...state.slideObjectsByCardId,
+          [cardId]: normaliseZIndices(next),
+        },
+      };
+    });
+  },
+  sendSlideObjectsBackward: (cardId: string, objectIds: string[]) => {
+    set(state => {
+      const existing = state.slideObjectsByCardId[cardId] ?? [];
+      if (existing.length === 0 || objectIds.length === 0) {
+        return {};
+      }
+
+      const targetSet = new Set(objectIds);
+      const next = [...existing];
+
+      for (let index = 0; index < next.length - 1; index += 1) {
+        const current = next[index + 1];
+        const previous = next[index];
+
+        if (!targetSet.has(current.id)) {
+          continue;
+        }
+
+        if (targetSet.has(previous.id)) {
+          continue;
+        }
+
+        next[index] = current;
+        next[index + 1] = previous;
+      }
 
       return {
         slideObjectsByCardId: {

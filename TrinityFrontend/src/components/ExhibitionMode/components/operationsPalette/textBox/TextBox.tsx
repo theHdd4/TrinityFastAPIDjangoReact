@@ -19,6 +19,7 @@ interface SlideTextBoxObjectProps {
   onDelete?: () => void;
   onInteract: () => void;
   onToolbarStateChange: (objectId: string, toolbar: React.ReactNode | null) => void;
+  onRequestPositionPanel?: () => void;
 }
 
 const clampFontSize = (value: number) => Math.min(Math.max(value, 8), 200);
@@ -146,6 +147,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   onDelete,
   onInteract,
   onToolbarStateChange,
+  onRequestPositionPanel,
 }) => {
   const textRef = useRef<HTMLDivElement | null>(null);
   const selectionRangeRef = useRef<Range | null>(null);
@@ -409,7 +411,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         onColorChange={handleColor}
         onRequestEffects={() => {}}
         onRequestAnimate={() => {}}
-        onRequestPosition={() => {}}
+        onRequestPosition={() => onRequestPositionPanel?.()}
         onDelete={onDelete}
       />
     ),
@@ -430,6 +432,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
       localFormatting.italic,
       localFormatting.strikethrough,
       localFormatting.underline,
+      onRequestPositionPanel,
       onDelete,
       runCommand,
     ],

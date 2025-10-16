@@ -245,6 +245,7 @@ export const createTableSlideObject = (
     width: DEFAULT_TABLE_WIDTH,
     height: DEFAULT_TABLE_HEIGHT,
     zIndex: 1,
+    rotation: 0,
     groupId: null,
     props: {
       data,
