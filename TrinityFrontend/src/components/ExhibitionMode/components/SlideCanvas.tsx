@@ -49,10 +49,13 @@ import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
 import {
   DEFAULT_TABLE_COLS,
   DEFAULT_TABLE_ROWS,
+  cloneTableHeaders,
   cloneTableMatrix,
+  createDefaultHeaderCell,
   createEmptyCell,
   createEmptyTableRow,
   normaliseTableData,
+  normaliseTableHeaders,
   type TableCellData,
   type TableCellFormatting,
 } from './operationsPalette/tables/constants';
@@ -114,6 +117,7 @@ type TableState = {
   cols: number;
   locked: boolean;
   showOutline: boolean;
+  headers: TableCellData[];
 };
 
 const coercePositiveInteger = (value: unknown, fallback: number): number => {
@@ -126,35 +130,25 @@ const coercePositiveInteger = (value: unknown, fallback: number): number => {
   return integer > 0 ? integer : fallback;
 };
 
-const extractTableHeaders = (value: unknown): string[] | undefined => {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  return value.map(header => {
-    if (typeof header === 'string') {
-      return header;
-    }
-    if (header == null) {
-      return '';
-    }
-    return String(header);
-  });
+const extractTableHeaders = (value: unknown, fallbackCount: number): TableCellData[] => {
+  return normaliseTableHeaders(value, fallbackCount);
 };
 
-const readTableState = (object: SlideObject): (TableState & { headers?: string[] }) => {
+const readTableState = (object: SlideObject): TableState => {
   const props = (object.props ?? {}) as Record<string, unknown> | undefined;
   const fallbackRows = coercePositiveInteger(props?.rows, DEFAULT_TABLE_ROWS);
   const fallbackCols = coercePositiveInteger(props?.cols, DEFAULT_TABLE_COLS);
   const data = normaliseTableData(props?.data, fallbackRows, fallbackCols);
+  const colCount = data[0]?.length ?? 0;
+  const headers = extractTableHeaders(props?.headers, colCount);
 
   return {
     data,
     rows: data.length,
-    cols: data[0]?.length ?? 0,
+    cols: colCount,
     locked: Boolean(props?.locked),
     showOutline: props?.showOutline !== false,
-    headers: extractTableHeaders(props?.headers),
+    headers,
   };
 };
 
@@ -164,7 +158,8 @@ const tableStatesEqual = (a: TableState, b: TableState) => {
     a.rows === b.rows &&
     a.cols === b.cols &&
     a.locked === b.locked &&
-    a.showOutline === b.showOutline
+    a.showOutline === b.showOutline &&
+    a.headers === b.headers
   );
 };
 
@@ -1284,7 +1279,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           return;
         }
 
-        const { headers: _headers, ...currentState } = readTableState(object);
+        const currentState = readTableState(object);
         const nextState = mutator(currentState);
 
         if (!nextState || tableStatesEqual(currentState, nextState)) {
@@ -1301,6 +1296,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               cols: nextState.cols,
               locked: nextState.locked,
               showOutline: nextState.showOutline,
+              headers: nextState.headers,
             },
           },
         });
@@ -1371,6 +1367,65 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [mutateTableState],
     );
 
+    const updateTableHeaderContent = useCallback(
+      (objectId: string, colIndex: number, value: string) => {
+        mutateTableState(objectId, state => {
+          if (colIndex < 0 || colIndex >= state.cols) {
+            return state;
+          }
+
+          const currentHeader = state.headers[colIndex];
+          if (!currentHeader || currentHeader.content === value) {
+            return state;
+          }
+
+          const nextHeaders = cloneTableHeaders(state.headers);
+          nextHeaders[colIndex] = {
+            ...nextHeaders[colIndex],
+            content: value,
+          };
+
+          return {
+            ...state,
+            headers: nextHeaders,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const updateTableHeaderFormatting = useCallback(
+      (objectId: string, colIndex: number, updates: Partial<TableCellFormatting>) => {
+        mutateTableState(objectId, state => {
+          if (colIndex < 0 || colIndex >= state.cols) {
+            return state;
+          }
+
+          const currentHeader = state.headers[colIndex];
+          if (!currentHeader) {
+            return state;
+          }
+
+          const nextFormatting = { ...currentHeader.formatting, ...updates };
+          if (formattingShallowEqual(currentHeader.formatting, nextFormatting)) {
+            return state;
+          }
+
+          const nextHeaders = cloneTableHeaders(state.headers);
+          nextHeaders[colIndex] = {
+            ...nextHeaders[colIndex],
+            formatting: nextFormatting,
+          };
+
+          return {
+            ...state,
+            headers: nextHeaders,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
     const toggleTableLock = useCallback(
       (objectId: string) => {
         mutateTableState(objectId, state => ({
@@ -1423,12 +1478,18 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             ...row,
             ...Array.from({ length: count }, () => createEmptyCell()),
           ]);
-          const nextCols = nextData[0]?.length ?? state.cols;
+          const existingHeaders = cloneTableHeaders(state.headers);
+          const headerAdditions = Array.from({ length: count }, (_, additionIndex) =>
+            createDefaultHeaderCell(existingHeaders.length + additionIndex),
+          );
+          const nextHeaders = [...existingHeaders, ...headerAdditions];
+          const nextCols = nextHeaders.length;
 
           return {
             ...state,
             data: nextData,
             cols: nextCols,
+            headers: nextHeaders,
           };
         });
       },
@@ -1489,12 +1550,17 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             ...row.slice(0, safeStart),
             ...row.slice(safeStart + actualCount),
           ]);
-          const nextCols = nextData[0]?.length ?? state.cols;
+          const remainingHeaders = cloneTableHeaders(state.headers);
+          const nextHeaders = remainingHeaders.filter(
+            (_, index) => index < safeStart || index >= safeStart + actualCount,
+          );
+          const nextCols = nextHeaders.length;
 
           return {
             ...state,
             data: nextData,
             cols: nextCols,
+            headers: nextHeaders,
           };
         });
       },
@@ -2206,6 +2272,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onUpdateCell={(row, col, value) => updateTableCellContent(object.id, row, col, value)}
                       onUpdateCellFormatting={(row, col, updates) =>
                         updateTableCellFormatting(object.id, row, col, updates)
+                      }
+                      onUpdateHeader={(col, value) => updateTableHeaderContent(object.id, col, value)}
+                      onUpdateHeaderFormatting={(col, updates) =>
+                        updateTableHeaderFormatting(object.id, col, updates)
                       }
                       onToggleLock={() => toggleTableLock(object.id)}
                       onToggleOutline={() => toggleTableOutline(object.id)}

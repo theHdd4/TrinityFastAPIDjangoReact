@@ -24,7 +24,7 @@ export interface ExhibitionTableTrayProps {
   rows: number;
   cols: number;
   showOutline?: boolean;
-  selectedCell: { row: number; col: number } | null;
+  selectedCell: { row: number; col: number; region?: 'header' | 'body' } | null;
   onToggleLock: () => void;
   onToggleOutline?: () => void;
   onDelete: () => void;
@@ -57,6 +57,10 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
   onAddRow,
   onAdd2Rows,
 }) => {
+  const isHeaderSelected = selectedCell?.region === 'header' || selectedCell?.row === -1;
+  const hasColumnSelection = Boolean(selectedCell && selectedCell.col >= 0);
+  const hasBodySelection = Boolean(selectedCell && !isHeaderSelected && selectedCell.row >= 0);
+
   return (
     <ContextMenuContent className="w-64">
       <ContextMenuItem disabled={locked || !canEdit}>
@@ -101,28 +105,28 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
 
       <ContextMenuItem
         onClick={onDeleteColumn}
-        disabled={locked || !selectedCell || cols <= 1 || !canEdit}
+        disabled={locked || !hasColumnSelection || cols <= 1 || !canEdit}
       >
         <Minus className="mr-2 h-4 w-4" />
         Delete column
       </ContextMenuItem>
       <ContextMenuItem
         onClick={onDelete2Columns}
-        disabled={locked || !selectedCell || cols <= 2 || !canEdit}
+        disabled={locked || !hasColumnSelection || cols <= 2 || !canEdit}
       >
         <Minus className="mr-2 h-4 w-4" />
         Delete 2 columns
       </ContextMenuItem>
       <ContextMenuItem
         onClick={onDeleteRow}
-        disabled={locked || !selectedCell || rows <= 1 || !canEdit}
+        disabled={locked || !hasBodySelection || rows <= 1 || !canEdit}
       >
         <Minus className="mr-2 h-4 w-4" />
         Delete row
       </ContextMenuItem>
       <ContextMenuItem
         onClick={onDelete2Rows}
-        disabled={locked || !selectedCell || rows <= 2 || !canEdit}
+        disabled={locked || !hasBodySelection || rows <= 2 || !canEdit}
       >
         <Minus className="mr-2 h-4 w-4" />
         Delete 2 rows

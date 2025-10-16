@@ -48,6 +48,11 @@ export const createCellFormatting = (
 
 export const DEFAULT_CELL_FORMATTING = createCellFormatting();
 
+export const createDefaultHeaderCell = (index: number): TableCellData => ({
+  content: `Column ${index + 1}`,
+  formatting: createCellFormatting({ bold: true }),
+});
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
@@ -100,6 +105,9 @@ export const cloneCell = (cell: TableCellData): TableCellData => ({
 
 export const cloneTableMatrix = (matrix: TableCellData[][]): TableCellData[][] =>
   matrix.map(row => row.map(cell => cloneCell(cell)));
+
+export const cloneTableHeaders = (headers: TableCellData[]): TableCellData[] =>
+  headers.map(header => cloneCell(header));
 
 const coerceCellValue = (value: unknown): TableCellData => {
   if (isRecord(value)) {
@@ -158,6 +166,29 @@ const toMatrix = (value: unknown): TableCellData[][] | null => {
   });
 
   return rows;
+};
+
+const ensureHeaderCell = (value: unknown, index: number): TableCellData => {
+  const cell = coerceCellValue(value);
+  const content = cell.content && cell.content.trim().length > 0 ? cell.content : `Column ${index + 1}`;
+
+  return {
+    ...cloneCell(cell),
+    content,
+  };
+};
+
+export const normaliseTableHeaders = (
+  value: unknown,
+  fallbackCount: number,
+): TableCellData[] => {
+  const source = Array.isArray(value) ? value : [];
+  const count = Math.max(fallbackCount, source.length, 1);
+
+  return Array.from({ length: count }, (_, index) => {
+    const header = index < source.length ? ensureHeaderCell(source[index], index) : createDefaultHeaderCell(index);
+    return header;
+  });
 };
 
 export const normaliseTableData = (
