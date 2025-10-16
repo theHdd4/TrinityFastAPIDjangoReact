@@ -513,8 +513,62 @@ const ExhibitionMode = () => {
   }, [currentSlide, isSlideshowActive]);
 
   useEffect(() => {
+    const isEditableKeyboardEvent = (event: KeyboardEvent): boolean => {
+      const isEditableTarget = (target: EventTarget | null | undefined): boolean => {
+        if (!target || !(target instanceof HTMLElement)) {
+          return false;
+        }
+
+        const tagName = target.tagName;
+        if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') {
+          return true;
+        }
+
+        if (target.isContentEditable) {
+          return true;
+        }
+
+        if (target.dataset?.textboxEditable === 'true' || target.dataset?.exhibitionTableCellContent === 'true') {
+          return true;
+        }
+
+        if (target.closest('[contenteditable="true"]')) {
+          return true;
+        }
+
+        if (target.closest('[data-textbox-editable="true"]')) {
+          return true;
+        }
+
+        if (target.closest('[data-exhibition-table-cell-content="true"]')) {
+          return true;
+        }
+
+        return false;
+      };
+
+      if (isEditableTarget(event.target)) {
+        return true;
+      }
+
+      if (typeof event.composedPath === 'function') {
+        const path = event.composedPath();
+        for (const node of path) {
+          if (isEditableTarget(node)) {
+            return true;
+          }
+        }
+      }
+
+      return false;
+    };
+
     const handleKeyPress = (e: KeyboardEvent) => {
       if (exhibitedCards.length === 0) return;
+
+      if (isEditableKeyboardEvent(e)) {
+        return;
+      }
 
       switch (e.key) {
         case 'ArrowLeft':

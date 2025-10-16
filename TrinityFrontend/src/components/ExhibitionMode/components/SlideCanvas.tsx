@@ -1,4 +1,5 @@
 import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   User,
   Calendar,
@@ -45,6 +46,7 @@ import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
 import { SlideTextBoxObject } from './operationsPalette/textBox/TextBox';
 import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from './operationsPalette/textBox/constants';
 import type { TextBoxFormatting } from './operationsPalette/textBox/types';
+import { TextBoxPositionPanel } from './operationsPalette/textBox/TextBoxPositionPanel';
 import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
 import {
   DEFAULT_TABLE_COLS,
@@ -220,17 +222,21 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     ...card.presentationSettings,
   }));
   const [activeTextToolbar, setActiveTextToolbar] = useState<ReactNode | null>(null);
+  const [positionPanelTarget, setPositionPanelTarget] = useState<{ objectId: string } | null>(null);
   const accentImageInputRef = useRef<HTMLInputElement | null>(null);
   const formatPanelRef = useRef<HTMLDivElement | null>(null);
   const formatToggleRef = useRef<HTMLButtonElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [positionPanelPortal, setPositionPanelPortal] = useState<HTMLElement | null>(null);
 
   const slideObjects = useExhibitionStore(
     useCallback(state => state.slideObjectsByCardId[card.id] ?? [], [card.id]),
   );
   const bulkUpdateSlideObjects = useExhibitionStore(state => state.bulkUpdateSlideObjects);
   const bringSlideObjectsToFront = useExhibitionStore(state => state.bringSlideObjectsToFront);
+  const bringSlideObjectsForward = useExhibitionStore(state => state.bringSlideObjectsForward);
   const sendSlideObjectsToBack = useExhibitionStore(state => state.sendSlideObjectsToBack);
+  const sendSlideObjectsBackward = useExhibitionStore(state => state.sendSlideObjectsBackward);
   const groupSlideObjects = useExhibitionStore(state => state.groupSlideObjects);
   const removeSlideObject = useExhibitionStore(state => state.removeSlideObject);
 
@@ -249,6 +255,16 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       }),
     [slideObjects, titleObjectId],
   );
+
+  const positionPanelObject = useMemo(() => {
+    if (!positionPanelTarget) {
+      return null;
+    }
+    const match = slideObjects.find(
+      object => object.id === positionPanelTarget.objectId && object.type === 'text-box',
+    );
+    return match ?? null;
+  }, [positionPanelTarget, slideObjects]);
 
   const handleBulkUpdate = useCallback(
     (updates: Record<string, Partial<SlideObject>>) => {
@@ -309,6 +325,22 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   }, [card]);
 
   useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    let portalRoot = document.getElementById('exhibition-position-panel-root') as HTMLElement | null;
+
+    if (!portalRoot) {
+      portalRoot = document.createElement('div');
+      portalRoot.id = 'exhibition-position-panel-root';
+      document.body.appendChild(portalRoot);
+    }
+
+    setPositionPanelPortal(portalRoot);
+  }, []);
+
+  useEffect(() => {
     if (!canEdit) {
       setShowFormatPanel(false);
     }
@@ -317,6 +349,17 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   useEffect(() => {
     setActiveTextToolbar(null);
   }, [card.id, canEdit]);
+
+  useEffect(() => {
+    if (!canEdit) {
+      setPositionPanelTarget(null);
+      return;
+    }
+
+    if (positionPanelTarget && !positionPanelObject) {
+      setPositionPanelTarget(null);
+    }
+  }, [canEdit, positionPanelObject, positionPanelTarget]);
 
   useEffect(() => {
     if (!showFormatPanel) {
@@ -485,9 +528,211 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     [canEdit, card.id, onTitleChange, resolvedTitle],
   );
 
-  const handleCanvasInteraction = () => {
+  const handleCanvasInteraction = useCallback(() => {
     setHasInteracted(true);
-  };
+  }, []);
+
+  const handleRequestPositionPanel = useCallback(
+    (objectId: string) => {
+      if (!canEdit) {
+        return;
+      }
+      setPositionPanelTarget({ objectId });
+    },
+    [canEdit],
+  );
+
+  const handleBringForward = useCallback(
+    (objectId: string) => {
+      bringSlideObjectsForward(card.id, [objectId]);
+      handleCanvasInteraction();
+    },
+    [bringSlideObjectsForward, card.id, handleCanvasInteraction],
+  );
+
+  const handleSendBackward = useCallback(
+    (objectId: string) => {
+      sendSlideObjectsBackward(card.id, [objectId]);
+      handleCanvasInteraction();
+    },
+    [card.id, handleCanvasInteraction, sendSlideObjectsBackward],
+  );
+
+  const handlePanelBringToFront = useCallback(
+    (objectId: string) => {
+      handleBringToFront([objectId]);
+      handleCanvasInteraction();
+    },
+    [handleBringToFront, handleCanvasInteraction],
+  );
+
+  const handlePanelSendToBack = useCallback(
+    (objectId: string) => {
+      handleSendToBack([objectId]);
+      handleCanvasInteraction();
+    },
+    [handleCanvasInteraction, handleSendToBack],
+  );
+
+  const updateTextBoxGeometry = useCallback(
+    (
+      objectId: string,
+      updates: { width?: number; height?: number; x?: number; y?: number; rotation?: number },
+    ) => {
+      if (!canEdit) {
+        return;
+      }
+
+      const target = slideObjects.find(object => object.id === objectId && object.type === 'text-box');
+      if (!target) {
+        return;
+      }
+
+      const canvas = canvasRef.current;
+
+      const rawWidth = updates.width;
+      const rawHeight = updates.height;
+
+      let nextWidth =
+        typeof rawWidth === 'number' && Number.isFinite(rawWidth) ? rawWidth : target.width;
+      let nextHeight =
+        typeof rawHeight === 'number' && Number.isFinite(rawHeight) ? rawHeight : target.height;
+
+      nextWidth = Math.max(MIN_OBJECT_WIDTH, nextWidth);
+      nextHeight = Math.max(MIN_OBJECT_HEIGHT, nextHeight);
+
+      if (canvas) {
+        nextWidth = Math.min(nextWidth, canvas.clientWidth);
+        nextHeight = Math.min(nextHeight, canvas.clientHeight);
+      }
+
+      const rawX = updates.x;
+      const rawY = updates.y;
+
+      let nextX = typeof rawX === 'number' && Number.isFinite(rawX) ? rawX : target.x;
+      let nextY = typeof rawY === 'number' && Number.isFinite(rawY) ? rawY : target.y;
+
+      if (canvas) {
+        const maxX = Math.max(0, canvas.clientWidth - nextWidth);
+        const maxY = Math.max(0, canvas.clientHeight - nextHeight);
+        nextX = Math.min(Math.max(0, nextX), maxX);
+        nextY = Math.min(Math.max(0, nextY), maxY);
+      } else {
+        nextX = Math.max(0, nextX);
+        nextY = Math.max(0, nextY);
+      }
+
+      const currentRotation = typeof target.rotation === 'number' ? target.rotation : 0;
+      let nextRotation = currentRotation;
+      if (typeof updates.rotation === 'number' && Number.isFinite(updates.rotation)) {
+        nextRotation = updates.rotation;
+      }
+
+      const payload: Partial<SlideObject> = {};
+
+      if (nextWidth !== target.width) {
+        payload.width = nextWidth;
+      }
+      if (nextHeight !== target.height) {
+        payload.height = nextHeight;
+      }
+      if (nextX !== target.x) {
+        payload.x = nextX;
+      }
+      if (nextY !== target.y) {
+        payload.y = nextY;
+      }
+      if (nextRotation !== currentRotation) {
+        payload.rotation = nextRotation;
+      }
+
+      if (Object.keys(payload).length === 0) {
+        return;
+      }
+
+      handleCanvasInteraction();
+      handleBulkUpdate({
+        [objectId]: payload,
+      });
+    },
+    [canEdit, handleBulkUpdate, handleCanvasInteraction, slideObjects],
+  );
+
+  const alignTextBoxToCanvas = useCallback(
+    (objectId: string, alignment: 'top' | 'middle' | 'bottom' | 'left' | 'center' | 'right') => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        return;
+      }
+
+      const target = slideObjects.find(object => object.id === objectId && object.type === 'text-box');
+      if (!target) {
+        return;
+      }
+
+      const updates: { x?: number; y?: number } = {};
+
+      if (alignment === 'top') {
+        updates.y = 0;
+      } else if (alignment === 'middle') {
+        updates.y = (canvas.clientHeight - target.height) / 2;
+      } else if (alignment === 'bottom') {
+        updates.y = canvas.clientHeight - target.height;
+      } else if (alignment === 'left') {
+        updates.x = 0;
+      } else if (alignment === 'center') {
+        updates.x = (canvas.clientWidth - target.width) / 2;
+      } else if (alignment === 'right') {
+        updates.x = canvas.clientWidth - target.width;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return;
+      }
+
+      updateTextBoxGeometry(objectId, updates);
+    },
+    [slideObjects, updateTextBoxGeometry],
+  );
+
+  const closePositionPanel = useCallback(() => {
+    setPositionPanelTarget(null);
+  }, []);
+
+  const positionPanelOverlay = useMemo(() => {
+    if (!canEdit || !positionPanelObject || !positionPanelPortal) {
+      return null;
+    }
+
+    return createPortal(
+      <div className="fixed inset-0 z-[60] flex justify-end pointer-events-none">
+        <div className="pointer-events-auto flex h-full w-[22rem] max-w-full translate-x-0 flex-col p-6 transition-transform duration-200">
+          <TextBoxPositionPanel
+            object={positionPanelObject}
+            onClose={closePositionPanel}
+            onBringForward={() => handleBringForward(positionPanelObject.id)}
+            onSendBackward={() => handleSendBackward(positionPanelObject.id)}
+            onBringToFront={() => handlePanelBringToFront(positionPanelObject.id)}
+            onSendToBack={() => handlePanelSendToBack(positionPanelObject.id)}
+            onAlign={alignment => alignTextBoxToCanvas(positionPanelObject.id, alignment)}
+            onGeometryChange={updates => updateTextBoxGeometry(positionPanelObject.id, updates)}
+          />
+        </div>
+      </div>,
+      positionPanelPortal,
+    );
+  }, [
+    alignTextBoxToCanvas,
+    canEdit,
+    closePositionPanel,
+    handleBringForward,
+    handlePanelBringToFront,
+    handlePanelSendToBack,
+    handleSendBackward,
+    positionPanelObject,
+    positionPanelPortal,
+    updateTextBoxGeometry,
+  ]);
 
   const handleAtomRemove = (atomId: string) => {
     if (!canEdit) {
@@ -585,13 +830,14 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         );
 
   return (
-    <div className={containerClasses}>
-      <div
-        className={cn(
-          'mx-auto transition-all duration-300 p-8',
-          cardWidthClass
-        )}
-      >
+    <>
+      <div className={containerClasses}>
+        <div
+          className={cn(
+            'mx-auto transition-all duration-300 p-8',
+            cardWidthClass,
+          )}
+        >
         {viewMode === 'vertical' && (
           <div className="mb-4 flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -626,73 +872,77 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           </div>
 
           <div className="flex flex-col gap-4">
-            <div
-              className={cn(
-                'relative h-[520px] w-full overflow-hidden bg-card shadow-2xl transition-all duration-300',
-                settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border',
-                isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
-                !canEdit && 'opacity-90'
-              )}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              <CanvasStage
-                ref={canvasRef}
-                canEdit={canEdit}
-                isDragOver={Boolean(isDragOver && canEdit && draggedAtom)}
-                objects={slideObjects}
-                showEmptyState={!hasInteracted && nonStructuralObjects.length === 0}
-                layout={settings.cardLayout}
-                cardColor={settings.cardColor}
-                accentImage={settings.accentImage ?? null}
-                accentImageName={settings.accentImageName ?? null}
-                titleObjectId={titleObjectId}
-                onCanvasDragLeave={handleDragLeave}
-                onCanvasDragOver={handleDragOver}
-                onCanvasDrop={handleDrop}
-                onInteract={handleCanvasInteraction}
-                onRemoveAtom={handleAtomRemove}
-                onBringToFront={handleBringToFront}
-                onSendToBack={handleSendToBack}
-                onBulkUpdate={handleBulkUpdate}
-                onGroupObjects={handleGroupObjects}
-                onTitleCommit={handleTitleCommit}
-                onRemoveObject={objectId => removeSlideObject(card.id, objectId)}
-                onTextToolbarChange={setActiveTextToolbar}
-              />
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+              <div
+                className={cn(
+                  'relative h-[520px] w-full overflow-hidden bg-card shadow-2xl transition-all duration-300',
+                  settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border',
+                  isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
+                  !canEdit && 'opacity-90'
+                )}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                <CanvasStage
+                  ref={canvasRef}
+                  canEdit={canEdit}
+                  isDragOver={Boolean(isDragOver && canEdit && draggedAtom)}
+                  objects={slideObjects}
+                  showEmptyState={!hasInteracted && nonStructuralObjects.length === 0}
+                  layout={settings.cardLayout}
+                  cardColor={settings.cardColor}
+                  accentImage={settings.accentImage ?? null}
+                  accentImageName={settings.accentImageName ?? null}
+                  titleObjectId={titleObjectId}
+                  onCanvasDragLeave={handleDragLeave}
+                  onCanvasDragOver={handleDragOver}
+                  onCanvasDrop={handleDrop}
+                  onInteract={handleCanvasInteraction}
+                  onRemoveAtom={handleAtomRemove}
+                  onBringToFront={handleBringToFront}
+                  onSendToBack={handleSendToBack}
+                  onBulkUpdate={handleBulkUpdate}
+                  onGroupObjects={handleGroupObjects}
+                  onTitleCommit={handleTitleCommit}
+                  onRemoveObject={objectId => removeSlideObject(card.id, objectId)}
+                  onTextToolbarChange={setActiveTextToolbar}
+                  onRequestPositionPanel={handleRequestPositionPanel}
+                />
 
-              <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
-                <Button
-                  size="icon"
-                  variant="secondary"
-                  className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
-                  onClick={() => onShowNotes?.()}
-                  type="button"
-                >
-                  <StickyNote className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="secondary"
-                  className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
-                  onClick={() => setShowFormatPanel(!showFormatPanel)}
-                  disabled={!canEdit}
-                  type="button"
-                  ref={formatToggleRef}
-                >
-                  <Settings className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="secondary"
-                  className="h-8 w-8 bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-lg hover:from-purple-600 hover:to-pink-600"
-                  type="button"
-                  disabled={!canEdit}
-                >
-                  <Sparkles className="h-4 w-4" />
-                </Button>
+                <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+                  <Button
+                    size="icon"
+                    variant="secondary"
+                    className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
+                    onClick={() => onShowNotes?.()}
+                    type="button"
+                  >
+                    <StickyNote className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="secondary"
+                    className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
+                    onClick={() => setShowFormatPanel(!showFormatPanel)}
+                    disabled={!canEdit}
+                    type="button"
+                    ref={formatToggleRef}
+                  >
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="secondary"
+                    className="h-8 w-8 bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-lg hover:from-purple-600 hover:to-pink-600"
+                    type="button"
+                    disabled={!canEdit}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
+
             </div>
           </div>
 
@@ -1055,8 +1305,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             </span>
           </div>
         )}
+        </div>
       </div>
-    </div>
+      {positionPanelOverlay}
+    </>
   );
 };
 
@@ -1082,6 +1334,7 @@ interface CanvasStageProps {
   onTitleCommit?: (text: string) => void;
   onRemoveObject?: (objectId: string) => void;
   onTextToolbarChange?: (toolbar: ReactNode | null) => void;
+  onRequestPositionPanel?: (objectId: string) => void;
 }
 
 const MIN_OBJECT_WIDTH = 220;
@@ -1180,6 +1433,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       onTitleCommit,
       onRemoveObject,
       onTextToolbarChange,
+      onRequestPositionPanel,
     },
     forwardedRef,
   ) => {
@@ -2165,6 +2419,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           {objects.map(object => {
             const isSelected = selectedIds.includes(object.id);
             const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
+            const rotation = typeof object.rotation === 'number' ? object.rotation : 0;
             const isAccentImageObject = object.type === 'accent-image';
             const isTextBoxObject = object.type === 'text-box';
             const isTableObject = object.type === 'table';
@@ -2209,6 +2464,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     : 'border-border/70 hover:border-primary/40',
                   isTextBoxObject && 'overflow-visible border-transparent bg-transparent shadow-none',
                 )}
+                style={{
+                  transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
+                  transformOrigin: rotation !== 0 ? 'center center' : undefined,
+                }}
               >
                 {isAtomObject(object) && !isFeatureOverviewAtom && (
                   <div className="flex items-center gap-2 border-b border-border/60 bg-muted/10 px-4 py-2">
@@ -2257,6 +2516,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
                       onInteract={onInteract}
                       onToolbarStateChange={handleTextToolbarStateChange}
+                      onRequestPositionPanel={
+                        onRequestPositionPanel ? () => onRequestPositionPanel(object.id) : undefined
+                      }
                     />
                   ) : isTableObject && tableState ? (
                     <ExhibitionTable

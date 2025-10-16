@@ -42,6 +42,7 @@ export const createTextBoxSlideObject = (
   width: DEFAULT_TEXT_BOX_WIDTH,
   height: DEFAULT_TEXT_BOX_HEIGHT,
   zIndex: 1,
+  rotation: 0,
   groupId: null,
   props: createDefaultFormatting(formattingOverrides),
   ...overrides,
