@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, ChevronsDown, ChevronsUp, Minus, Move, Palette, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { Check, ChevronsDown, ChevronsUp, Move, Palette, Sparkles, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -98,16 +98,6 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
 
   const handleToolbarMouseDown = (event: React.MouseEvent) => {
     event.preventDefault();
-  };
-
-  const handleDecreaseStrokeWidth = () => {
-    const next = clampStrokeWidth(strokeWidth - 1);
-    onStrokeWidthChange(next);
-  };
-
-  const handleIncreaseStrokeWidth = () => {
-    const next = clampStrokeWidth(strokeWidth + 1);
-    onStrokeWidthChange(next);
   };
 
   const handleOpacityInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -388,30 +378,6 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
       <Separator />
 
       {outlineButton}
-
-      <Separator />
-
-      <Button
-        variant="ghost"
-        size="icon"
-        type="button"
-        className="h-8 w-8 shrink-0 rounded-full border border-border/60 bg-background/80 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-        onClick={handleDecreaseStrokeWidth}
-        onMouseDown={handleToolbarMouseDown}
-      >
-        <Minus className="h-4 w-4" />
-      </Button>
-      <span className="w-12 shrink-0 text-center text-sm font-semibold text-foreground">{displayedStrokeWidth}</span>
-      <Button
-        variant="ghost"
-        size="icon"
-        type="button"
-        className="h-8 w-8 shrink-0 rounded-full border border-border/60 bg-background/80 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-        onClick={handleIncreaseStrokeWidth}
-        onMouseDown={handleToolbarMouseDown}
-      >
-        <Plus className="h-4 w-4" />
-      </Button>
 
       <Separator />
 
