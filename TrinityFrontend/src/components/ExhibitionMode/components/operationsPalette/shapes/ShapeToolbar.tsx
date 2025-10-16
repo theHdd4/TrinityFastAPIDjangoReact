@@ -1,14 +1,7 @@
 import React from 'react';
-import { Check, ChevronsDown, ChevronsUp, Move, Palette, Sparkles, Trash2 } from 'lucide-react';
+import { Check, ChevronsDown, ChevronsUp, CircleDashed, Move, Palette, Sparkles, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { type ShapeStrokeStyle } from './constants';
 
@@ -198,8 +191,8 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
   );
 
   const outlineButton = (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Popover>
+      <PopoverTrigger asChild>
         <Button
           variant="ghost"
           size="icon"
@@ -215,29 +208,18 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
                 <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
             ) : (
-              <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
-                <path
-                  d="M3.5 13.5 C6 11 8.5 9.5 10 11.2 C11.5 12.9 13.5 7.5 16.5 6"
-                  stroke={outlineIndicatorColor}
-                  strokeWidth={2}
-                  fill="none"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <circle cx="5.5" cy="14.5" r="1.2" fill={outlineIndicatorColor} />
-              </svg>
+              <CircleDashed className="h-4 w-4" strokeWidth={2} />
             )}
           </span>
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
+      </PopoverTrigger>
+      <PopoverContent
         side="top"
         align="start"
         className="z-[4000] w-72 rounded-2xl border border-border/70 bg-background/95 p-3 shadow-2xl"
+        data-text-toolbar-root
       >
-        <DropdownMenuLabel className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Outline
-        </DropdownMenuLabel>
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Outline</p>
         <div className="mt-2 flex flex-col gap-3">
           <div className="flex items-center gap-2">
             {OUTLINE_STYLE_OPTIONS.map(option => {
@@ -246,52 +228,45 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
                 : !isOutlineDisabled && activeStrokeStyle === option.style;
 
               return (
-                <DropdownMenuItem
+                <button
                   key={option.id}
-                  asChild
-                  onSelect={event => {
-                    event.preventDefault();
-                    handleOutlineStyleSelect(option.id);
-                  }}
+                  type="button"
+                  onMouseDown={handleToolbarMouseDown}
+                  onClick={() => handleOutlineStyleSelect(option.id)}
+                  className={cn(
+                    'flex h-9 w-9 items-center justify-center rounded-xl border border-border/60 bg-background transition-colors hover:border-primary/60 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                    isActive && 'border-primary bg-primary/10 text-primary shadow-sm',
+                  )}
+                  aria-label={option.label}
                 >
-                  <button
-                    type="button"
-                    onMouseDown={handleToolbarMouseDown}
-                    className={cn(
-                      'flex h-9 w-9 items-center justify-center rounded-xl border border-border/60 bg-background transition-colors hover:border-primary/60 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                      isActive && 'border-primary bg-primary/10 text-primary shadow-sm',
-                    )}
-                    aria-label={option.label}
-                  >
-                    {option.id === 'none' ? (
-                      <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
-                        <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.4" fill="none" />
-                        <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.4" strokeLinecap="round" />
-                      </svg>
-                    ) : (
-                      <svg viewBox="0 0 32 18" className="h-5 w-6" aria-hidden>
-                        <line
-                          x1="4"
-                          y1="9"
-                          x2="28"
-                          y2="9"
-                          stroke={outlineIndicatorColor}
-                          strokeWidth={2.6}
-                          strokeLinecap="round"
-                          strokeDasharray={
-                            option.style === 'dashed'
-                              ? '8 6'
-                              : option.style === 'dash-dot'
-                              ? '10 6 3 6'
-                              : option.style === 'dotted'
-                              ? '2 6'
-                              : undefined
-                          }
-                        />
-                      </svg>
-                    )}
-                  </button>
-                </DropdownMenuItem>
+                  {option.id === 'none' ? (
+                    <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
+                      <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.4" fill="none" />
+                      <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.4" strokeLinecap="round" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 32 18" className="h-5 w-6" aria-hidden>
+                      <line
+                        x1="4"
+                        y1="9"
+                        x2="28"
+                        y2="9"
+                        stroke={outlineIndicatorColor}
+                        strokeWidth={2.6}
+                        strokeLinecap="round"
+                        strokeDasharray={
+                          option.style === 'dashed'
+                            ? '8 6'
+                            : option.style === 'dash-dot'
+                            ? '10 6 3 6'
+                            : option.style === 'dotted'
+                            ? '2 6'
+                            : undefined
+                        }
+                      />
+                    </svg>
+                  )}
+                </button>
               );
             })}
           </div>
@@ -302,51 +277,37 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
               {OUTLINE_COLORS.map(color => {
                 const isActive = !isOutlineDisabled && stroke.toLowerCase() === color.toLowerCase();
                 return (
-                  <DropdownMenuItem
+                  <button
                     key={color}
-                    asChild
-                    onSelect={event => {
-                      event.preventDefault();
-                      handleOutlineColorSelect(color);
-                    }}
+                    type="button"
+                    onMouseDown={handleToolbarMouseDown}
+                    onClick={() => handleOutlineColorSelect(color)}
+                    className={cn(
+                      'relative flex h-8 w-8 items-center justify-center rounded-full border border-border/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                      isActive && 'border-primary ring-2 ring-primary/60 ring-offset-1 ring-offset-background',
+                    )}
+                    style={{ backgroundColor: color }}
+                    aria-label={`Set outline color to ${color}`}
                   >
-                    <button
-                      type="button"
-                      onMouseDown={handleToolbarMouseDown}
-                      className={cn(
-                        'relative flex h-8 w-8 items-center justify-center rounded-full border border-border/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                        isActive && 'border-primary ring-2 ring-primary/60 ring-offset-1 ring-offset-background',
-                      )}
-                      style={{ backgroundColor: color }}
-                      aria-label={`Set outline color to ${color}`}
-                    >
-                      {isActive && <Check className="h-3 w-3 text-white" />}
-                    </button>
-                  </DropdownMenuItem>
+                    {isActive && <Check className="h-3 w-3 text-white" />}
+                  </button>
                 );
               })}
-              <DropdownMenuItem
-                asChild
-                onSelect={event => {
-                  event.preventDefault();
-                  handleNoOutline();
-                }}
+              <button
+                type="button"
+                onMouseDown={handleToolbarMouseDown}
+                onClick={handleNoOutline}
+                className={cn(
+                  'relative flex h-8 w-8 items-center justify-center rounded-full border border-border/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                  isOutlineDisabled && 'border-primary ring-2 ring-primary/60 ring-offset-1 ring-offset-background',
+                )}
+                aria-label="Remove outline"
               >
-                <button
-                  type="button"
-                  onMouseDown={handleToolbarMouseDown}
-                  className={cn(
-                    'relative flex h-8 w-8 items-center justify-center rounded-full border border-border/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                    isOutlineDisabled && 'border-primary ring-2 ring-primary/60 ring-offset-1 ring-offset-background',
-                  )}
-                  aria-label="Remove outline"
-                >
-                  <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
-                    <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.4" fill="none" />
-                    <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.4" strokeLinecap="round" />
-                  </svg>
-                </button>
-              </DropdownMenuItem>
+                <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
+                  <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.4" fill="none" />
+                  <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.4" strokeLinecap="round" />
+                </svg>
+              </button>
             </div>
             <div className="flex items-center gap-2">
               <input
@@ -356,23 +317,16 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
                 onMouseDown={handleToolbarMouseDown}
                 className="h-10 w-full cursor-pointer rounded-lg border border-border"
               />
-              <DropdownMenuItem
-                asChild
-                onSelect={event => {
-                  event.preventDefault();
-                  handleResetOutline();
-                }}
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                className="h-8 rounded-full px-3 text-[11px] font-medium"
+                onMouseDown={handleToolbarMouseDown}
+                onClick={handleResetOutline}
               >
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  type="button"
-                  className="h-8 rounded-full px-3 text-[11px] font-medium"
-                  onMouseDown={handleToolbarMouseDown}
-                >
-                  Reset
-                </Button>
-              </DropdownMenuItem>
+                Reset
+              </Button>
             </div>
           </div>
 
@@ -392,8 +346,8 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
             />
           </div>
         </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </PopoverContent>
+    </Popover>
   );
 
   return (
