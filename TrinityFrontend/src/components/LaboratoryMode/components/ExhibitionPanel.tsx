@@ -113,6 +113,7 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
   );
 
   const [expandedAtomKey, setExpandedAtomKey] = React.useState<string | null>(null);
+  const hasInitialisedExpandedAtomRef = React.useRef(false);
   const exhibitionHandlesRef = React.useRef<Map<string, FeatureOverviewExhibitionHandle>>(new Map());
   const [exhibitingAtomKey, setExhibitingAtomKey] = React.useState<string | null>(null);
   const [isExhibitingAll, setIsExhibitingAll] = React.useState(false);
@@ -122,6 +123,7 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
       if (expandedAtomKey !== null) {
         setExpandedAtomKey(null);
       }
+      hasInitialisedExpandedAtomRef.current = false;
       return;
     }
 
@@ -129,10 +131,19 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
       ? atomPanels.some((panel) => panel.key === expandedAtomKey)
       : false;
 
-    if (!expandedAtomKey || !activeExists) {
+    if (expandedAtomKey && !activeExists) {
+      setExpandedAtomKey(atomPanels[0]?.key ?? null);
+      return;
+    }
+
+    if (!hasInitialisedExpandedAtomRef.current) {
+      hasInitialisedExpandedAtomRef.current = true;
       setExpandedAtomKey((current) => {
-        const next = atomPanels[0]?.key ?? null;
-        return current === next ? current : next;
+        if (current && atomPanels.some((panel) => panel.key === current)) {
+          return current;
+        }
+
+        return atomPanels[0]?.key ?? null;
       });
     }
   }, [atomPanels, expandedAtomKey]);

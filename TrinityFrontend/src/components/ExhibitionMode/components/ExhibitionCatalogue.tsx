@@ -1,6 +1,7 @@
 import React from 'react';
 import clsx from 'clsx';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Badge } from '@/components/ui/badge';
 import { atomCategories } from '@/components/AtomCategory/data/atomCategories';
 import type { LucideIcon } from 'lucide-react';
 import { ChevronDown, ChevronLeft, FolderKanban, GalleryHorizontal, Image } from 'lucide-react';
@@ -275,40 +276,50 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
   );
 
   const [expandedGroupKey, setExpandedGroupKey] = React.useState<string | null>(null);
+  const hasInitialisedExpandedGroupRef = React.useRef(false);
 
   React.useEffect(() => {
     if (groups.length === 0) {
       if (expandedGroupKey !== null) {
         setExpandedGroupKey(null);
       }
+      hasInitialisedExpandedGroupRef.current = false;
       return;
     }
 
     const hasActive = expandedGroupKey ? groups.some(group => group.key === expandedGroupKey) : false;
-    if (!expandedGroupKey || !hasActive) {
+    if (expandedGroupKey && !hasActive) {
       setExpandedGroupKey(groups[0]?.key ?? null);
+      return;
+    }
+
+    if (!hasInitialisedExpandedGroupRef.current) {
+      hasInitialisedExpandedGroupRef.current = true;
+      setExpandedGroupKey(current => {
+        if (current && groups.some(group => group.key === current)) {
+          return current;
+        }
+
+        return groups[0]?.key ?? null;
+      });
     }
   }, [groups, expandedGroupKey]);
 
   return (
-    <div className="w-64 h-full bg-background border-r border-border flex flex-col">
-      <div className="p-4 border-b border-border flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <GalleryHorizontal className="h-5 w-5 text-primary" />
-            <h3 className="font-semibold text-foreground">Exhibition Catalogue</h3>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {totalComponents === 0
-              ? 'Stage components from the laboratory exhibition panel to populate the catalogue.'
-              : `${totalComponents} ${totalComponents === 1 ? 'component' : 'components'} staged for exhibition`}
-          </p>
+    <div className="w-80 h-full bg-white border-r border-gray-200 flex flex-col">
+      <div className="p-3 border-b border-gray-200 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <GalleryHorizontal className="w-4 h-4 text-gray-700" />
+          <h3 className="font-semibold text-gray-900">Exhibition Catalogue</h3>
+          <Badge variant="secondary" className="ml-1">
+            {totalComponents} {totalComponents === 1 ? 'item' : 'items'}
+          </Badge>
         </div>
         {onCollapse && (
           <button
             type="button"
             onClick={onCollapse}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700"
             title="Collapse catalogue"
             aria-label="Collapse catalogue"
           >
@@ -318,9 +329,9 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="p-3 space-y-4">
+        <div className="p-4 space-y-4">
           {groups.length === 0 ? (
-            <div className="rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 px-3 py-6 text-center text-xs text-muted-foreground">
+            <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-xs text-gray-600">
               Stage feature overview components for exhibition to see them catalogued here.
             </div>
           ) : (
@@ -338,7 +349,7 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
                   <div className="flex items-center justify-between gap-2">
                     <button
                       type="button"
-                      className="flex flex-1 items-center gap-3 px-3 py-3 text-left"
+                      className="flex flex-1 items-center gap-3 px-4 py-3 text-left"
                       onClick={() =>
                         setExpandedGroupKey(current => (current === group.key ? null : group.key))
                       }
@@ -373,7 +384,7 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
                   </div>
                   <div
                     className={clsx(
-                      'space-y-4 border-t border-gray-200 bg-white/80 px-3 py-4',
+                      'space-y-4 border-t border-gray-200 bg-white/80 px-4 py-4',
                       !isExpanded && 'hidden',
                     )}
                     id={`${group.key}-catalogue-list`}
