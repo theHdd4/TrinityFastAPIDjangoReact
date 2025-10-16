@@ -1,4 +1,5 @@
 import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   User,
   Calendar,
@@ -226,6 +227,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const formatPanelRef = useRef<HTMLDivElement | null>(null);
   const formatToggleRef = useRef<HTMLButtonElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [positionPanelPortal, setPositionPanelPortal] = useState<HTMLElement | null>(null);
 
   const slideObjects = useExhibitionStore(
     useCallback(state => state.slideObjectsByCardId[card.id] ?? [], [card.id]),
@@ -321,6 +323,22 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       ...card.presentationSettings,
     });
   }, [card]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    let portalRoot = document.getElementById('exhibition-position-panel-root') as HTMLElement | null;
+
+    if (!portalRoot) {
+      portalRoot = document.createElement('div');
+      portalRoot.id = 'exhibition-position-panel-root';
+      document.body.appendChild(portalRoot);
+    }
+
+    setPositionPanelPortal(portalRoot);
+  }, []);
 
   useEffect(() => {
     if (!canEdit) {
@@ -677,6 +695,45 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     [slideObjects, updateTextBoxGeometry],
   );
 
+  const closePositionPanel = useCallback(() => {
+    setPositionPanelTarget(null);
+  }, []);
+
+  const positionPanelOverlay = useMemo(() => {
+    if (!canEdit || !positionPanelObject || !positionPanelPortal) {
+      return null;
+    }
+
+    return createPortal(
+      <div className="fixed inset-0 z-[60] flex justify-end pointer-events-none">
+        <div className="pointer-events-auto flex h-full w-[22rem] max-w-full translate-x-0 flex-col p-6 transition-transform duration-200">
+          <TextBoxPositionPanel
+            object={positionPanelObject}
+            onClose={closePositionPanel}
+            onBringForward={() => handleBringForward(positionPanelObject.id)}
+            onSendBackward={() => handleSendBackward(positionPanelObject.id)}
+            onBringToFront={() => handlePanelBringToFront(positionPanelObject.id)}
+            onSendToBack={() => handlePanelSendToBack(positionPanelObject.id)}
+            onAlign={alignment => alignTextBoxToCanvas(positionPanelObject.id, alignment)}
+            onGeometryChange={updates => updateTextBoxGeometry(positionPanelObject.id, updates)}
+          />
+        </div>
+      </div>,
+      positionPanelPortal,
+    );
+  }, [
+    alignTextBoxToCanvas,
+    canEdit,
+    closePositionPanel,
+    handleBringForward,
+    handlePanelBringToFront,
+    handlePanelSendToBack,
+    handleSendBackward,
+    positionPanelObject,
+    positionPanelPortal,
+    updateTextBoxGeometry,
+  ]);
+
   const handleAtomRemove = (atomId: string) => {
     if (!canEdit) {
       return;
@@ -773,13 +830,14 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         );
 
   return (
-    <div className={containerClasses}>
-      <div
-        className={cn(
-          'mx-auto transition-all duration-300 p-8',
-          cardWidthClass
-        )}
-      >
+    <>
+      <div className={containerClasses}>
+        <div
+          className={cn(
+            'mx-auto transition-all duration-300 p-8',
+            cardWidthClass,
+          )}
+        >
         {viewMode === 'vertical' && (
           <div className="mb-4 flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -885,18 +943,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                 </div>
               </div>
 
-              {canEdit && positionPanelObject && (
-                <TextBoxPositionPanel
-                  object={positionPanelObject}
-                  onClose={() => setPositionPanelTarget(null)}
-                  onBringForward={() => handleBringForward(positionPanelObject.id)}
-                  onSendBackward={() => handleSendBackward(positionPanelObject.id)}
-                  onBringToFront={() => handlePanelBringToFront(positionPanelObject.id)}
-                  onSendToBack={() => handlePanelSendToBack(positionPanelObject.id)}
-                  onAlign={alignment => alignTextBoxToCanvas(positionPanelObject.id, alignment)}
-                  onGeometryChange={updates => updateTextBoxGeometry(positionPanelObject.id, updates)}
-                />
-              )}
             </div>
           </div>
 
@@ -1259,8 +1305,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             </span>
           </div>
         )}
+        </div>
       </div>
-    </div>
+      {positionPanelOverlay}
+    </>
   );
 };
 
