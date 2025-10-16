@@ -25,6 +25,7 @@ import { TextBoxPositionPanel } from './operationsPalette/textBox/TextBoxPositio
 import { CardFormattingPanel } from './operationsPalette/CardFormattingPanel';
 import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
 import { SlideShapeObject } from './operationsPalette/shapes';
+import type { ShapeObjectProps } from './operationsPalette/shapes/constants';
 import {
   DEFAULT_TABLE_COLS,
   DEFAULT_TABLE_ROWS,
@@ -1190,6 +1191,28 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [],
     );
 
+    const updateShapeProps = useCallback(
+      (objectId: string, updates: Partial<ShapeObjectProps>) => {
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'shape') {
+          return;
+        }
+
+        const currentProps = (object.props ?? {}) as Record<string, unknown>;
+        const nextProps = {
+          ...currentProps,
+          ...updates,
+        } as Record<string, unknown>;
+
+        onBulkUpdate({
+          [objectId]: {
+            props: nextProps,
+          },
+        });
+      },
+      [objectsMap, onBulkUpdate],
+    );
+
     const mutateTableState = useCallback(
       (objectId: string, mutator: (state: TableState) => TableState | null) => {
         const object = objectsMap.get(objectId);
@@ -2041,7 +2064,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       }
 
       if (object.type === 'shape') {
-        return <SlideShapeObject props={object.props as Record<string, unknown> | undefined} />;
+        return null;
       }
 
       if (typeof object.props?.text === 'string') {
@@ -2127,7 +2150,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 className={cn(
                   'relative flex h-full w-full flex-col overflow-hidden rounded-3xl border-2 shadow-xl transition-all',
                   isShapeObject
-                    ? 'border-transparent bg-transparent shadow-none'
+                    ? 'border-none bg-transparent shadow-none overflow-visible'
                     : isAccentImageObject
                     ? 'bg-muted/30'
                     : 'bg-background/95',
@@ -2140,7 +2163,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                         ? 'border-primary shadow-2xl'
                         : 'border-border/70 hover:border-primary/40'),
                   isTextBoxObject && 'overflow-visible border-transparent bg-transparent shadow-none',
-                  isShapeObject && isSelected && 'ring-2 ring-primary/40',
                 )}
                 style={{
                   transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
@@ -2161,7 +2183,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 <div
                   className={cn(
                     'relative flex-1 overflow-hidden',
-                    isAccentImageObject ? undefined : 'p-4',
+                    isAccentImageObject || isShapeObject ? undefined : 'p-4',
                     (isTextBoxObject || isTableObject) && 'overflow-visible p-0',
                     isShapeObject && 'flex items-center justify-center overflow-visible p-0',
                   )}
@@ -2234,7 +2256,21 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       className={cn('h-full w-full overflow-hidden', 'rounded-2xl bg-background/90 p-3')}
                     />
                   ) : isShapeObject ? (
-                    renderObjectContent(object)
+                    <SlideShapeObject
+                      id={object.id}
+                      canEdit={canEdit}
+                      isSelected={isSelected}
+                      props={object.props as Record<string, unknown> | undefined}
+                      onUpdateProps={updates => updateShapeProps(object.id, updates)}
+                      onToolbarStateChange={handleTextToolbarStateChange}
+                      onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
+                      onRequestPositionPanel={
+                        onRequestPositionPanel ? () => onRequestPositionPanel(object.id) : undefined
+                      }
+                      onBringToFront={() => onBringToFront([object.id])}
+                      onSendToBack={() => onSendToBack([object.id])}
+                      onInteract={onInteract}
+                    />
                   ) : (
                     <div
                       className={cn(

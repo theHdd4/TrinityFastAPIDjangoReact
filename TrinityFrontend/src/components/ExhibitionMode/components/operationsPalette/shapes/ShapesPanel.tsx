@@ -118,16 +118,6 @@ export const ShapesPanel: React.FC<ShapesPanelProps> = ({ onSelectShape, onClose
           />
         </div>
 
-        <Button
-          type="button"
-          variant="secondary"
-          className="w-full justify-center gap-2 border-dashed"
-          disabled
-        >
-          <Sparkles className="h-4 w-4" />
-          Generate shapes
-        </Button>
-
         <ScrollArea className="max-h-[70vh] pr-2">
           <div className="space-y-6 pb-2">
             {categorisedShapes.length === 0 ? (
