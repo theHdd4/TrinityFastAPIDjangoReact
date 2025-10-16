@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Eye, EyeOff, User, Lock, ArrowLeft } from 'lucide-react';
+import { Eye, EyeOff, User, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
+import { BackToAppsIcon } from '@/components/PrimaryMenu/TrinityAssets';
 import LoginAnimation from '@/components/LoginAnimation';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 
@@ -157,7 +158,7 @@ const Login = () => {
           showAnimation ? 'opacity-0 pointer-events-none' : 'opacity-100'
         }`}
       >
-        <ArrowLeft className="w-4 h-4 mr-2" />
+        <BackToAppsIcon className="w-4 h-4 mr-2 text-[#fec107]" />
         Back to Home
       </Button>
       
