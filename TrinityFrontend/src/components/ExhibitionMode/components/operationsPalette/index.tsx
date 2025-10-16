@@ -50,18 +50,24 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
     [],
   );
 
+  const isPanelVisible = Boolean(positionPanel);
+
   return (
-    <div className="relative h-full">
-      {positionPanel && (
-        <div
-          className="pointer-events-none absolute inset-y-0 right-12 z-40 flex max-w-[calc(100vw-6rem)] justify-end transition-transform duration-200 ease-out"
-          style={{ width: POSITION_PANEL_WIDTH }}
-        >
-          <div className="pointer-events-auto flex h-full w-full items-start justify-end overflow-y-auto py-4 pr-0 pl-4">
+    <div className="flex h-full items-stretch">
+      <div
+        className={cn(
+          'flex h-full items-start justify-end overflow-y-auto border-l border-border bg-background transition-all duration-200',
+          isPanelVisible ? 'opacity-100 py-4 pl-4 pr-0' : 'pointer-events-none opacity-0 py-0 pl-0 pr-0',
+        )}
+        aria-hidden={!isPanelVisible}
+        style={{ width: isPanelVisible ? POSITION_PANEL_WIDTH : 0 }}
+      >
+        {isPanelVisible && (
+          <div className="flex w-full justify-end">
             {positionPanel}
           </div>
-        </div>
-      )}
+        )}
+      </div>
       <div className="w-12 h-full bg-background border-l border-border flex flex-col items-center py-4 gap-4">
         <div className="flex flex-col items-center gap-3 w-full">
           <span className="inline-flex items-center justify-center px-1 mx-auto text-[0.55rem] font-semibold text-muted-foreground uppercase tracking-[0.08em] leading-none pb-1 border-b-2 border-yellow-400">
