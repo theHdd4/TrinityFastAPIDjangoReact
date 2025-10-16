@@ -28,6 +28,47 @@ import { TABLE_STYLE_GROUPS, type TableStyleDefinition } from './constants';
 
 const noop = () => {};
 
+const parseHexColor = (value: string): { r: number; g: number; b: number } | null => {
+  const hex = value.trim().replace(/^#/, '');
+
+  if (!/^[0-9a-f]{3}$|^[0-9a-f]{6}$/i.test(hex)) {
+    return null;
+  }
+
+  const normalized = hex.length === 3 ? hex.replace(/./g, char => `${char}${char}`) : hex;
+
+  const r = parseInt(normalized.slice(0, 2), 16);
+  const g = parseInt(normalized.slice(2, 4), 16);
+  const b = parseInt(normalized.slice(4, 6), 16);
+
+  return { r, g, b };
+};
+
+const toLinearChannel = (value: number): number => {
+  const channel = value / 255;
+  return channel <= 0.04045 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
+};
+
+const calculateLuminance = ({ r, g, b }: { r: number; g: number; b: number }): number => {
+  const red = toLinearChannel(r);
+  const green = toLinearChannel(g);
+  const blue = toLinearChannel(b);
+
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+};
+
+const getPreviewAccentColor = (hex: string): string => {
+  const rgb = parseHexColor(hex);
+
+  if (!rgb) {
+    return 'rgba(17, 24, 39, 0.5)';
+  }
+
+  const luminance = calculateLuminance(rgb);
+
+  return luminance > 0.6 ? 'rgba(17, 24, 39, 0.45)' : 'rgba(255, 255, 255, 0.78)';
+};
+
 export interface ExhibitionTableTrayProps {
   locked: boolean;
   canEdit?: boolean;
@@ -76,33 +117,84 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
   const hasBodySelection = Boolean(selectedCell && !isHeaderSelected && selectedCell.row >= 0);
   const disableStyleSelection = locked || !canEdit;
 
-  const renderStylePreview = (style: TableStyleDefinition) => (
-    <div className="flex flex-col gap-1">
+  const renderStylePreview = (style: TableStyleDefinition) => {
+    const rowConfigs: Array<{
+      key: string;
+      background: string;
+      accent: string;
+      primaryWidths: [string, string, string];
+      secondaryWidths?: [string, string, string];
+    }> = [
+      {
+        key: 'header',
+        background: style.preview.header,
+        accent: getPreviewAccentColor(style.preview.header),
+        primaryWidths: ['58%', '52%', '48%'],
+      },
+      {
+        key: 'odd',
+        background: style.preview.odd,
+        accent: getPreviewAccentColor(style.preview.odd),
+        primaryWidths: ['72%', '64%', '58%'],
+        secondaryWidths: ['42%', '48%', '36%'],
+      },
+      {
+        key: 'even',
+        background: style.preview.even,
+        accent: getPreviewAccentColor(style.preview.even),
+        primaryWidths: ['68%', '60%', '54%'],
+        secondaryWidths: ['40%', '46%', '34%'],
+      },
+    ];
+
+    return (
       <div
-        className="h-3 rounded-sm border"
+        className="rounded-md border p-1 shadow-sm"
         style={{
-          backgroundColor: style.preview.header,
           borderColor: style.preview.border,
+          backgroundColor: style.table.background,
         }}
-      />
-      <div className="grid grid-rows-3 gap-1">
-        {[
-          { key: 'odd-top', color: style.preview.odd },
-          { key: 'even', color: style.preview.even },
-          { key: 'odd-bottom', color: style.preview.odd },
-        ].map(segment => (
-          <div
-            key={`${style.id}-preview-${segment.key}`}
-            className="h-2 rounded-sm border"
-            style={{
-              backgroundColor: segment.color,
-              borderColor: style.preview.border,
-            }}
-          />
-        ))}
+      >
+        <div className="space-y-[3px]">
+          {rowConfigs.map(row => (
+            <div
+              key={`${style.id}-row-${row.key}`}
+              className="grid grid-cols-3 overflow-hidden rounded-[3px] border"
+              style={{ borderColor: style.preview.border }}
+            >
+              {row.primaryWidths.map((width, columnIndex) => (
+                <div
+                  key={`${style.id}-row-${row.key}-col-${columnIndex}`}
+                  className="flex flex-col justify-center border-r px-1.5 py-1 last:border-r-0"
+                  style={{
+                    backgroundColor: row.background,
+                    borderColor: style.preview.border,
+                  }}
+                >
+                  <div
+                    className="h-1.5 rounded-sm"
+                    style={{
+                      backgroundColor: row.accent,
+                      width,
+                    }}
+                  />
+                  {row.secondaryWidths && (
+                    <div
+                      className="mt-[2px] h-1 rounded-sm opacity-80"
+                      style={{
+                        backgroundColor: row.accent,
+                        width: row.secondaryWidths[columnIndex],
+                      }}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <ContextMenuContent className="w-64">
