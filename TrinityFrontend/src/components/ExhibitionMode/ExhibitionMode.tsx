@@ -1153,11 +1153,10 @@ const ExhibitionMode = () => {
       return;
     }
 
-    const nextCards = useExhibitionStore.getState().exhibitedCards;
-    const newIndex = nextCards.findIndex(card => card.id === created.id);
-    if (newIndex !== -1) {
-      setCurrentSlide(newIndex);
-    }
+    const newIndex =
+      exhibitedCards.length > 0 ? Math.min(currentSlide + 1, exhibitedCards.length) : 0;
+
+    setCurrentSlide(newIndex);
 
     toast({
       title: 'Blank slide added',
