@@ -21,6 +21,7 @@ import type {
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
+import ExhibitionFeatureOverview from '@/components/ExhibitionMode/components/atoms/FeatureOverview';
 import {
   buildChartRendererPropsFromManifest,
   buildTableDataFromManifest,
@@ -94,115 +95,145 @@ const buildDefaultEditableName = (selection: FeatureOverviewExhibitionSelection)
 const getComponentPrefix = (componentType?: FeatureOverviewExhibitionComponentType): string =>
   componentType === 'trend_analysis' ? 'Trend Analysis' : 'SKU Stats';
 
-const humanizeLabel = (value: string): string =>
-  value
-    .split(/[_\s-]+/g)
-    .filter(Boolean)
-    .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(' ');
-
-const formatPreviewValue = (value: unknown): string => {
-  if (value === null || value === undefined) {
-    return '—';
-  }
-
-  if (typeof value === 'number') {
-    return new Intl.NumberFormat(undefined, {
-      maximumFractionDigits: 2,
-    }).format(value);
-  }
-
-  if (typeof value === 'boolean') {
-    return value ? 'Yes' : 'No';
-  }
-
-  if (value instanceof Date) {
-    return value.toLocaleString();
-  }
-
-  if (typeof value === 'string') {
-    return value;
-  }
-
-  try {
-    return JSON.stringify(value);
-  } catch (error) {
-    console.warn('Unable to serialise preview value', error);
-    return String(value);
-  }
-};
-
-const extractSummaryEntries = (
-  selection: FeatureOverviewExhibitionSelection,
-): Array<[string, unknown]> => {
-  const summary =
-    selection.statisticalDetails?.summary ?? selection.visualizationManifest?.data?.summary ?? null;
-
-  if (!summary || typeof summary !== 'object') {
-    return [];
-  }
-
-  return Object.entries(summary)
-    .filter(([, value]) => value !== null && value !== undefined && typeof value !== 'object')
-    .slice(0, 5);
-};
-
-interface TimeseriesPreviewPoint {
+interface ProcessedSelection {
   id: string;
-  label: string;
-  value: unknown;
+  title: string;
+  componentType: FeatureOverviewExhibitionComponentType;
+  metadata: Record<string, unknown>;
+  manifest?: unknown;
+  manifestId?: string;
 }
 
-interface TimeseriesPreviewData {
-  xField: string;
-  yField: string;
-  points: TimeseriesPreviewPoint[];
+interface NormaliseSelectionOptions {
+  selection: FeatureOverviewExhibitionSelection;
+  index: number;
+  atomId: string;
+  resolvedAtomTitle: string;
+  visibility: Record<VisibilityToggleKey, boolean>;
+  stagedRows: Array<Record<string, any>>;
+  stagedColumns: string[];
 }
 
-const extractTimeseriesPreview = (
-  selection: FeatureOverviewExhibitionSelection,
-): TimeseriesPreviewData => {
-  const manifestSeries = selection.visualizationManifest?.data?.timeseries;
-  const detailsSeries = selection.statisticalDetails?.timeseries;
+const normaliseSelectionForExhibition = ({
+  selection,
+  index,
+  atomId,
+  resolvedAtomTitle,
+  visibility,
+  stagedRows,
+  stagedColumns,
+}: NormaliseSelectionOptions): ProcessedSelection => {
+  const componentType: FeatureOverviewExhibitionComponentType = selection.componentType ?? 'statistical_summary';
 
-  const timeseries: Array<Record<string, unknown>> = Array.isArray(manifestSeries) && manifestSeries.length > 0
-    ? (manifestSeries as Array<Record<string, unknown>>)
-    : Array.isArray(detailsSeries) && detailsSeries.length > 0
-    ? (detailsSeries as Array<Record<string, unknown>>)
-    : [];
+  const manifest = selection.visualizationManifest ? clonePlain(selection.visualizationManifest) : undefined;
+  const manifestId =
+    selection.manifestId ||
+    (manifest && typeof manifest === 'object' && 'id' in manifest ? (manifest as Record<string, any>).id : undefined) ||
+    selection.key;
+  const manifestChartProps = buildChartRendererPropsFromManifest(manifest);
+  const manifestTableData = buildTableDataFromManifest(manifest);
 
-  const xField =
-    sanitizeSegment(selection.chartState?.xAxisField) ||
-    sanitizeSegment(selection.featureContext?.xAxis) ||
-    'x';
+  const baseChartState = selection.chartState;
+  const fallbackTheme = baseChartState?.theme || 'default';
+  const fallbackXAxis = selection.featureContext?.xAxis || baseChartState?.xAxisField || 'date';
+  const fallbackYAxis = baseChartState?.yAxisField || selection.metric;
+  const featureContextDetails = selection.featureContext
+    ? {
+        ...selection.featureContext,
+        xAxis: selection.featureContext.xAxis || fallbackXAxis,
+      }
+    : undefined;
 
-  const yField =
-    sanitizeSegment(selection.chartState?.yAxisField) ||
-    sanitizeSegment(selection.chartState?.yAxisLabel) ||
-    sanitizeSegment(selection.metric) ||
-    'value';
+  const normalisedChartState =
+    componentType === 'trend_analysis'
+      ? {
+          chartType: baseChartState?.chartType || 'line_chart',
+          theme: fallbackTheme,
+          showDataLabels: baseChartState?.showDataLabels ?? false,
+          showAxisLabels: baseChartState?.showAxisLabels ?? true,
+          showGrid: baseChartState?.showGrid ?? true,
+          showLegend: baseChartState?.showLegend ?? true,
+          xAxisField: fallbackXAxis,
+          yAxisField: fallbackYAxis,
+          colorPalette: resolvePalette(fallbackTheme, baseChartState?.colorPalette),
+          legendField: baseChartState?.legendField,
+          xAxisLabel: baseChartState?.xAxisLabel || featureContextDetails?.xAxis || fallbackXAxis,
+          yAxisLabel: baseChartState?.yAxisLabel || fallbackYAxis,
+          sortOrder:
+            baseChartState?.sortOrder === 'asc' || baseChartState?.sortOrder === 'desc'
+              ? baseChartState.sortOrder
+              : null,
+        }
+      : undefined;
 
-  const points: TimeseriesPreviewPoint[] = timeseries.slice(0, 5).map((entry, index) => {
-    const labelCandidate =
-      entry?.[xField] ?? entry?.date ?? entry?.period ?? entry?.week ?? entry?.month ?? `Point ${index + 1}`;
-    const valueCandidate = entry?.[yField] ?? entry?.value ?? entry?.metric ?? null;
+  const statisticalDetails = selection.statisticalDetails
+    ? {
+        summary: clonePlain(selection.statisticalDetails.summary),
+        timeseries: clonePlain(selection.statisticalDetails.timeseries),
+        full: clonePlain(selection.statisticalDetails.full),
+      }
+    : undefined;
 
-    const label =
-      typeof labelCandidate === 'string' || typeof labelCandidate === 'number'
-        ? String(labelCandidate)
-        : `Point ${index + 1}`;
+  const metadata: Record<string, unknown> = {
+    metric: selection.metric,
+    combination: clonePlain(selection.combination),
+    dimensions: Array.isArray(selection.dimensions)
+      ? selection.dimensions.map(dimension => ({ ...dimension }))
+      : undefined,
+    rowId: selection.rowId,
+    label: selection.label,
+    chartState: normalisedChartState,
+    featureContext: featureContextDetails ? { ...featureContextDetails } : undefined,
+    statisticalDetails,
+    skuRow: selection.skuRow ? { ...selection.skuRow } : undefined,
+    capturedAt: selection.capturedAt,
+    sourceAtomTitle: resolvedAtomTitle,
+    skuStatisticsSettings: {
+      visibility: { ...visibility },
+      tableRows: stagedRows.map(row => ({ ...row })),
+      tableColumns: stagedColumns.length > 0 ? [...stagedColumns] : undefined,
+    },
+    viewType: componentType === 'trend_analysis' ? 'trend_analysis' : 'statistical_summary',
+  };
 
-    return {
-      id: `${selection.key}-point-${index}`,
-      label,
-      value: valueCandidate,
+  if (manifest) {
+    metadata.visualizationManifest = manifest;
+  }
+
+  if (manifestId) {
+    metadata.manifestId = manifestId;
+  }
+
+  if (manifestChartProps) {
+    metadata.chartRendererProps = clonePlain(manifestChartProps);
+    metadata.chartData = clonePlain(manifestChartProps.data);
+  } else if (manifest && typeof manifest === 'object' && 'data' in manifest && manifest.data?.timeseries) {
+    metadata.chartData = clonePlain(manifest.data.timeseries);
+  }
+
+  if (manifestTableData) {
+    metadata.tableData = {
+      headers: [...manifestTableData.headers],
+      rows: manifestTableData.rows.map(row => ({ ...row })),
     };
-  });
+  }
+
+  const dimensionSummary = Array.isArray(selection.dimensions)
+    ? selection.dimensions
+        .map(dimension => sanitizeSegment(dimension.value) || sanitizeSegment(dimension.name))
+        .filter(Boolean)
+        .join(' / ')
+    : '';
+
+  const title = selection.label || (dimensionSummary ? `${selection.metric} · ${dimensionSummary}` : selection.metric);
 
   return {
-    xField: xField || 'x',
-    yField: yField || 'value',
-    points,
+    id: selection.key || `${atomId}-${index}-${componentType}`,
+    title: title || selection.metric,
+    componentType,
+    metadata,
+    manifest,
+    manifestId,
   };
 };
 
@@ -217,7 +248,8 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draftNames, setDraftNames] = useState<Record<string, string>>({});
-  const [expandedSelections, setExpandedSelections] = useState<Record<string, boolean>>({});
+  const [expandedPreviewSelections, setExpandedPreviewSelections] = useState<Record<string, boolean>>({});
+  const [openSettingsSelections, setOpenSettingsSelections] = useState<Record<string, boolean>>({});
   const [visibility, setVisibility] = useState<Record<VisibilityToggleKey, boolean>>(DEFAULT_VISIBILITY);
   const { toast } = useToast();
   const loadSavedConfiguration = useExhibitionStore(state => state.loadSavedConfiguration);
@@ -267,6 +299,43 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
 
     return 'Exhibited Atom';
   }, [atomId, sourceAtomTitle]);
+
+  const stagedRows = useMemo(
+    () =>
+      selections
+        .map(selection => selection.skuRow)
+        .filter((row): row is Record<string, any> => row != null && typeof row === 'object'),
+    [selections],
+  );
+
+  const stagedColumns = useMemo(() => {
+    if (stagedRows.length === 0) {
+      return [] as string[];
+    }
+
+    const columnSet = new Set<string>();
+    stagedRows.forEach(row => {
+      Object.keys(row).forEach(column => columnSet.add(column));
+    });
+
+    return Array.from(columnSet);
+  }, [stagedRows]);
+
+  const processedSelections = useMemo(
+    () =>
+      selections.map((selection, index) =>
+        normaliseSelectionForExhibition({
+          selection,
+          index,
+          atomId,
+          resolvedAtomTitle,
+          visibility,
+          stagedRows,
+          stagedColumns,
+        }),
+      ),
+    [selections, atomId, resolvedAtomTitle, visibility, stagedRows, stagedColumns],
+  );
 
   const toggleVisibilitySetting = (key: VisibilityToggleKey) => {
     setVisibility(prev => ({
@@ -338,186 +407,34 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
         return identifier !== cardIdentifier;
       });
 
-      const processedSelections = selections.map((selection, index) => {
-        const componentType: FeatureOverviewExhibitionComponentType =
-          selection.componentType ?? 'statistical_summary';
-        const dimensionSummary = selection.dimensions
-          .map(d => d.value)
-          .filter(Boolean)
-          .join(' / ');
-        const title = selection.label || (dimensionSummary ? `${selection.metric} · ${dimensionSummary}` : selection.metric);
+    const exhibitedComponents: ExhibitionComponentPayload[] = processedSelections.flatMap(
+      ({
+        id,
+        title,
+        componentType,
+        metadata,
+        manifest,
+        manifestId,
+      }) => {
+        const componentLabel =
+          componentType === 'trend_analysis' ? 'Trend Analysis' : 'Statistical Summary';
 
-        const manifest = selection.visualizationManifest
-          ? clonePlain(selection.visualizationManifest)
-          : undefined;
-        const manifestId = selection.manifestId || manifest?.id || selection.key;
-        const manifestChartProps = buildChartRendererPropsFromManifest(manifest);
-        const manifestTableData = buildTableDataFromManifest(manifest);
+        const metadataPayload = clonePlain(metadata);
 
-        const baseChartState = selection.chartState;
-        const fallbackTheme = baseChartState?.theme || 'default';
-        const fallbackXAxis = selection.featureContext?.xAxis || baseChartState?.xAxisField || 'date';
-        const fallbackYAxis = baseChartState?.yAxisField || selection.metric;
-        const featureContextDetails = selection.featureContext
-          ? {
-              ...selection.featureContext,
-              xAxis: selection.featureContext.xAxis || fallbackXAxis,
-            }
-          : undefined;
-
-        const normalisedChartState =
-          componentType === 'trend_analysis'
-            ? {
-                chartType: baseChartState?.chartType || 'line_chart',
-                theme: fallbackTheme,
-                showDataLabels: baseChartState?.showDataLabels ?? false,
-                showAxisLabels: baseChartState?.showAxisLabels ?? true,
-                showGrid: baseChartState?.showGrid ?? true,
-                showLegend: baseChartState?.showLegend ?? true,
-                xAxisField: fallbackXAxis,
-                yAxisField: fallbackYAxis,
-                colorPalette: resolvePalette(fallbackTheme, baseChartState?.colorPalette),
-                legendField: baseChartState?.legendField,
-                xAxisLabel:
-                  baseChartState?.xAxisLabel || featureContextDetails?.xAxis || fallbackXAxis,
-                yAxisLabel: baseChartState?.yAxisLabel || fallbackYAxis,
-                sortOrder:
-                  baseChartState?.sortOrder === 'asc' || baseChartState?.sortOrder === 'desc'
-                    ? baseChartState.sortOrder
-                    : null,
-              }
-            : undefined;
-
-        const statisticalDetails = selection.statisticalDetails
-          ? {
-              summary: selection.statisticalDetails.summary,
-              timeseries: selection.statisticalDetails.timeseries,
-              full: selection.statisticalDetails.full,
-            }
-          : undefined;
-
-        return {
-          id: selection.key || `${atomId}-${index}-${componentType}`,
-          title,
-          chartState: componentType === 'trend_analysis' ? normalisedChartState : undefined,
-          featureContext: featureContextDetails,
-          statisticalDetails,
-          selection,
-          componentType,
-          sourceAtomTitle: resolvedAtomTitle,
-          manifest,
-          manifestId,
-          manifestChartProps,
-          manifestTableData,
-        };
-      });
-
-      const stagedRows = processedSelections
-        .map(item => item.selection.skuRow)
-        .filter((row): row is Record<string, any> => row != null && typeof row === 'object');
-
-      const skuStatisticsSettings: {
-        visibility: Record<string, boolean>;
-        tableRows?: Record<string, any>[];
-        tableColumns?: string[];
-      } = {
-        visibility: { ...visibility },
-      };
-
-      if (stagedRows.length > 0) {
-        skuStatisticsSettings.tableRows = stagedRows;
-        skuStatisticsSettings.tableColumns = Array.from(
-          new Set(stagedRows.flatMap(row => Object.keys(row))),
-        );
-      }
-
-      const exhibitedComponents: ExhibitionComponentPayload[] = processedSelections.flatMap(
-        ({
-          id,
-          title,
-          chartState: normalisedChartState,
-          featureContext,
-          statisticalDetails,
-          selection: baseSelection,
-          componentType,
-          sourceAtomTitle: originatingAtomTitle,
-          manifest,
-          manifestId,
-          manifestChartProps,
-          manifestTableData,
-        }) => {
-          const baseMetadata = {
-            metric: baseSelection.metric,
-            combination: baseSelection.combination,
-            dimensions: baseSelection.dimensions,
-            rowId: baseSelection.rowId,
-            label: baseSelection.label,
-            chartState: normalisedChartState,
-            featureContext,
-            statisticalDetails,
-            skuRow: baseSelection.skuRow,
-            capturedAt: baseSelection.capturedAt,
-            sourceAtomTitle: originatingAtomTitle,
-            skuStatisticsSettings: {
-              visibility: { ...skuStatisticsSettings.visibility },
-              tableRows: skuStatisticsSettings.tableRows?.map(row => ({ ...row })),
-              tableColumns: skuStatisticsSettings.tableColumns
-                ? [...skuStatisticsSettings.tableColumns]
-                : undefined,
-            },
-          };
-
-          if (manifest) {
-            baseMetadata.visualizationManifest = manifest;
-          }
-
-          if (manifestId) {
-            baseMetadata.manifestId = manifestId;
-          }
-
-          if (manifestChartProps) {
-            baseMetadata.chartRendererProps = clonePlain(manifestChartProps);
-            baseMetadata.chartData = clonePlain(manifestChartProps.data);
-          } else if (manifest?.data?.timeseries) {
-            baseMetadata.chartData = clonePlain(manifest.data.timeseries);
-          }
-
-          if (manifestTableData) {
-            baseMetadata.tableData = manifestTableData;
-          } else if (manifest?.table?.rows && manifest.table.rows.length > 0) {
-            baseMetadata.tableData = {
-              headers:
-                manifest.table.columns && manifest.table.columns.length > 0
-                  ? [...manifest.table.columns]
-                  : Object.keys(manifest.table.rows[0] ?? {}),
-              rows: manifest.table.rows.map(row => ({ ...row })),
-            };
-          }
-
-          const componentLabel =
-            componentType === 'trend_analysis' ? 'Trend Analysis' : 'Statistical Summary';
-
-          return [
-            {
-              id,
-              atomId,
-              title: `${title} · ${componentLabel}`,
-              category: 'Feature Overview',
-              color: 'bg-amber-500',
-              metadata: {
-                ...baseMetadata,
-                chartState: componentType === 'trend_analysis' ? normalisedChartState : undefined,
-                viewType:
-                  componentType === 'trend_analysis'
-                    ? ('trend_analysis' as const)
-                    : ('statistical_summary' as const),
-              },
-              manifest,
-              manifest_id: manifestId,
-            },
-          ];
-        },
-      );
+        return [
+          {
+            id,
+            atomId,
+            title: `${title} · ${componentLabel}`,
+            category: 'Feature Overview',
+            color: 'bg-amber-500',
+            metadata: metadataPayload,
+            manifest,
+            manifest_id: manifestId,
+          },
+        ];
+      },
+    );
 
       const newEntry: ExhibitionAtomPayload = {
         id: cardIdentifier,
@@ -575,9 +492,13 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
           </div>
         ) : (
           <div className="space-y-3">
-            {selections.map(selection => {
-              const componentType: FeatureOverviewExhibitionComponentType =
-                selection.componentType ?? 'statistical_summary';
+            {selections.map((selection, index) => {
+              const processed = processedSelections[index];
+              if (!processed) {
+                return null;
+              }
+
+              const componentType = processed.componentType;
               const typePrefix = getComponentPrefix(componentType);
               const defaultEditableName = buildDefaultEditableName(selection);
               const currentEditableName = sanitizeSegment(selection.label) || defaultEditableName;
@@ -586,11 +507,8 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
               const displayActualName = `${typePrefix}${baseDescriptor ? ` - ${baseDescriptor}` : ''}`;
               const isEditing = editingKey === selection.key;
               const draftValue = draftNames[selection.key] ?? currentEditableName;
-              const isExpanded = expandedSelections[selection.key] ?? false;
-              const summaryEntries =
-                componentType === 'statistical_summary' ? extractSummaryEntries(selection) : [];
-              const timeseriesPreview =
-                componentType === 'trend_analysis' ? extractTimeseriesPreview(selection) : null;
+              const isPreviewOpen = expandedPreviewSelections[selection.key] ?? false;
+              const isSettingsOpen = openSettingsSelections[selection.key] ?? false;
 
               const startEditing = () => {
                 setDraftNames(prev => ({ ...prev, [selection.key]: currentEditableName }));
@@ -617,10 +535,17 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                 onRenameSelection(selection.key, nextName);
               };
 
-              const toggleExpanded = () => {
-                setExpandedSelections(prev => ({
+              const togglePreview = () => {
+                setExpandedPreviewSelections(prev => ({
                   ...prev,
-                  [selection.key]: !isExpanded,
+                  [selection.key]: !isPreviewOpen,
+                }));
+              };
+
+              const toggleSettings = () => {
+                setOpenSettingsSelections(prev => ({
+                  ...prev,
+                  [selection.key]: !isSettingsOpen,
                 }));
               };
 
@@ -628,6 +553,8 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                 'flex w-full flex-wrap items-center gap-2 rounded-md px-2 py-1 text-sm font-semibold text-black shadow-sm',
                 highlightBackgroundClass,
               );
+
+              const showDetailSections = isSettingsOpen || isPreviewOpen;
 
               return (
                 <div
@@ -683,7 +610,7 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-gray-500 hover:text-gray-700"
-                        onClick={toggleExpanded}
+                        onClick={toggleSettings}
                       >
                         <Settings2 className="h-4 w-4" />
                         <span className="sr-only">Toggle visibility settings</span>
@@ -693,10 +620,10 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-gray-500 hover:text-gray-700"
-                        onClick={toggleExpanded}
-                        aria-expanded={isExpanded}
+                        onClick={togglePreview}
+                        aria-expanded={isPreviewOpen}
                       >
-                        <ChevronDown className={clsx('h-4 w-4 transition-transform', isExpanded && 'rotate-180')} />
+                        <ChevronDown className={clsx('h-4 w-4 transition-transform', isPreviewOpen && 'rotate-180')} />
                         <span className="sr-only">Toggle preview</span>
                       </Button>
                     </div>
@@ -704,76 +631,46 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
 
                   <p className="text-xs font-medium text-gray-700">{displayActualName}</p>
 
-                  {isExpanded && (
+                  {showDetailSections && (
                     <div className="space-y-4 border-t border-gray-200 pt-3">
-                      <div>
-                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-700">
-                          <Settings2 className="h-3.5 w-3.5" />
-                          Visibility settings
-                        </div>
-                        <div className="mt-2 space-y-2">
-                          {VISIBILITY_TOGGLES.map(toggle => (
-                            <label
-                              key={toggle.key}
-                              className="flex items-center justify-between rounded-md border border-gray-200 bg-white/70 px-3 py-2 text-xs text-gray-700"
-                            >
-                              <span className="font-medium">{toggle.label}</span>
-                              <input
-                                type="checkbox"
-                                className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-                                checked={visibility[toggle.key]}
-                                onChange={() => toggleVisibilitySetting(toggle.key)}
-                              />
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-700">
-                          <Image className="h-3.5 w-3.5" />
-                          Preview snapshot
-                        </div>
-                        {componentType === 'trend_analysis' && timeseriesPreview ? (
-                          timeseriesPreview.points.length > 0 ? (
-                            <div className="mt-2 overflow-hidden rounded-md border border-gray-200 bg-white/70">
-                              <div className="grid grid-cols-2 gap-2 border-b border-gray-200 bg-gray-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-600">
-                                <span className="truncate">{humanizeLabel(timeseriesPreview.xField)}</span>
-                                <span className="truncate text-right">{humanizeLabel(timeseriesPreview.yField)}</span>
-                              </div>
-                              <ul className="divide-y divide-gray-200 max-h-40 overflow-y-auto">
-                                {timeseriesPreview.points.map(point => (
-                                  <li
-                                    key={point.id}
-                                    className="flex items-center justify-between px-3 py-2 text-xs text-gray-700"
-                                  >
-                                    <span className="truncate pr-2">{point.label}</span>
-                                    <span className="font-semibold text-gray-900">
-                                      {formatPreviewValue(point.value)}
-                                    </span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          ) : (
-                            <p className="mt-2 text-xs italic text-gray-500">No timeseries preview available.</p>
-                          )
-                        ) : summaryEntries.length > 0 ? (
+                      {isSettingsOpen && (
+                        <div>
+                          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-700">
+                            <Settings2 className="h-3.5 w-3.5" />
+                            Visibility settings
+                          </div>
                           <div className="mt-2 space-y-2">
-                            {summaryEntries.map(([label, value]) => (
-                              <div
-                                key={label}
+                            {VISIBILITY_TOGGLES.map(toggle => (
+                              <label
+                                key={toggle.key}
                                 className="flex items-center justify-between rounded-md border border-gray-200 bg-white/70 px-3 py-2 text-xs text-gray-700"
                               >
-                                <span className="font-medium">{humanizeLabel(label)}</span>
-                                <span className="font-semibold text-gray-900">{formatPreviewValue(value)}</span>
-                              </div>
+                                <span className="font-medium">{toggle.label}</span>
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                                  checked={visibility[toggle.key]}
+                                  onChange={() => toggleVisibilitySetting(toggle.key)}
+                                />
+                              </label>
                             ))}
                           </div>
-                        ) : (
-                          <p className="mt-2 text-xs italic text-gray-500">No summary preview available.</p>
-                        )}
-                      </div>
+                        </div>
+                      )}
+
+                      {isPreviewOpen && (
+                        <div>
+                          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-700">
+                            <Image className="h-3.5 w-3.5" />
+                            Preview snapshot
+                          </div>
+                          <div className="mt-2 overflow-hidden rounded-md border border-gray-200 bg-white/80 p-2">
+                            <div className="pointer-events-none select-none">
+                              <ExhibitionFeatureOverview metadata={processed.metadata} variant="compact" />
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
