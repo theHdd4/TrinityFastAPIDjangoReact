@@ -18,6 +18,7 @@ For staging or production switch back to an explicit whitelist
 """
 
 import os
+import socket
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -28,6 +29,84 @@ from corsheaders.defaults import default_headers, default_methods
 # ------------------------------------------------------------------
 load_dotenv()
 
+
+def _split_csv(value: str | None) -> list[str]:
+    """Return cleaned entries from a comma separated string."""
+
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _discover_local_ips() -> list[str]:
+    """Attempt to collect non-loopback IPv4 addresses for the current host."""
+
+    addresses: list[str] = []
+    hostname = socket.gethostname()
+    name_candidates = {hostname, socket.getfqdn(), os.getenv("HOSTNAME", "")}
+
+    for name in name_candidates:
+        if not name:
+            continue
+        try:
+            infos = socket.getaddrinfo(name, None, proto=socket.IPPROTO_TCP)
+        except socket.gaierror:
+            continue
+        for info in infos:
+            ip = info[4][0]
+            if ip and "." in ip:
+                addresses.append(ip)
+
+    try:
+        _, _, host_ips = socket.gethostbyname_ex(hostname)
+        addresses.extend(host_ips)
+    except socket.gaierror:
+        pass
+
+    for target in ("8.8.8.8", "1.1.1.1"):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect((target, 80))
+                addresses.append(sock.getsockname()[0])
+        except OSError:
+            continue
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for ip in addresses:
+        if not ip or ip.startswith("127."):
+            continue
+        if ip not in seen:
+            seen.add(ip)
+            unique.append(ip)
+    return unique
+
+
+def _expand_origins(hosts: list[str], ports: list[str]) -> list[str]:
+    """Expand hostnames/IPs into http/https origins for multiple ports."""
+
+    origins: list[str] = []
+    seen: set[str] = set()
+    for host in hosts:
+        host = host.strip()
+        if not host:
+            continue
+        if host.startswith("http://") or host.startswith("https://"):
+            if host not in seen:
+                seen.add(host)
+                origins.append(host)
+            continue
+        for port in ports:
+            origin = f"http://{host}:{port}"
+            if origin not in seen:
+                seen.add(origin)
+                origins.append(origin)
+        https_origin = f"https://{host}"
+        if https_origin not in seen:
+            seen.add(https_origin)
+            origins.append(https_origin)
+    return origins
+
 # ------------------------------------------------------------------
 # Base directory
 # ------------------------------------------------------------------
@@ -36,7 +115,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ------------------------------------------------------------------
 # Security
 # ------------------------------------------------------------------
-HOST_IP = os.getenv("HOST_IP", "10.156.227.220")  # Fixed: Use correct default IP
+_discovered_ips = _discover_local_ips()
+_fallback_host_ip = _discovered_ips[0] if _discovered_ips else "127.0.0.1"
+
+HOST_IP = os.getenv("HOST_IP", _fallback_host_ip)
 FRONTEND_PORT = os.getenv("FRONTEND_PORT", "8080")
 FRONTEND_URL = os.getenv("FRONTEND_URL", f"http://{HOST_IP}:{FRONTEND_PORT}")
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production")
@@ -60,16 +142,43 @@ ADDITIONAL_DOMAINS = os.getenv("ADDITIONAL_DOMAINS", HOST_IP)
 # ------------------------------------------------------------------
 # CORS configuration
 # ------------------------------------------------------------------
-_default_cors = os.getenv(
-    "CORS_DEFAULT",
-    f"{_frontend_origin},https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com",
-)
-CORS_ALLOWED_ORIGINS = [
-    o.strip()
-    for o in (os.getenv("CORS_ALLOWED_ORIGINS") or _default_cors).split(",")
-    if o.strip()
+_historic_hosts = [
+    "10.19.4.220",
+    "10.2.4.48",
+    "10.2.1.207",
+    "172.22.64.1",
+    "10.2.3.55",
 ]
-CORS_ALLOW_ALL_ORIGINS = False
+_frontend_ports = list(dict.fromkeys([FRONTEND_PORT, "8080", "8081"]))
+_host_entries = [
+    "localhost",
+    "127.0.0.1",
+    HOST_IP,
+    *_historic_hosts,
+    *_split_csv(os.getenv("ADDITIONAL_DOMAINS")),
+    *_discovered_ips,
+]
+
+_default_cors_list = _expand_origins(
+    _host_entries,
+    _frontend_ports,
+)
+_default_cors_list.extend(
+    [
+        "https://trinity.quantmatrixai.com",
+        "https://trinity-dev.quantmatrixai.com",
+    ]
+)
+_default_cors = [origin for origin in dict.fromkeys(_default_cors_list) if origin]
+
+_cors_env = os.getenv("CORS_ALLOWED_ORIGINS")
+
+if _cors_env and _cors_env.strip() not in {"", "*"}:
+    CORS_ALLOWED_ORIGINS = _split_csv(_cors_env)
+    CORS_ALLOW_ALL_ORIGINS = False
+else:
+    CORS_ALLOWED_ORIGINS = _default_cors
+    CORS_ALLOW_ALL_ORIGINS = True
 
 CORS_ALLOW_CREDENTIALS = True            # echo origin when cookies/auth supplied
 CORS_ALLOW_HEADERS = list(default_headers) + [
