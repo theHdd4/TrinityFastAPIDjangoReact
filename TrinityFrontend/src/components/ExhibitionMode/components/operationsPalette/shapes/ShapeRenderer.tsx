@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { getDefaultShapeProps, type ShapeDefinition } from './constants';
 
@@ -22,6 +22,8 @@ export const ShapeRenderer: React.FC<ShapeRendererProps> = ({
   const defaults = getDefaultShapeProps(definition);
   const geometry = definition.geometry;
   const isLineShape = geometry.kind === 'line' || geometry.kind === 'polyline';
+  const contentGroupRef = useRef<SVGGElement | null>(null);
+  const [transform, setTransform] = useState('translate(0, 0) scale(1)');
 
   const resolvedFill =
     !isLineShape && typeof fill === 'string' && fill.trim().length > 0 ? fill : defaults.fill;
@@ -50,7 +52,43 @@ export const ShapeRenderer: React.FC<ShapeRendererProps> = ({
     strokeWidth: resolvedStrokeWidth,
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
+    vectorEffect: 'non-scaling-stroke' as const,
   };
+
+  useLayoutEffect(() => {
+    const contentNode = contentGroupRef.current;
+    if (!contentNode) {
+      return;
+    }
+
+    const bbox = contentNode.getBBox();
+    if (!Number.isFinite(bbox.width) || !Number.isFinite(bbox.height)) {
+      return;
+    }
+
+    const hasVisibleStroke = resolvedStroke !== 'none' && resolvedStrokeWidth > 0;
+    const strokePadding = hasVisibleStroke ? resolvedStrokeWidth : 0;
+    const halfStroke = strokePadding / 2;
+    const paddedX = bbox.x - halfStroke;
+    const paddedY = bbox.y - halfStroke;
+    const paddedWidth = bbox.width + strokePadding;
+    const paddedHeight = bbox.height + strokePadding;
+
+    const safeWidth = Math.max(paddedWidth, 1);
+    const safeHeight = Math.max(paddedHeight, 1);
+    const scale = Math.min(100 / safeWidth, 100 / safeHeight);
+
+    const scaledWidth = safeWidth * scale;
+    const scaledHeight = safeHeight * scale;
+    const offsetX = (100 - scaledWidth) / 2;
+    const offsetY = (100 - scaledHeight) / 2;
+
+    const translateX = offsetX - paddedX * scale;
+    const translateY = offsetY - paddedY * scale;
+    const nextTransform = `translate(${translateX}, ${translateY}) scale(${scale})`;
+
+    setTransform(prev => (prev === nextTransform ? prev : nextTransform));
+  }, [definition, resolvedStroke, resolvedStrokeWidth]);
 
   const renderGeometry = () => {
     switch (geometry.kind) {
@@ -103,7 +141,11 @@ export const ShapeRenderer: React.FC<ShapeRendererProps> = ({
 
   return (
     <svg viewBox="0 0 100 100" className={cn('h-full w-full', className)} role="presentation">
-      <g opacity={svgOpacity}>{content}</g>
+      <g transform={transform}>
+        <g ref={contentGroupRef} opacity={svgOpacity} data-shape-content>
+          {content}
+        </g>
+      </g>
     </svg>
   );
 };
