@@ -1,6 +1,5 @@
 import React from 'react';
 import clsx from 'clsx';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { atomCategories } from '@/components/AtomCategory/data/atomCategories';
 import type { LucideIcon } from 'lucide-react';
@@ -196,7 +195,7 @@ const CatalogueComponentCard: React.FC<{
             </div>
             <div className="mt-2 rounded-md border border-gray-200 bg-white/80 p-2">
               <div className="pointer-events-none select-none">
-                <div className="max-h-80 overflow-auto">
+                <div className="overflow-auto">
                   <ExhibitionFeatureOverview metadata={metadata} variant="full" />
                 </div>
                 {showComponentTitle && (
@@ -314,7 +313,7 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
   }, [groups, expandedGroupKey]);
 
   return (
-    <div className="flex h-full w-80 flex-col border-r border-gray-200 bg-white">
+    <div className="flex h-full w-80 flex-col border-l border-gray-200 bg-white transition-all duration-300">
       <div className="p-3 border-b border-gray-200 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <GalleryHorizontal className="w-4 h-4 text-gray-700" />
@@ -336,14 +335,13 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
         )}
       </div>
 
-      <ScrollArea className="flex-1">
-        <div className="w-full space-y-4 p-4">
-          {groups.length === 0 ? (
-            <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-xs text-gray-600">
-              Stage feature overview components for exhibition to see them catalogued here.
-            </div>
-          ) : (
-            groups.map(group => {
+      <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 p-4 space-y-4">
+        {groups.length === 0 ? (
+          <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-xs text-gray-600">
+            Stage feature overview components for exhibition to see them catalogued here.
+          </div>
+        ) : (
+          groups.map(group => {
               const Icon = group.info.icon ?? FolderKanban;
               const isExpanded = expandedGroupKey === group.key;
               const totalLabel =
@@ -424,8 +422,7 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
               );
             })
           )}
-        </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 };
