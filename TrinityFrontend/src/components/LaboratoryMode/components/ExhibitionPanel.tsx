@@ -4,8 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { atomCategories } from '@/components/AtomCategory/data/atomCategories';
 import type { LucideIcon } from 'lucide-react';
-import { ChevronDown, ChevronRight, FolderKanban, GalleryHorizontal } from 'lucide-react';
-import FeatureOverviewExhibition from '@/components/AtomList/atoms/feature-overview/components/FeatureOverviewExhibition';
+import { ChevronDown, ChevronRight, FolderKanban, GalleryHorizontal, Loader2, Play, Send } from 'lucide-react';
+import FeatureOverviewExhibition, {
+  FeatureOverviewExhibitionHandle,
+} from '@/components/AtomList/atoms/feature-overview/components/FeatureOverviewExhibition';
 import {
   useLaboratoryStore,
   type FeatureOverviewExhibitionSelection,
@@ -111,6 +113,9 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
   );
 
   const [expandedAtomKey, setExpandedAtomKey] = React.useState<string | null>(null);
+  const exhibitionHandlesRef = React.useRef<Map<string, FeatureOverviewExhibitionHandle>>(new Map());
+  const [exhibitingAtomKey, setExhibitingAtomKey] = React.useState<string | null>(null);
+  const [isExhibitingAll, setIsExhibitingAll] = React.useState(false);
 
   React.useEffect(() => {
     if (atomPanels.length === 0) {
@@ -168,6 +173,44 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
     [getAtom, updateAtomSettings],
   );
 
+  const handleExhibitAtom = React.useCallback(
+    async (panelKey: string) => {
+      const handle = exhibitionHandlesRef.current.get(panelKey);
+      if (!handle || handle.getSelectionCount() === 0) {
+        return;
+      }
+
+      setExhibitingAtomKey(panelKey);
+      try {
+        await handle.exhibit();
+      } finally {
+        setExhibitingAtomKey((current) => (current === panelKey ? null : current));
+      }
+    },
+    [],
+  );
+
+  const handleExhibitAll = React.useCallback(async () => {
+    if (totalSelections === 0 || atomPanels.length === 0) {
+      return;
+    }
+
+    setIsExhibitingAll(true);
+    try {
+      for (const panel of atomPanels) {
+        const handle = exhibitionHandlesRef.current.get(panel.key);
+        if (!handle || handle.getSelectionCount() === 0) {
+          continue;
+        }
+
+        await handle.exhibit();
+      }
+    } finally {
+      setIsExhibitingAll(false);
+      setExhibitingAtomKey(null);
+    }
+  }, [atomPanels, totalSelections]);
+
   return (
     <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-80">
       <div className="p-3 border-b border-gray-200 flex items-center justify-between">
@@ -193,60 +236,117 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
             const Icon = panel.info.icon ?? FolderKanban;
             const isExpanded = expandedAtomKey === panel.key;
             const totalLabel = panel.total === 1 ? '1 component' : `${panel.total} components`;
+            const isAtomExhibiting = exhibitingAtomKey === panel.key;
 
             return (
               <div
                 key={panel.key}
                 className="rounded-xl border border-gray-200 bg-white/70 shadow-sm transition hover:border-gray-300"
               >
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left"
-                  onClick={() =>
-                    setExpandedAtomKey((current) => (current === panel.key ? null : panel.key))
-                  }
-                >
-                  <span className="flex items-center gap-3">
-                    <span
-                      className={clsx(
-                        'flex h-10 w-10 items-center justify-center rounded-full text-white shadow-sm',
-                        panel.info.color,
-                      )}
-                    >
-                      <Icon className="h-5 w-5" />
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    className="flex flex-1 items-center justify-between gap-4 px-4 py-3 text-left"
+                    onClick={() =>
+                      setExpandedAtomKey((current) => (current === panel.key ? null : panel.key))
+                    }
+                  >
+                    <span className="flex items-center gap-3">
+                      <span
+                        className={clsx(
+                          'flex h-10 w-10 items-center justify-center rounded-full text-white shadow-sm',
+                          panel.info.color,
+                        )}
+                      >
+                        <Icon className="h-5 w-5" />
+                      </span>
+                      <span>
+                        <span className="block text-sm font-semibold text-gray-900">{panel.info.title}</span>
+                        <span className="text-xs text-gray-500">{totalLabel}</span>
+                      </span>
                     </span>
-                    <span>
-                      <span className="block text-sm font-semibold text-gray-900">{panel.info.title}</span>
-                      <span className="text-xs text-gray-500">{totalLabel}</span>
-                    </span>
-                  </span>
-                  <span className="flex items-center gap-2">
-                    <span className="flex h-7 min-w-[28px] items-center justify-center rounded-full bg-emerald-100 px-2 text-sm font-semibold text-emerald-700">
-                      {panel.total}
-                    </span>
-                    <ChevronDown
-                      className={clsx('h-4 w-4 text-gray-500 transition-transform', isExpanded && 'rotate-180')}
-                    />
-                  </span>
-                </button>
-
-                {isExpanded && (
-                  <div className="space-y-4 border-t border-gray-200 bg-white/80 px-4 py-4">
-                    <div className="min-w-0">
-                      <FeatureOverviewExhibition
-                        atomId={panel.entry.atomId}
-                        cardId={panel.entry.cardId}
-                        atomColor={panel.entry.atomColor}
-                        selections={panel.entry.selections}
-                        onRemoveSelection={(key) => handleRemoveSelection(panel.entry.atomId, key)}
-                        onRenameSelection={(key, name) => handleRenameSelection(panel.entry.atomId, key, name)}
+                    <span className="flex items-center gap-2">
+                      <span className="flex h-7 min-w-[28px] items-center justify-center rounded-full bg-emerald-100 px-2 text-sm font-semibold text-emerald-700">
+                        {panel.total}
+                      </span>
+                      <ChevronDown
+                        className={clsx('h-4 w-4 text-gray-500 transition-transform', isExpanded && 'rotate-180')}
                       />
-                    </div>
-                  </div>
-                )}
+                    </span>
+                  </button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="mr-3 h-8 w-8 text-gray-500 hover:text-gray-700"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void handleExhibitAtom(panel.key);
+                    }}
+                    disabled={panel.total === 0 || isAtomExhibiting || isExhibitingAll}
+                  >
+                    {isAtomExhibiting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Play className="h-4 w-4" />
+                    )}
+                    <span className="sr-only">Exhibit components from {panel.info.title}</span>
+                  </Button>
+                </div>
+
+                <div
+                  className={clsx(
+                    'space-y-4 border-t border-gray-200 bg-white/80 px-4 py-4',
+                    !isExpanded && 'hidden',
+                  )}
+                  aria-hidden={!isExpanded}
+                >
+                  <FeatureOverviewExhibition
+                    ref={(instance: FeatureOverviewExhibitionHandle | null) => {
+                      if (instance) {
+                        exhibitionHandlesRef.current.set(panel.key, instance);
+                      } else {
+                        exhibitionHandlesRef.current.delete(panel.key);
+                      }
+                    }}
+                    atomId={panel.entry.atomId}
+                    cardId={panel.entry.cardId}
+                    atomColor={panel.entry.atomColor}
+                    selections={panel.entry.selections}
+                    onRemoveSelection={(key) => handleRemoveSelection(panel.entry.atomId, key)}
+                    onRenameSelection={(key, name) => handleRenameSelection(panel.entry.atomId, key, name)}
+                  />
+                </div>
               </div>
             );
           })
+        )}
+      </div>
+
+      <div className="border-t border-gray-200 bg-white/90 p-4 space-y-2">
+        <Button
+          type="button"
+          className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700"
+          size="lg"
+          onClick={() => void handleExhibitAll()}
+          disabled={totalSelections === 0 || isExhibitingAll}
+        >
+          {isExhibitingAll ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Exhibiting…
+            </>
+          ) : (
+            <>
+              <Send className="mr-2 h-4 w-4" />
+              Exhibit all
+            </>
+          )}
+        </Button>
+        {totalSelections === 0 && (
+          <p className="text-xs text-gray-500 text-center">
+            Stage components for exhibition in the laboratory to enable the Exhibit action.
+          </p>
         )}
       </div>
     </div>
