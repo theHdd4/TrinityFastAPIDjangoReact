@@ -61,6 +61,8 @@ const VISIBILITY_TOGGLES: Array<{ key: VisibilityToggleKey; label: string }> = [
   { key: 'qualityMetrics', label: 'Show data quality metrics' },
 ];
 
+const PREVIEW_SCALE = 0.8;
+
 const sanitizeSegment = (value?: string | null): string => {
   if (typeof value !== 'string') {
     return '';
@@ -94,6 +96,18 @@ const buildDefaultEditableName = (selection: FeatureOverviewExhibitionSelection)
 
 const getComponentPrefix = (componentType?: FeatureOverviewExhibitionComponentType): string =>
   componentType === 'trend_analysis' ? 'Trend Analysis' : 'SKU Stats';
+
+const buildDefaultHighlightedName = (
+  selection: FeatureOverviewExhibitionSelection,
+  componentType?: FeatureOverviewExhibitionComponentType,
+): string => {
+  const defaultEditableName = buildDefaultEditableName(selection);
+  const prefix = getComponentPrefix(componentType);
+  if (!prefix) {
+    return defaultEditableName;
+  }
+  return defaultEditableName ? `${prefix} - ${defaultEditableName}` : prefix;
+};
 
 interface ProcessedSelection {
   id: string;
@@ -500,10 +514,9 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
 
               const componentType = processed.componentType;
               const typePrefix = getComponentPrefix(componentType);
-              const defaultEditableName = buildDefaultEditableName(selection);
-              const currentEditableName = sanitizeSegment(selection.label) || defaultEditableName;
+              const defaultHighlightedName = buildDefaultHighlightedName(selection, componentType);
+              const currentEditableName = sanitizeSegment(selection.label) || defaultHighlightedName;
               const baseDescriptor = buildBaseDescriptor(selection) || 'Not specified';
-              const displayEditableName = `${typePrefix}${currentEditableName ? ` - ${currentEditableName}` : ''}`;
               const displayActualName = `${typePrefix}${baseDescriptor ? ` - ${baseDescriptor}` : ''}`;
               const isEditing = editingKey === selection.key;
               const draftValue = draftNames[selection.key] ?? currentEditableName;
@@ -531,7 +544,7 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                 }
 
                 const proposedName = draftValue.trim();
-                const nextName = proposedName.length > 0 ? proposedName : defaultEditableName;
+                const nextName = proposedName.length > 0 ? proposedName : defaultHighlightedName;
                 onRenameSelection(selection.key, nextName);
               };
 
@@ -565,9 +578,6 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                     <div className="flex-1 min-w-0">
                       {isEditing ? (
                         <div className={highlightClasses}>
-                          <span className="text-xs font-semibold uppercase tracking-wide text-black/80">
-                            {typePrefix}
-                          </span>
                           <Input
                             value={draftValue}
                             onChange={event => updateDraft(event.target.value)}
@@ -588,7 +598,7 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                         </div>
                       ) : (
                         <div className={clsx(highlightClasses, 'justify-between')}>
-                          <span className="truncate">{displayEditableName}</span>
+                          <span className="truncate">{currentEditableName}</span>
                         </div>
                       )}
                     </div>
@@ -665,8 +675,16 @@ const FeatureOverviewExhibition: React.FC<FeatureOverviewExhibitionProps> = ({
                             Preview snapshot
                           </div>
                           <div className="mt-2 overflow-hidden rounded-md border border-gray-200 bg-white/80 p-2">
-                            <div className="pointer-events-none select-none">
-                              <ExhibitionFeatureOverview metadata={processed.metadata} variant="compact" />
+                            <div className="pointer-events-none select-none flex justify-center">
+                              <div
+                                className="origin-top"
+                                style={{
+                                  transform: `scale(${PREVIEW_SCALE})`,
+                                  transformOrigin: 'top center',
+                                }}
+                              >
+                                <ExhibitionFeatureOverview metadata={processed.metadata} variant="compact" />
+                              </div>
                             </div>
                           </div>
                         </div>
