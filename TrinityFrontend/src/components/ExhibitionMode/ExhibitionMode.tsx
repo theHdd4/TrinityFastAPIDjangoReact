@@ -1205,44 +1205,6 @@ const ExhibitionMode = () => {
     setOperationsPanelState(null);
   }, []);
 
-  const operationsPalettePanel = useMemo(() => {
-    if (!operationsPanelState) {
-      return null;
-    }
-
-    if (operationsPanelState.type === 'notes') {
-      return (
-        <SlideNotes
-          currentSlide={currentSlide}
-          notes={notes}
-          onNotesChange={handleNotesChange}
-          onClose={handleCloseNotesPanel}
-        />
-      );
-    }
-
-    if (operationsPanelState.type === 'shapes') {
-      return (
-        <ShapesPanel
-          onSelectShape={handleShapeSelect}
-          onClose={handleCloseShapesPanel}
-          canEdit={canEdit}
-        />
-      );
-    }
-
-    return operationsPanelState.node;
-  }, [
-    canEdit,
-    currentSlide,
-    handleCloseNotesPanel,
-    handleCloseShapesPanel,
-    handleNotesChange,
-    handleShapeSelect,
-    notes,
-    operationsPanelState,
-  ]);
-
   const handleToggleViewMode = useCallback(() => {
     if (isSlideshowActive) {
       handleStopSlideshow();
@@ -1408,6 +1370,44 @@ const ExhibitionMode = () => {
       slideObjectsByCardId,
     ],
   );
+
+  const operationsPalettePanel = useMemo(() => {
+    if (!operationsPanelState) {
+      return null;
+    }
+
+    if (operationsPanelState.type === 'notes') {
+      return (
+        <SlideNotes
+          currentSlide={currentSlide}
+          notes={notes}
+          onNotesChange={handleNotesChange}
+          onClose={handleCloseNotesPanel}
+        />
+      );
+    }
+
+    if (operationsPanelState.type === 'shapes') {
+      return (
+        <ShapesPanel
+          onSelectShape={handleShapeSelect}
+          onClose={handleCloseShapesPanel}
+          canEdit={canEdit}
+        />
+      );
+    }
+
+    return operationsPanelState.node;
+  }, [
+    canEdit,
+    currentSlide,
+    handleCloseNotesPanel,
+    handleCloseShapesPanel,
+    handleNotesChange,
+    handleShapeSelect,
+    notes,
+    operationsPanelState,
+  ]);
   const slideWrapperStyle: React.CSSProperties | undefined = isSlideshowActive
     ? {
         opacity: slideshowOpacity,
