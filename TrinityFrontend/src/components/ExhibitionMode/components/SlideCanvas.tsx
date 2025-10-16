@@ -34,6 +34,7 @@ import {
   createEmptyTableRow,
   normaliseTableData,
   normaliseTableHeaders,
+  ensureTableStyleId,
   type TableCellData,
   type TableCellFormatting,
 } from './operationsPalette/tables/constants';
@@ -96,6 +97,7 @@ type TableState = {
   locked: boolean;
   showOutline: boolean;
   headers: TableCellData[];
+  styleId: string;
 };
 
 const coercePositiveInteger = (value: unknown, fallback: number): number => {
@@ -119,6 +121,7 @@ const readTableState = (object: SlideObject): TableState => {
   const data = normaliseTableData(props?.data, fallbackRows, fallbackCols);
   const colCount = data[0]?.length ?? 0;
   const headers = extractTableHeaders(props?.headers, colCount);
+  const styleId = ensureTableStyleId(props?.styleId);
 
   return {
     data,
@@ -127,6 +130,7 @@ const readTableState = (object: SlideObject): TableState => {
     locked: Boolean(props?.locked),
     showOutline: props?.showOutline !== false,
     headers,
+    styleId,
   };
 };
 
@@ -137,7 +141,8 @@ const tableStatesEqual = (a: TableState, b: TableState) => {
     a.cols === b.cols &&
     a.locked === b.locked &&
     a.showOutline === b.showOutline &&
-    a.headers === b.headers
+    a.headers === b.headers &&
+    a.styleId === b.styleId
   );
 };
 
@@ -1214,6 +1219,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               locked: nextState.locked,
               showOutline: nextState.showOutline,
               headers: nextState.headers,
+              styleId: nextState.styleId,
             },
           },
         });
@@ -1359,6 +1365,24 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           ...state,
           showOutline: !state.showOutline,
         }));
+      },
+      [mutateTableState],
+    );
+
+    const setTableStyle = useCallback(
+      (objectId: string, nextStyleId: string) => {
+        mutateTableState(objectId, state => {
+          const safeStyleId = ensureTableStyleId(nextStyleId);
+
+          if (state.styleId === safeStyleId) {
+            return state;
+          }
+
+          return {
+            ...state,
+            styleId: safeStyleId,
+          };
+        });
       },
       [mutateTableState],
     );
@@ -2192,6 +2216,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       cols={tableState.cols}
                       locked={tableState.locked}
                       showOutline={tableState.showOutline}
+                      styleId={tableState.styleId}
                       canEdit={canEdit}
                       selectedCell={isSelected ? undefined : null}
                       onUpdateCell={(row, col, value) => updateTableCellContent(object.id, row, col, value)}
@@ -2204,6 +2229,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       }
                       onToggleLock={() => toggleTableLock(object.id)}
                       onToggleOutline={() => toggleTableOutline(object.id)}
+                      onStyleChange={nextStyleId => setTableStyle(object.id, nextStyleId)}
                       onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
                       onDeleteColumn={colIndex => removeColumnsFromTable(object.id, colIndex, 1)}
                       onDelete2Columns={colIndex => removeColumnsFromTable(object.id, colIndex, 2)}

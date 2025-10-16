@@ -10,13 +10,23 @@ import {
   AlignHorizontalSpaceAround,
   AlignVerticalSpaceAround,
   Grid3x3,
+  Palette,
+  Check,
 } from 'lucide-react';
 import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuShortcut,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuLabel,
 } from '@/components/ui/context-menu';
+import { cn } from '@/lib/utils';
+import { TABLE_STYLE_GROUPS, type TableStyleDefinition } from './constants';
+
+const noop = () => {};
 
 export interface ExhibitionTableTrayProps {
   locked: boolean;
@@ -25,6 +35,7 @@ export interface ExhibitionTableTrayProps {
   cols: number;
   showOutline?: boolean;
   selectedCell: { row: number; col: number; region?: 'header' | 'body' } | null;
+  styleId?: string;
   onToggleLock: () => void;
   onToggleOutline?: () => void;
   onDelete: () => void;
@@ -36,6 +47,7 @@ export interface ExhibitionTableTrayProps {
   onAdd2Columns: () => void;
   onAddRow: () => void;
   onAdd2Rows: () => void;
+  onSelectStyle?: (styleId: string) => void;
 }
 
 export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
@@ -45,6 +57,7 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
   cols,
   showOutline = true,
   selectedCell,
+  styleId,
   onToggleLock,
   onToggleOutline,
   onDelete,
@@ -56,10 +69,40 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
   onAdd2Columns,
   onAddRow,
   onAdd2Rows,
+  onSelectStyle = noop,
 }) => {
   const isHeaderSelected = selectedCell?.region === 'header' || selectedCell?.row === -1;
   const hasColumnSelection = Boolean(selectedCell && selectedCell.col >= 0);
   const hasBodySelection = Boolean(selectedCell && !isHeaderSelected && selectedCell.row >= 0);
+  const disableStyleSelection = locked || !canEdit;
+
+  const renderStylePreview = (style: TableStyleDefinition) => (
+    <div className="flex flex-col gap-1">
+      <div
+        className="h-3 rounded-sm border"
+        style={{
+          backgroundColor: style.preview.header,
+          borderColor: style.preview.border,
+        }}
+      />
+      <div className="grid grid-rows-3 gap-1">
+        {[
+          { key: 'odd-top', color: style.preview.odd },
+          { key: 'even', color: style.preview.even },
+          { key: 'odd-bottom', color: style.preview.odd },
+        ].map(segment => (
+          <div
+            key={`${style.id}-preview-${segment.key}`}
+            className="h-2 rounded-sm border"
+            style={{
+              backgroundColor: segment.color,
+              borderColor: style.preview.border,
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <ContextMenuContent className="w-64">
@@ -95,6 +138,53 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
         {locked ? 'Unlock' : 'Lock'}
         <ContextMenuShortcut>Alt+Shift+L</ContextMenuShortcut>
       </ContextMenuItem>
+
+      <ContextMenuSub>
+        <ContextMenuSubTrigger disabled={disableStyleSelection}>
+          <Palette className="mr-2 h-4 w-4" />
+          Table style
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent className="w-[320px]">
+          {TABLE_STYLE_GROUPS.map(group => (
+            <div key={group.id} className="mb-2 last:mb-0">
+              <ContextMenuLabel className="px-1.5 py-1 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                {group.label}
+              </ContextMenuLabel>
+              <div className="grid grid-cols-3 gap-2 px-1.5">
+                {group.styles.map(style => {
+                  const isActive = style.id === styleId;
+
+                  return (
+                    <ContextMenuItem
+                      key={style.id}
+                      asChild
+                      disabled={disableStyleSelection}
+                      className="p-0"
+                    >
+                      <button
+                        type="button"
+                        className={cn(
+                          'flex h-24 w-full flex-col justify-between rounded-md border bg-background p-2 text-left text-xs font-medium shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                          isActive
+                            ? 'border-primary/70 ring-2 ring-primary ring-offset-2 ring-offset-background'
+                            : 'hover:border-primary/50 hover:shadow-md',
+                        )}
+                        onClick={() => onSelectStyle(style.id)}
+                      >
+                        {renderStylePreview(style)}
+                        <div className="flex items-center justify-between pt-1 text-[11px]">
+                          <span className="truncate font-semibold">{style.label}</span>
+                          {isActive && <Check className="h-3.5 w-3.5" />}
+                        </div>
+                      </button>
+                    </ContextMenuItem>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
 
       <ContextMenuItem onClick={onToggleOutline} disabled={!canEdit}>
         <AlignHorizontalSpaceAround className="mr-2 h-4 w-4" />

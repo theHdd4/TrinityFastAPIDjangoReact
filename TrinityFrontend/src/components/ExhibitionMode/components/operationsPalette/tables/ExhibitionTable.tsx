@@ -11,8 +11,11 @@ import {
   createCellFormatting,
   createDefaultHeaderCell,
   createEmptyCell,
+  getTableStyleById,
   type TableCellData,
   type TableCellFormatting,
+  type TableStyleDefinition,
+  DEFAULT_TABLE_STYLE_ID,
 } from './constants';
 import { ExhibitionTableTray } from './ExhibitionTableTray';
 
@@ -38,6 +41,7 @@ export interface ExhibitionTableProps {
   onUpdateHeaderFormatting?: (col: number, updates: Partial<TableCellFormatting>) => void;
   className?: string;
   canEdit?: boolean;
+  styleId?: string;
   onToggleLock?: () => void;
   onToggleOutline?: () => void;
   onDelete?: () => void;
@@ -51,6 +55,7 @@ export interface ExhibitionTableProps {
   onAdd2Rows?: () => void;
   onToolbarStateChange?: (toolbar: React.ReactNode | null) => void;
   onInteract?: () => void;
+  onStyleChange?: (styleId: string) => void;
 }
 
 const noop = () => {};
@@ -156,6 +161,30 @@ const buildTextDecoration = (formatting: TableCellFormatting) => {
     return 'line-through';
   }
   return 'none';
+};
+
+const DEFAULT_TEXT_COLOR = DEFAULT_CELL_FORMATTING.color;
+
+const applyStyleTextColor = (
+  formatting: TableCellFormatting,
+  styleColor?: string,
+): TableCellFormatting => {
+  if (!styleColor) {
+    return formatting;
+  }
+
+  if (formatting.color !== DEFAULT_TEXT_COLOR && formatting.color !== styleColor) {
+    return formatting;
+  }
+
+  if (formatting.color === styleColor) {
+    return formatting;
+  }
+
+  return {
+    ...formatting,
+    color: styleColor,
+  };
 };
 
 interface ContentEditableCellProps {
@@ -294,6 +323,8 @@ interface EditableTableCellProps {
   canEdit: boolean;
   locked: boolean;
   showOutline: boolean;
+  backgroundColor?: string;
+  borderColor: string;
   onSelect: (cell: TableSelection) => void;
   onChange: (value: string) => void;
   onCommit: (value: string) => void;
@@ -309,6 +340,8 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
   canEdit,
   locked,
   showOutline,
+  backgroundColor,
+  borderColor,
   onSelect,
   onChange,
   onCommit,
@@ -330,13 +363,16 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
   return (
     <td
       className={cn(
-        'align-top transition-colors',
-        showOutline ? 'border border-border' : 'border border-transparent',
+        'align-top transition-colors border',
         editable ? 'cursor-text' : 'cursor-default',
         isActive && 'bg-primary/10 outline outline-2 outline-primary/60',
       )}
       data-exhibition-table-cell={editable ? 'editable' : 'readonly'}
-      style={{ textAlign: formatting.align }}
+      style={{
+        textAlign: formatting.align,
+        backgroundColor: isActive ? undefined : backgroundColor,
+        borderColor: showOutline ? borderColor : 'transparent',
+      }}
       onClick={() => {
         handleSelect();
         if (editable) {
@@ -365,6 +401,8 @@ interface EditableHeaderCellProps {
   canEdit: boolean;
   locked: boolean;
   showOutline: boolean;
+  backgroundColor?: string;
+  borderColor: string;
   onSelect: (cell: TableSelection) => void;
   onChange: (value: string) => void;
   onCommit: (value: string) => void;
@@ -379,6 +417,8 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
   canEdit,
   locked,
   showOutline,
+  backgroundColor,
+  borderColor,
   onSelect,
   onChange,
   onCommit,
@@ -400,12 +440,15 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
   return (
     <th
       className={cn(
-        'align-middle transition-colors',
-        showOutline ? 'border border-border' : 'border border-transparent',
+        'align-middle transition-colors border',
         editable ? 'cursor-text' : 'cursor-default',
         isActive && 'bg-primary/10 outline outline-2 outline-primary/60',
       )}
-      style={{ textAlign: formatting.align }}
+      style={{
+        textAlign: formatting.align,
+        backgroundColor: isActive ? undefined : backgroundColor,
+        borderColor: showOutline ? borderColor : 'transparent',
+      }}
       onClick={() => {
         handleSelect();
         if (editable) {
@@ -520,6 +563,17 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
       return createDefaultHeaderCell(index);
     });
   }, [headers, colCount]);
+
+  const tableStyle: TableStyleDefinition = useMemo(() => getTableStyleById(styleId), [styleId]);
+  const tableBorderColor = tableStyle.table.borderColor;
+  const tableBackground = tableStyle.table.background;
+  const headerBackground = tableStyle.header.background;
+  const headerBorderColor = tableStyle.header.borderColor;
+  const headerTextColor = tableStyle.header.textColor;
+  const bodyBorderColor = tableStyle.body.borderColor;
+  const bodyOddBackground = tableStyle.body.oddBackground;
+  const bodyEvenBackground = tableStyle.body.evenBackground;
+  const bodyTextColor = tableStyle.body.textColor;
 
   useEffect(() => {
     if (!effectiveSelection) {
@@ -784,17 +838,19 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
           )}
         >
           <table
-            className={cn(
-              'h-full w-full table-fixed border-collapse',
-              showOutline ? 'border border-border' : 'border border-transparent',
-            )}
+            className={cn('h-full w-full table-fixed border-collapse border')}
+            style={{
+              backgroundColor: tableBackground,
+              borderColor: showOutline ? tableBorderColor : 'transparent',
+            }}
             data-table-id={id}
           >
             {headerCells.length > 0 && (
-              <thead className="bg-muted/40">
+              <thead className="bg-transparent">
                 <tr>
                   {headerCells.map((headerCell, headerIndex) => {
                     const headerFormatting = headerCell?.formatting ?? createCellFormatting({ bold: true });
+                    const styledHeaderFormatting = applyStyleTextColor(headerFormatting, headerTextColor);
                     const isActiveHeader =
                       selectionRegion === 'header' && effectiveSelection?.col === headerIndex;
 
@@ -803,11 +859,13 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
                         key={`${id}-header-${headerIndex}`}
                         colIndex={headerIndex}
                         cell={headerCell}
-                        formatting={headerFormatting}
+                        formatting={styledHeaderFormatting}
                         isActive={Boolean(isActiveHeader)}
                         canEdit={canEdit}
                         locked={locked}
                         showOutline={showOutline}
+                        backgroundColor={headerBackground}
+                        borderColor={headerBorderColor}
                         onSelect={handleSelection}
                         onChange={value => handleHeaderInput(headerIndex, value)}
                         onCommit={value => handleHeaderCommit(headerIndex, value)}
@@ -819,35 +877,42 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
               </thead>
             )}
             <tbody>
-              {tableData.map((rowData, rowIndex) => (
-                <tr key={`${id}-row-${rowIndex}`} className="even:bg-muted/20">
-                  {rowData.map((cell, colIndex) => {
-                    const isActive =
-                      selectionRegion === 'body' &&
-                      effectiveSelection?.row === rowIndex &&
-                      effectiveSelection?.col === colIndex;
-                    const cellFormatting = cell?.formatting ?? createCellFormatting();
+              {tableData.map((rowData, rowIndex) => {
+                const rowBackgroundColor = rowIndex % 2 === 0 ? bodyOddBackground : bodyEvenBackground;
 
-                    return (
-                      <EditableTableCell
-                        key={`${id}-cell-${rowIndex}-${colIndex}`}
-                        rowIndex={rowIndex}
-                        colIndex={colIndex}
-                        cell={cell}
-                        formatting={cellFormatting}
-                        isActive={Boolean(isActive)}
-                        canEdit={canEdit}
-                        locked={locked}
-                        showOutline={showOutline}
-                        onSelect={handleSelection}
-                        onChange={value => handleBodyCellInput(rowIndex, colIndex, value)}
-                        onCommit={value => handleBodyCellCommit(rowIndex, colIndex, value)}
-                        onInteract={onInteract}
-                      />
-                    );
-                  })}
-                </tr>
-              ))}
+                return (
+                  <tr key={`${id}-row-${rowIndex}`}>
+                    {rowData.map((cell, colIndex) => {
+                      const isActive =
+                        selectionRegion === 'body' &&
+                        effectiveSelection?.row === rowIndex &&
+                        effectiveSelection?.col === colIndex;
+                      const cellFormatting = cell?.formatting ?? createCellFormatting();
+                      const styledCellFormatting = applyStyleTextColor(cellFormatting, bodyTextColor);
+
+                      return (
+                        <EditableTableCell
+                          key={`${id}-cell-${rowIndex}-${colIndex}`}
+                          rowIndex={rowIndex}
+                          colIndex={colIndex}
+                          cell={cell}
+                          formatting={styledCellFormatting}
+                          isActive={Boolean(isActive)}
+                          canEdit={canEdit}
+                          locked={locked}
+                          showOutline={showOutline}
+                          backgroundColor={rowBackgroundColor}
+                          borderColor={bodyBorderColor}
+                          onSelect={handleSelection}
+                          onChange={value => handleBodyCellInput(rowIndex, colIndex, value)}
+                          onCommit={value => handleBodyCellCommit(rowIndex, colIndex, value)}
+                          onInteract={onInteract}
+                        />
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -860,6 +925,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
         cols={colCount}
         showOutline={showOutline}
         selectedCell={effectiveSelection}
+        styleId={tableStyle.id}
         onToggleLock={onToggleLock}
         onToggleOutline={onToggleOutline}
         onDelete={onDelete}
@@ -887,6 +953,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
         onAdd2Columns={onAdd2Columns}
         onAddRow={onAddRow}
         onAdd2Rows={onAdd2Rows}
+        onSelectStyle={onStyleChange}
       />
     </ContextMenu>
   );
