@@ -134,7 +134,7 @@ const CatalogueComponentCard: React.FC<{
   };
 
   const cardClasses = clsx(
-    'rounded-lg border border-gray-200 bg-white/80 px-3 py-3 shadow-sm space-y-3 transition-colors',
+    'w-full rounded-lg border border-gray-200 bg-white/80 px-3 py-3 shadow-sm space-y-3 transition-colors',
     enableDragging && onDragStart ? 'cursor-grab active:cursor-grabbing' : 'cursor-default',
     isActive && 'border-emerald-300 ring-2 ring-emerald-200',
   );
@@ -160,7 +160,13 @@ const CatalogueComponentCard: React.FC<{
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <div className={clsx('flex w-full flex-wrap items-center gap-2 rounded-md px-2 py-1 text-sm font-semibold text-black shadow-sm', highlightBackgroundClass, 'justify-between')}>
+          <div
+            className={clsx(
+              'flex w-full min-w-0 flex-wrap items-center gap-2 rounded-md px-2 py-1 text-sm font-semibold text-black shadow-sm',
+              highlightBackgroundClass,
+              'justify-between',
+            )}
+          >
             <span className="truncate">{highlightedName}</span>
           </div>
         </div>
@@ -177,7 +183,9 @@ const CatalogueComponentCard: React.FC<{
         </div>
       </div>
 
-      <p className="text-xs font-medium text-gray-700">{displayActualName || baseDescriptor}</p>
+      <p className="break-words text-xs font-medium text-gray-700">
+        {displayActualName || baseDescriptor}
+      </p>
 
       {isPreviewOpen && (
         <div className="space-y-4 border-t border-gray-200 pt-3">
@@ -188,7 +196,7 @@ const CatalogueComponentCard: React.FC<{
             </div>
             <div className="mt-2 rounded-md border border-gray-200 bg-white/80 p-2">
               <div className="pointer-events-none select-none">
-                <div className="overflow-auto">
+                <div className="max-h-80 overflow-auto">
                   <ExhibitionFeatureOverview metadata={metadata} variant="full" />
                 </div>
                 {showComponentTitle && (
@@ -306,7 +314,7 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
   }, [groups, expandedGroupKey]);
 
   return (
-    <div className="w-80 h-full bg-white border-r border-gray-200 flex flex-col">
+    <div className="flex h-full w-80 flex-col border-r border-gray-200 bg-white">
       <div className="p-3 border-b border-gray-200 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <GalleryHorizontal className="w-4 h-4 text-gray-700" />
@@ -329,7 +337,7 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="p-4 space-y-4">
+        <div className="w-full space-y-4 p-4">
           {groups.length === 0 ? (
             <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-xs text-gray-600">
               Stage feature overview components for exhibition to see them catalogued here.
@@ -344,7 +352,7 @@ export const ExhibitionCatalogue: React.FC<ExhibitionCatalogueProps> = ({
               return (
                 <div
                   key={group.key}
-                  className="rounded-xl border border-gray-200 bg-white/70 shadow-sm transition hover:border-gray-300"
+                  className="w-full rounded-xl border border-gray-200 bg-white/70 shadow-sm transition hover:border-gray-300"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <button
