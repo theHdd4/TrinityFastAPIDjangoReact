@@ -1709,6 +1709,32 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         if (!canEdit) {
           return;
         }
+
+        const targetElement = event.target instanceof Element ? event.target : null;
+        const editableTableCell = targetElement?.closest('[data-exhibition-table-cell-content="true"]');
+
+        const isMulti = event.shiftKey || event.metaKey || event.ctrlKey;
+        const resolveSelection = () => {
+          const baseSelection = isMulti
+            ? selectedIds.includes(objectId)
+              ? selectedIds
+              : [...selectedIds, objectId]
+            : [objectId];
+          return Array.from(new Set(baseSelection));
+        };
+
+        if (editableTableCell) {
+          event.stopPropagation();
+          if (editingTextState) {
+            commitEditingText();
+          }
+          onInteract();
+          const uniqueSelection = resolveSelection();
+          setSelectedIds(uniqueSelection);
+          onBringToFront(uniqueSelection);
+          return;
+        }
+
         event.preventDefault();
         event.stopPropagation();
         if (editingTextState) {
@@ -1717,13 +1743,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         onInteract();
         focusCanvas();
 
-        const isMulti = event.shiftKey || event.metaKey || event.ctrlKey;
-        const baseSelection = isMulti
-          ? selectedIds.includes(objectId)
-            ? selectedIds
-            : [...selectedIds, objectId]
-          : [objectId];
-        const uniqueSelection = Array.from(new Set(baseSelection));
+        const uniqueSelection = resolveSelection();
         setSelectedIds(uniqueSelection);
 
         const initialPositions = new Map<string, { x: number; y: number }>();

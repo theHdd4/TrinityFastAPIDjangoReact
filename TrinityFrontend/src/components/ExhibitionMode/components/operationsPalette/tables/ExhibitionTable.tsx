@@ -208,6 +208,7 @@ const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
         }
       }}
       className="min-h-[40px] w-full px-3 py-2 text-sm focus:outline-none"
+      data-exhibition-table-cell-content={editable ? 'true' : 'false'}
       style={{
         fontFamily: formatting.fontFamily,
         fontSize: `${formatting.fontSize}px`,
@@ -278,6 +279,7 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
         editable ? 'cursor-text' : 'cursor-default',
         isActive && 'bg-primary/10 outline outline-2 outline-primary/60',
       )}
+      data-exhibition-table-cell={editable ? 'editable' : 'readonly'}
       style={{ textAlign: formatting.align }}
       onClick={() => {
         handleSelect();
