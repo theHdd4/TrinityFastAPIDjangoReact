@@ -11,16 +11,15 @@ import {
   createCellFormatting,
   createDefaultHeaderCell,
   createEmptyCell,
+  getTableStyleById,
   type TableCellData,
   type TableCellFormatting,
+  type TableSelection,
+  type TableSelectionPoint,
+  type TableStyleDefinition,
+  DEFAULT_TABLE_STYLE_ID,
 } from './constants';
 import { ExhibitionTableTray } from './ExhibitionTableTray';
-
-export interface TableSelection {
-  row: number;
-  col: number;
-  region?: 'header' | 'body';
-}
 
 export interface ExhibitionTableProps {
   id: string;
@@ -31,26 +30,29 @@ export interface ExhibitionTableProps {
   rows?: number;
   cols?: number;
   selectedCell?: TableSelection | null;
-  onCellSelect?: (cell: TableSelection) => void;
+  onCellSelect?: (selection: TableSelection | null) => void;
   onUpdateCell?: (row: number, col: number, value: string) => void;
   onUpdateCellFormatting?: (row: number, col: number, updates: Partial<TableCellFormatting>) => void;
   onUpdateHeader?: (col: number, value: string) => void;
   onUpdateHeaderFormatting?: (col: number, updates: Partial<TableCellFormatting>) => void;
   className?: string;
   canEdit?: boolean;
+  styleId?: string;
+  isSelected?: boolean;
   onToggleLock?: () => void;
   onToggleOutline?: () => void;
   onDelete?: () => void;
-  onDeleteColumn?: (colIndex: number) => void;
-  onDelete2Columns?: (colIndex: number) => void;
-  onDeleteRow?: (rowIndex: number) => void;
-  onDelete2Rows?: (rowIndex: number) => void;
+  onDeleteColumn?: (startIndex: number, count: number) => void;
+  onDelete2Columns?: (startIndex: number, count: number) => void;
+  onDeleteRow?: (startIndex: number, count: number) => void;
+  onDelete2Rows?: (startIndex: number, count: number) => void;
   onAddColumn?: () => void;
   onAdd2Columns?: () => void;
   onAddRow?: () => void;
   onAdd2Rows?: () => void;
   onToolbarStateChange?: (toolbar: React.ReactNode | null) => void;
   onInteract?: () => void;
+  onStyleChange?: (styleId: string) => void;
 }
 
 const noop = () => {};
@@ -156,6 +158,127 @@ const buildTextDecoration = (formatting: TableCellFormatting) => {
     return 'line-through';
   }
   return 'none';
+};
+
+const DEFAULT_TEXT_COLOR = DEFAULT_CELL_FORMATTING.color;
+
+const applyStyleTextColor = (
+  formatting: TableCellFormatting,
+  styleColor?: string,
+): TableCellFormatting => {
+  if (!styleColor) {
+    return formatting;
+  }
+
+  if (formatting.color !== DEFAULT_TEXT_COLOR && formatting.color !== styleColor) {
+    return formatting;
+  }
+
+  if (formatting.color === styleColor) {
+    return formatting;
+  }
+
+  return {
+    ...formatting,
+    color: styleColor,
+  };
+};
+
+type SelectionRegion = TableSelection['region'];
+
+interface SelectionTarget {
+  region: SelectionRegion;
+  row: number;
+  col: number;
+}
+
+interface BodySelectionBounds {
+  startRow: number;
+  endRow: number;
+  startCol: number;
+  endCol: number;
+}
+
+interface HeaderSelectionBounds {
+  startCol: number;
+  endCol: number;
+}
+
+const clampIndex = (value: number, min: number, max: number) => {
+  if (max < min) {
+    return min;
+  }
+  return Math.min(Math.max(value, min), max);
+};
+
+const getBodySelectionBounds = (selection: TableSelection): BodySelectionBounds => {
+  const { anchor, focus } = selection;
+
+  const rawStartRow = Math.min(anchor.row, focus.row);
+  const rawEndRow = Math.max(anchor.row, focus.row);
+  const rawStartCol = Math.min(anchor.col, focus.col);
+  const rawEndCol = Math.max(anchor.col, focus.col);
+
+  return {
+    startRow: Math.max(0, rawStartRow),
+    endRow: Math.max(0, rawEndRow),
+    startCol: Math.max(0, rawStartCol),
+    endCol: Math.max(0, rawEndCol),
+  };
+};
+
+const getHeaderSelectionBounds = (selection: TableSelection): HeaderSelectionBounds => {
+  const rawStartCol = Math.min(selection.anchor.col, selection.focus.col);
+  const rawEndCol = Math.max(selection.anchor.col, selection.focus.col);
+
+  return {
+    startCol: Math.max(0, rawStartCol),
+    endCol: Math.max(0, rawEndCol),
+  };
+};
+
+const clampBodyBounds = (
+  bounds: BodySelectionBounds,
+  rowCount: number,
+  colCount: number,
+): BodySelectionBounds | null => {
+  if (rowCount <= 0 || colCount <= 0) {
+    return null;
+  }
+
+  const maxRow = rowCount - 1;
+  const maxCol = colCount - 1;
+
+  const startRow = clampIndex(bounds.startRow, 0, maxRow);
+  const endRow = clampIndex(bounds.endRow, 0, maxRow);
+  const startCol = clampIndex(bounds.startCol, 0, maxCol);
+  const endCol = clampIndex(bounds.endCol, 0, maxCol);
+
+  return {
+    startRow: Math.min(startRow, endRow),
+    endRow: Math.max(startRow, endRow),
+    startCol: Math.min(startCol, endCol),
+    endCol: Math.max(startCol, endCol),
+  };
+};
+
+const clampHeaderBounds = (
+  bounds: HeaderSelectionBounds,
+  colCount: number,
+): HeaderSelectionBounds | null => {
+  if (colCount <= 0) {
+    return null;
+  }
+
+  const maxCol = colCount - 1;
+
+  const startCol = clampIndex(bounds.startCol, 0, maxCol);
+  const endCol = clampIndex(bounds.endCol, 0, maxCol);
+
+  return {
+    startCol: Math.min(startCol, endCol),
+    endCol: Math.max(startCol, endCol),
+  };
 };
 
 interface ContentEditableCellProps {
@@ -294,7 +417,10 @@ interface EditableTableCellProps {
   canEdit: boolean;
   locked: boolean;
   showOutline: boolean;
-  onSelect: (cell: TableSelection) => void;
+  backgroundColor?: string;
+  borderColor: string;
+  onSelectionStart: (target: SelectionTarget, options?: { extend?: boolean }) => void;
+  onSelectionExtend: (target: SelectionTarget) => void;
   onChange: (value: string) => void;
   onCommit: (value: string) => void;
   onInteract?: () => void;
@@ -309,36 +435,71 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
   canEdit,
   locked,
   showOutline,
-  onSelect,
+  backgroundColor,
+  borderColor,
+  onSelectionStart,
+  onSelectionExtend,
   onChange,
   onCommit,
   onInteract,
 }) => {
   const editable = canEdit && !locked;
 
-  const handleSelect = useCallback(() => {
-    onSelect({ row: rowIndex, col: colIndex, region: 'body' });
-  }, [colIndex, onSelect, rowIndex]);
+  const selectionTarget = useMemo<SelectionTarget>(
+    () => ({ region: 'body', row: rowIndex, col: colIndex }),
+    [colIndex, rowIndex],
+  );
+
+  const handlePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLTableCellElement>) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) {
+        return;
+      }
+
+      const targetElement = event.target as HTMLElement | null;
+      if (!event.shiftKey && targetElement?.dataset.exhibitionTableCellContent !== 'true') {
+        event.preventDefault();
+      }
+
+      onSelectionStart(selectionTarget, { extend: event.shiftKey });
+    },
+    [onSelectionStart, selectionTarget],
+  );
+
+  const handlePointerEnter = useCallback(
+    (event: React.PointerEvent<HTMLTableCellElement>) => {
+      if (event.pointerType === 'mouse' && event.buttons !== 1) {
+        return;
+      }
+
+      onSelectionExtend(selectionTarget);
+    },
+    [onSelectionExtend, selectionTarget],
+  );
 
   const handleFocus = useCallback(() => {
-    handleSelect();
+    onSelectionStart(selectionTarget);
     if (editable) {
       onInteract?.();
     }
-  }, [editable, handleSelect, onInteract]);
+  }, [editable, onInteract, onSelectionStart, selectionTarget]);
 
   return (
     <td
       className={cn(
-        'align-top transition-colors',
-        showOutline ? 'border border-border' : 'border border-transparent',
+        'align-top transition-colors border',
         editable ? 'cursor-text' : 'cursor-default',
-        isActive && 'bg-primary/10 outline outline-2 outline-primary/60',
+        isActive && 'outline outline-2 outline-primary/60',
       )}
       data-exhibition-table-cell={editable ? 'editable' : 'readonly'}
-      style={{ textAlign: formatting.align }}
+      style={{
+        textAlign: formatting.align,
+        backgroundColor: isActive ? undefined : backgroundColor,
+        borderColor: showOutline ? borderColor : 'transparent',
+      }}
+      onPointerDown={handlePointerDown}
+      onPointerEnter={handlePointerEnter}
       onClick={() => {
-        handleSelect();
         if (editable) {
           onInteract?.();
         }
@@ -365,7 +526,10 @@ interface EditableHeaderCellProps {
   canEdit: boolean;
   locked: boolean;
   showOutline: boolean;
-  onSelect: (cell: TableSelection) => void;
+  backgroundColor?: string;
+  borderColor: string;
+  onSelectionStart: (target: SelectionTarget, options?: { extend?: boolean }) => void;
+  onSelectionExtend: (target: SelectionTarget) => void;
   onChange: (value: string) => void;
   onCommit: (value: string) => void;
   onInteract?: () => void;
@@ -379,35 +543,70 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
   canEdit,
   locked,
   showOutline,
-  onSelect,
+  backgroundColor,
+  borderColor,
+  onSelectionStart,
+  onSelectionExtend,
   onChange,
   onCommit,
   onInteract,
 }) => {
   const editable = canEdit && !locked;
 
-  const handleSelect = useCallback(() => {
-    onSelect({ row: -1, col: colIndex, region: 'header' });
-  }, [colIndex, onSelect]);
+  const selectionTarget = useMemo<SelectionTarget>(
+    () => ({ region: 'header', row: -1, col: colIndex }),
+    [colIndex],
+  );
+
+  const handlePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLTableCellElement>) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) {
+        return;
+      }
+
+      const targetElement = event.target as HTMLElement | null;
+      if (!event.shiftKey && targetElement?.dataset.exhibitionTableCellContent !== 'true') {
+        event.preventDefault();
+      }
+
+      onSelectionStart(selectionTarget, { extend: event.shiftKey });
+    },
+    [onSelectionStart, selectionTarget],
+  );
+
+  const handlePointerEnter = useCallback(
+    (event: React.PointerEvent<HTMLTableCellElement>) => {
+      if (event.pointerType === 'mouse' && event.buttons !== 1) {
+        return;
+      }
+
+      onSelectionExtend(selectionTarget);
+    },
+    [onSelectionExtend, selectionTarget],
+  );
 
   const handleFocus = useCallback(() => {
-    handleSelect();
+    onSelectionStart(selectionTarget);
     if (editable) {
       onInteract?.();
     }
-  }, [editable, handleSelect, onInteract]);
+  }, [editable, onInteract, onSelectionStart, selectionTarget]);
 
   return (
     <th
       className={cn(
-        'align-middle transition-colors',
-        showOutline ? 'border border-border' : 'border border-transparent',
+        'align-middle transition-colors border',
         editable ? 'cursor-text' : 'cursor-default',
-        isActive && 'bg-primary/10 outline outline-2 outline-primary/60',
+        isActive && 'outline outline-2 outline-primary/60',
       )}
-      style={{ textAlign: formatting.align }}
+      style={{
+        textAlign: formatting.align,
+        backgroundColor: isActive ? undefined : backgroundColor,
+        borderColor: showOutline ? borderColor : 'transparent',
+      }}
+      onPointerDown={handlePointerDown}
+      onPointerEnter={handlePointerEnter}
       onClick={() => {
-        handleSelect();
         if (editable) {
           onInteract?.();
         }
@@ -436,12 +635,14 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   rows,
   cols,
   selectedCell,
-  onCellSelect,
+  onCellSelect = noop,
   onUpdateCell,
   onUpdateCellFormatting,
   onUpdateHeader,
   onUpdateHeaderFormatting,
   className,
+  styleId = DEFAULT_TABLE_STYLE_ID,
+  isSelected = false,
   onToggleLock = noop,
   onToggleOutline = noop,
   onDelete = noop,
@@ -455,14 +656,28 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   onAdd2Rows = noop,
   onToolbarStateChange,
   onInteract,
+  onStyleChange = noop,
 }) => {
   const [internalSelection, setInternalSelection] = useState<TableSelection | null>(null);
   const [toolbarFormatting, setToolbarFormatting] = useState<TableCellFormatting>(DEFAULT_CELL_FORMATTING);
+  const dragStateRef = useRef<{ region: SelectionRegion; anchor: TableSelectionPoint } | null>(null);
+
+  const clearDragState = useCallback(() => {
+    dragStateRef.current = null;
+  }, []);
+
+  const commitSelection = useCallback(
+    (nextSelection: TableSelection | null, notify = true) => {
+      setInternalSelection(nextSelection);
+      if (notify) {
+        onCellSelect(nextSelection ?? null);
+      }
+    },
+    [onCellSelect],
+  );
 
   const effectiveSelection = selectedCell ?? internalSelection;
-  const selectionRegion = effectiveSelection
-    ? effectiveSelection.region ?? (effectiveSelection.row === -1 ? 'header' : 'body')
-    : null;
+  const selectionRegion: SelectionRegion | null = effectiveSelection ? effectiveSelection.region : null;
 
   useEffect(() => {
     if (selectedCell === undefined) {
@@ -470,12 +685,59 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
     }
 
     if (selectedCell === null) {
+      clearDragState();
       setInternalSelection(null);
       return;
     }
 
+    clearDragState();
     setInternalSelection(selectedCell);
-  }, [selectedCell]);
+  }, [clearDragState, selectedCell]);
+
+  const handleSelectionStart = useCallback(
+    (target: SelectionTarget, options?: { extend?: boolean }) => {
+      const { region, row, col } = target;
+      const extend = Boolean(options?.extend);
+      let anchor: TableSelectionPoint = { row, col };
+
+      if (extend && internalSelection && internalSelection.region === region) {
+        anchor = internalSelection.anchor;
+      }
+
+      const nextSelection: TableSelection = {
+        region,
+        anchor,
+        focus: { row, col },
+      };
+
+      dragStateRef.current = { region, anchor };
+      commitSelection(nextSelection);
+
+      if (typeof window !== 'undefined' && window.document) {
+        window.document.addEventListener('pointerup', clearDragState, { once: true });
+      }
+    },
+    [clearDragState, commitSelection, internalSelection],
+  );
+
+  const handleSelectionExtend = useCallback(
+    (target: SelectionTarget) => {
+      const dragState = dragStateRef.current;
+      if (!dragState || dragState.region !== target.region) {
+        return;
+      }
+
+      const { row, col } = target;
+      const nextSelection: TableSelection = {
+        region: target.region,
+        anchor: dragState.anchor,
+        focus: { row, col },
+      };
+
+      commitSelection(nextSelection);
+    },
+    [commitSelection],
+  );
 
   const rowCount = useMemo(() => {
     if (typeof rows === 'number') {
@@ -521,6 +783,70 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
     });
   }, [headers, colCount]);
 
+  const bodySelectionBounds = useMemo(() => {
+    if (!effectiveSelection || effectiveSelection.region !== 'body') {
+      return null;
+    }
+
+    const rawBounds = getBodySelectionBounds(effectiveSelection);
+    return clampBodyBounds(rawBounds, rowCount, colCount);
+  }, [colCount, effectiveSelection, rowCount]);
+
+  const headerSelectionBounds = useMemo(() => {
+    if (!effectiveSelection || effectiveSelection.region !== 'header') {
+      return null;
+    }
+
+    const rawBounds = getHeaderSelectionBounds(effectiveSelection);
+    return clampHeaderBounds(rawBounds, colCount);
+  }, [colCount, effectiveSelection]);
+
+  const columnSelectionBounds = useMemo(() => {
+    if (!effectiveSelection) {
+      return null;
+    }
+
+    if (effectiveSelection.region === 'header') {
+      return headerSelectionBounds;
+    }
+
+    if (!bodySelectionBounds) {
+      return null;
+    }
+
+    const { startCol, endCol } = bodySelectionBounds;
+    return { startCol, endCol };
+  }, [bodySelectionBounds, effectiveSelection, headerSelectionBounds]);
+
+  const selectedColumnCount = useMemo(() => {
+    if (!columnSelectionBounds) {
+      return 0;
+    }
+    const { startCol, endCol } = columnSelectionBounds;
+    return Math.max(0, endCol - startCol + 1);
+  }, [columnSelectionBounds]);
+
+  const selectedRowCount = useMemo(() => {
+    if (!bodySelectionBounds) {
+      return 0;
+    }
+
+    const { startRow, endRow } = bodySelectionBounds;
+    return Math.max(0, endRow - startRow + 1);
+  }, [bodySelectionBounds]);
+
+  const tableStyle: TableStyleDefinition = useMemo(() => getTableStyleById(styleId), [styleId]);
+  const tableBorderColor = tableStyle.table.borderColor;
+  const tableBackground = tableStyle.table.background;
+  const headerBackground = tableStyle.header.background;
+  const headerBorderColor = tableStyle.header.borderColor;
+  const headerTextColor = tableStyle.header.textColor;
+  const bodyBorderColor = tableStyle.body.borderColor;
+  const bodyOddBackground = tableStyle.body.oddBackground;
+  const bodyEvenBackground = tableStyle.body.evenBackground;
+  const bodyTextColor = tableStyle.body.textColor;
+  const showTableOutline = showOutline && isSelected;
+
   useEffect(() => {
     if (!effectiveSelection) {
       setToolbarFormatting(DEFAULT_CELL_FORMATTING);
@@ -528,31 +854,40 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
     }
 
     if (selectionRegion === 'header') {
-      const header = headerCells[effectiveSelection.col];
-      if (header) {
-        setToolbarFormatting(header.formatting ?? DEFAULT_CELL_FORMATTING);
-      } else {
+      const bounds = headerSelectionBounds;
+      if (!bounds) {
         setToolbarFormatting(DEFAULT_CELL_FORMATTING);
+        return;
       }
+
+      const header = headerCells[bounds.startCol];
+      setToolbarFormatting(header?.formatting ?? DEFAULT_CELL_FORMATTING);
       return;
     }
 
-    const { row, col } = effectiveSelection;
-    const cell = tableData[row]?.[col];
-    if (cell) {
-      setToolbarFormatting(cell.formatting);
-    } else {
-      setToolbarFormatting(DEFAULT_CELL_FORMATTING);
-    }
-  }, [effectiveSelection, headerCells, selectionRegion, tableData]);
+    if (selectionRegion === 'body') {
+      const bounds = bodySelectionBounds;
+      if (!bounds) {
+        setToolbarFormatting(DEFAULT_CELL_FORMATTING);
+        return;
+      }
 
-  const handleSelection = useCallback(
-    (cell: TableSelection) => {
-      setInternalSelection(cell);
-      onCellSelect?.(cell);
-    },
-    [onCellSelect],
-  );
+      const cell = tableData[bounds.startRow]?.[bounds.startCol];
+      if (cell) {
+        setToolbarFormatting(cell.formatting);
+        return;
+      }
+    }
+
+    setToolbarFormatting(DEFAULT_CELL_FORMATTING);
+  }, [
+    bodySelectionBounds,
+    effectiveSelection,
+    headerCells,
+    headerSelectionBounds,
+    selectionRegion,
+    tableData,
+  ]);
 
   const handleBodyCellInput = useCallback(
     (rowIndex: number, colIndex: number, value: string) => {
@@ -605,39 +940,53 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
       }
 
       if (selectionRegion === 'header') {
-        if (!onUpdateHeader) {
+        if (!onUpdateHeader || !headerSelectionBounds) {
           return;
         }
-        const headerIndex = effectiveSelection.col;
-        const headerCell = headerCells[headerIndex];
-        if (!headerCell) {
-          return;
-        }
+        for (let col = headerSelectionBounds.startCol; col <= headerSelectionBounds.endCol; col += 1) {
+          const headerCell = headerCells[col];
+          if (!headerCell) {
+            continue;
+          }
 
-        const nextValue = transformer(headerCell.content ?? '');
-        if (nextValue !== (headerCell.content ?? '')) {
-          handleHeaderInput(headerIndex, nextValue);
+          const nextValue = transformer(headerCell.content ?? '');
+          if (nextValue !== (headerCell.content ?? '')) {
+            handleHeaderInput(col, nextValue);
+          }
         }
         return;
       }
 
-      const { row, col } = effectiveSelection;
-      const targetRow = tableData[row];
-      const targetCell = targetRow?.[col];
-      if (!targetCell) {
+      if (!bodySelectionBounds) {
         return;
       }
 
-      const nextValue = transformer(targetCell.content ?? '');
-      if (nextValue !== (targetCell.content ?? '')) {
-        handleBodyCellInput(row, col, nextValue);
+      for (let row = bodySelectionBounds.startRow; row <= bodySelectionBounds.endRow; row += 1) {
+        const targetRow = tableData[row];
+        if (!targetRow) {
+          continue;
+        }
+
+        for (let col = bodySelectionBounds.startCol; col <= bodySelectionBounds.endCol; col += 1) {
+          const targetCell = targetRow[col];
+          if (!targetCell) {
+            continue;
+          }
+
+          const nextValue = transformer(targetCell.content ?? '');
+          if (nextValue !== (targetCell.content ?? '')) {
+            handleBodyCellInput(row, col, nextValue);
+          }
+        }
       }
     },
     [
+      bodySelectionBounds,
       effectiveSelection,
       handleBodyCellInput,
       handleHeaderInput,
       headerCells,
+      headerSelectionBounds,
       onUpdateHeader,
       selectionRegion,
       tableData,
@@ -659,26 +1008,34 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
       }
 
       if (selectionRegion === 'header') {
-        if (!onUpdateHeaderFormatting) {
+        if (!onUpdateHeaderFormatting || !headerSelectionBounds) {
           return;
         }
         onInteract?.();
         setToolbarFormatting(prev => ({ ...prev, ...updates }));
-        onUpdateHeaderFormatting(effectiveSelection.col, updates);
+        for (let col = headerSelectionBounds.startCol; col <= headerSelectionBounds.endCol; col += 1) {
+          onUpdateHeaderFormatting(col, updates);
+        }
         return;
       }
-      if (!onUpdateCellFormatting) {
+      if (!onUpdateCellFormatting || !bodySelectionBounds) {
         return;
       }
       onInteract?.();
       setToolbarFormatting(prev => ({ ...prev, ...updates }));
-      onUpdateCellFormatting(effectiveSelection.row, effectiveSelection.col, updates);
+      for (let row = bodySelectionBounds.startRow; row <= bodySelectionBounds.endRow; row += 1) {
+        for (let col = bodySelectionBounds.startCol; col <= bodySelectionBounds.endCol; col += 1) {
+          onUpdateCellFormatting(row, col, updates);
+        }
+      }
     },
     [
+      bodySelectionBounds,
       effectiveSelection,
       onInteract,
       onUpdateCellFormatting,
       onUpdateHeaderFormatting,
+      headerSelectionBounds,
       selectionRegion,
     ],
   );
@@ -779,36 +1136,46 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
       <ContextMenuTrigger asChild>
         <div
           className={cn(
-            'h-full w-full overflow-hidden',
+            'h-full w-full overflow-hidden rounded-2xl border border-transparent bg-transparent p-3 transition-colors',
+            canEdit && !locked && 'hover:border-border/70',
+            isSelected && 'border-border/80 shadow-sm',
             className,
           )}
         >
           <table
-            className={cn(
-              'h-full w-full table-fixed border-collapse',
-              showOutline ? 'border border-border' : 'border border-transparent',
-            )}
+            className={cn('h-full w-full table-fixed border-collapse border')}
+            style={{
+              backgroundColor: tableBackground,
+              borderColor: showTableOutline ? tableBorderColor : 'transparent',
+            }}
             data-table-id={id}
           >
             {headerCells.length > 0 && (
-              <thead className="bg-muted/40">
+              <thead className="bg-transparent">
                 <tr>
                   {headerCells.map((headerCell, headerIndex) => {
                     const headerFormatting = headerCell?.formatting ?? createCellFormatting({ bold: true });
+                    const styledHeaderFormatting = applyStyleTextColor(headerFormatting, headerTextColor);
                     const isActiveHeader =
-                      selectionRegion === 'header' && effectiveSelection?.col === headerIndex;
+                      selectionRegion === 'header' &&
+                      headerSelectionBounds != null &&
+                      headerIndex >= headerSelectionBounds.startCol &&
+                      headerIndex <= headerSelectionBounds.endCol;
 
                     return (
                       <EditableHeaderCell
                         key={`${id}-header-${headerIndex}`}
                         colIndex={headerIndex}
                         cell={headerCell}
-                        formatting={headerFormatting}
+                        formatting={styledHeaderFormatting}
                         isActive={Boolean(isActiveHeader)}
                         canEdit={canEdit}
                         locked={locked}
                         showOutline={showOutline}
-                        onSelect={handleSelection}
+                        backgroundColor={headerBackground}
+                        borderColor={headerBorderColor}
+                        onSelectionStart={handleSelectionStart}
+                        onSelectionExtend={handleSelectionExtend}
                         onChange={value => handleHeaderInput(headerIndex, value)}
                         onCommit={value => handleHeaderCommit(headerIndex, value)}
                         onInteract={onInteract}
@@ -819,35 +1186,46 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
               </thead>
             )}
             <tbody>
-              {tableData.map((rowData, rowIndex) => (
-                <tr key={`${id}-row-${rowIndex}`} className="even:bg-muted/20">
-                  {rowData.map((cell, colIndex) => {
-                    const isActive =
-                      selectionRegion === 'body' &&
-                      effectiveSelection?.row === rowIndex &&
-                      effectiveSelection?.col === colIndex;
-                    const cellFormatting = cell?.formatting ?? createCellFormatting();
+              {tableData.map((rowData, rowIndex) => {
+                const rowBackgroundColor = rowIndex % 2 === 0 ? bodyOddBackground : bodyEvenBackground;
 
-                    return (
-                      <EditableTableCell
-                        key={`${id}-cell-${rowIndex}-${colIndex}`}
-                        rowIndex={rowIndex}
-                        colIndex={colIndex}
-                        cell={cell}
-                        formatting={cellFormatting}
-                        isActive={Boolean(isActive)}
-                        canEdit={canEdit}
-                        locked={locked}
-                        showOutline={showOutline}
-                        onSelect={handleSelection}
-                        onChange={value => handleBodyCellInput(rowIndex, colIndex, value)}
-                        onCommit={value => handleBodyCellCommit(rowIndex, colIndex, value)}
-                        onInteract={onInteract}
-                      />
-                    );
-                  })}
-                </tr>
-              ))}
+                return (
+                  <tr key={`${id}-row-${rowIndex}`}>
+                    {rowData.map((cell, colIndex) => {
+                      const isActive =
+                        selectionRegion === 'body' &&
+                        bodySelectionBounds != null &&
+                        rowIndex >= bodySelectionBounds.startRow &&
+                        rowIndex <= bodySelectionBounds.endRow &&
+                        colIndex >= bodySelectionBounds.startCol &&
+                        colIndex <= bodySelectionBounds.endCol;
+                      const cellFormatting = cell?.formatting ?? createCellFormatting();
+                      const styledCellFormatting = applyStyleTextColor(cellFormatting, bodyTextColor);
+
+                      return (
+                        <EditableTableCell
+                          key={`${id}-cell-${rowIndex}-${colIndex}`}
+                          rowIndex={rowIndex}
+                          colIndex={colIndex}
+                          cell={cell}
+                          formatting={styledCellFormatting}
+                          isActive={Boolean(isActive)}
+                          canEdit={canEdit}
+                          locked={locked}
+                          showOutline={showOutline}
+                          backgroundColor={rowBackgroundColor}
+                          borderColor={bodyBorderColor}
+                          onSelectionStart={handleSelectionStart}
+                          onSelectionExtend={handleSelectionExtend}
+                          onChange={value => handleBodyCellInput(rowIndex, colIndex, value)}
+                          onCommit={value => handleBodyCellCommit(rowIndex, colIndex, value)}
+                          onInteract={onInteract}
+                        />
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -860,33 +1238,41 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
         cols={colCount}
         showOutline={showOutline}
         selectedCell={effectiveSelection}
+        styleId={tableStyle.id}
         onToggleLock={onToggleLock}
         onToggleOutline={onToggleOutline}
         onDelete={onDelete}
         onDeleteColumn={() => {
-          if (effectiveSelection && effectiveSelection.col >= 0) {
-            onDeleteColumn(effectiveSelection.col);
+          if (!columnSelectionBounds || selectedColumnCount <= 0) {
+            return;
           }
+          onDeleteColumn(columnSelectionBounds.startCol, selectedColumnCount);
         }}
         onDelete2Columns={() => {
-          if (effectiveSelection && effectiveSelection.col >= 0) {
-            onDelete2Columns(effectiveSelection.col);
+          if (!columnSelectionBounds || selectedColumnCount <= 0) {
+            return;
           }
+          const removalCount = Math.max(2, selectedColumnCount);
+          onDelete2Columns(columnSelectionBounds.startCol, removalCount);
         }}
         onDeleteRow={() => {
-          if (effectiveSelection && selectionRegion === 'body' && effectiveSelection.row >= 0) {
-            onDeleteRow(effectiveSelection.row);
+          if (!bodySelectionBounds || selectedRowCount <= 0) {
+            return;
           }
+          onDeleteRow(bodySelectionBounds.startRow, selectedRowCount);
         }}
         onDelete2Rows={() => {
-          if (effectiveSelection && selectionRegion === 'body' && effectiveSelection.row >= 0) {
-            onDelete2Rows(effectiveSelection.row);
+          if (!bodySelectionBounds || selectedRowCount <= 0) {
+            return;
           }
+          const removalCount = Math.max(2, selectedRowCount);
+          onDelete2Rows(bodySelectionBounds.startRow, removalCount);
         }}
         onAddColumn={onAddColumn}
         onAdd2Columns={onAdd2Columns}
         onAddRow={onAddRow}
         onAdd2Rows={onAdd2Rows}
+        onSelectStyle={onStyleChange}
       />
     </ContextMenu>
   );
