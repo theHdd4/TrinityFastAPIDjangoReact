@@ -1,5 +1,5 @@
 import React from 'react';
-import { Check, ChevronsDown, ChevronsUp, Minus, Move, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { Check, ChevronsDown, ChevronsUp, Minus, Move, Palette, Plus, Sparkles, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -195,7 +195,7 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
             onChange={event => onFillChange?.(event.target.value)}
             className="h-10 w-full cursor-pointer rounded-lg border border-border"
           />
-          <PaletteIcon className="h-5 w-5 text-muted-foreground" />
+          <Palette className="h-5 w-5 text-muted-foreground" />
         </div>
       </PopoverContent>
     </Popover>
