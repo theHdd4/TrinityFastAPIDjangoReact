@@ -13,6 +13,8 @@ import { createTemplatesTool } from './tools/templates';
 import { createThemesTool } from './tools/themes';
 import { createSettingsTool } from './tools/settings';
 
+export const POSITION_PANEL_WIDTH = '22rem';
+
 interface OperationsPaletteProps {
   onFullscreen: () => void;
   onExport?: () => void;
@@ -51,8 +53,11 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
   return (
     <div className="relative h-full">
       {positionPanel && (
-        <div className="pointer-events-none absolute inset-y-0 right-12 z-40 flex w-[22rem] max-w-[calc(100vw-6rem)] justify-end transition-transform duration-200 ease-out">
-          <div className="pointer-events-auto flex h-full w-full items-start justify-end overflow-y-auto py-4 pr-4">
+        <div
+          className="pointer-events-none absolute inset-y-0 right-12 z-40 flex max-w-[calc(100vw-6rem)] justify-end transition-transform duration-200 ease-out"
+          style={{ width: POSITION_PANEL_WIDTH }}
+        >
+          <div className="pointer-events-auto flex h-full w-full items-start justify-end overflow-y-auto py-4 pr-0 pl-4">
             {positionPanel}
           </div>
         </div>
