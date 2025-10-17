@@ -3,7 +3,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Play, Save, Share2, Upload } from 'lucide-react';
+import { Play, Save, Share2, Upload, ChevronLeft, ChevronRight } from 'lucide-react';
 import Header from '@/components/Header';
 import WorkflowCanvas from './components/WorkflowCanvas';
 import MoleculeList from '@/components/MoleculeList/MoleculeList';
@@ -25,6 +25,7 @@ const WorkflowMode = () => {
   const [canvasMolecules, setCanvasMolecules] = useState<any[]>([]);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [customMolecules, setCustomMolecules] = useState<Array<{ id: string; title: string; atoms: string[] }>>([]);
+  const [isLibraryVisible, setIsLibraryVisible] = useState(true);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -75,6 +76,10 @@ const WorkflowMode = () => {
 
   const handleMoleculeSelect = (moleculeId: string) => {
     setSelectedMoleculeId(moleculeId);
+  };
+
+  const toggleLibraryVisibility = () => {
+    setIsLibraryVisible(!isLibraryVisible);
   };
 
   const handleCanvasMoleculesUpdate = useCallback((molecules: any[]) => {
@@ -756,12 +761,29 @@ const WorkflowMode = () => {
 
       <div className="flex-1 flex overflow-hidden">
         {/* Molecule Library - LEFT SIDE */}
-        <div className="w-80 bg-card border-r border-border flex flex-col">
-          <MoleculeList canEdit={true} />
+        {isLibraryVisible && (
+          <div className="w-80 bg-card border-r border-border flex flex-col">
+            <MoleculeList canEdit={true} />
+          </div>
+        )}
+
+        {/* Library Toggle Button */}
+        <div className="absolute left-0 top-1/2 transform -translate-y-1/2 z-20">
+          <Button
+            onClick={toggleLibraryVisibility}
+            className="w-8 h-16 p-0 rounded-r-lg shadow-lg bg-white hover:bg-gray-50 border border-l-0 border-gray-200"
+            title={isLibraryVisible ? "Hide Library" : "Show Library"}
+          >
+            {isLibraryVisible ? (
+              <ChevronLeft className="w-4 h-4" />
+            ) : (
+              <ChevronRight className="w-4 h-4" />
+            )}
+          </Button>
         </div>
 
         {/* Workflow Canvas - MAIN AREA */}
-        <div className="flex-1 p-6 relative">
+        <div className={`flex-1 p-6 relative transition-all duration-300 ${isLibraryVisible ? 'ml-0' : 'ml-0'}`}>
             <WorkflowCanvas
               onMoleculeSelect={handleMoleculeSelect}
             onCreateMolecule={handleCreateMolecule}
@@ -771,6 +793,7 @@ const WorkflowMode = () => {
             onMoleculeRemove={handleMoleculeRemove}
             onMoleculeRename={handleRenameMolecule}
             onMoleculeAdd={handleMoleculeAdd}
+            isLibraryVisible={isLibraryVisible}
           />
         </div>
 

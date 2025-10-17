@@ -12,10 +12,13 @@ import ReactFlow, {
   EdgeChange,
   Node,
   NodeChange,
-  useReactFlow
+  useReactFlow,
+  Controls,
+  MiniMap
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import MoleculeNode, { MoleculeNodeData } from './MoleculeNode';
+import { Plus, Minus, ZoomIn, ZoomOut } from 'lucide-react';
 
 interface WorkflowCanvasProps {
   onMoleculeSelect: (moleculeId: string) => void;
@@ -27,11 +30,55 @@ interface WorkflowCanvasProps {
   onMoleculeRemove?: (moleculeId: string) => void;
   onMoleculeRename?: (moleculeId: string, newName: string) => void;
   onMoleculeAdd?: (molecule: any) => void;
+  isLibraryVisible?: boolean;
 }
 
 const nodeTypes = { molecule: MoleculeNode };
 
 const STORAGE_KEY = 'workflow-canvas-molecules';
+
+// Custom Zoom Controls Component
+const ZoomControls: React.FC = () => {
+  const { zoomIn, zoomOut, zoomTo } = useReactFlow();
+
+  return (
+    <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-50">
+      <Button
+        onClick={() => {
+          console.log('Zoom In clicked');
+          zoomIn();
+        }}
+        size="sm"
+        className="w-12 h-12 p-0 rounded-full shadow-xl bg-white hover:bg-gray-50 border-2 border-gray-300 hover:border-blue-400 transition-all"
+        title="Zoom In"
+      >
+        <Plus className="w-5 h-5 text-gray-700" />
+      </Button>
+      <Button
+        onClick={() => {
+          console.log('Zoom Out clicked');
+          zoomOut();
+        }}
+        size="sm"
+        className="w-12 h-12 p-0 rounded-full shadow-xl bg-white hover:bg-gray-50 border-2 border-gray-300 hover:border-blue-400 transition-all"
+        title="Zoom Out"
+      >
+        <Minus className="w-5 h-5 text-gray-700" />
+      </Button>
+      <Button
+        onClick={() => {
+          console.log('Reset Zoom clicked');
+          zoomTo(1);
+        }}
+        size="sm"
+        className="w-12 h-12 p-0 rounded-full shadow-xl bg-white hover:bg-gray-50 border-2 border-gray-300 hover:border-blue-400 transition-all text-xs font-bold"
+        title="Reset Zoom"
+      >
+        1:1
+      </Button>
+    </div>
+  );
+};
 
 const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   onMoleculeSelect,
@@ -41,7 +88,8 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   onMoveAtomToAtomList,
   onMoleculeRemove,
   onMoleculeRename,
-  onMoleculeAdd
+  onMoleculeAdd,
+  isLibraryVisible = true
 }) => {
   const [nodes, setNodes] = useState<Node<MoleculeNodeData>[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -239,10 +287,20 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
   // Removed localStorage loading - parent WorkflowMode now manages molecules
 
+  // Trigger re-render when library visibility changes
+  useEffect(() => {
+    if (reactFlowInstance) {
+      // Small delay to ensure DOM has updated
+      setTimeout(() => {
+        reactFlowInstance.fitView({ padding: 0.1 });
+      }, 100);
+    }
+  }, [isLibraryVisible, reactFlowInstance]);
+
   // Update nodes when canvasMolecules change
   useEffect(() => {
     const newNodes: Node<MoleculeNodeData>[] = canvasMolecules.map((molecule, index) => {
-      // Calculate position for sophisticated grid layout
+      // Calculate position for simple grid layout
       const moleculeWidth = 48; // Keep same width
       const spacing = 192; // Keep same spacing
       const moleculesPerRow = 4; // 4 molecules per row
@@ -252,35 +310,9 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
       const row = Math.floor(index / moleculesPerRow);
       const col = index % moleculesPerRow;
       
-      // Snake pattern positioning logic
-      let positionX, positionY;
-      
-      if (row === 0) {
-        // First row (molecules 1-4): normal left-to-right flow
-        positionX = startX + (col * (moleculeWidth + spacing));
-        positionY = startY;
-      } else if (row === 1) {
-        // Second row (molecules 5-8): reverse order (right-to-left)
-        // M5 is rightmost, M8 is leftmost
-        const reverseCol = (moleculesPerRow - 1) - col;
-        positionX = startX + (reverseCol * (moleculeWidth + spacing));
-        positionY = startY + (moleculeWidth + spacing);
-      } else if (row === 2) {
-        // Third row (molecules 9-12): normal left-to-right flow like first row
-        positionX = startX + (col * (moleculeWidth + spacing));
-        positionY = startY + (2 * (moleculeWidth + spacing));
-      } else {
-        // Fourth row and beyond: alternate pattern
-        if (row % 2 === 0) {
-          // Even rows: normal left-to-right flow
-          positionX = startX + (col * (moleculeWidth + spacing));
-        } else {
-          // Odd rows: reverse right-to-left flow
-          const reverseCol = (moleculesPerRow - 1) - col;
-          positionX = startX + (reverseCol * (moleculeWidth + spacing));
-        }
-        positionY = startY + (row * (moleculeWidth + spacing));
-      }
+      // Simple grid positioning - always left-to-right, top-to-bottom
+      const positionX = startX + (col * (moleculeWidth + spacing));
+      const positionY = startY + (row * (moleculeWidth + spacing));
 
       return {
         id: molecule.id,
@@ -308,103 +340,66 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
       };
     });
 
-    // Create edges following snake pattern
+    // Create edges following simple left-to-right flow
     const newEdges: Edge[] = [];
     const moleculesPerRow = 4; // Define moleculesPerRow for edge creation
+    
+    console.log('🔗 Creating edges for', newNodes.length, 'nodes');
     
     for (let i = 0; i < newNodes.length; i++) {
       const currentRow = Math.floor(i / moleculesPerRow);
       const currentCol = i % moleculesPerRow;
       
-      // Connect within the same row
-      if (currentRow % 2 === 0) {
-        // Even rows (0, 2, 4...): left-to-right flow
-        if (currentCol < moleculesPerRow - 1) {
-          // Not the last molecule in the row
-          const nextIndex = i + 1;
-          if (nextIndex < newNodes.length) {
-            console.log(`Even row connection: ${newNodes[i].data.title} → ${newNodes[nextIndex].data.title}`);
-            newEdges.push({
-              id: `${newNodes[i].id}-${newNodes[nextIndex].id}`,
-              source: newNodes[i].id,
-              target: newNodes[nextIndex].id,
-              sourceHandle: 'right',
-              targetHandle: 'left',
-              type: 'default',
-              style: { stroke: 'hsl(var(--primary))', strokeWidth: 2 },
-              markerEnd: {
-                type: 'arrowclosed',
-                color: 'hsl(var(--primary))',
-              },
-            });
-          }
-        } else {
-          // Last molecule in even row - connect to first molecule of next row
-          const nextRowFirstIndex = (currentRow + 1) * moleculesPerRow;
-          if (nextRowFirstIndex < newNodes.length) {
-             // For snake pattern: M4 (last of row 0, even) connects to M5 (first of row 1, odd)
-             // Connect from M4's right edge to M5's right edge
-             newEdges.push({
-               id: `${newNodes[i].id}-${newNodes[nextRowFirstIndex].id}`,
-               source: newNodes[i].id,
-               target: newNodes[nextRowFirstIndex].id,
-               sourceHandle: 'right',
-               targetHandle: 'right-target',
-               type: 'smoothstep',
-               style: { stroke: 'hsl(var(--primary))', strokeWidth: 2, strokeDasharray: '5,5' },
-               markerEnd: {
-                 type: 'arrowclosed',
-                 color: 'hsl(var(--primary))',
-               },
-             });
-          }
+      console.log(`📍 Node ${i}: ${newNodes[i].data.title} (Row ${currentRow}, Col ${currentCol})`);
+      
+      // Always connect left-to-right within the same row
+      if (currentCol < moleculesPerRow - 1) {
+        // Not the last molecule in the row - connect to next molecule
+        const nextIndex = i + 1;
+        if (nextIndex < newNodes.length && Math.floor(nextIndex / moleculesPerRow) === currentRow) {
+          console.log(`✅ Same row connection: ${newNodes[i].data.title} → ${newNodes[nextIndex].data.title}`);
+          const edge = {
+            id: `${newNodes[i].id}-${newNodes[nextIndex].id}`,
+            source: newNodes[i].id,
+            target: newNodes[nextIndex].id,
+            sourceHandle: 'right',
+            targetHandle: 'left',
+            type: 'default',
+            style: { stroke: 'hsl(var(--primary))', strokeWidth: 2 },
+            markerEnd: {
+              type: 'arrowclosed',
+              color: 'hsl(var(--primary))',
+            },
+          };
+          console.log('🔗 Edge created:', edge);
+          newEdges.push(edge);
         }
-       } else {
-
-         if (currentCol < moleculesPerRow - 1) {
-           // Not the last molecule in the row - connect to next molecule in array
-           // This creates: M8←M7←M6←M5 visually
-           const nextIndex = i + 1;
-           if (nextIndex < newNodes.length && Math.floor(nextIndex / moleculesPerRow) === currentRow) {
-             console.log(`Odd row connection: ${newNodes[nextIndex].data.title} → ${newNodes[i].data.title}`);
-             newEdges.push({
-               id: `${newNodes[nextIndex].id}-${newNodes[i].id}`,
-               source: newNodes[nextIndex].id,
-               target: newNodes[i].id,
-               sourceHandle: 'left-source',
-               targetHandle: 'right',
-               type: 'default',
-               style: { stroke: 'hsl(var(--primary))', strokeWidth: 2 },
-               markerEnd: {
-                 type: 'arrowclosed',
-                 color: 'hsl(var(--primary))',
-               },
-             });
-           } else {
-             console.log(`Skipping connection: i=${i}, nextIndex=${nextIndex}, currentRow=${currentRow}, nextRow=${Math.floor(nextIndex / moleculesPerRow)}`);
-           }
-         } else {
-           // First molecule in odd row - connect to first molecule of next row
-           const nextRowFirstIndex = (currentRow + 1) * moleculesPerRow;
-           if (nextRowFirstIndex < newNodes.length) {
-             // For snake pattern: M8 (leftmost in odd row) connects to M9 (leftmost in even row)
-             newEdges.push({
-               id: `${newNodes[i].id}-${newNodes[nextRowFirstIndex].id}`,
-               source: newNodes[i].id,
-               target: newNodes[nextRowFirstIndex].id,
-               sourceHandle: 'left',
-               targetHandle: 'left',
-               type: 'smoothstep',
-               style: { stroke: 'hsl(var(--primary))', strokeWidth: 2, strokeDasharray: '5,5' },
-               markerEnd: {
-                 type: 'arrowclosed',
-                 color: 'hsl(var(--primary))',
-               },
-             });
-           }
-         }
-       }
+      } else {
+        // Last molecule in row - connect to first molecule of next row
+        const nextRowFirstIndex = (currentRow + 1) * moleculesPerRow;
+        if (nextRowFirstIndex < newNodes.length) {
+          console.log(`✅ Row transition: ${newNodes[i].data.title} → ${newNodes[nextRowFirstIndex].data.title}`);
+          const edge = {
+            id: `${newNodes[i].id}-${newNodes[nextRowFirstIndex].id}`,
+            source: newNodes[i].id,
+            target: newNodes[nextRowFirstIndex].id,
+            sourceHandle: 'right',
+            targetHandle: 'left',
+            type: 'smoothstep',
+            style: { stroke: 'hsl(var(--primary))', strokeWidth: 2, strokeDasharray: '5,5' },
+            markerEnd: {
+              type: 'arrowclosed',
+              color: 'hsl(var(--primary))',
+            },
+          };
+          console.log('🔗 Edge created:', edge);
+          newEdges.push(edge);
+        }
+      }
     }
+    
+    console.log('🔗 Total edges created:', newEdges.length);
+    console.log('🔗 All edges:', newEdges.map(e => `${e.source}(${e.sourceHandle}) → ${e.target}(${e.targetHandle})`));
 
     setNodes(newNodes);
     setEdges(newEdges);
@@ -415,14 +410,15 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   // The parent WorkflowMode now manages molecules directly
 
   return (
-    <div className="h-full relative bg-gradient-to-br from-background via-card/50 to-muted/20 rounded-lg border-2 border-border/50 shadow-elegant backdrop-blur-sm">
+    <div className="h-full w-full relative bg-gradient-to-br from-background via-card/50 to-muted/20 rounded-lg border-2 border-border/50 shadow-elegant backdrop-blur-sm">
       <div 
         ref={reactFlowWrapper} 
-        className="w-full overflow-auto scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-200"
+        className="w-full h-full overflow-auto scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-200"
         style={{
           scrollbarWidth: 'thin',
           scrollbarColor: '#9ca3af #e5e7eb',
           height: '100%',
+          width: '100%',
           minHeight: '100%'
         }}
       >
@@ -461,18 +457,19 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
             zoomOnPinch={false}
             zoomOnDoubleClick={false}
             fitView={false}
-            minZoom={1}
-            maxZoom={1}
+            minZoom={0.1}
+            maxZoom={4}
             defaultZoom={1}
             proOptions={{ hideAttribution: true }}
             style={{ 
               width: '100%', 
-              height: 'auto',
+              height: '100%',
               minHeight: 'calc(100vh - 200px)',
               maxHeight: 'none'
             }}
           >
             <Background gap={24} color="hsl(var(--border) / 0.3)" className="opacity-50" />
+            <ZoomControls />
           </ReactFlow>
         </ReactFlowProvider>
       </div>

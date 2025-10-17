@@ -29,13 +29,12 @@ class CustomMoleculeSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def validate_molecule_id(self, value):
-        """Ensure molecule_id is unique within the project."""
-        project = self.context.get('project')
-        if project and CustomMolecule.objects.filter(
-            project=project, 
+        """Ensure molecule_id is unique across the tenant (all projects)."""
+        # Check for uniqueness across all projects since custom molecules are shared
+        if CustomMolecule.objects.filter(
             molecule_id=value
         ).exclude(id=self.instance.id if self.instance else None).exists():
             raise serializers.ValidationError(
-                "A custom molecule with this ID already exists in this project."
+                "A custom molecule with this ID already exists."
             )
         return value

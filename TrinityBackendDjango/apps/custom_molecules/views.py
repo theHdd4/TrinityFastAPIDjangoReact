@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from django.shortcuts import get_object_or_404
 from rest_framework.authentication import SessionAuthentication
 from .models import CustomMolecule
 from .serializers import CustomMoleculeSerializer
@@ -40,9 +41,14 @@ class CustomMoleculeViewSet(viewsets.ModelViewSet):
         lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
         lookup_value = self.kwargs[lookup_url_kwarg]
         filter_kwargs = {self.lookup_field: lookup_value}
-        obj = get_object_or_404(self.get_queryset(), **filter_kwargs)
-        self.check_object_permissions(self.request, obj)
-        return obj
+        try:
+            obj = get_object_or_404(self.get_queryset(), **filter_kwargs)
+            self.check_object_permissions(self.request, obj)
+            return obj
+        except Exception as e:
+            # Log the error for debugging
+            print(f"Error in get_object: {str(e)}")
+            raise
 
     def perform_create(self, serializer):
         # Automatically set the user and project from request context
@@ -63,6 +69,25 @@ class CustomMoleculeViewSet(viewsets.ModelViewSet):
         # Handle both authenticated and unauthenticated users
         user = self.request.user if self.request.user.is_authenticated else None
         serializer.save(user=user, project_id=project_id)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Custom destroy method to handle delete operations with better error handling.
+        """
+        try:
+            instance = self.get_object()
+            molecule_id = instance.molecule_id
+            self.perform_destroy(instance)
+            return Response({
+                'success': True,
+                'message': f'Molecule {molecule_id} deleted successfully'
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            print(f"Error in destroy: {str(e)}")
+            return Response({
+                'success': False,
+                'error': f'Failed to delete molecule: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'])
     def for_frontend(self, request):

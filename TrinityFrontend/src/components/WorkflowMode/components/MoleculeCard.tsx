@@ -32,27 +32,14 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
     if (!onDelete) return;
     
     try {
-      // Get current project information
-      const currentProjectStr = localStorage.getItem('current-project');
-      let project_id = null;
+      console.log('🗑️ Attempting to delete molecule:', molecule.id);
       
-      if (currentProjectStr) {
-        try {
-          const currentProject = JSON.parse(currentProjectStr);
-          project_id = currentProject.id || null;
-        } catch (e) {
-          console.warn('Failed to parse current project:', e);
-        }
-      }
-
-      if (!project_id) {
-        console.error('Project ID not found');
-        return;
-      }
-
       // Delete the molecule from the backend using the standard DELETE endpoint
       // No project_id needed since molecules are shared across all projects
-      const response = await fetch(`${CUSTOM_MOLECULES_API}/${molecule.id}/`, {
+      const deleteUrl = `${CUSTOM_MOLECULES_API}/${molecule.id}/`;
+      console.log('🗑️ Delete URL:', deleteUrl);
+      
+      const response = await fetch(deleteUrl, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -60,15 +47,23 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
         credentials: 'include',
       });
 
+      console.log('🗑️ Delete response status:', response.status);
+      console.log('🗑️ Delete response ok:', response.ok);
+
       if (response.ok) {
+        const result = await response.json();
+        console.log('🗑️ Delete response data:', result);
+        
         // Call the parent's delete callback to update the UI
         onDelete(molecule.id);
-        console.log('Molecule deleted successfully');
+        console.log('✅ Molecule deleted successfully');
       } else {
-        console.error('Failed to delete molecule:', response.statusText);
+        const errorText = await response.text();
+        console.error('❌ Failed to delete molecule:', response.status, response.statusText);
+        console.error('❌ Error response:', errorText);
       }
     } catch (error) {
-      console.error('Error deleting molecule:', error);
+      console.error('❌ Error deleting molecule:', error);
     }
   };
 
