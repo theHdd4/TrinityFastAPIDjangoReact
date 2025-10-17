@@ -1,6 +1,7 @@
 import os
+import re
 import socket
-from typing import Iterable, List
+from typing import Iterable, List, Sequence
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +10,17 @@ from app.api.router import api_router, text_router
 from DataStorageRetrieval.arrow_client import load_env_from_redis
 
 
-def _iter_host_variants(hosts: Iterable[str], ports: Iterable[str]) -> Iterable[str]:
+def _split_hosts(raw_hosts: str) -> List[str]:
+    """Split an environment variable style string into individual host entries."""
+
+    if not raw_hosts:
+        return []
+
+    parts = re.split(r"[\s,]+", raw_hosts)
+    return [part.strip() for part in parts if part.strip()]
+
+
+def _iter_host_variants(hosts: Sequence[str], ports: Sequence[str]) -> Iterable[str]:
     """Yield HTTP/HTTPS origin variants for the provided hosts."""
 
     for host in hosts:
@@ -72,31 +83,39 @@ def _default_cors_origins() -> List[str]:
     host_ip = os.getenv("HOST_IP", "").strip()
     frontend_port = os.getenv("FRONTEND_PORT", "8080").strip() or "8080"
 
-    defaults = [
-        "http://10.19.4.220:8080",
-        "http://10.2.4.48:8080",
-        "http://127.0.0.1:8080",
-        "http://10.2.1.207:8080",
-        "http://172.22.64.1:8080",
-        "http://10.2.3.55:8080",
-        "https://trinity.quantmatrixai.com",
-        "https://trinity-dev.quantmatrixai.com",
-        "http://localhost:8080",
-    ]
+    defaults = []
 
     ports = [frontend_port, "8080", "8081"]
 
-    if host_ip:
-        defaults.extend(_iter_host_variants([host_ip], ports))
+    docker_http_hosts = [
+        "10.19.4.220",
+        "10.2.4.48",
+        "10.2.1.207",
+        "10.2.3.55",
+        "127.0.0.1",
+        "172.22.64.1",
+        "172.17.48.1",
+        "localhost",
+    ]
 
-    defaults.extend(_iter_host_variants(_detect_runtime_hosts(), ports))
+    defaults.extend(_iter_host_variants(docker_http_hosts, ports))
 
     defaults.extend(
         [
-            f"http://127.0.0.1:{frontend_port}",
-            f"http://localhost:{frontend_port}",
+            "https://trinity.quantmatrixai.com",
+            "https://trinity-dev.quantmatrixai.com",
         ]
     )
+
+    host_ip_values = _split_hosts(host_ip)
+    if host_ip_values:
+        defaults.extend(_iter_host_variants(host_ip_values, ports))
+
+    defaults.extend(_iter_host_variants(_detect_runtime_hosts(), ports))
+
+    extra_hosts = _split_hosts(os.getenv("FASTAPI_ADDITIONAL_CORS_HOSTS", ""))
+    if extra_hosts:
+        defaults.extend(_iter_host_variants(extra_hosts, ports))
 
     # Preserve order while removing duplicates and empty entries.
     return [origin for origin in dict.fromkeys(defaults) if origin]
@@ -110,7 +129,7 @@ def _load_cors_origins() -> List[str]:
         configured = configured.strip()
         if configured == "*":
             return ["*"]
-        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+        return _split_hosts(configured)
     return _default_cors_origins()
 
 

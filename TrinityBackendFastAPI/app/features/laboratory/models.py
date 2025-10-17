@@ -2,17 +2,25 @@ from __future__ import annotations
 
 from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class LaboratoryCardRequest(BaseModel):
     """Schema describing the payload for creating a laboratory card."""
 
-    atom_id: str = Field(..., alias="atomId", description="Identifier of the atom to render inside the card")
+    model_config = ConfigDict(populate_by_name=True)
+
+    atom_id: str = Field(
+        ...,
+        description="Identifier of the atom to render inside the card",
+        serialization_alias="atomId",
+        validation_alias=AliasChoices("atomId", "atom_id"),
+    )
     molecule_id: Optional[str] = Field(
         default=None,
-        alias="moleculeId",
         description="Optional molecule identifier associated with the card",
+        serialization_alias="moleculeId",
+        validation_alias=AliasChoices("moleculeId", "molecule_id"),
     )
     source: Literal["manual", "ai"] = Field(
         default="manual",
@@ -27,15 +35,18 @@ class LaboratoryCardRequest(BaseModel):
         description="Optional settings object to initialize the atom with.",
     )
 
-    class Config:
-        allow_population_by_field_name = True
-
-
 class LaboratoryAtomResponse(BaseModel):
     """Atom metadata returned as part of the laboratory card response."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str = Field(..., description="Unique identifier for this atom instance")
-    atom_id: str = Field(..., alias="atomId", description="Atom identifier (e.g. 'feature-overview')")
+    atom_id: str = Field(
+        ...,
+        description="Atom identifier (e.g. 'feature-overview')",
+        serialization_alias="atomId",
+        validation_alias=AliasChoices("atomId", "atom_id"),
+    )
     source: Literal["manual", "ai"] = Field(
         default="manual",
         description="Indicates how the atom was added to the card.",
@@ -49,30 +60,33 @@ class LaboratoryAtomResponse(BaseModel):
         description="Settings payload to bootstrap the atom in the UI.",
     )
 
-    class Config:
-        allow_population_by_field_name = True
-
-
 class LaboratoryCardResponse(BaseModel):
     """Response returned after creating a laboratory card."""
+
+    model_config = ConfigDict(populate_by_name=True)
 
     id: str = Field(..., description="Unique identifier for the newly created card")
     atoms: List[LaboratoryAtomResponse] = Field(..., description="List of atoms contained in the card")
     is_exhibited: bool = Field(
         default=False,
-        alias="isExhibited",
         description="Flag denoting whether the card should appear in exhibition mode.",
+        serialization_alias="isExhibited",
+        validation_alias=AliasChoices("isExhibited", "is_exhibited"),
     )
     molecule_id: Optional[str] = Field(
         default=None,
-        alias="moleculeId",
         description="Optional molecule identifier for grouping cards together.",
+        serialization_alias="moleculeId",
+        validation_alias=AliasChoices("moleculeId", "molecule_id"),
     )
     molecule_title: Optional[str] = Field(
         default=None,
-        alias="moleculeTitle",
         description="Human readable molecule title when available.",
+        serialization_alias="moleculeTitle",
+        validation_alias=AliasChoices("moleculeTitle", "molecule_title"),
     )
 
-    class Config:
-        allow_population_by_field_name = True
+
+LaboratoryCardRequest.model_rebuild(_types_namespace=globals())
+LaboratoryAtomResponse.model_rebuild(_types_namespace=globals())
+LaboratoryCardResponse.model_rebuild(_types_namespace=globals())

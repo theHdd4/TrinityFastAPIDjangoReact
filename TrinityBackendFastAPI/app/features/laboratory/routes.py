@@ -9,7 +9,11 @@ from .models import LaboratoryAtomResponse, LaboratoryCardRequest, LaboratoryCar
 router = APIRouter()
 
 
-@router.post("/cards", response_model=LaboratoryCardResponse)
+@router.post(
+    "/cards",
+    response_model=LaboratoryCardResponse,
+    response_model_by_alias=True,
+)
 async def create_laboratory_card(payload: LaboratoryCardRequest) -> LaboratoryCardResponse:
     """Create a laboratory card scaffold for the frontend workspace."""
 
