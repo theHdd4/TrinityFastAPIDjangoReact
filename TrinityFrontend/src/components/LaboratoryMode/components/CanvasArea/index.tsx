@@ -40,6 +40,8 @@ import EvaluateModelsFeatureAtom from '@/components/AtomList/atoms/evaluate-mode
 import AutoRegressiveModelsAtom from '@/components/AtomList/atoms/auto-regressive-models/AutoRegressiveModelsAtom';
 import SelectModelsAutoRegressiveAtom from '@/components/AtomList/atoms/select-models-auto-regressive/SelectModelsAutoRegressiveAtom';
 import EvaluateModelsAutoRegressiveAtom from '@/components/AtomList/atoms/evaluate-models-auto-regressive/EvaluateModelsAutoRegressiveAtom';
+import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAtom';
+import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/ScenarioPlannerAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -307,7 +309,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     let layoutCandidate: Candidate = null;
 
     if (Array.isArray(layoutCards)) {
-      outer: for (let i = layoutCards.length - 1; i >= 0; i--) {
+      outer: for (let i = (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1; i >= 0; i--) {
         const card = layoutCards[i];
         for (let j = card.atoms.length - 1; j >= 0; j--) {
           const a = card.atoms[j];
@@ -1051,7 +1053,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     moleculeId,
     moleculeTitle: info?.title
   };
-  if (position === undefined || position >= layoutCards.length) {
+  if (position === undefined || position >= (Array.isArray(layoutCards) ? layoutCards.length : 0)) {
     setLayoutCards([...(Array.isArray(layoutCards) ? layoutCards : []), newCard]);
   } else {
     const arr = Array.isArray(layoutCards) ? layoutCards : [];
@@ -1378,29 +1380,43 @@ const handleAddDragLeave = (e: React.DragEvent) => {
               const moleculeCards = Array.isArray(layoutCards) 
                 ? layoutCards.filter(card => card.moleculeId === molecule.moleculeId)
                 : [];
-              const atomCount = moleculeCards.reduce((sum, card) => sum + card.atoms.length, 0);
+              const atomCount = moleculeCards.reduce((sum, card) => sum + (card.atoms?.length || 0), 0);
 
               return (
               <Card key={molecule.moleculeId} className="bg-white border-2 border-gray-200 shadow-lg rounded-xl overflow-hidden">
                 {/* Collapsible Molecule Header */}
                 <div 
-                  className="flex items-center justify-between p-3 bg-white border-b border-gray-200 cursor-pointer hover:bg-gray-50 transition-all duration-200"
+                  className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200 cursor-pointer hover:from-blue-100 hover:to-indigo-100 transition-all duration-200"
                   onClick={() => toggleMoleculeCollapse(molecule.moleculeId)}
                 >
-                  <div className="flex items-center space-x-3">
-                    <div className="w-2 h-6 bg-yellow-500 rounded-full"></div>
+                  <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-3 h-8 bg-gradient-to-b from-blue-500 to-indigo-600 rounded-full shadow-sm"></div>
+                      <div className="w-1 h-6 bg-blue-300 rounded-full"></div>
+                    </div>
                     <div>
-                      <h3 className="text-lg font-semibold text-gray-900">
+                      <h3 className="text-lg font-bold text-gray-900 tracking-tight">
                         {molecule.moleculeTitle}
                       </h3>
-                      <p className="text-xs text-gray-600 mt-0.5">
-                        {moleculeCards.length} card{moleculeCards.length !== 1 ? 's' : ''} • {atomCount} atom{atomCount !== 1 ? 's' : ''}
-                      </p>
+                      <div className="flex items-center space-x-3 mt-1">
+                        <div className="flex items-center space-x-1">
+                          <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                          <span className="text-xs font-medium text-blue-700">
+                            {moleculeCards.length} card{moleculeCards.length !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-1">
+                          <div className="w-2 h-2 bg-indigo-500 rounded-full"></div>
+                          <span className="text-xs font-medium text-indigo-700">
+                            {atomCount} atom{atomCount !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <button className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+                  <button className="p-2 hover:bg-white/50 rounded-lg transition-all duration-200 hover:shadow-sm">
                     <ChevronDown 
-                      className={`w-5 h-5 text-gray-600 transition-transform duration-300 ${
+                      className={`w-5 h-5 text-gray-700 transition-transform duration-300 ${
                         isCollapsed ? '-rotate-90' : 'rotate-0'
                       }`}
                     />
@@ -1613,7 +1629,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       <div className={canEdit ? '' : 'pointer-events-none'}>
       {/* Layout Cards Container */}
       <div className="p-6 space-y-6 w-full">
-        {Array.isArray(layoutCards) && layoutCards.map((card, index) => {
+        {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards.map((card, index) => {
           const cardTitle = card.moleculeTitle
             ? (card.atoms.length > 0 ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
             : card.atoms.length > 0
@@ -1829,7 +1845,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
               )}
             </div>
           </Card>
-          {index < layoutCards.length - 1 && (
+          {index < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (
             <div className="flex justify-center my-4">
               <button
                 onClick={() => addNewCard(undefined, index + 1)}
@@ -1891,10 +1907,10 @@ const handleAddDragLeave = (e: React.DragEvent) => {
               {/* Fullscreen Header */}
               <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
                 <div className="flex items-center space-x-2">
-                <Eye className={`w-4 h-4 ${layoutCards.find(c => c.id === expandedCard)?.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
+                <Eye className={`w-4 h-4 ${Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard)?.isExhibited : false ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                 <span className="text-lg font-semibold text-gray-900">
                   {(() => {
-                    const card = layoutCards.find(c => c.id === expandedCard);
+                    const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
                     if (!card) return 'Card';
                     return card.moleculeTitle
                       ? (card.atoms.length > 0 ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
@@ -1907,7 +1923,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                 <div className="flex items-center space-x-2">
                 <span className="text-sm text-gray-500">Exhibit the Card</span>
                 <Switch
-                  checked={layoutCards.find(c => c.id === expandedCard)?.isExhibited || false}
+                  checked={Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard)?.isExhibited || false : false}
                   onCheckedChange={(checked) => handleExhibitionToggle(expandedCard, checked)}
                   className="data-[state=checked]:bg-[#458EE2]"
                 />
@@ -1924,7 +1940,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
               {/* Fullscreen Content */}
               <div className="flex-1 flex flex-col px-8 py-4 space-y-4 overflow-auto">
                 {(() => {
-                const card = layoutCards.find(c => c.id === expandedCard);
+                const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
                 if (!card) return null;
 
                 return card.atoms.length === 0 ? (

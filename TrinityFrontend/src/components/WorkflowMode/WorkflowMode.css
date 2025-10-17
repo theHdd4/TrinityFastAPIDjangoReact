@@ -23,6 +23,32 @@
   background: hsl(var(--primary) / 0.8);
 }
 
+/* Right panel scrollbar positioning */
+.workflow-right-panel-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--primary)) hsl(var(--border));
+  direction: ltr; /* Ensure scrollbar appears on the right side of the content */
+}
+
+.workflow-right-panel-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.workflow-right-panel-scroll::-webkit-scrollbar-track {
+  background: hsl(var(--border) / 0.3);
+  border-radius: 3px;
+}
+
+.workflow-right-panel-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--primary) / 0.6);
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.workflow-right-panel-scroll::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--primary) / 0.8);
+}
+
 /* Smooth animations for molecule nodes */
 .molecule-node-enter {
   opacity: 0;

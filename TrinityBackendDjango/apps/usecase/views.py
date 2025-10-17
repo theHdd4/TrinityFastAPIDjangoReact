@@ -61,17 +61,13 @@ class UseCaseViewSet(viewsets.ModelViewSet):
         Used by the workflow area to display app-specific molecules.
         """
         try:
-            from apps.trinity_v1_atoms.models import TrinityV1Atom
-            
             app = UseCase.objects.prefetch_related('molecule_objects').get(slug=slug)
             
             # Get molecules from the many-to-many relationship
             molecules_list = []
             for mol in app.molecule_objects.all():
-                # Get atom names from trinity_v1_atoms table
-                atom_ids = mol.atoms or []
-                matching_atoms = TrinityV1Atom.objects.filter(id__in=atom_ids)
-                atom_names = [atom.name for atom in matching_atoms]
+                # The atoms field already contains atom names as strings
+                atom_names = mol.atoms or []
                 
                 molecules_list.append({
                     'id': mol.molecule_id,

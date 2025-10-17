@@ -24,6 +24,7 @@ from app.features.exhibition.endpoint import router as exhibition_router
 from app.features.explore.endpoint import router as explore_router
 from app.features.correlation.endpoint import router as correlation_router
 from app.features.build_autoregressive.endpoint import router as autoregressive_router
+from app.features.molecule.routes import router as molecule_router
 
 api_router = APIRouter()
 text_router = APIRouter()
@@ -61,6 +62,13 @@ api_router.include_router(build_model_router)
 api_router.include_router(autoregressive_router)
 api_router.include_router(select_models_router)
 api_router.include_router(evaluate_router)
+
+# Molecule management router
+api_router.include_router(
+    molecule_router,
+    prefix="/molecules",
+    tags=["Molecule Management"]
+)
 
 # Text router for text-based features
 text_router.include_router(textbox_router)

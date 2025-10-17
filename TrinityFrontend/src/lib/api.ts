@@ -182,6 +182,14 @@ export const EVALUATE_API =
   normalizeUrl(import.meta.env.VITE_EVALUATE_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/evaluate`;
 
+export const MOLECULES_API =
+  normalizeUrl(import.meta.env.VITE_MOLECULES_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/molecules`;
+
+export const CUSTOM_MOLECULES_API =
+  normalizeUrl(import.meta.env.VITE_CUSTOM_MOLECULES_API) ||
+  `${backendOrigin}${djangoPrefix}/custom-molecules`;
+
 // Growth Rates API functions
 export const calculateFiscalGrowth = async (params: {
   scope: string;
