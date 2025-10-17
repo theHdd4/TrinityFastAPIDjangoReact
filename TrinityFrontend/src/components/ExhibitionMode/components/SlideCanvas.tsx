@@ -1,31 +1,7 @@
 import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  User,
-  Calendar,
-  Sparkles,
-  StickyNote,
-  Image as ImageIcon,
-  Palette,
-  Layout,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
-  Maximize2,
-  RotateCcw,
-  Settings,
-  Plus,
-  Trash2,
-} from 'lucide-react';
+import { User, Calendar, Sparkles, StickyNote, Settings, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Switch } from '@/components/ui/switch';
-import { Separator } from '@/components/ui/separator';
 import {
   useExhibitionStore,
   CardLayout,
@@ -45,6 +21,25 @@ import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
 import { SlideTextBoxObject } from './operationsPalette/textBox/TextBox';
 import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from './operationsPalette/textBox/constants';
 import type { TextBoxFormatting } from './operationsPalette/textBox/types';
+import { TextBoxPositionPanel } from './operationsPalette/textBox/TextBoxPositionPanel';
+import { CardFormattingPanel } from './operationsPalette/CardFormattingPanel';
+import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
+import { SlideShapeObject } from './operationsPalette/shapes';
+import type { ShapeObjectProps } from './operationsPalette/shapes/constants';
+import {
+  DEFAULT_TABLE_COLS,
+  DEFAULT_TABLE_ROWS,
+  cloneTableHeaders,
+  cloneTableMatrix,
+  createDefaultHeaderCell,
+  createEmptyCell,
+  createEmptyTableRow,
+  normaliseTableData,
+  normaliseTableHeaders,
+  ensureTableStyleId,
+  type TableCellData,
+  type TableCellFormatting,
+} from './operationsPalette/tables/constants';
 
 interface CanvasDropPlacement {
   x: number;
@@ -97,6 +92,75 @@ const isAtomObject = (
 
 const UNTITLED_SLIDE_TEXT = 'Untitled Slide';
 
+type TableState = {
+  data: TableCellData[][];
+  rows: number;
+  cols: number;
+  locked: boolean;
+  showOutline: boolean;
+  headers: TableCellData[];
+  styleId: string;
+};
+
+const coercePositiveInteger = (value: unknown, fallback: number): number => {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+
+  const integer = Math.floor(numeric);
+  return integer > 0 ? integer : fallback;
+};
+
+const extractTableHeaders = (value: unknown, fallbackCount: number): TableCellData[] => {
+  return normaliseTableHeaders(value, fallbackCount);
+};
+
+const readTableState = (object: SlideObject): TableState => {
+  const props = (object.props ?? {}) as Record<string, unknown> | undefined;
+  const fallbackRows = coercePositiveInteger(props?.rows, DEFAULT_TABLE_ROWS);
+  const fallbackCols = coercePositiveInteger(props?.cols, DEFAULT_TABLE_COLS);
+  const data = normaliseTableData(props?.data, fallbackRows, fallbackCols);
+  const colCount = data[0]?.length ?? 0;
+  const headers = extractTableHeaders(props?.headers, colCount);
+  const styleId = ensureTableStyleId(props?.styleId);
+
+  return {
+    data,
+    rows: data.length,
+    cols: colCount,
+    locked: Boolean(props?.locked),
+    showOutline: props?.showOutline !== false,
+    headers,
+    styleId,
+  };
+};
+
+const tableStatesEqual = (a: TableState, b: TableState) => {
+  return (
+    a.data === b.data &&
+    a.rows === b.rows &&
+    a.cols === b.cols &&
+    a.locked === b.locked &&
+    a.showOutline === b.showOutline &&
+    a.headers === b.headers &&
+    a.styleId === b.styleId
+  );
+};
+
+const formattingShallowEqual = (a: TableCellFormatting, b: TableCellFormatting) => {
+  return (
+    a.fontFamily === b.fontFamily &&
+    a.fontSize === b.fontSize &&
+    a.bold === b.bold &&
+    a.italic === b.italic &&
+    a.underline === b.underline &&
+    a.strikethrough === b.strikethrough &&
+    a.align === b.align &&
+    a.color === b.color
+  );
+};
+
 interface SlideCanvasProps {
   card: LayoutCard;
   slideNumber: number;
@@ -117,6 +181,7 @@ interface SlideCanvasProps {
   isActive?: boolean;
   onTitleChange?: (title: string, cardId: string) => void;
   presenterName?: string | null;
+  onPositionPanelChange?: (panel: ReactNode | null) => void;
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -133,6 +198,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   isActive = false,
   onTitleChange,
   presenterName,
+  onPositionPanelChange,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -141,9 +207,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     ...card.presentationSettings,
   }));
   const [activeTextToolbar, setActiveTextToolbar] = useState<ReactNode | null>(null);
+  const [positionPanelTarget, setPositionPanelTarget] = useState<{ objectId: string } | null>(null);
   const accentImageInputRef = useRef<HTMLInputElement | null>(null);
-  const formatPanelRef = useRef<HTMLDivElement | null>(null);
-  const formatToggleRef = useRef<HTMLButtonElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
 
   const slideObjects = useExhibitionStore(
@@ -151,7 +216,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   );
   const bulkUpdateSlideObjects = useExhibitionStore(state => state.bulkUpdateSlideObjects);
   const bringSlideObjectsToFront = useExhibitionStore(state => state.bringSlideObjectsToFront);
+  const bringSlideObjectsForward = useExhibitionStore(state => state.bringSlideObjectsForward);
   const sendSlideObjectsToBack = useExhibitionStore(state => state.sendSlideObjectsToBack);
+  const sendSlideObjectsBackward = useExhibitionStore(state => state.sendSlideObjectsBackward);
   const groupSlideObjects = useExhibitionStore(state => state.groupSlideObjects);
   const removeSlideObject = useExhibitionStore(state => state.removeSlideObject);
 
@@ -170,6 +237,16 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       }),
     [slideObjects, titleObjectId],
   );
+
+  const positionPanelObject = useMemo(() => {
+    if (!positionPanelTarget) {
+      return null;
+    }
+    const match = slideObjects.find(
+      object => object.id === positionPanelTarget.objectId && object.type === 'text-box',
+    );
+    return match ?? null;
+  }, [positionPanelTarget, slideObjects]);
 
   const handleBulkUpdate = useCallback(
     (updates: Record<string, Partial<SlideObject>>) => {
@@ -240,36 +317,15 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   }, [card.id, canEdit]);
 
   useEffect(() => {
-    if (!showFormatPanel) {
+    if (!canEdit) {
+      setPositionPanelTarget(null);
       return;
     }
 
-    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
-      const target = event.target as Node | null;
-
-      if (!target) {
-        return;
-      }
-
-      if (formatPanelRef.current?.contains(target)) {
-        return;
-      }
-
-      if (formatToggleRef.current?.contains(target)) {
-        return;
-      }
-
-      setShowFormatPanel(false);
-    };
-
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('touchstart', handlePointerDown);
-
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('touchstart', handlePointerDown);
-    };
-  }, [showFormatPanel]);
+    if (positionPanelTarget && !positionPanelObject) {
+      setPositionPanelTarget(null);
+    }
+  }, [canEdit, positionPanelObject, positionPanelTarget]);
 
   useEffect(() => {
     if (nonStructuralObjects.length > 0) {
@@ -279,45 +335,48 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }
   }, [card.id, nonStructuralObjects.length]);
 
-  const updateSettings = (partial: Partial<PresentationSettings>) => {
-    setSettings(prev => {
-      if (!canEdit) {
-        return prev;
-      }
-
-      const merged = { ...prev, ...partial } as PresentationSettings;
-
-      if ('cardLayout' in partial && !('cardColor' in partial)) {
-        const targetLayout = partial.cardLayout ?? prev.cardLayout;
-        const mappedColor = layoutDefaultColors[targetLayout];
-        if (!merged.accentImage && mappedColor && merged.cardColor !== mappedColor) {
-          merged.cardColor = mappedColor;
+  const updateSettings = useCallback(
+    (partial: Partial<PresentationSettings>) => {
+      setSettings(prev => {
+        if (!canEdit) {
+          return prev;
         }
-      }
 
-      if ('accentImage' in partial && !partial.accentImage) {
-        const fallbackColor = layoutDefaultColors[merged.cardLayout] ?? 'default';
-        merged.cardColor = fallbackColor;
-        merged.accentImage = null;
-      }
+        const merged = { ...prev, ...partial } as PresentationSettings;
 
-      if ('accentImageName' in partial && !partial.accentImageName) {
-        merged.accentImageName = null;
-      }
+        if ('cardLayout' in partial && !('cardColor' in partial)) {
+          const targetLayout = partial.cardLayout ?? prev.cardLayout;
+          const mappedColor = layoutDefaultColors[targetLayout];
+          if (!merged.accentImage && mappedColor && merged.cardColor !== mappedColor) {
+            merged.cardColor = mappedColor;
+          }
+        }
 
-      onPresentationChange?.(merged, card.id);
-      return merged;
-    });
-  };
+        if ('accentImage' in partial && !partial.accentImage) {
+          const fallbackColor = layoutDefaultColors[merged.cardLayout] ?? 'default';
+          merged.cardColor = fallbackColor;
+          merged.accentImage = null;
+        }
 
-  const resetSettings = () => {
+        if ('accentImageName' in partial && !partial.accentImageName) {
+          merged.accentImageName = null;
+        }
+
+        onPresentationChange?.(merged, card.id);
+        return merged;
+      });
+    },
+    [canEdit, card.id, layoutDefaultColors, onPresentationChange],
+  );
+
+  const resetSettings = useCallback(() => {
     if (!canEdit) {
       return;
     }
     const defaults = { ...DEFAULT_PRESENTATION_SETTINGS };
     setSettings(defaults);
     onPresentationChange?.(defaults, card.id);
-  };
+  }, [canEdit, card.id, onPresentationChange]);
 
   const layoutConfig = useMemo(() => {
     const shared = {
@@ -406,9 +465,206 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     [canEdit, card.id, onTitleChange, resolvedTitle],
   );
 
-  const handleCanvasInteraction = () => {
+  const handleCanvasInteraction = useCallback(() => {
     setHasInteracted(true);
-  };
+  }, []);
+
+  const handleRequestPositionPanel = useCallback(
+    (objectId: string) => {
+      if (!canEdit) {
+        return;
+      }
+      setShowFormatPanel(false);
+      setPositionPanelTarget({ objectId });
+    },
+    [canEdit],
+  );
+
+  const handleBringForward = useCallback(
+    (objectId: string) => {
+      bringSlideObjectsForward(card.id, [objectId]);
+      handleCanvasInteraction();
+    },
+    [bringSlideObjectsForward, card.id, handleCanvasInteraction],
+  );
+
+  const handleSendBackward = useCallback(
+    (objectId: string) => {
+      sendSlideObjectsBackward(card.id, [objectId]);
+      handleCanvasInteraction();
+    },
+    [card.id, handleCanvasInteraction, sendSlideObjectsBackward],
+  );
+
+  const handlePanelBringToFront = useCallback(
+    (objectId: string) => {
+      handleBringToFront([objectId]);
+      handleCanvasInteraction();
+    },
+    [handleBringToFront, handleCanvasInteraction],
+  );
+
+  const handlePanelSendToBack = useCallback(
+    (objectId: string) => {
+      handleSendToBack([objectId]);
+      handleCanvasInteraction();
+    },
+    [handleCanvasInteraction, handleSendToBack],
+  );
+
+  const updateTextBoxGeometry = useCallback(
+    (
+      objectId: string,
+      updates: { width?: number; height?: number; x?: number; y?: number; rotation?: number },
+    ) => {
+      if (!canEdit) {
+        return;
+      }
+
+      const target = slideObjects.find(object => object.id === objectId && object.type === 'text-box');
+      if (!target) {
+        return;
+      }
+
+      const canvas = canvasRef.current;
+
+      const rawWidth = updates.width;
+      const rawHeight = updates.height;
+
+      let nextWidth =
+        typeof rawWidth === 'number' && Number.isFinite(rawWidth) ? rawWidth : target.width;
+      let nextHeight =
+        typeof rawHeight === 'number' && Number.isFinite(rawHeight) ? rawHeight : target.height;
+
+      nextWidth = Math.max(MIN_OBJECT_WIDTH, nextWidth);
+      nextHeight = Math.max(MIN_OBJECT_HEIGHT, nextHeight);
+
+      if (canvas) {
+        nextWidth = Math.min(nextWidth, canvas.clientWidth);
+        nextHeight = Math.min(nextHeight, canvas.clientHeight);
+      }
+
+      const rawX = updates.x;
+      const rawY = updates.y;
+
+      let nextX = typeof rawX === 'number' && Number.isFinite(rawX) ? rawX : target.x;
+      let nextY = typeof rawY === 'number' && Number.isFinite(rawY) ? rawY : target.y;
+
+      if (canvas) {
+        const maxX = Math.max(0, canvas.clientWidth - nextWidth);
+        const maxY = Math.max(0, canvas.clientHeight - nextHeight);
+        nextX = Math.min(Math.max(0, nextX), maxX);
+        nextY = Math.min(Math.max(0, nextY), maxY);
+      } else {
+        nextX = Math.max(0, nextX);
+        nextY = Math.max(0, nextY);
+      }
+
+      const currentRotation = typeof target.rotation === 'number' ? target.rotation : 0;
+      let nextRotation = currentRotation;
+      if (typeof updates.rotation === 'number' && Number.isFinite(updates.rotation)) {
+        nextRotation = updates.rotation;
+      }
+
+      const payload: Partial<SlideObject> = {};
+
+      if (nextWidth !== target.width) {
+        payload.width = nextWidth;
+      }
+      if (nextHeight !== target.height) {
+        payload.height = nextHeight;
+      }
+      if (nextX !== target.x) {
+        payload.x = nextX;
+      }
+      if (nextY !== target.y) {
+        payload.y = nextY;
+      }
+      if (nextRotation !== currentRotation) {
+        payload.rotation = nextRotation;
+      }
+
+      if (Object.keys(payload).length === 0) {
+        return;
+      }
+
+      handleCanvasInteraction();
+      handleBulkUpdate({
+        [objectId]: payload,
+      });
+    },
+    [canEdit, handleBulkUpdate, handleCanvasInteraction, slideObjects],
+  );
+
+  const alignTextBoxToCanvas = useCallback(
+    (objectId: string, alignment: 'top' | 'middle' | 'bottom' | 'left' | 'center' | 'right') => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        return;
+      }
+
+      const target = slideObjects.find(object => object.id === objectId && object.type === 'text-box');
+      if (!target) {
+        return;
+      }
+
+      const updates: { x?: number; y?: number } = {};
+
+      if (alignment === 'top') {
+        updates.y = 0;
+      } else if (alignment === 'middle') {
+        updates.y = (canvas.clientHeight - target.height) / 2;
+      } else if (alignment === 'bottom') {
+        updates.y = canvas.clientHeight - target.height;
+      } else if (alignment === 'left') {
+        updates.x = 0;
+      } else if (alignment === 'center') {
+        updates.x = (canvas.clientWidth - target.width) / 2;
+      } else if (alignment === 'right') {
+        updates.x = canvas.clientWidth - target.width;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return;
+      }
+
+      updateTextBoxGeometry(objectId, updates);
+    },
+    [slideObjects, updateTextBoxGeometry],
+  );
+
+  const closePositionPanel = useCallback(() => {
+    setPositionPanelTarget(null);
+  }, []);
+
+  const positionPanelNode = useMemo(() => {
+    if (!canEdit || !positionPanelObject) {
+      return null;
+    }
+
+    return (
+      <TextBoxPositionPanel
+        object={positionPanelObject}
+        onClose={closePositionPanel}
+        onBringForward={() => handleBringForward(positionPanelObject.id)}
+        onSendBackward={() => handleSendBackward(positionPanelObject.id)}
+        onBringToFront={() => handlePanelBringToFront(positionPanelObject.id)}
+        onSendToBack={() => handlePanelSendToBack(positionPanelObject.id)}
+        onAlign={alignment => alignTextBoxToCanvas(positionPanelObject.id, alignment)}
+        onGeometryChange={updates => updateTextBoxGeometry(positionPanelObject.id, updates)}
+      />
+    );
+  }, [
+    alignTextBoxToCanvas,
+    canEdit,
+    closePositionPanel,
+    handleBringForward,
+    handlePanelBringToFront,
+    handlePanelSendToBack,
+    handleSendBackward,
+    positionPanelObject,
+    updateTextBoxGeometry,
+  ]);
 
   const handleAtomRemove = (atomId: string) => {
     if (!canEdit) {
@@ -471,29 +727,90 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     });
   };
 
-  const handleAccentImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canEdit) {
-      return;
-    }
-
-    const file = event.target.files?.[0];
-    event.target.value = '';
-
-    if (!file) {
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result !== 'string' || reader.result.length === 0) {
+  const handleAccentImageChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      if (!canEdit) {
         return;
       }
 
-      updateSettings({ accentImage: reader.result, accentImageName: file.name });
-    };
+      const file = event.target.files?.[0];
+      event.target.value = '';
 
-    reader.readAsDataURL(file);
-  };
+      if (!file) {
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result !== 'string' || reader.result.length === 0) {
+          return;
+        }
+
+        updateSettings({ accentImage: reader.result, accentImageName: file.name });
+      };
+
+      reader.readAsDataURL(file);
+    },
+    [canEdit, updateSettings],
+  );
+
+  const handleCloseFormatPanel = useCallback(() => {
+    setShowFormatPanel(false);
+  }, []);
+
+  const formatPanelNode = useMemo(() => {
+    if (!canEdit || !showFormatPanel) {
+      return null;
+    }
+
+    return (
+      <CardFormattingPanel
+        settings={settings}
+        canEdit={canEdit}
+        onUpdateSettings={updateSettings}
+        onReset={resetSettings}
+        onAccentImageChange={handleAccentImageChange}
+        accentImageInputRef={accentImageInputRef}
+        onClose={handleCloseFormatPanel}
+      />
+    );
+  }, [
+    accentImageInputRef,
+    canEdit,
+    handleAccentImageChange,
+    handleCloseFormatPanel,
+    resetSettings,
+    settings,
+    showFormatPanel,
+    updateSettings,
+  ]);
+
+  const operationsPanelNode = useMemo(
+    () => formatPanelNode ?? positionPanelNode,
+    [formatPanelNode, positionPanelNode],
+  );
+
+  const lastProvidedOperationsPanel = useRef<ReactNode | null>(null);
+
+  useEffect(() => {
+    if (!onPositionPanelChange) {
+      return;
+    }
+
+    if (operationsPanelNode !== lastProvidedOperationsPanel.current) {
+      onPositionPanelChange(operationsPanelNode);
+      lastProvidedOperationsPanel.current = operationsPanelNode;
+    }
+  }, [onPositionPanelChange, operationsPanelNode]);
+
+  useEffect(() => {
+    return () => {
+      if (onPositionPanelChange && lastProvidedOperationsPanel.current) {
+        onPositionPanelChange(null);
+        lastProvidedOperationsPanel.current = null;
+      }
+    };
+  }, [onPositionPanelChange]);
 
   const containerClasses =
     viewMode === 'horizontal'
@@ -510,7 +827,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       <div
         className={cn(
           'mx-auto transition-all duration-300 p-8',
-          cardWidthClass
+          cardWidthClass,
         )}
       >
         {viewMode === 'vertical' && (
@@ -527,13 +844,13 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         )}
 
         <div className="space-y-4">
-            {canEdit && activeTextToolbar && (
-              <div className="relative mb-4 flex w-full justify-center">
-                <div className="z-30 drop-shadow-xl">{activeTextToolbar}</div>
-              </div>
-            )}
+          {canEdit && activeTextToolbar && (
+            <div className="relative mb-4 flex w-full justify-center">
+              <div className="z-30 drop-shadow-xl">{activeTextToolbar}</div>
+            </div>
+          )}
 
-            <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-2 text-foreground">
               <User className="h-4 w-4" />
               <span className="font-semibold">Exhibition presenter:</span>
@@ -547,73 +864,83 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           </div>
 
           <div className="flex flex-col gap-4">
-            <div
-              className={cn(
-                'relative h-[520px] w-full overflow-hidden bg-card shadow-2xl transition-all duration-300',
-                settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border',
-                isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
-                !canEdit && 'opacity-90'
-              )}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-            >
-              <CanvasStage
-                ref={canvasRef}
-                canEdit={canEdit}
-                isDragOver={Boolean(isDragOver && canEdit && draggedAtom)}
-                objects={slideObjects}
-                showEmptyState={!hasInteracted && nonStructuralObjects.length === 0}
-                layout={settings.cardLayout}
-                cardColor={settings.cardColor}
-                accentImage={settings.accentImage ?? null}
-                accentImageName={settings.accentImageName ?? null}
-                titleObjectId={titleObjectId}
-                onCanvasDragLeave={handleDragLeave}
-                onCanvasDragOver={handleDragOver}
-                onCanvasDrop={handleDrop}
-                onInteract={handleCanvasInteraction}
-                onRemoveAtom={handleAtomRemove}
-                onBringToFront={handleBringToFront}
-                onSendToBack={handleSendToBack}
-                onBulkUpdate={handleBulkUpdate}
-                onGroupObjects={handleGroupObjects}
-                onTitleCommit={handleTitleCommit}
-                onRemoveObject={objectId => removeSlideObject(card.id, objectId)}
-                onTextToolbarChange={setActiveTextToolbar}
-              />
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+              <div
+                className={cn(
+                  'relative h-[520px] w-full overflow-hidden bg-card shadow-2xl transition-all duration-300',
+                  settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border',
+                  isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
+                  !canEdit && 'opacity-90'
+                )}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                <CanvasStage
+                  ref={canvasRef}
+                  canEdit={canEdit}
+                  isDragOver={Boolean(isDragOver && canEdit && draggedAtom)}
+                  objects={slideObjects}
+                  showEmptyState={!hasInteracted && nonStructuralObjects.length === 0}
+                  layout={settings.cardLayout}
+                  cardColor={settings.cardColor}
+                  accentImage={settings.accentImage ?? null}
+                  accentImageName={settings.accentImageName ?? null}
+                  titleObjectId={titleObjectId}
+                  onCanvasDragLeave={handleDragLeave}
+                  onCanvasDragOver={handleDragOver}
+                  onCanvasDrop={handleDrop}
+                  onInteract={handleCanvasInteraction}
+                  onRemoveAtom={handleAtomRemove}
+                  onBringToFront={handleBringToFront}
+                  onSendToBack={handleSendToBack}
+                  onBulkUpdate={handleBulkUpdate}
+                  onGroupObjects={handleGroupObjects}
+                  onTitleCommit={handleTitleCommit}
+                  onRemoveObject={objectId => removeSlideObject(card.id, objectId)}
+                  onTextToolbarChange={setActiveTextToolbar}
+                  onRequestPositionPanel={handleRequestPositionPanel}
+                />
 
-              <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
-                <Button
-                  size="icon"
-                  variant="secondary"
-                  className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
-                  onClick={() => onShowNotes?.()}
-                  type="button"
-                >
-                  <StickyNote className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="secondary"
-                  className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
-                  onClick={() => setShowFormatPanel(!showFormatPanel)}
-                  disabled={!canEdit}
-                  type="button"
-                  ref={formatToggleRef}
-                >
-                  <Settings className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="secondary"
-                  className="h-8 w-8 bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-lg hover:from-purple-600 hover:to-pink-600"
-                  type="button"
-                  disabled={!canEdit}
-                >
-                  <Sparkles className="h-4 w-4" />
-                </Button>
+                <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+                  <Button
+                    size="icon"
+                    variant="secondary"
+                    className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
+                    onClick={() => {
+                      setShowFormatPanel(false);
+                      setPositionPanelTarget(null);
+                      onShowNotes?.();
+                    }}
+                    type="button"
+                  >
+                    <StickyNote className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="secondary"
+                    className={cn(
+                      'h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background transition-colors',
+                      showFormatPanel && 'border border-primary/40 text-primary'
+                    )}
+                    onClick={() => setShowFormatPanel(prev => !prev)}
+                    disabled={!canEdit}
+                    type="button"
+                  >
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="secondary"
+                    className="h-8 w-8 bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-lg hover:from-purple-600 hover:to-pink-600"
+                    type="button"
+                    disabled={!canEdit}
+                  >
+                    <Sparkles className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
+
             </div>
           </div>
 
@@ -667,343 +994,18 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             </div>
           )}
 
-          {showFormatPanel && (
-            <div
-              ref={formatPanelRef}
-              className="absolute right-0 top-12 z-30 w-80 rounded-xl border-2 border-border bg-background p-4 shadow-2xl sm:right-3"
-            >
-              <h3 className="mb-4 text-sm font-semibold">Card Formatting</h3>
-
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Layout</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <Button
-                      size="icon"
-                      variant={settings.cardLayout === 'none' ? 'default' : 'outline'}
-                      className="h-12 w-12 rounded-lg"
-                      onClick={() => updateSettings({ cardLayout: 'none' })}
-                      type="button"
-                      disabled={!canEdit}
-                    >
-                      <span className="sr-only">No layout</span>
-                      <div className="flex h-6 w-6 items-center justify-center">
-                        <div className="h-6 w-6 rounded border-2 border-current" />
-                      </div>
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant={settings.cardLayout === 'top' ? 'default' : 'outline'}
-                      className="h-12 w-12 rounded-lg"
-                      onClick={() => updateSettings({ cardLayout: 'top' })}
-                      type="button"
-                      disabled={!canEdit}
-                    >
-                      <span className="sr-only">Top layout</span>
-                      <div className="flex h-6 w-6 flex-col">
-                        <div className="h-2 rounded-t border-2 border-current bg-current/20" />
-                        <div className="flex-1 rounded-b border-2 border-current" />
-                      </div>
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant={settings.cardLayout === 'bottom' ? 'default' : 'outline'}
-                      className="h-12 w-12 rounded-lg"
-                      onClick={() => updateSettings({ cardLayout: 'bottom' })}
-                      type="button"
-                      disabled={!canEdit}
-                    >
-                      <span className="sr-only">Bottom layout</span>
-                      <div className="flex h-6 w-6 flex-col">
-                        <div className="flex-1 rounded-t border-2 border-current" />
-                        <div className="h-2 rounded-b border-2 border-current bg-current/20" />
-                      </div>
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant={settings.cardLayout === 'right' ? 'default' : 'outline'}
-                      className="h-12 w-12 rounded-lg"
-                      onClick={() => updateSettings({ cardLayout: 'right' })}
-                      type="button"
-                      disabled={!canEdit}
-                    >
-                      <span className="sr-only">Right layout</span>
-                      <div className="flex h-6 w-6">
-                        <div className="flex-1 rounded-l border-2 border-current" />
-                        <div className="w-2 rounded-r border-2 border-current bg-current/20" />
-                      </div>
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant={settings.cardLayout === 'left' ? 'default' : 'outline'}
-                      className="h-12 w-12 rounded-lg"
-                      onClick={() => updateSettings({ cardLayout: 'left' })}
-                      type="button"
-                      disabled={!canEdit}
-                    >
-                      <span className="sr-only">Left layout</span>
-                      <div className="flex h-6 w-6">
-                        <div className="w-2 rounded-l border-2 border-current bg-current/20" />
-                        <div className="flex-1 rounded-r border-2 border-current" />
-                      </div>
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant={settings.cardLayout === 'full' ? 'default' : 'outline'}
-                      className="h-12 w-12 rounded-lg"
-                      onClick={() => updateSettings({ cardLayout: 'full' })}
-                      type="button"
-                      disabled={!canEdit}
-                    >
-                      <span className="sr-only">Entire background layout</span>
-                      <div className="h-6 w-6 rounded border-2 border-current bg-current/20" />
-                    </Button>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Accent image</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {settings.accentImage && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs text-destructive"
-                        onClick={() => updateSettings({ accentImage: null, accentImageName: null })}
-                        disabled={!canEdit}
-                        type="button"
-                      >
-                        Remove
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 text-xs text-primary"
-                      onClick={() => accentImageInputRef.current?.click()}
-                      disabled={!canEdit}
-                      type="button"
-                    >
-                      {settings.accentImage ? 'Change' : 'Upload'}
-                    </Button>
-                  </div>
-                </div>
-
-                {settings.accentImage && (
-                  <div className="space-y-2">
-                    <div className="relative h-24 overflow-hidden rounded-lg border border-border">
-                      <img
-                        src={settings.accentImage}
-                        alt="Accent"
-                        className="h-full w-full object-cover"
-                      />
-                      {settings.accentImageName && (
-                        <div className="absolute bottom-0 left-0 right-0 bg-background/90 px-2 py-1 text-[11px] truncate">
-                          {settings.accentImageName}
-                        </div>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      Accent images replace the card color for this slide layout.
-                    </p>
-                  </div>
-                )}
-
-                <input
-                  ref={accentImageInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleAccentImageChange}
-                  className="hidden"
-                />
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Palette className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Card color</span>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs capitalize"
-                        disabled={!canEdit || Boolean(settings.accentImage)}
-                      >
-                        {settings.cardColor}
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="bg-background">
-                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'default' })}>Default</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'blue' })}>Blue</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'purple' })}>Purple</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'green' })}>Green</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => updateSettings({ cardColor: 'orange' })}>Orange</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Layout className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Full-bleed card</span>
-                  </div>
-                  <Switch
-                    checked={settings.fullBleed}
-                    onCheckedChange={value => updateSettings({ fullBleed: value })}
-                    disabled={!canEdit}
-                  />
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <AlignCenter className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Content alignment</span>
-                  </div>
-                  <div className="flex gap-1">
-                    <Button
-                      size="icon"
-                      variant={settings.contentAlignment === 'top' ? 'default' : 'outline'}
-                      className="h-7 w-7"
-                      onClick={() => updateSettings({ contentAlignment: 'top' })}
-                      disabled={!canEdit}
-                    >
-                      <AlignLeft className="h-3 w-3 rotate-90" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant={settings.contentAlignment === 'center' ? 'default' : 'outline'}
-                      className="h-7 w-7"
-                      onClick={() => updateSettings({ contentAlignment: 'center' })}
-                      disabled={!canEdit}
-                    >
-                      <AlignCenter className="h-3 w-3 rotate-90" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant={settings.contentAlignment === 'bottom' ? 'default' : 'outline'}
-                      className="h-7 w-7"
-                      onClick={() => updateSettings({ contentAlignment: 'bottom' })}
-                      disabled={!canEdit}
-                    >
-                      <AlignRight className="h-3 w-3 rotate-90" />
-                    </Button>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Maximize2 className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Card width</span>
-                  </div>
-                  <div className="flex gap-1">
-                    <Button
-                      size="sm"
-                      variant={settings.cardWidth === 'M' ? 'default' : 'outline'}
-                      className="h-7 px-3 text-xs"
-                      onClick={() => updateSettings({ cardWidth: 'M' })}
-                      disabled={!canEdit}
-                    >
-                      M
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant={settings.cardWidth === 'L' ? 'default' : 'outline'}
-                      className="h-7 px-3 text-xs"
-                      onClick={() => updateSettings({ cardWidth: 'L' })}
-                      disabled={!canEdit}
-                    >
-                      L
-                    </Button>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Backdrop</span>
-                  <Button size="sm" variant="ghost" className="h-7 text-xs text-primary">
-                    <Plus className="mr-1 h-3 w-3" />
-                    Add
-                  </Button>
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Card headers & footers</span>
-                  <Button size="sm" variant="ghost" className="h-7 text-xs text-primary">
-                    Edit
-                  </Button>
-                </div>
-
-                <Separator />
-
-                <Button
-                  variant="outline"
-                  className="w-full justify-start text-sm"
-                  onClick={resetSettings}
-                  type="button"
-                  disabled={!canEdit}
-                >
-                  <RotateCcw className="mr-2 h-4 w-4" />
-                  Reset styling
-                </Button>
-              </div>
+          {viewMode === 'horizontal' && (
+            <div className="mt-6 text-center">
+              <span className="inline-block px-4 py-2 bg-muted rounded-full text-sm font-medium text-muted-foreground">
+                Slide {slideNumber} of {totalSlides}
+              </span>
             </div>
           )}
         </div>
-
-        {viewMode === 'horizontal' && (
-          <div className="mt-6 text-center">
-            <span className="inline-block px-4 py-2 bg-muted rounded-full text-sm font-medium text-muted-foreground">
-              Slide {slideNumber} of {totalSlides}
-            </span>
-          </div>
-        )}
       </div>
     </div>
   );
 };
-
-interface CanvasStageProps {
-  canEdit: boolean;
-  objects: SlideObject[];
-  isDragOver: boolean;
-  showEmptyState: boolean;
-  layout: CardLayout;
-  cardColor: CardColor;
-  accentImage?: string | null;
-  accentImageName?: string | null;
-  titleObjectId?: string | null;
-  onCanvasDragOver: (event: React.DragEvent) => void;
-  onCanvasDragLeave: () => void;
-  onCanvasDrop: (event: React.DragEvent) => void;
-  onInteract: () => void;
-  onRemoveAtom?: (atomId: string) => void;
-  onBringToFront: (objectIds: string[]) => void;
-  onSendToBack: (objectIds: string[]) => void;
-  onBulkUpdate: (updates: Record<string, Partial<SlideObject>>) => void;
-  onGroupObjects: (objectIds: string[], groupId: string | null) => void;
-  onTitleCommit?: (text: string) => void;
-  onRemoveObject?: (objectId: string) => void;
-  onTextToolbarChange?: (toolbar: ReactNode | null) => void;
-}
 
 const MIN_OBJECT_WIDTH = 220;
 const MIN_OBJECT_HEIGHT = 120;
@@ -1101,6 +1103,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       onTitleCommit,
       onRemoveObject,
       onTextToolbarChange,
+      onRequestPositionPanel,
     },
     forwardedRef,
   ) => {
@@ -1191,6 +1194,342 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         });
       },
       [],
+    );
+
+    const updateShapeProps = useCallback(
+      (objectId: string, updates: Partial<ShapeObjectProps>) => {
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'shape') {
+          return;
+        }
+
+        const currentProps = (object.props ?? {}) as Record<string, unknown>;
+        const nextProps = {
+          ...currentProps,
+          ...updates,
+        } as Record<string, unknown>;
+
+        onBulkUpdate({
+          [objectId]: {
+            props: nextProps,
+          },
+        });
+      },
+      [objectsMap, onBulkUpdate],
+    );
+
+    const mutateTableState = useCallback(
+      (objectId: string, mutator: (state: TableState) => TableState | null) => {
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'table') {
+          return;
+        }
+
+        const currentState = readTableState(object);
+        const nextState = mutator(currentState);
+
+        if (!nextState || tableStatesEqual(currentState, nextState)) {
+          return;
+        }
+
+        onInteract();
+        onBulkUpdate({
+          [objectId]: {
+            props: {
+              ...(object.props || {}),
+              data: nextState.data,
+              rows: nextState.rows,
+              cols: nextState.cols,
+              locked: nextState.locked,
+              showOutline: nextState.showOutline,
+              headers: nextState.headers,
+              styleId: nextState.styleId,
+            },
+          },
+        });
+      },
+      [objectsMap, onBulkUpdate, onInteract],
+    );
+
+    const updateTableCellContent = useCallback(
+      (objectId: string, rowIndex: number, colIndex: number, value: string) => {
+        mutateTableState(objectId, state => {
+          if (rowIndex < 0 || colIndex < 0 || rowIndex >= state.rows || colIndex >= state.cols) {
+            return state;
+          }
+
+          const currentCell = state.data[rowIndex][colIndex];
+          if (!currentCell) {
+            return state;
+          }
+
+          if (currentCell.content === value) {
+            return state;
+          }
+
+          const nextData = cloneTableMatrix(state.data);
+          nextData[rowIndex][colIndex] = {
+            ...nextData[rowIndex][colIndex],
+            content: value,
+          };
+
+          return {
+            ...state,
+            data: nextData,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const updateTableCellFormatting = useCallback(
+      (objectId: string, rowIndex: number, colIndex: number, updates: Partial<TableCellFormatting>) => {
+        mutateTableState(objectId, state => {
+          if (rowIndex < 0 || colIndex < 0 || rowIndex >= state.rows || colIndex >= state.cols) {
+            return state;
+          }
+
+          const currentCell = state.data[rowIndex][colIndex];
+          if (!currentCell) {
+            return state;
+          }
+
+          const nextFormatting = { ...currentCell.formatting, ...updates };
+          if (formattingShallowEqual(currentCell.formatting, nextFormatting)) {
+            return state;
+          }
+
+          const nextData = cloneTableMatrix(state.data);
+          nextData[rowIndex][colIndex] = {
+            ...nextData[rowIndex][colIndex],
+            formatting: nextFormatting,
+          };
+
+          return {
+            ...state,
+            data: nextData,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const updateTableHeaderContent = useCallback(
+      (objectId: string, colIndex: number, value: string) => {
+        mutateTableState(objectId, state => {
+          if (colIndex < 0 || colIndex >= state.cols) {
+            return state;
+          }
+
+          const currentHeader = state.headers[colIndex];
+          if (!currentHeader || currentHeader.content === value) {
+            return state;
+          }
+
+          const nextHeaders = cloneTableHeaders(state.headers);
+          nextHeaders[colIndex] = {
+            ...nextHeaders[colIndex],
+            content: value,
+          };
+
+          return {
+            ...state,
+            headers: nextHeaders,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const updateTableHeaderFormatting = useCallback(
+      (objectId: string, colIndex: number, updates: Partial<TableCellFormatting>) => {
+        mutateTableState(objectId, state => {
+          if (colIndex < 0 || colIndex >= state.cols) {
+            return state;
+          }
+
+          const currentHeader = state.headers[colIndex];
+          if (!currentHeader) {
+            return state;
+          }
+
+          const nextFormatting = { ...currentHeader.formatting, ...updates };
+          if (formattingShallowEqual(currentHeader.formatting, nextFormatting)) {
+            return state;
+          }
+
+          const nextHeaders = cloneTableHeaders(state.headers);
+          nextHeaders[colIndex] = {
+            ...nextHeaders[colIndex],
+            formatting: nextFormatting,
+          };
+
+          return {
+            ...state,
+            headers: nextHeaders,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const toggleTableLock = useCallback(
+      (objectId: string) => {
+        mutateTableState(objectId, state => ({
+          ...state,
+          locked: !state.locked,
+        }));
+      },
+      [mutateTableState],
+    );
+
+    const toggleTableOutline = useCallback(
+      (objectId: string) => {
+        mutateTableState(objectId, state => ({
+          ...state,
+          showOutline: !state.showOutline,
+        }));
+      },
+      [mutateTableState],
+    );
+
+    const setTableStyle = useCallback(
+      (objectId: string, nextStyleId: string) => {
+        mutateTableState(objectId, state => {
+          const safeStyleId = ensureTableStyleId(nextStyleId);
+
+          if (state.styleId === safeStyleId) {
+            return state;
+          }
+
+          return {
+            ...state,
+            styleId: safeStyleId,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const addRowsToTable = useCallback(
+      (objectId: string, count: number) => {
+        if (count <= 0) {
+          return;
+        }
+
+        mutateTableState(objectId, state => {
+          const columnCount = Math.max(state.cols, 1);
+          const additions = Array.from({ length: count }, () => createEmptyTableRow(columnCount));
+          const nextData = [...state.data, ...additions];
+
+          return {
+            ...state,
+            data: nextData,
+            rows: nextData.length,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const addColumnsToTable = useCallback(
+      (objectId: string, count: number) => {
+        if (count <= 0) {
+          return;
+        }
+
+        mutateTableState(objectId, state => {
+          const nextData = state.data.map(row => [
+            ...row,
+            ...Array.from({ length: count }, () => createEmptyCell()),
+          ]);
+          const existingHeaders = cloneTableHeaders(state.headers);
+          const headerAdditions = Array.from({ length: count }, (_, additionIndex) =>
+            createDefaultHeaderCell(existingHeaders.length + additionIndex),
+          );
+          const nextHeaders = [...existingHeaders, ...headerAdditions];
+          const nextCols = nextHeaders.length;
+
+          return {
+            ...state,
+            data: nextData,
+            cols: nextCols,
+            headers: nextHeaders,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const removeRowsFromTable = useCallback(
+      (objectId: string, startIndex: number, count: number) => {
+        if (count <= 0) {
+          return;
+        }
+
+        mutateTableState(objectId, state => {
+          if (state.rows <= 1) {
+            return state;
+          }
+
+          const safeStart = Math.max(0, Math.min(startIndex, state.rows - 1));
+          const available = state.rows - safeStart;
+          const actualCount = Math.min(count, available);
+
+          if (state.rows - actualCount < 1) {
+            return state;
+          }
+
+          const nextData = state.data.filter((_, index) => index < safeStart || index >= safeStart + actualCount);
+
+          return {
+            ...state,
+            data: nextData,
+            rows: nextData.length,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const removeColumnsFromTable = useCallback(
+      (objectId: string, startIndex: number, count: number) => {
+        if (count <= 0) {
+          return;
+        }
+
+        mutateTableState(objectId, state => {
+          if (state.cols <= 1) {
+            return state;
+          }
+
+          const safeStart = Math.max(0, Math.min(startIndex, state.cols - 1));
+          const available = state.cols - safeStart;
+          const actualCount = Math.min(count, available);
+
+          if (state.cols - actualCount < 1) {
+            return state;
+          }
+
+          const nextData = state.data.map(row => [
+            ...row.slice(0, safeStart),
+            ...row.slice(safeStart + actualCount),
+          ]);
+          const remainingHeaders = cloneTableHeaders(state.headers);
+          const nextHeaders = remainingHeaders.filter(
+            (_, index) => index < safeStart || index >= safeStart + actualCount,
+          );
+          const nextCols = nextHeaders.length;
+
+          return {
+            ...state,
+            data: nextData,
+            cols: nextCols,
+            headers: nextHeaders,
+          };
+        });
+      },
+      [mutateTableState],
     );
 
     const commitEditingText = useCallback(() => {
@@ -1323,12 +1662,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [clampPosition],
     );
 
-    const handleBackgroundPointerDown = useCallback(
-      (event: React.PointerEvent<HTMLDivElement>) => {
+    const handleBackgroundPointerDown = useCallback(() => {
         if (!canEdit) {
-          return;
-        }
-        if (event.target !== event.currentTarget) {
           return;
         }
         if (editingTextState) {
@@ -1341,11 +1676,96 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [canEdit, commitEditingText, editingTextState, focusCanvas, onInteract],
     );
 
+    const selectionCount = selectedIds.length;
+
+    useEffect(() => {
+      if (!canEdit || selectionCount === 0) {
+        return;
+      }
+
+      const resolveTargetElement = (eventTarget: EventTarget | null): Element | null => {
+        if (!eventTarget) {
+          return null;
+        }
+
+        if (eventTarget instanceof Element) {
+          return eventTarget;
+        }
+
+        if (eventTarget instanceof Node) {
+          return eventTarget.parentElement;
+        }
+
+        return null;
+      };
+
+      const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+        const node = internalRef.current;
+
+        if (!node) {
+          return;
+        }
+
+        const targetElement = resolveTargetElement(event.target);
+
+        if (targetElement) {
+          if (node.contains(targetElement)) {
+            return;
+          }
+
+          if (targetElement.closest('[data-text-toolbar-root]')) {
+            return;
+          }
+        }
+
+        if (editingTextState) {
+          commitEditingText();
+        }
+
+        onInteract();
+        setSelectedIds([]);
+      };
+
+      document.addEventListener('mousedown', handlePointerDown);
+      document.addEventListener('touchstart', handlePointerDown);
+
+      return () => {
+        document.removeEventListener('mousedown', handlePointerDown);
+        document.removeEventListener('touchstart', handlePointerDown);
+      };
+    }, [canEdit, commitEditingText, editingTextState, onInteract, selectionCount]);
+
     const handleObjectPointerDown = useCallback(
       (event: React.PointerEvent<HTMLDivElement>, objectId: string) => {
         if (!canEdit) {
           return;
         }
+
+        const targetElement = event.target instanceof Element ? event.target : null;
+        const editableTableCell = targetElement?.closest('[data-exhibition-table-cell-content="true"]');
+
+        const isMulti = event.shiftKey || event.metaKey || event.ctrlKey;
+        const resolveSelection = () => {
+          const baseSelection = isMulti
+            ? selectedIds.includes(objectId)
+              ? selectedIds
+              : [...selectedIds, objectId]
+            : [objectId];
+          return Array.from(new Set(baseSelection));
+        };
+
+        if (editableTableCell) {
+          event.stopPropagation();
+          if (editingTextState) {
+            commitEditingText();
+          }
+          onInteract();
+          const uniqueSelection = resolveSelection();
+          setSelectedIds(uniqueSelection);
+          onBringToFront(uniqueSelection);
+          return;
+        }
+
         event.preventDefault();
         event.stopPropagation();
         if (editingTextState) {
@@ -1354,13 +1774,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         onInteract();
         focusCanvas();
 
-        const isMulti = event.shiftKey || event.metaKey || event.ctrlKey;
-        const baseSelection = isMulti
-          ? selectedIds.includes(objectId)
-            ? selectedIds
-            : [...selectedIds, objectId]
-          : [objectId];
-        const uniqueSelection = Array.from(new Set(baseSelection));
+        const uniqueSelection = resolveSelection();
         setSelectedIds(uniqueSelection);
 
         const initialPositions = new Map<string, { x: number; y: number }>();
@@ -1477,7 +1891,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             }
             if (isAtomObject(object) && onRemoveAtom) {
               onRemoveAtom(object.props.atom.id);
-            } else if (object.type === 'text-box' && onRemoveObject) {
+            } else if (
+              (object.type === 'text-box' || object.type === 'table' || object.type === 'shape') &&
+              onRemoveObject
+            ) {
               onRemoveObject(id);
             }
           });
@@ -1670,6 +2087,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         return null;
       }
 
+      if (object.type === 'shape') {
+        return null;
+      }
+
       if (typeof object.props?.text === 'string') {
         return <p className="text-sm leading-relaxed text-muted-foreground">{object.props.text}</p>;
       }
@@ -1716,8 +2137,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           {objects.map(object => {
             const isSelected = selectedIds.includes(object.id);
             const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
+            const rotation = typeof object.rotation === 'number' ? object.rotation : 0;
             const isAccentImageObject = object.type === 'accent-image';
             const isTextBoxObject = object.type === 'text-box';
+            const isTableObject = object.type === 'table';
+            const isShapeObject = object.type === 'shape';
             const isEditingTextBox =
               isTextBoxObject &&
               editingTextState?.id === object.id &&
@@ -1725,6 +2149,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const textBoxFormatting = isTextBoxObject
               ? extractTextBoxFormatting(object.props as Record<string, unknown> | undefined)
               : null;
+            const tableState = isTableObject ? readTableState(object) : null;
+            const featureOverviewAtomId =
+              isAtomObject(object) && typeof object.props.atom.atomId === 'string'
+                ? object.props.atom.atomId
+                : null;
+            const isFeatureOverviewAtom = featureOverviewAtomId === 'feature-overview';
 
           return (
             <div
@@ -1743,12 +2173,28 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               <div
                 className={cn(
                   'relative flex h-full w-full flex-col overflow-hidden rounded-3xl border-2 shadow-xl transition-all',
-                  isAccentImageObject ? 'bg-muted/30' : 'bg-background/95',
-                  isSelected ? 'border-primary shadow-2xl' : 'border-border/70 hover:border-primary/40',
-                  isTextBoxObject && 'overflow-visible border-transparent bg-transparent shadow-none',
+                  isShapeObject
+                    ? 'border-none bg-transparent shadow-none overflow-visible'
+                    : isAccentImageObject
+                    ? 'bg-muted/30'
+                    : 'bg-background/95',
+                  isFeatureOverviewAtom
+                    ? isSelected
+                      ? 'border-primary shadow-2xl'
+                      : 'border-transparent'
+                    : !isShapeObject &&
+                      (isSelected
+                        ? 'border-primary shadow-2xl'
+                        : 'border-border/70 hover-border-primary/40'),
+                  (isTextBoxObject || isTableObject) &&
+                    'overflow-visible border-transparent bg-transparent shadow-none',
                 )}
+                style={{
+                  transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
+                  transformOrigin: rotation !== 0 ? 'center center' : undefined,
+                }}
               >
-                {isAtomObject(object) && (
+                {isAtomObject(object) && !isFeatureOverviewAtom && (
                   <div className="flex items-center gap-2 border-b border-border/60 bg-muted/10 px-4 py-2">
                     <div className={`h-2.5 w-2.5 rounded-full ${object.props.atom.color}`} />
                     <div className="flex flex-col">
@@ -1762,8 +2208,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 <div
                   className={cn(
                     'relative flex-1 overflow-hidden',
-                    isAccentImageObject ? undefined : 'p-4',
-                    isTextBoxObject && 'overflow-visible p-0',
+                    isAccentImageObject || isShapeObject ? undefined : 'p-4',
+                    (isTextBoxObject || isTableObject) && 'overflow-visible p-0',
+                    isShapeObject && 'flex items-center justify-center overflow-visible p-0',
                   )}
                 >
                   {isTextBoxObject ? (
@@ -1795,6 +2242,62 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
                       onInteract={onInteract}
                       onToolbarStateChange={handleTextToolbarStateChange}
+                      onRequestPositionPanel={
+                        onRequestPositionPanel ? () => onRequestPositionPanel(object.id) : undefined
+                      }
+                    />
+                  ) : isTableObject && tableState ? (
+                    <ExhibitionTable
+                      id={object.id}
+                      headers={tableState.headers}
+                      data={tableState.data}
+                      rows={tableState.rows}
+                      cols={tableState.cols}
+                      locked={tableState.locked}
+                      showOutline={tableState.showOutline}
+                      styleId={tableState.styleId}
+                      canEdit={canEdit}
+                      isSelected={isSelected}
+                      selectedCell={isSelected ? undefined : null}
+                      onUpdateCell={(row, col, value) => updateTableCellContent(object.id, row, col, value)}
+                      onUpdateCellFormatting={(row, col, updates) =>
+                        updateTableCellFormatting(object.id, row, col, updates)
+                      }
+                      onUpdateHeader={(col, value) => updateTableHeaderContent(object.id, col, value)}
+                      onUpdateHeaderFormatting={(col, updates) =>
+                        updateTableHeaderFormatting(object.id, col, updates)
+                      }
+                      onToggleLock={() => toggleTableLock(object.id)}
+                      onToggleOutline={() => toggleTableOutline(object.id)}
+                      onStyleChange={nextStyleId => setTableStyle(object.id, nextStyleId)}
+                      onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
+                      onDeleteColumn={(startIndex, count) => removeColumnsFromTable(object.id, startIndex, count)}
+                      onDelete2Columns={(startIndex, count) => removeColumnsFromTable(object.id, startIndex, count)}
+                      onDeleteRow={(startIndex, count) => removeRowsFromTable(object.id, startIndex, count)}
+                      onDelete2Rows={(startIndex, count) => removeRowsFromTable(object.id, startIndex, count)}
+                      onAddColumn={() => addColumnsToTable(object.id, 1)}
+                      onAdd2Columns={() => addColumnsToTable(object.id, 2)}
+                      onAddRow={() => addRowsToTable(object.id, 1)}
+                      onAdd2Rows={() => addRowsToTable(object.id, 2)}
+                      onToolbarStateChange={node => handleTextToolbarStateChange(object.id, node)}
+                      onInteract={onInteract}
+                      className="h-full w-full"
+                    />
+                  ) : isShapeObject ? (
+                    <SlideShapeObject
+                      id={object.id}
+                      canEdit={canEdit}
+                      isSelected={isSelected}
+                      props={object.props as Record<string, unknown> | undefined}
+                      onUpdateProps={updates => updateShapeProps(object.id, updates)}
+                      onToolbarStateChange={handleTextToolbarStateChange}
+                      onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
+                      onRequestPositionPanel={
+                        onRequestPositionPanel ? () => onRequestPositionPanel(object.id) : undefined
+                      }
+                      onBringToFront={() => onBringToFront([object.id])}
+                      onSendToBack={() => onSendToBack([object.id])}
+                      onInteract={onInteract}
                     />
                   ) : (
                     <div
@@ -1811,9 +2314,27 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   <Button
                     size="icon"
                     variant="ghost"
-                    className="absolute top-3 right-3 z-30 h-9 w-9 text-muted-foreground hover:text-destructive"
+                    className={cn(
+                      'absolute top-3 right-3 z-30 h-9 w-9 text-muted-foreground hover:text-destructive opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100',
+                      isSelected && 'opacity-100',
+                    )}
                     onPointerDown={event => event.stopPropagation()}
                     onClick={() => onRemoveAtom(object.props.atom.id)}
+                    type="button"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+                {canEdit && isShapeObject && onRemoveObject && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className={cn(
+                      'absolute top-3 right-3 z-30 h-9 w-9 text-muted-foreground hover:text-destructive opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100',
+                      isSelected && 'opacity-100',
+                    )}
+                    onPointerDown={event => event.stopPropagation()}
+                    onClick={() => onRemoveObject(object.id)}
                     type="button"
                   >
                     <Trash2 className="h-4 w-4" />

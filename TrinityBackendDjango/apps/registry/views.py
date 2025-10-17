@@ -36,8 +36,11 @@ logger = logging.getLogger(__name__)
 
 class AppViewSet(viewsets.ModelViewSet):
     """
-    CRUD for App templates.
-    Admin-only for writes; read-only for all authenticated users.
+    CRUD for App templates in tenant schema.
+    
+    This viewset controls which apps (from public.usecase) are accessible to the current tenant.
+    Only enabled apps are shown to non-admin users.
+    Admin users can see all apps (enabled and disabled) for tenant management.
     """
     queryset = App.objects.all()
     serializer_class = AppSerializer
@@ -47,7 +50,12 @@ class AppViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
+        
+        # Filter to only show enabled apps for non-admin users
         if not user.is_staff:
+            qs = qs.filter(is_enabled=True)
+            
+            # Additional role-based filtering
             try:
                 from apps.roles.models import UserRole
 
@@ -57,17 +65,102 @@ class AppViewSet(viewsets.ModelViewSet):
                     allowed.update(role.allowed_apps or [])
                 if allowed:
                     qs = qs.filter(id__in=allowed)
-                else:
-                    qs = qs.none()
             except Exception:
-                qs = qs.none()
-        return qs
+                # If roles don't exist or error, just show enabled apps
+                pass
+        
+        # Order by name for consistent display
+        return qs.order_by('name')
 
     def get_permissions(self):
         if self.action in ("create", "update", "partial_update", "destroy"):
             return [permissions.IsAdminUser()]
         return super().get_permissions()
 
+    def list(self, request, *args, **kwargs):
+        """
+        List apps accessible to this tenant with full molecule/atom data from public.usecase
+        Uses API-level tenant switching based on user's environment variables.
+        """
+        from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+        from apps.usecase.models import UseCase
+        
+        # Get user's tenant schema
+        schema_name = get_user_tenant_schema(request.user)
+        if not schema_name:
+            logger.warning(f"No tenant schema found for user {request.user.username}")
+            return Response([])
+        
+        logger.info(f"🔄 Switching to tenant schema: {schema_name} for user {request.user.username}")
+        
+        # Switch to user's tenant schema
+        with switch_to_user_tenant(request.user):
+            logger.info(f"✅ Now in tenant schema: {schema_name}")
+            # Get apps from the user's tenant schema
+            queryset = self.filter_queryset(self.get_queryset())
+            logger.info(f"📊 Queryset count: {queryset.count()}")
+            
+            enriched_apps = []
+            for app in queryset:
+                app_data = {
+                    'id': app.id,
+                    'name': app.name,
+                    'slug': app.slug,
+                    'description': app.description,
+                    'modules': [],
+                    'molecules': [],
+                    'molecule_atoms': {},
+                    'atoms_in_molecules': []
+                }
+                
+                # Fetch data from public.usecase if linked
+                if app.usecase_id:
+                    try:
+                        from django_tenants.utils import schema_context
+                        from apps.trinity_v1_atoms.models import TrinityV1Atom
+                        
+                        # Access UseCase from public schema
+                        with schema_context('public'):
+                            usecase = UseCase.objects.prefetch_related('molecule_objects').get(id=app.usecase_id)
+                            app_data['modules'] = usecase.modules or []
+                            app_data['molecules'] = usecase.molecules or []
+                            
+                            # Build molecule_atoms and atoms_in_molecules from molecule_objects
+                            molecule_atoms = {}
+                            atoms_in_molecules = []
+                            
+                            for molecule in usecase.molecule_objects.all():
+                                atom_names = molecule.atoms or []
+                                matching_atoms = TrinityV1Atom.objects.filter(atom_id__in=atom_names)
+                                
+                                atoms_list = []
+                                for atom in matching_atoms:
+                                    atom_data = {
+                                        'id': atom.atom_id,
+                                        'name': atom.name,
+                                        'description': atom.description,
+                                        'category': atom.category
+                                    }
+                                    atoms_list.append(atom_data)
+                                    if atom.atom_id not in atoms_in_molecules:
+                                        atoms_in_molecules.append(atom.atom_id)
+                                
+                                molecule_atoms[molecule.molecule_id] = {
+                                    'id': molecule.molecule_id,
+                                    'name': molecule.name,
+                                    'atoms': atoms_list
+                                }
+                            
+                            app_data['molecule_atoms'] = molecule_atoms
+                            app_data['atoms_in_molecules'] = atoms_in_molecules
+                    except UseCase.DoesNotExist:
+                        logger.warning(f"UseCase {app.usecase_id} not found for app {app.slug}")
+                
+                enriched_apps.append(app_data)
+            
+            logger.info(f"Found {len(enriched_apps)} apps for tenant {schema_name}")
+            return Response(enriched_apps)
+    
     def retrieve(self, request, *args, **kwargs):
         load_env_vars(request.user)
         app_obj = self.get_object()
@@ -96,32 +189,43 @@ class ProjectViewSet(viewsets.ModelViewSet):
     authentication_classes = [CsrfExemptSessionAuthentication]
 
     def get_queryset(self):
+        from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+        
         user = self.request.user
-        qs = self.queryset
+        
+        # Get user's tenant schema
+        schema_name = get_user_tenant_schema(user)
+        if not schema_name:
+            logger.warning(f"No tenant schema found for user {user.username}")
+            return Project.objects.none()
+        
+        # Switch to user's tenant schema before filtering projects
+        with switch_to_user_tenant(user):
+            qs = self.queryset
 
-        if not user.is_staff:
-            try:
-                from apps.roles.models import UserRole
+            if not user.is_staff:
+                try:
+                    from apps.roles.models import UserRole
 
-                roles = UserRole.objects.filter(user=user)
-                allowed = set()
-                for role in roles:
-                    allowed.update(role.allowed_apps or [])
-                if allowed:
-                    qs = qs.filter(app_id__in=allowed)
-                else:
+                    roles = UserRole.objects.filter(user=user)
+                    allowed = set()
+                    for role in roles:
+                        allowed.update(role.allowed_apps or [])
+                    if allowed:
+                        qs = qs.filter(app_id__in=allowed)
+                    else:
+                        return Project.objects.none()
+                except Exception:
                     return Project.objects.none()
-            except Exception:
-                return Project.objects.none()
 
-        app_param = self.request.query_params.get("app")
-        if app_param:
-            if app_param.isdigit():
-                qs = qs.filter(app__id=app_param)
-            else:
-                qs = qs.filter(app__slug=app_param)
+            app_param = self.request.query_params.get("app")
+            if app_param:
+                if app_param.isdigit():
+                    qs = qs.filter(app__id=app_param)
+                else:
+                    qs = qs.filter(app__slug=app_param)
 
-        return qs
+            return qs
 
     def _can_edit(self, user):
         # Temporarily allow all authenticated users to edit for debugging
@@ -136,70 +240,113 @@ class ProjectViewSet(viewsets.ModelViewSet):
         return user.is_staff or any(user.has_perm(p) for p in perms)
 
     def update(self, request, *args, **kwargs):
+        from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+        
         if not self._can_edit(request.user):
             return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
-        return super().update(request, *args, **kwargs)
+        
+        # Get user's tenant schema
+        schema_name = get_user_tenant_schema(request.user)
+        if not schema_name:
+            logger.warning(f"No tenant schema found for user {request.user.username}")
+            return Response({"detail": "No tenant found for user"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Switch to user's tenant schema before updating project
+        with switch_to_user_tenant(request.user):
+            return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
+        from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+        
         if not self._can_edit(request.user):
             return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
-        return super().partial_update(request, *args, **kwargs)
+        
+        # Get user's tenant schema
+        schema_name = get_user_tenant_schema(request.user)
+        if not schema_name:
+            logger.warning(f"No tenant schema found for user {request.user.username}")
+            return Response({"detail": "No tenant found for user"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Switch to user's tenant schema before updating project
+        with switch_to_user_tenant(request.user):
+            return super().partial_update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
+        from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+        
         if not self._can_edit(request.user):
             return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
-        project = self.get_object()
-        project.is_deleted = True
-        project.save(update_fields=["is_deleted"])
+        
+        # Get user's tenant schema
+        schema_name = get_user_tenant_schema(request.user)
+        if not schema_name:
+            logger.warning(f"No tenant schema found for user {request.user.username}")
+            return Response({"detail": "No tenant found for user"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Switch to user's tenant schema before deleting project
+        with switch_to_user_tenant(request.user):
+            project = self.get_object()
+            project.is_deleted = True
+            project.save(update_fields=["is_deleted"])
 
-        tenant_obj = getattr(request, "tenant", None)
-        client_name_env = os.getenv("CLIENT_NAME", "default_client")
-        tenant_candidates = {
-            client_name_env,
-            client_name_env.replace(" ", "_"),
-        }
-        if tenant_obj:
-            for attr in ("name", "slug"):
-                val = getattr(tenant_obj, attr, None)
-                if val:
-                    tenant_candidates.add(val)
-                    tenant_candidates.add(val.replace(" ", "_"))
+            tenant_obj = getattr(request, "tenant", None)
+            client_name_env = os.getenv("CLIENT_NAME", "default_client")
+            tenant_candidates = {
+                client_name_env,
+                client_name_env.replace(" ", "_"),
+            }
+            if tenant_obj:
+                for attr in ("name", "slug"):
+                    val = getattr(tenant_obj, attr, None)
+                    if val:
+                        tenant_candidates.add(val)
+                        tenant_candidates.add(val.replace(" ", "_"))
 
-        app_slug = project.app.slug if project.app else ""
-        for client_slug in tenant_candidates:
-            remove_prefix(f"{client_slug}/{app_slug}/{project.name}")
-            remove_prefix(f"{client_slug}/{app_slug}/{project.slug}")
+            app_slug = project.app.slug if project.app else ""
+            for client_slug in tenant_candidates:
+                remove_prefix(f"{client_slug}/{app_slug}/{project.name}")
+                remove_prefix(f"{client_slug}/{app_slug}/{project.slug}")
 
-        try:
-            client_id, app_id, project_id = _get_env_ids(project)
-            mc = MongoClient(getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db"))
-            coll = mc["trinity_db"]["atom_list_configuration"]
-            coll.update_many(
-                {"client_id": client_id, "app_id": app_id, "project_id": project_id},
-                {"$set": {"isDeleted": True}},
-            )
-        except Exception as exc:  # pragma: no cover - logging only
-            logger.error("Failed to mark atom configuration deleted: %s", exc)
+            try:
+                client_id, app_id, project_id = _get_env_ids(project)
+                mc = MongoClient(getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db"))
+                coll = mc["trinity_db"]["atom_list_configuration"]
+                coll.update_many(
+                    {"client_id": client_id, "app_id": app_id, "project_id": project_id},
+                    {"$set": {"isDeleted": True}},
+                )
+            except Exception as exc:  # pragma: no cover - logging only
+                logger.error("Failed to mark atom configuration deleted: %s", exc)
 
-        return Response(status=status.HTTP_204_NO_CONTENT)
+            return Response(status=status.HTTP_204_NO_CONTENT)
 
     def create(self, request, *args, **kwargs):
-        data = request.data.copy()
-        app = data.get("app")
-        base_name = data.get("name", "")
-        if app and base_name:
-            name = base_name
-            counter = 1
-            while Project.objects.filter(app_id=app, name=name).exists():
-                name = f"{base_name} {counter}"
-                counter += 1
-            data["name"] = name
+        from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+        
+        # Get user's tenant schema
+        schema_name = get_user_tenant_schema(request.user)
+        if not schema_name:
+            logger.warning(f"No tenant schema found for user {request.user.username}")
+            return Response({"detail": "No tenant found for user"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Switch to user's tenant schema before creating project
+        with switch_to_user_tenant(request.user):
+            data = request.data.copy()
+            app = data.get("app")
+            base_name = data.get("name", "")
+            if app and base_name:
+                name = base_name
+                counter = 1
+                while Project.objects.filter(app_id=app, name=name).exists():
+                    name = f"{base_name} {counter}"
+                    counter += 1
+                data["name"] = name
 
-        serializer = self.get_serializer(data=data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
-        headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+            serializer = self.get_serializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            self.perform_create(serializer)
+            headers = self.get_success_headers(serializer.data)
+            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -214,37 +361,51 @@ class ProjectViewSet(viewsets.ModelViewSet):
         serializer.save(owner=user, slug=slug_val)
 
     def retrieve(self, request, *args, **kwargs):
-        load_env_vars(request.user)
-        project_obj = self.get_object()
-        os.environ["PROJECT_NAME"] = project_obj.name
-        os.environ["PROJECT_ID"] = f"{project_obj.name}_{project_obj.id}"
-        print(
-            f"✅ project selected: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
-        )
-        save_env_var(request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
-        save_env_var(request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
-        save_env_var(request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
-        save_env_var(request.user, "APP_ID", os.environ.get("APP_ID", ""))
-        save_env_var(request.user, "PROJECT_NAME", os.environ["PROJECT_NAME"])
-        save_env_var(request.user, "PROJECT_ID", os.environ["PROJECT_ID"])
-        print("Current env vars after project select", get_env_dict(request.user))
-        serializer = self.get_serializer(project_obj)
-        data = serializer.data
-        data["environment"] = get_env_dict(request.user)
+        from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
+        
+        # Get user's tenant schema
+        schema_name = get_user_tenant_schema(request.user)
+        if not schema_name:
+            logger.warning(f"No tenant schema found for user {request.user.username}")
+            return Response({"detail": "No tenant found for user"}, status=status.HTTP_404_NOT_FOUND)
+        
+        logger.info(f"🔄 Switching to tenant schema: {schema_name} for user {request.user.username}")
+        
+        # Switch to user's tenant schema before accessing project
+        with switch_to_user_tenant(request.user):
+            logger.info(f"✅ Now in tenant schema: {schema_name}")
+            
+            load_env_vars(request.user)
+            project_obj = self.get_object()
+            os.environ["PROJECT_NAME"] = project_obj.name
+            os.environ["PROJECT_ID"] = f"{project_obj.name}_{project_obj.id}"
+            print(
+                f"✅ project selected: PROJECT_ID={os.environ['PROJECT_ID']} PROJECT_NAME={os.environ['PROJECT_NAME']}"
+            )
+            save_env_var(request.user, "CLIENT_NAME", os.environ.get("CLIENT_NAME", ""))
+            save_env_var(request.user, "CLIENT_ID", os.environ.get("CLIENT_ID", ""))
+            save_env_var(request.user, "APP_NAME", os.environ.get("APP_NAME", ""))
+            save_env_var(request.user, "APP_ID", os.environ.get("APP_ID", ""))
+            save_env_var(request.user, "PROJECT_NAME", os.environ["PROJECT_NAME"])
+            save_env_var(request.user, "PROJECT_ID", os.environ["PROJECT_ID"])
+            print("Current env vars after project select", get_env_dict(request.user))
+            serializer = self.get_serializer(project_obj)
+            data = serializer.data
+            data["environment"] = get_env_dict(request.user)
 
-        state = data.get("state") or {}
-        for field, mode in [
-            ("laboratory_config", "lab"),
-            ("workflow_config", "workflow"),
-            ("exhibition_config", "exhibition"),
-        ]:
-            cfg = load_atom_list_configuration(project_obj, mode)
-            if cfg:
-                state[field] = cfg
-        if state:
-            data["state"] = state
+            state = data.get("state") or {}
+            for field, mode in [
+                ("laboratory_config", "lab"),
+                ("workflow_config", "workflow"),
+                ("exhibition_config", "exhibition"),
+            ]:
+                cfg = load_atom_list_configuration(project_obj, mode)
+                if cfg:
+                    state[field] = cfg
+            if state:
+                data["state"] = state
 
-        return Response(data)
+            return Response(data)
 
     def perform_update(self, serializer):
         load_env_vars(self.request.user)

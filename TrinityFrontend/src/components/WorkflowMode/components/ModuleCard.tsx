@@ -40,13 +40,13 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ molecule }) => {
       onDragEnd={handleDragEnd}
     >
       <div className="mb-3">
-        <span className="text-sm font-medium text-gray-700">{molecule.type}</span>
+        <span className="text-sm font-medium text-muted-foreground">{molecule.type}</span>
       </div>
       
-      <h4 className="font-semibold text-gray-900 mb-2 text-sm">{molecule.title}</h4>
-      <p className="text-xs text-gray-700 mb-3 line-clamp-2">{molecule.subtitle}</p>
+      <h4 className="font-semibold text-foreground mb-2 text-sm">{molecule.title}</h4>
+      <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{molecule.subtitle}</p>
       
-      <div className="text-xs text-gray-600 bg-white px-2 py-1 rounded">
+      <div className="text-xs text-muted-foreground bg-card px-2 py-1 rounded border border-border">
         Tags: {molecule.tag}
       </div>
     </Card>

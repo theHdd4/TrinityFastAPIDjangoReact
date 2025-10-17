@@ -4,6 +4,8 @@ import {
   fetchExhibitionConfiguration,
   ExhibitionAtomPayload,
   ExhibitionComponentPayload,
+  fetchExhibitionLayout,
+  type ExhibitionLayoutResponse,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 
@@ -47,7 +49,7 @@ export type SlideshowTransition = 'fade' | 'slide' | 'zoom';
 
 export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   cardColor: 'purple',
-  cardWidth: 'M',
+  cardWidth: 'L',
   contentAlignment: 'center',
   fullBleed: false,
   cardLayout: DEFAULT_CARD_LAYOUT,
@@ -86,6 +88,7 @@ export interface SlideObject {
   width: number;
   height: number;
   zIndex: number;
+  rotation: number;
   groupId?: string | null;
   props: Record<string, unknown>;
 }
@@ -112,6 +115,7 @@ export const createSlideObjectFromAtom = (
   width: DEFAULT_CANVAS_OBJECT_WIDTH,
   height: DEFAULT_CANVAS_OBJECT_HEIGHT,
   zIndex: 1,
+  rotation: 0,
   groupId: null,
   props: { atom } as Record<string, unknown>,
   ...overrides,
@@ -144,7 +148,9 @@ interface ExhibitionStore {
   bulkUpdateSlideObjects: (cardId: string, updates: Record<string, Partial<SlideObject>>) => void;
   removeSlideObject: (cardId: string, objectId: string) => void;
   bringSlideObjectsToFront: (cardId: string, objectIds: string[]) => void;
+  bringSlideObjectsForward: (cardId: string, objectIds: string[]) => void;
   sendSlideObjectsToBack: (cardId: string, objectIds: string[]) => void;
+  sendSlideObjectsBackward: (cardId: string, objectIds: string[]) => void;
   groupSlideObjects: (cardId: string, objectIds: string[], groupId: string | null) => void;
   reset: () => void;
 }
@@ -170,6 +176,28 @@ const parseMetadataRecord = (value: unknown): Record<string, any> | undefined =>
         }
       } catch (error) {
         console.warn('[Exhibition] Unable to parse feature overview metadata payload', error);
+      }
+    }
+  }
+
+  return undefined;
+};
+
+const parseManifestRecord = (value: unknown): Record<string, any> | undefined => {
+  if (isRecord(value)) {
+    return { ...value };
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (isRecord(parsed)) {
+          return { ...parsed };
+        }
+      } catch (error) {
+        console.warn('[Exhibition] Unable to parse manifest payload', error);
       }
     }
   }
@@ -382,6 +410,7 @@ const synchroniseSlideObjects = (
       width: typeof base?.width === 'number' ? base.width : DEFAULT_TITLE_OBJECT_WIDTH,
       height: typeof base?.height === 'number' ? base.height : DEFAULT_TITLE_OBJECT_HEIGHT,
       zIndex: resolvedZIndex,
+      rotation: typeof base?.rotation === 'number' ? base.rotation : 0,
       groupId: base?.groupId ?? null,
       props: ensureTitleProps(baseProps),
     };
@@ -473,6 +502,7 @@ const synchroniseSlideObjects = (
           width: DEFAULT_ACCENT_IMAGE_OBJECT_WIDTH,
           height: DEFAULT_ACCENT_IMAGE_OBJECT_HEIGHT,
           zIndex: 1,
+          rotation: 0,
           groupId: null,
           props: {
             src: accentImage,
@@ -524,7 +554,10 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     ? candidate.color.trim()
     : FALLBACK_COLOR;
 
-  const metadata = parseMetadataRecord(candidate.metadata);
+  const metadata = parseMetadataRecord(candidate.metadata) ?? {};
+  const manifest = parseManifestRecord((candidate as Record<string, unknown>).manifest);
+  const manifestIdRaw = (candidate as Record<string, unknown>).manifest_id;
+  const manifestId = isNonEmptyString(manifestIdRaw) ? manifestIdRaw.trim() : undefined;
 
   const id = resolvedId ?? resolvedAtomId ?? `atom-${Math.random().toString(36).slice(2, 10)}`;
   let atomId = resolvedAtomId ?? id;
@@ -537,6 +570,14 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
       category.toLowerCase().includes('feature overview'))
   ) {
     atomId = 'feature-overview';
+  }
+
+  if (manifest && metadata.visualizationManifest == null) {
+    metadata.visualizationManifest = manifest;
+  }
+
+  if (manifestId && typeof manifestId === 'string') {
+    metadata.manifestId = manifestId;
   }
 
   return {
@@ -638,6 +679,64 @@ const extractCards = (cards: LayoutCard[] | unknown): LayoutCard[] => {
       });
     })
     .filter((card): card is LayoutCard => card !== null);
+};
+
+const normaliseSavedSlideObject = (value: unknown): SlideObject | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = isNonEmptyString(value.id) ? value.id.trim() : null;
+  if (!id) {
+    return null;
+  }
+
+  const type = isNonEmptyString(value.type) ? value.type.trim() : 'atom';
+  const toNumber = (input: unknown, fallback: number): number => {
+    if (typeof input === 'number' && Number.isFinite(input)) {
+      return input;
+    }
+    const parsed = Number(input);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const props = isRecord(value.props) ? { ...value.props } : {};
+
+  const groupId = isNonEmptyString(value.groupId) ? value.groupId.trim() : null;
+
+  return {
+    id,
+    type,
+    x: toNumber(value.x, 0),
+    y: toNumber(value.y, 0),
+    width: toNumber(value.width, DEFAULT_CANVAS_OBJECT_WIDTH),
+    height: toNumber(value.height, DEFAULT_CANVAS_OBJECT_HEIGHT),
+    zIndex: toNumber(value.zIndex, 1),
+    rotation: toNumber(value.rotation, 0),
+    groupId,
+    props,
+  };
+};
+
+const normaliseLayoutSlideObjects = (
+  raw: Record<string, unknown> | undefined,
+): Record<string, SlideObject[]> => {
+  if (!raw || typeof raw !== 'object') {
+    return {};
+  }
+
+  return Object.entries(raw).reduce<Record<string, SlideObject[]>>((acc, [cardId, value]) => {
+    if (!isNonEmptyString(cardId) || !Array.isArray(value)) {
+      return acc;
+    }
+
+    const objects = value
+      .map(entry => normaliseSavedSlideObject(entry))
+      .filter((entry): entry is SlideObject => entry !== null);
+
+    acc[cardId] = objects;
+    return acc;
+  }, {} as Record<string, SlideObject[]>);
 };
 
 const createBlankSlide = (): LayoutCard =>
@@ -767,6 +866,9 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   loadSavedConfiguration: async (explicitContext?: ProjectContext | null) => {
     let loadedCards: LayoutCard[] = [];
     let catalogueEntries: ExhibitionAtomPayload[] = [];
+    let remoteCatalogueResolved = false;
+    let layoutCards: LayoutCard[] = [];
+    let layoutSlideObjects: Record<string, SlideObject[]> = {};
     const resolvedContext = normaliseProjectContext(explicitContext ?? getActiveProjectContext());
     const contextLabel = resolvedContext
       ? `${resolvedContext.client_name}/${resolvedContext.app_name}/${resolvedContext.project_name}`
@@ -778,6 +880,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       );
       try {
         const remote = await fetchExhibitionConfiguration(resolvedContext);
+        remoteCatalogueResolved = true;
         const remoteAtoms = remote && Array.isArray(remote.atoms) ? remote.atoms : [];
         catalogueEntries = remoteAtoms;
 
@@ -805,6 +908,26 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
             })
             .filter((card): card is LayoutCard => card !== null);
         }
+
+        try {
+          const layoutResponse: ExhibitionLayoutResponse | null = await fetchExhibitionLayout(resolvedContext);
+          if (layoutResponse) {
+            layoutCards = extractCards(layoutResponse.cards);
+            layoutSlideObjects = normaliseLayoutSlideObjects(layoutResponse.slide_objects);
+            console.info(
+              `[Exhibition] Retrieved exhibition layout with ${layoutCards.length} slide card(s) from trinity_db.exhibition_list_configuration for ${contextLabel}`,
+            );
+          } else {
+            console.info(
+              `[Exhibition] No exhibition layout entry found for ${contextLabel} in trinity_db.exhibition_list_configuration`,
+            );
+          }
+        } catch (error) {
+          console.warn(
+            `[Exhibition] Failed to fetch exhibition layout for ${contextLabel} from trinity_db.exhibition_list_configuration`,
+            error,
+          );
+        }
       } catch (error) {
         console.warn(
           `[Exhibition] Failed to fetch exhibition catalogue for ${contextLabel} from trinity_db.exhibition_catalogue`,
@@ -824,13 +947,18 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
       const remoteCards = loadedCards.map(withPresentationDefaults);
       const hasRemoteCards = remoteCards.length > 0;
+      const shouldUseRemoteCatalogue = remoteCatalogueResolved;
+      const hasLayoutCards = layoutCards.length > 0;
+      const preparedLayoutCards = hasLayoutCards ? layoutCards.map(withPresentationDefaults) : [];
       const preservedCards = state.cards.map(withPresentationDefaults);
       const baseCards = shouldResetSlides ? [] : preservedCards;
 
       let ensuredCards: LayoutCard[] = [];
       let insertedBlankSlide = false;
 
-      if (baseCards.length > 0) {
+      if (hasLayoutCards) {
+        ensuredCards = preparedLayoutCards;
+      } else if (baseCards.length > 0) {
         ensuredCards = baseCards;
       } else if (hasRemoteCards) {
         ensuredCards = [];
@@ -840,13 +968,14 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       }
 
       const nextExhibitedCards = ensuredCards.filter(card => card.isExhibited);
-      const nextCatalogueCards = hasRemoteCards
+      const nextCatalogueCards = shouldUseRemoteCatalogue
         ? computeCatalogueCards(remoteCards)
         : computeCatalogueCards(ensuredCards);
 
       const nextSlideObjects: Record<string, SlideObject[]> = {};
       ensuredCards.forEach(card => {
-        nextSlideObjects[card.id] = synchroniseSlideObjects(state.slideObjectsByCardId[card.id], card);
+        const savedObjects = layoutSlideObjects[card.id] ?? state.slideObjectsByCardId[card.id];
+        nextSlideObjects[card.id] = synchroniseSlideObjects(savedObjects, card);
       });
 
       console.info(
@@ -862,10 +991,12 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
               (card.moleculeTitle ? ` (${card.moleculeTitle})` : ''),
           );
         });
-      } else {
+      } else if (shouldUseRemoteCatalogue) {
         console.info(
           '[Exhibition] Exhibition catalogue has no components to display after processing remote data',
         );
+      } else {
+        console.info('[Exhibition] Exhibition catalogue has no exhibited components available in local cache');
       }
 
       if (shouldResetSlides && state.cards.length > 0) {
@@ -891,7 +1022,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         cards: ensuredCards,
         exhibitedCards: nextExhibitedCards,
         catalogueCards: nextCatalogueCards,
-        catalogueEntries,
+        catalogueEntries: shouldUseRemoteCatalogue ? catalogueEntries : state.catalogueEntries,
         lastLoadedContext: resolvedContext,
         slideObjectsByCardId: nextSlideObjects,
       };
@@ -1108,6 +1239,40 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       };
     });
   },
+  bringSlideObjectsForward: (cardId: string, objectIds: string[]) => {
+    set(state => {
+      const existing = state.slideObjectsByCardId[cardId] ?? [];
+      if (existing.length === 0 || objectIds.length === 0) {
+        return {};
+      }
+
+      const targetSet = new Set(objectIds);
+      const next = [...existing];
+
+      for (let index = next.length - 1; index > 0; index -= 1) {
+        const previous = next[index - 1];
+        const current = next[index];
+
+        if (!targetSet.has(previous.id)) {
+          continue;
+        }
+
+        if (targetSet.has(current.id)) {
+          continue;
+        }
+
+        next[index - 1] = current;
+        next[index] = previous;
+      }
+
+      return {
+        slideObjectsByCardId: {
+          ...state.slideObjectsByCardId,
+          [cardId]: normaliseZIndices(next),
+        },
+      };
+    });
+  },
   sendSlideObjectsToBack: (cardId: string, objectIds: string[]) => {
     set(state => {
       const existing = state.slideObjectsByCardId[cardId] ?? [];
@@ -1119,6 +1284,40 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       const next = existing
         .filter(object => targetSet.has(object.id))
         .concat(existing.filter(object => !targetSet.has(object.id)));
+
+      return {
+        slideObjectsByCardId: {
+          ...state.slideObjectsByCardId,
+          [cardId]: normaliseZIndices(next),
+        },
+      };
+    });
+  },
+  sendSlideObjectsBackward: (cardId: string, objectIds: string[]) => {
+    set(state => {
+      const existing = state.slideObjectsByCardId[cardId] ?? [];
+      if (existing.length === 0 || objectIds.length === 0) {
+        return {};
+      }
+
+      const targetSet = new Set(objectIds);
+      const next = [...existing];
+
+      for (let index = 0; index < next.length - 1; index += 1) {
+        const current = next[index + 1];
+        const previous = next[index];
+
+        if (!targetSet.has(current.id)) {
+          continue;
+        }
+
+        if (targetSet.has(previous.id)) {
+          continue;
+        }
+
+        next[index] = current;
+        next[index + 1] = previous;
+      }
 
       return {
         slideObjectsByCardId: {

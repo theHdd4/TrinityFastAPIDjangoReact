@@ -7,20 +7,61 @@ User = get_user_model()
 
 class App(models.Model):
     """
-    Represents a base application template that projects derive from.
+    Represents a tenant-specific application instance linked to a UseCase from the public schema.
+    
+    This model lives in the tenant schema and controls which apps from the public 'usecase' 
+    table are accessible to this specific tenant/client.
+    
+    The 'usecase_id' field references the public.usecase table's ID.
+    Each tenant can only access apps that have an entry in their tenant's App table.
     """
-    name = models.CharField(max_length=150, unique=True)
-    slug = models.SlugField(max_length=150, unique=True)
-    description = models.TextField(blank=True)
+    usecase_id = models.IntegerField(
+        help_text="ID of the app definition in public.usecase table",
+        db_index=True,
+        null=True,
+        blank=True,
+        default=None
+    )
+    name = models.CharField(
+        max_length=150, 
+        help_text="App name (synced from public.usecase)"
+    )
+    slug = models.SlugField(
+        max_length=150, 
+        unique=True,
+        help_text="App slug (synced from public.usecase)"
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="App description (synced from public.usecase)"
+    )
+    is_enabled = models.BooleanField(
+        default=True,
+        help_text="Whether this app is enabled for this tenant"
+    )
+    custom_config = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Tenant-specific customizations for this app (e.g., custom modules, settings)"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     history = HistoricalRecords()
 
     class Meta:
         ordering = ["name"]
+        indexes = [
+            models.Index(fields=['usecase_id', 'is_enabled']),
+            models.Index(fields=['slug']),
+        ]
 
     def __str__(self):
-        return self.name
+        return f"{self.name} (UseCase ID: {self.usecase_id})"
+    
+    @property
+    def is_accessible(self):
+        """Check if this app is currently accessible by the tenant"""
+        return self.is_enabled
 
 
 class Project(models.Model):

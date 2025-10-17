@@ -19,9 +19,118 @@ interface SlideTextBoxObjectProps {
   onDelete?: () => void;
   onInteract: () => void;
   onToolbarStateChange: (objectId: string, toolbar: React.ReactNode | null) => void;
+  onRequestPositionPanel?: () => void;
 }
 
 const clampFontSize = (value: number) => Math.min(Math.max(value, 8), 200);
+
+const LIST_LINE_SEPARATOR = /\r?\n/;
+const BULLET_PATTERN = /^\s*[•-]\s+/;
+const NUMBERED_PATTERN = /^\s*\d+[.)]?\s+/;
+
+const decodeHtmlEntities = (value: string): string => {
+  if (typeof window === 'undefined') {
+    return value;
+  }
+
+  const textarea = window.document.createElement('textarea');
+  textarea.innerHTML = value;
+  return textarea.value;
+};
+
+const htmlToPlainText = (rawValue: string): string => {
+  if (!rawValue) {
+    return '';
+  }
+
+  let working = rawValue
+    .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/(div|p|li)>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '')
+    .replace(/<div[^>]*>/gi, '')
+    .replace(/<p[^>]*>/gi, '')
+    .replace(/<span[^>]*>/gi, '')
+    .replace(/<\/span>/gi, '')
+    .replace(/<\/ul>/gi, '\n')
+    .replace(/<\/ol>/gi, '\n')
+    .replace(/<[^>]+>/g, '');
+
+  working = working.replace(/\u00a0/g, ' ');
+  working = decodeHtmlEntities(working);
+
+  while (working.endsWith('\n')) {
+    working = working.slice(0, -1);
+  }
+
+  return working;
+};
+
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const plainTextToHtml = (value: string): string => {
+  if (!value) {
+    return '';
+  }
+
+  return value
+    .split(LIST_LINE_SEPARATOR)
+    .map(line => {
+      if (line.length === 0) {
+        return '<div><br></div>';
+      }
+      return `<div>${escapeHtml(line)}</div>`;
+    })
+    .join('');
+};
+
+const stripListPrefix = (line: string): string => {
+  if (BULLET_PATTERN.test(line)) {
+    return line.replace(BULLET_PATTERN, '');
+  }
+  if (NUMBERED_PATTERN.test(line)) {
+    return line.replace(NUMBERED_PATTERN, '');
+  }
+  return line;
+};
+
+const toggleBulletedListContent = (value: string): string => {
+  const lines = value.split(LIST_LINE_SEPARATOR);
+  const isBulleted = lines.every(line => line.trim().length === 0 || BULLET_PATTERN.test(line));
+
+  if (isBulleted) {
+    return lines.map(line => line.replace(BULLET_PATTERN, '')).join('\n');
+  }
+
+  return lines
+    .map(line => {
+      const base = stripListPrefix(line).trimStart();
+      return base.length > 0 ? `• ${base}` : '• ';
+    })
+    .join('\n');
+};
+
+const toggleNumberedListContent = (value: string): string => {
+  const lines = value.split(LIST_LINE_SEPARATOR);
+  const isNumbered = lines.every(line => line.trim().length === 0 || NUMBERED_PATTERN.test(line));
+
+  if (isNumbered) {
+    return lines.map(line => line.replace(NUMBERED_PATTERN, '')).join('\n');
+  }
+
+  return lines
+    .map((line, index) => {
+      const base = stripListPrefix(line).trimStart();
+      const prefix = `${index + 1}. `;
+      return base.length > 0 ? `${prefix}${base}` : prefix;
+    })
+    .join('\n');
+};
 
 export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   id,
@@ -38,6 +147,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   onDelete,
   onInteract,
   onToolbarStateChange,
+  onRequestPositionPanel,
 }) => {
   const textRef = useRef<HTMLDivElement | null>(null);
   const selectionRangeRef = useRef<Range | null>(null);
@@ -167,6 +277,75 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     [isEditing, runCommand, updateFormatting],
   );
 
+  const focusEditableSurface = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      const node = textRef.current;
+      if (!node) {
+        return;
+      }
+
+      node.focus();
+
+      const selection = window.getSelection();
+      if (!selection) {
+        return;
+      }
+
+      const range = window.document.createRange();
+      range.selectNodeContents(node);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      selectionRangeRef.current = range;
+    });
+  }, []);
+
+  const applyListTransformation = useCallback(
+    (transformer: (value: string) => string) => {
+      const source = isEditing ? editingValue : localFormatting.text;
+      const plain = htmlToPlainText(source);
+      const transformed = transformer(plain);
+      const nextValue = plainTextToHtml(transformed);
+
+      if (nextValue === source) {
+        return;
+      }
+
+      if (isEditing) {
+        onInteract();
+        if (textRef.current) {
+          textRef.current.innerHTML = nextValue;
+        }
+        onEditingChange(nextValue);
+        focusEditableSurface();
+        return;
+      }
+
+      updateFormatting({ text: nextValue });
+    },
+    [
+      editingValue,
+      focusEditableSurface,
+      isEditing,
+      localFormatting.text,
+      onEditingChange,
+      onInteract,
+      updateFormatting,
+    ],
+  );
+
+  const handleBulletedList = useCallback(() => {
+    applyListTransformation(toggleBulletedListContent);
+  }, [applyListTransformation]);
+
+  const handleNumberedList = useCallback(() => {
+    applyListTransformation(toggleNumberedListContent);
+  }, [applyListTransformation]);
+
   const handleFontFamily = useCallback(
     (fontFamily: string) => {
       updateFormatting({ fontFamily });
@@ -226,21 +405,23 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         onToggleStrikethrough={() => handleToggle('strikethrough')}
         align={localFormatting.align}
         onAlign={handleAlign}
-        onBulletedList={() => runCommand('insertUnorderedList')}
-        onNumberedList={() => runCommand('insertOrderedList')}
+        onBulletedList={handleBulletedList}
+        onNumberedList={handleNumberedList}
         color={localFormatting.color}
         onColorChange={handleColor}
         onRequestEffects={() => {}}
         onRequestAnimate={() => {}}
-        onRequestPosition={() => {}}
+        onRequestPosition={() => onRequestPositionPanel?.()}
         onDelete={onDelete}
       />
     ),
     [
       handleAlign,
+      handleBulletedList,
       handleColor,
       handleDecreaseFontSize,
       handleFontFamily,
+      handleNumberedList,
       handleIncreaseFontSize,
       handleToggle,
       localFormatting.align,
@@ -251,6 +432,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
       localFormatting.italic,
       localFormatting.strikethrough,
       localFormatting.underline,
+      onRequestPositionPanel,
       onDelete,
       runCommand,
     ],
@@ -275,8 +457,9 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   const content = (
     <div
       className={cn(
-        'h-full w-full overflow-hidden rounded-2xl border border-transparent bg-background/95 p-3 transition-colors',
-        canEdit && !isEditing && 'hover:border-border/80',
+        'h-full w-full overflow-hidden rounded-2xl border border-transparent bg-transparent p-3 transition-colors focus-within:border-primary focus-within:shadow-lg',
+        canEdit && !isEditing && 'hover:border-border/70',
+        isSelected && !isEditing && 'border-border/80 shadow-sm',
         isEditing && 'border-primary shadow-lg',
       )}
       onDoubleClick={handleDoubleClick}
@@ -304,6 +487,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
         data-placeholder={DEFAULT_TEXT_BOX_TEXT}
+        data-textbox-editable={canEdit && isEditing ? 'true' : undefined}
         style={{
           fontSize: `${localFormatting.fontSize}px`,
           fontFamily: localFormatting.fontFamily,
@@ -314,6 +498,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
           }`.trim(),
           textAlign: localFormatting.align,
           color: localFormatting.color,
+          whiteSpace: 'pre-wrap',
         }}
       />
       {!canEdit && localFormatting.text.trim().length === 0 && (

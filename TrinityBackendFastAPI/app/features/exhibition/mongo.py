@@ -101,9 +101,13 @@ def _mongo_auth_kwargs(uri: str) -> dict[str, str]:
     if "@" in uri.split("//", 1)[-1]:
         return {}
 
-    username = os.getenv("MONGO_USERNAME", "").strip()
-    password = os.getenv("MONGO_PASSWORD", "").strip()
-    auth_source = os.getenv("MONGO_AUTH_SOURCE", "").strip() or os.getenv("MONGO_AUTH_DB", "admin").strip()
+    username = (os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER") or "").strip()
+    password = (os.getenv("MONGO_PASSWORD") or os.getenv("MONGO_PASS") or "").strip()
+    auth_source = (
+        os.getenv("MONGO_AUTH_SOURCE")
+        or os.getenv("MONGO_AUTH_DB")
+        or "admin"
+    ).strip()
     auth_mechanism = os.getenv("MONGO_AUTH_MECHANISM", "").strip()
 
     kwargs: dict[str, str] = {}
@@ -122,13 +126,16 @@ def _mongo_auth_kwargs(uri: str) -> dict[str, str]:
 def _default_mongo_uri() -> str:
     """Construct the default MongoDB URI for the exhibition catalogue."""
 
-    username_env = os.getenv("MONGO_USERNAME")
-    password_env = os.getenv("MONGO_PASSWORD")
+    username_env = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER")
+    password_env = os.getenv("MONGO_PASSWORD") or os.getenv("MONGO_PASS")
 
     username = username_env.strip() if isinstance(username_env, str) and username_env.strip() else "admin_dev"
     password = password_env.strip() if isinstance(password_env, str) and password_env.strip() else "pass_dev"
 
-    auth_source_env = os.getenv("MONGO_AUTH_SOURCE") or os.getenv("MONGO_AUTH_DB")
+    auth_source_env = (
+        os.getenv("MONGO_AUTH_SOURCE")
+        or os.getenv("MONGO_AUTH_DB")
+    )
     auth_source = auth_source_env.strip() if isinstance(auth_source_env, str) and auth_source_env.strip() else "admin"
 
     return build_host_mongo_uri(

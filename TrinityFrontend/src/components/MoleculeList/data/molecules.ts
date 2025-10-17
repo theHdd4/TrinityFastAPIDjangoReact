@@ -6,11 +6,7 @@ export const molecules = [
     title: 'Build',
     subtitle: 'Model building and creation',
     tag: 'Modeling',
-    atoms: [
-      'Auto-regressive models',
-      'Model Output - Non CSF',
-      'Single Modeling'
-    ]
+    atoms: []
   },
   {
     id: 'data-pre-process',
@@ -20,10 +16,7 @@ export const molecules = [
     tag: 'Data Processing',
     atoms: [
       'Base Price Estimator',
-      'Clustering',
-      'Data Preparation',
-      'Promo Comparison',
-      'Promotion Intensity Analysis'
+      'Clustering'
     ]
   },
   {
@@ -33,11 +26,7 @@ export const molecules = [
     subtitle: 'Data exploration and analysis',
     tag: 'Exploration',
     atoms: [
-      'Correlation',
-      'Depth Ladder',
-      'EDA',
-      'Promo Comparison',
-      'Promotion Intensity Analysis'
+      'Correlation'
     ]
   },
   {
@@ -47,16 +36,7 @@ export const molecules = [
     subtitle: 'Model engineering and algorithm synthesis',
     tag: 'Engineering',
     atoms: [
-      'Bulk Model Output - CSF',
-      'Bulk Modeling',
-      'Key Selector',
-      'Model Performance',
-      'Model Selector',
-      'Concatination',
-      'Create or Transform',
-      'Delete',
-      'Merge',
-      'Rename'
+      'Merge'
     ]
   },
   {
@@ -66,7 +46,6 @@ export const molecules = [
     subtitle: 'Initial data preprocessing',
     tag: 'Preprocessing',
     atoms: [
-      'Feature Over View',
       'GroupBy'
     ]
   },

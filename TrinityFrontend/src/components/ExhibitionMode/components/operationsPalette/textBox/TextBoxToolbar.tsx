@@ -79,16 +79,19 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
 
   const iconButtonClasses = (active?: boolean) =>
     cn(
-      'h-8 w-8 rounded-full border border-transparent text-foreground transition-colors',
+      'h-8 w-8 shrink-0 rounded-full border border-transparent text-foreground transition-colors',
       active
         ? 'bg-emerald-500 text-white shadow-sm'
         : 'bg-transparent text-muted-foreground hover:bg-muted/40 hover:text-foreground',
     );
 
-  const controlChipClasses = 'h-8 rounded-full px-3 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40';
+  const controlChipClasses = 'h-8 shrink-0 rounded-full px-2.5 text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40';
 
   return (
-    <div className="relative flex items-center gap-2 rounded-full border border-border/70 bg-background/95 px-4 py-3 text-sm shadow-[0_24px_48px_-22px_rgba(124,58,237,0.45)] backdrop-blur-lg">
+    <div
+      className="relative flex w-full max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-border/70 bg-background/95 px-2.5 py-2.5 text-sm shadow-[0_24px_48px_-22px_rgba(124,58,237,0.45)] backdrop-blur-lg"
+      data-text-toolbar-root
+    >
 
       <Popover>
         <PopoverTrigger asChild>
@@ -96,7 +99,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
             variant="ghost"
             size="sm"
             type="button"
-            className="relative h-8 min-w-[140px] justify-between rounded-full border border-border/50 px-3 text-xs font-medium text-foreground hover:bg-muted/40"
+            className="relative h-8 min-w-[112px] justify-between rounded-full border border-border/50 px-3 text-[11px] font-medium text-foreground hover:bg-muted/40"
             onMouseDown={handleToolbarMouseDown}
           >
             <span className="truncate" style={{ fontFamily }}>
@@ -109,6 +112,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           side="bottom"
           align="start"
           className="z-[4000] w-52 max-h-64 overflow-y-auto rounded-xl border border-border/70 bg-background/95 p-2 shadow-2xl"
+          data-text-toolbar-root
         >
           <div className="space-y-1">
             {FONT_OPTIONS.map(option => (
@@ -129,23 +133,23 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         </PopoverContent>
       </Popover>
 
-      <span className="h-6 w-px rounded-full bg-border/60" />
+      <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
 
       <Button
         variant="ghost"
         size="icon"
-        className="h-8 w-8 rounded-full border border-border/60 bg-background/80 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+        className="h-8 w-8 shrink-0 rounded-full border border-border/60 bg-background/80 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
         onClick={onDecreaseFontSize}
         type="button"
         onMouseDown={handleToolbarMouseDown}
       >
         <Minus className="h-4 w-4" />
       </Button>
-      <span className="w-10 text-center text-sm font-semibold text-foreground">{fontSize}</span>
+      <span className="w-8 shrink-0 text-center text-sm font-semibold text-foreground">{fontSize}</span>
       <Button
         variant="ghost"
         size="icon"
-        className="h-8 w-8 rounded-full border border-border/60 bg-background/80 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+        className="h-8 w-8 shrink-0 rounded-full border border-border/60 bg-background/80 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
         onClick={onIncreaseFontSize}
         type="button"
         onMouseDown={handleToolbarMouseDown}
@@ -153,9 +157,9 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         <Plus className="h-4 w-4" />
       </Button>
 
-      <span className="h-6 w-px rounded-full bg-border/60" />
+      <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
 
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         <Button
           variant="ghost"
           size="icon"
@@ -198,9 +202,9 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         </Button>
       </div>
 
-      <span className="h-6 w-px rounded-full bg-border/60" />
+      <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
 
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         <Button
           variant="ghost"
           size="icon"
@@ -233,12 +237,12 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         </Button>
       </div>
 
-      <span className="h-6 w-px rounded-full bg-border/60" />
+      <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
 
       <Button
         variant="ghost"
         size="icon"
-        className="h-8 w-8 rounded-full text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+        className="h-8 w-8 shrink-0 rounded-full text-muted-foreground hover:bg-muted/40 hover:text-foreground"
         onClick={() => onBulletedList?.()}
         type="button"
         onMouseDown={handleToolbarMouseDown}
@@ -248,7 +252,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
       <Button
         variant="ghost"
         size="icon"
-        className="h-8 w-8 rounded-full text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+        className="h-8 w-8 shrink-0 rounded-full text-muted-foreground hover:bg-muted/40 hover:text-foreground"
         onClick={() => onNumberedList?.()}
         type="button"
         onMouseDown={handleToolbarMouseDown}
@@ -256,7 +260,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         <ListOrdered className="h-4 w-4" />
       </Button>
 
-      <span className="h-6 w-px rounded-full bg-border/60" />
+      <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
 
       <Popover>
         <PopoverTrigger asChild>
@@ -264,7 +268,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
             variant="ghost"
             size="icon"
             type="button"
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border/50 p-0"
             onMouseDown={handleToolbarMouseDown}
           >
             <span
@@ -278,6 +282,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           side="top"
           align="center"
           className="z-[4000] w-48 rounded-xl border border-border/70 bg-background/95 p-3 shadow-2xl"
+          data-text-toolbar-root
         >
           <div className="flex items-center justify-between gap-2">
             <input
@@ -293,7 +298,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
 
       <span className="h-6 w-px rounded-full bg-border/60" />
 
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         <Button
           variant="ghost"
           size="sm"
@@ -330,13 +335,13 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
 
       {onDelete && (
         <>
-          <span className="h-6 w-px rounded-full bg-border/60" />
+          <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
           <Button
             variant="ghost"
             size="icon"
             type="button"
             onClick={onDelete}
-            className="h-8 w-8 rounded-full text-destructive hover:bg-destructive/10"
+            className="h-8 w-8 shrink-0 rounded-full text-destructive hover:bg-destructive/10"
             onMouseDown={handleToolbarMouseDown}
           >
             <Trash2 className="h-4 w-4" />

@@ -47,7 +47,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   atomId,
   onDataChange
 }) => {
-  console.log('🔧 AutoRegressiveModelsCanvas: Component rendered with atomId:', atomId, 'data:', data);
+  
   
   const { toast } = useToast();
   
@@ -146,21 +146,21 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   // Interactive Legend Functions - Single Selection Model
   const handleLegendClick = (entry: any, combinationIndex: number) => {
     const { dataKey } = entry;
-    console.log('🔧 Legend clicked:', dataKey, 'for combination:', combinationIndex);
+    
     
     setSelectedLegend(prev => {
       const currentSelected = prev[combinationIndex];
       
       // If clicking the same legend item, deselect it (show all lines)
       if (currentSelected === dataKey) {
-        console.log('🔧 Deselecting legend:', dataKey, '- showing all lines');
+        
         const newState = { ...prev };
         delete newState[combinationIndex];
         return newState;
       }
       
       // Otherwise, select this legend item (hide all other lines)
-      console.log('🔧 Selecting legend:', dataKey, '- hiding other lines');
+      
       return {
         ...prev,
         [combinationIndex]: dataKey
@@ -171,21 +171,21 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   // Growth Rates Legend Click Handler
   const handleGrowthLegendClick = (entry: any, combinationId: string) => {
     const { dataKey } = entry;
-    console.log('🔧 Growth Legend clicked:', dataKey, 'for combination:', combinationId);
+    
     
     setSelectedGrowthLegend(prev => {
       const currentSelected = prev[combinationId];
       
       // If clicking the same legend item, deselect it (show all bars)
       if (currentSelected === dataKey) {
-        console.log('🔧 Deselecting growth legend:', dataKey, '- showing all bars');
+        
         const newState = { ...prev };
         delete newState[combinationId];
         return newState;
       }
       
       // Otherwise, select this legend item (hide all other bars)
-      console.log('🔧 Selecting growth legend:', dataKey, '- hiding other bars');
+      
       return {
         ...prev,
         [combinationId]: dataKey
@@ -251,7 +251,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    console.log('🔧 Context menu triggered at:', e.clientX, e.clientY);
+    
     setContextMenuPosition({ x: e.clientX, y: e.clientY });
     setShowContextMenu(true);
     setShowColorSubmenu(false);
@@ -452,7 +452,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       if (isBarChartArea && e.button === 2) {
         e.preventDefault();
         e.stopPropagation();
-        console.log('🔧 Global context menu triggered at:', e.clientX, e.clientY);
+        
         setContextMenuPosition({ x: e.clientX, y: e.clientY });
         setShowContextMenu(true);
         setShowColorSubmenu(false);
@@ -467,18 +467,18 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       
       // Don't close context menu if clicking inside the fullscreen modal
       if (isFullscreenMode && target.closest('[role="dialog"]')) {
-        console.log('🔧 Click inside fullscreen modal - not closing context menu');
+        
         return;
       }
       
       // Check if click is on context menu itself
       if (target.closest('.context-menu') || target.closest('.color-submenu')) {
-        console.log('🔧 Click on context menu - not closing');
+        
         return;
       }
       
       // Close context menu when clicking anywhere else, including within chart area
-      console.log('🔧 Closing context menus due to click anywhere');
+      
       setShowContextMenu(false);
       setShowColorSubmenu(false);
       setShowSortSubmenu(false);
@@ -486,7 +486,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
 
     // Close context menus when scrolling
     const handleScroll = () => {
-      console.log('🔧 Closing context menus due to scroll');
+      
       setShowContextMenu(false);
       setShowColorSubmenu(false);
       setShowSortSubmenu(false);
@@ -537,27 +537,27 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       
       // Don't close context menu if clicking inside the fullscreen modal
       if (isFullscreenMode && target.closest('[role="dialog"]')) {
-        console.log('🔧 Click inside fullscreen modal - not closing');
+        
         return;
       }
       
       // Check if click is on context menu itself
       if (target.closest('.context-menu') || target.closest('.color-submenu')) {
-        console.log('🔧 Click on context menu - not closing');
+        
         return;
       }
       
       // Check if click is on bar chart area (don't close if clicking on bar chart)
       if (target.closest('[data-chart-type="bar"]')) {
-        console.log('🔧 Click on bar chart area - not closing');
+        
         return;
       }
       
       // If we get here, it's a click outside - close context menus
-      console.log('🔧 Global click outside - closing context menus');
-      console.log('🔧 Click target:', target);
-      console.log('🔧 Click target classes:', target.className);
-      console.log('🔧 Click target tag:', target.tagName);
+      
+      
+      
+      
       
       // Force close all context menus
       setShowContextMenu(false);
@@ -575,27 +575,27 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       
       // Don't close context menu if clicking inside the fullscreen modal
       if (isFullscreenMode && target.closest('[role="dialog"]')) {
-        console.log('🔧 Mousedown inside fullscreen modal - not closing');
+        
         return;
       }
       
       // Check if click is on context menu itself
       if (target.closest('.context-menu') || target.closest('.color-submenu')) {
-        console.log('🔧 Mousedown on context menu - not closing');
+        
         return;
       }
       
       // Check if click is on bar chart area (don't close if clicking on bar chart)
       if (target.closest('[data-chart-type="bar"]')) {
-        console.log('🔧 Mousedown on bar chart area - not closing');
+        
         return;
       }
       
       // If we get here, it's a click outside - close context menus
-      console.log('🔧 Global mousedown outside - closing context menus');
-      console.log('🔧 Mousedown target:', target);
-      console.log('🔧 Mousedown target classes:', target.className);
-      console.log('🔧 Mousedown target tag:', target.tagName);
+      
+      
+      
+      
       
       // Force close all context menus
       setShowContextMenu(false);
@@ -610,7 +610,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
     // Also add a direct body click listener as backup
     const handleBodyClick = (e: Event) => {
       if (showContextMenu || showColorSubmenu || showSortSubmenu) {
-        console.log('🔧 Body click detected - closing context menus');
+        
         setShowContextMenu(false);
         setShowColorSubmenu(false);
         setShowSortSubmenu(false);
@@ -645,7 +645,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                         Array.isArray(storeData);
       
       if (hasResults) {
-        console.log('🔧 AutoRegressiveModelsCanvas: Found results in store data, syncing to local state');
+        
         console.log('🔧 AutoRegressiveModelsCanvas: Store data structure:', {
           hasResultsProperty: !!(storeData as any).results,
           hasCombinationResultsProperty: !!(storeData as any).combination_results,
@@ -666,7 +666,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
   // Restore complete state from store data when component loads
   useEffect(() => {
     if (storeData) {
-      console.log('🔧 AutoRegressiveModelsCanvas: Restoring complete state from store data');
+      
       
       // Restore model results
       if ((storeData as any).modelResults) {
@@ -732,13 +732,13 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         setHasFreshCombinationSaveStatus((storeData as any).hasFreshCombinationSaveStatus);
       }
       
-      console.log('🔧 AutoRegressiveModelsCanvas: Complete state restored from store data');
+      
     }
   }, [storeData]);
 
   // Debug logging for localModelResults and auto-expand functionality
   useEffect(() => {
-    console.log('🔧 AutoRegressiveModelsCanvas: localModelResults changed:', localModelResults);
+    
     if (localModelResults) {
       const resultsArray = getResultsArray();
       console.log('🔧 AutoRegressiveModelsCanvas: Results structure:', {
@@ -753,7 +753,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       
       // Auto-expand the first result when results are loaded
       if (resultsArray && resultsArray.length > 0 && minimizedCombinations.size === 0) {
-        console.log('🔧 Auto-expanding first result for better user experience');
+        
         // Don't minimize the first result
       }
     }
@@ -792,7 +792,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
     // Don't auto-populate growth models from settings
     // They should only be selected after running models and seeing results
     setSelectedGrowthModels([]);
-    console.log('🔧 Initialized selectedGrowthModels as empty (no auto-selection)');
+    
   }, []);
 
   // Don't auto-populate combinationGrowthModels - let users select models manually
@@ -854,7 +854,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         project_id: envParams.PROJECT_ID || ''
       };
 
-      console.log('🔧 DEBUG: Saving combination with request:', saveRequest);
+      
 
       const response = await fetch(baseUrl, {
         method: 'POST',
@@ -870,7 +870,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       }
 
       const saveResult = await response.json();
-      console.log('🔧 DEBUG: Save result:', saveResult);
+      
       
       // Show success message
       toast({
@@ -880,9 +880,9 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       });
       
       // Refresh combination status after saving
-      console.log('🔧 DEBUG: About to call fetchCombinationSaveStatus after saving');
+      
       await fetchCombinationSaveStatus();
-      console.log('🔧 DEBUG: fetchCombinationSaveStatus completed after saving');
+      
       
       // Save complete state after saving a combination
       setTimeout(() => {
@@ -906,28 +906,28 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
 
   // Function to fetch combination save status (works like select models feature)
   const fetchCombinationSaveStatus = async () => {
-    console.log('🔧 DEBUG: fetchCombinationSaveStatus function called');
+    
     
     // Prevent multiple simultaneous calls
     if (isFetchingCombinationStatus) {
-      console.log('🔧 DEBUG: Already fetching combination status, skipping');
+      
       return;
     }
 
     // Get the file_key from the results (like the original implementation)
     const resultsArray = getResultsArray();
-    console.log('🔧 DEBUG: resultsArray:', resultsArray);
+    
     
     if (!resultsArray || resultsArray.length === 0) {
-      console.log('🔧 DEBUG: No results available, returning early');
+      
       return;
     }
 
     const fileKey = resultsArray[0]?.file_key;
-    console.log('🔧 DEBUG: fileKey from results:', fileKey);
+    
     
     if (!fileKey) {
-      console.log('🔧 DEBUG: No file_key found in results, returning early');
+      
       return;
     }
 
@@ -937,7 +937,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
     });
     
     if (!atomId) {
-      console.log('🔧 DEBUG: Missing atomId, returning early');
+      
       return;
     }
 
@@ -976,11 +976,11 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       }
 
       const result = await response.json();
-      console.log('🔧 DEBUG: Combination save status result:', result);
-      console.log('🔧 DEBUG: Setting combinationSaveStatus state with:', result);
+      
+      
       setCombinationSaveStatus(result);
       setHasFreshCombinationSaveStatus(true); // Mark that we have fresh data
-      console.log('🔧 DEBUG: combinationSaveStatus state set');
+      
       
       // Save complete state after fetching combination save status
       setTimeout(() => {
@@ -998,21 +998,21 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
 
   // Function to calculate growth rates
   const calculateGrowthRates = async (period: 'quarterly' | 'halfyearly' | 'yearly', specificCombination?: string) => {
-    console.log('🔧 calculateGrowthRates called with period:', period);
-    console.log('🔧 finalData:', finalData);
-    console.log('🔧 data prop:', data);
-    console.log('🔧 storeData:', storeData);
-    console.log('🔧 Function is accessible!');
+    
+    
+    
+    
+    
     
     // Try to get scope and combinations from multiple sources
     let scope = finalData?.selectedScope || data?.selectedScope || storeData?.selectedScope;
     let combinations = finalData?.selectedCombinations || data?.selectedCombinations || storeData?.selectedCombinations;
     
-    console.log('🔧 Resolved scope:', scope);
-    console.log('🔧 Resolved combinations:', combinations);
+    
+    
     
     if (!scope || !combinations || combinations.length === 0) {
-      console.log('🔧 Missing data - scope or combinations not selected');
+      
       toast({
         title: "Missing Data",
         description: "Please select scope and combinations first.",
@@ -1044,23 +1044,23 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
           run_id: currentRunId  // Add the run_id parameter
         };
 
-        console.log('🔧 Growth rate calculation params:', params);
-        console.log('🔧 Current run_id:', currentRunId);
-        console.log('🔧 API endpoint:', `${AUTO_REGRESSIVE_API}/calculate-${period === 'quarterly' ? 'quarterly' : period === 'halfyearly' ? 'halfyearly' : 'fiscal'}-growth`);
+        
+        
+        
 
         let result;
         try {
           switch (period) {
             case 'quarterly':
-              console.log('🔧 Calling calculateQuarterlyGrowth...');
+              
               result = await calculateQuarterlyGrowth(params);
               break;
             case 'halfyearly':
-              console.log('🔧 Calling calculateHalfYearlyGrowth...');
+              
               result = await calculateHalfYearlyGrowth(params);
               break;
             case 'yearly':
-              console.log('�� Calling calculateFiscalGrowth...');
+              
               result = await calculateFiscalGrowth(params);
               break;
           }
@@ -1115,7 +1115,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
             newData[result.combination] = structuredData;
           }
           setGrowthRatesData(prev => ({ ...prev, ...newData }));
-          console.log('🔧 Stored growth rate data for all combinations:', newData);
+          
         }
         
         toast({
@@ -1217,7 +1217,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
     return aggregated;
   };
 
-  console.log('🔧 calculateGrowthRates function defined:', typeof calculateGrowthRates);
+  
 
   // Fetch numerical columns when scope and combinations are selected
   useEffect(() => {
@@ -1233,9 +1233,9 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
           formData.append('scope', finalData.selectedScope);
           formData.append('combination', firstCombination);
           
-          console.log('🔧 AutoRegressiveModelsCanvas: Fetching columns for scope:', finalData.selectedScope);
-          console.log('🔧 AutoRegressiveModelsCanvas: Using combination:', firstCombination);
-          console.log('🔧 AutoRegressiveModelsCanvas: API URL:', `${AUTO_REGRESSIVE_API}/get_columns`);
+          
+          
+          
           
           // Fetching columns from auto-regressive API using GET method
           const params = new URLSearchParams({
@@ -1249,12 +1249,12 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
             headers: { 'Content-Type': 'application/json' }
           });
           
-          console.log('🔧 AutoRegressiveModelsCanvas: API Response status:', response.status);
-          console.log('🔧 AutoRegressiveModelsCanvas: API Response headers:', response.headers);
+          
+          
           
           if (response.ok) {
             const data = await response.json();
-            console.log('🔧 AutoRegressiveModelsCanvas: API Response data:', data);
+            
             
             // Use the numerical_columns directly from the backend response
             const numericalCols = data.numerical_columns || [];
@@ -1310,7 +1310,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
               testFormData.append('combination', firstCombination);
               testFormData.append('date_column', dateCol);
               
-              console.log('🔧 AutoRegressiveModelsCanvas: Trying date column:', dateCol);
+              
               
               const response = await fetch(`${AUTO_REGRESSIVE_API}/detect_frequency`, {
                 method: 'POST',
@@ -1320,7 +1320,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
               
               if (response.ok) {
                 const data = await response.json();
-                console.log('🔧 AutoRegressiveModelsCanvas: Frequency detection response for', dateCol, ':', data);
+                
                 
                 if (data.frequency && data.frequency !== "Unknown") {
                   // Check if it's a custom frequency - if so, show dropdown for manual selection
@@ -1330,7 +1330,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                     setFrequencyConfidence('low'); // Custom frequency has low confidence
                     setShowFrequencyDropdown(true); // Show dropdown for manual selection
                     setSelectedFrequency('custom'); // Set to custom as default
-                    console.log('🔧 AutoRegressiveModelsCanvas: Custom frequency detected, showing dropdown for manual selection');
+                    
                   } else {
                     // Standard frequency was successfully detected
                     setAutoDetectedFrequency(data.frequency);
@@ -1350,14 +1350,14 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                       setSelectedFrequency(frequencyMapping[data.frequency]);
                     }
                     
-                    console.log('🔧 AutoRegressiveModelsCanvas: Auto-detected frequency:', data.frequency, 'using column:', dateCol);
+                    
                   }
                   frequencyDetected = true;
                   break; // Exit the loop since we found a working column
                 }
               }
             } catch (error) {
-              console.log('🔧 AutoRegressiveModelsCanvas: Failed to detect frequency with column:', dateCol, error);
+              
               continue; // Try next column
             }
           }
@@ -1367,7 +1367,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
             setAutoDetectedFrequency(null);
             setFrequencyConfidence('low');
             setShowFrequencyDropdown(true);
-            console.log('🔧 AutoRegressiveModelsCanvas: No frequency detected with any common columns, showing manual dropdown');
+            
           }
           
         } catch (error) {
@@ -1376,7 +1376,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
           setAutoDetectedFrequency(null);
           setFrequencyConfidence('low');
           setShowFrequencyDropdown(true);
-          console.log('🔧 AutoRegressiveModelsCanvas: Frequency detection exception, showing manual dropdown');
+          
         }
       }
     };
@@ -1416,22 +1416,22 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
 
   // Data modification functions for Laboratory Mode
   const handleDataChange = (newData: Partial<AutoRegressiveModelsData>) => {
-    console.log('🔧 handleDataChange called with:', newData);
-    console.log('🔧 atomId:', atomId);
-    console.log('🔧 onDataChange function:', !!onDataChange);
+    
+    
+    
     
     if (onDataChange) {
-      console.log('🔧 Calling onDataChange with data:', newData);
+      
       onDataChange(newData);
-      console.log('🔧 onDataChange called successfully');
+      
     } else {
-      console.log('🔧 Cannot update settings - missing onDataChange function');
+      
     }
   };
 
   // Function to save complete atom state including all API responses
   const saveCompleteAtomState = () => {
-    console.log('🔧 saveCompleteAtomState: Saving complete atom state');
+    
     
     const completeState = {
       // Basic configuration data
@@ -1464,33 +1464,33 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       lastError: localModelResults?.error || null
     };
     
-    console.log('🔧 saveCompleteAtomState: Complete state to save:', completeState);
+    
     
     if (onDataChange) {
       onDataChange(completeState);
-      console.log('🔧 saveCompleteAtomState: State saved successfully');
+      
     } else {
-      console.log('🔧 saveCompleteAtomState: Cannot save - missing onDataChange function');
+      
     }
   };
 
 
   // Handle combination deselection from canvas
   const removeCombination = (combinationToRemove: string) => {
-    console.log('🔧 removeCombination called with:', combinationToRemove);
-    console.log('🔧 Current combinations:', finalData?.selectedCombinations);
+    
+    
     
     const updatedCombinations = (finalData?.selectedCombinations || []).filter(
       combination => combination !== combinationToRemove
     );
     
-    console.log('🔧 Updated combinations:', updatedCombinations);
+    
     handleDataChange({ selectedCombinations: updatedCombinations });
   };
 
   const handleRunModels = async () => {
     if (!allSelectionsMade) {
-      console.log('Cannot run models: not all selections made');
+      
       return;
     }
 
@@ -1556,8 +1556,8 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         };
 
         console.log(`🔧 AutoRegressiveModelsCanvas: Processing combination ${i + 1}/${totalCombinations}:`, requestPayload);
-        console.log('🔧 AutoRegressiveModelsCanvas: Selected models being sent:', finalData.selectedModels);
-        console.log('🔧 AutoRegressiveModelsCanvas: Models to run:', requestPayload.models_to_run);
+        
+        
 
         // Validate request for this combination
       try {
@@ -1618,7 +1618,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
 
             const result = await response.json();
             console.log(`🔧 AutoRegressiveModelsCanvas: Combination ${i + 1} completed:`, result);
-            console.log('🔧 AutoRegressiveModelsCanvas: Models in result:', result.results ? Object.keys(result.results) : 'No results');
+            
             if (result.results) {
               Object.keys(result.results).forEach(modelKey => {
                 console.log(`🔧 AutoRegressiveModelsCanvas: Model ${modelKey} data:`, result.results[modelKey]);
@@ -1659,7 +1659,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       
       // Process the results
       if (allResults.length > 0) {
-        console.log('🔧 AutoRegressiveModelsCanvas: All results:', allResults);
+        
         
         // Use the last result's run_id as the main run_id
         const mainRunId = allResults[allResults.length - 1].run_id;
@@ -1674,7 +1674,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
           results: allResults.flatMap(result => result.results || [])
         };
         
-        console.log('🔧 AutoRegressiveModelsCanvas: Combined results:', combinedResults);
+        
           
           // Store results for growth rate calculations
         setLocalModelResults(combinedResults);
@@ -1797,32 +1797,32 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
 
   // Generate real forecast data from backend results for the line chart
   const generateRealForecastData = (result: any, forecastHorizon: number) => {
-    console.log('🔧 generateRealForecastData called with:', { result, forecastHorizon });
+    
     
     // Debug: Log the full result structure
-    console.log('🔧 Full result structure:', JSON.stringify(result, null, 2));
-    console.log('🔧 Result keys:', Object.keys(result || {}));
-    console.log('🔧 Result.result keys:', Object.keys(result?.result || {}));
+    
+    
+    
     
     if (!result?.result?.forecast_df) {
-      console.log('❌ No forecast_df found in result:', result);
+      
         return [];
       }
 
     const forecast_df = result.result.forecast_df;
-    console.log('🔧 forecast_df data:', forecast_df);
+    
       
       const data = [];
     
     // Get the actual models that were run from backend
     const modelsRun = result.result.models_run || [];
-    console.log('🔧 Models run (backend):', modelsRun);
-    console.log('🔧 Models run type:', typeof modelsRun, 'Array?', Array.isArray(modelsRun));
+    
+    
     
     // For forecast data, we can only show models that were actually run by the backend
     // because the forecast_df only contains data for those models
     const modelsToShow = modelsRun;
-    console.log('🔧 Models to show in chart (forecast):', modelsToShow);
+    
     
     // Check which models actually have data
     const modelsWithData = new Set();
@@ -1833,7 +1833,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         }
       });
     });
-    console.log('🔧 Models with actual data:', Array.from(modelsWithData));
+    
     
     // Process each row in the forecast dataframe
     forecast_df.forEach((row: any, index: number) => {
@@ -1855,22 +1855,22 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         data.push(dataPoint);
       });
       
-      console.log('🔧 Processed chart data:', data);
-    console.log('🔧 Sample data point:', data[0]);
+      
+    
       return data;
   };
 
   // Generate real performance data for the bar chart
   const generateRealPerformanceData = (result: any) => {
-    console.log('🔧 generateRealPerformanceData called with:', result);
+    
     
     if (!result?.result?.metrics) {
-      console.log('❌ No metrics found in result:', result);
+      
         return [];
       }
 
     const metrics = result.result.metrics;
-    console.log('🔧 Metrics data:', metrics);
+    
       
       const data = [];
     
@@ -1888,34 +1888,34 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         }
       });
       
-      console.log('🔧 Processed performance data:', data);
+      
       return data;
   };
 
   // Generate real matrix data for performance comparison
   const generateRealMatrixData = (result: any) => {
-    console.log('🔧 generateRealMatrixData called with:', result);
+    
     
     // Debug: Log the full result structure for matrix
-    console.log('🔧 Full result structure (matrix):', JSON.stringify(result, null, 2));
-    console.log('🔧 Result keys (matrix):', Object.keys(result || {}));
-    console.log('🔧 Result.result keys (matrix):', Object.keys(result?.result || {}));
+    
+    
+    
     
     // Check for metrics in the result
     const metrics = result?.result?.metrics || {};
     const modelsRun = result?.result?.models_run || [];
     const metricNames = ['MAE', 'MSE', 'RMSE', 'MAPE', 'SMAPE'];
     
-    console.log('🔧 Models run:', modelsRun);
-    console.log('🔧 Models run type:', typeof modelsRun, 'Array?', Array.isArray(modelsRun));
-    console.log('🔧 Available metrics:', metrics);
-    console.log('🔧 Metric names:', metricNames);
+    
+    
+    
+    
     
     // Use models_run to ensure all selected models are shown, even if they don't have metrics
     const modelNames = modelsRun.length > 0 ? modelsRun : Object.keys(metrics);
     
     if (modelNames.length === 0) {
-      console.log('❌ No models found in result');
+      
       return { matrix: [], metrics: [], bestModel: null };
     }
     
@@ -1926,7 +1926,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         const value = metrics[modelName]?.[metric];
         row[metric] = value !== null && value !== undefined ? value : null;
       });
-      console.log('🔧 Matrix row for', modelName, ':', row);
+      
       return row;
     });
     
@@ -1935,25 +1935,25 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
     let bestMape = Infinity;
     
     matrix.forEach((row) => {
-      console.log('🔧 Checking row for best model:', row.model, 'MAPE:', row.MAPE, 'Current best:', bestModel, 'Current best MAPE:', bestMape);
+      
       if (row.MAPE && row.MAPE < bestMape && row.MAPE > 0) {
         bestMape = row.MAPE;
         bestModel = row.model;
-        console.log('🔧 New best model found:', bestModel, 'with MAPE:', bestMape);
+        
       }
     });
     
-    console.log('🔧 Processed matrix data:', matrix);
-    console.log('🔧 Best model identified:', bestModel, 'with MAPE:', bestMape);
+    
+    
     return { matrix, metrics: metricNames, bestModel };
   };
 
   // Context Menu Components
   const ContextMenu = () => {
-    console.log('🔧 ContextMenu render - showContextMenu:', showContextMenu, 'position:', contextMenuPosition);
+    
     if (!showContextMenu) return null;
 
-    console.log('🔧 Rendering context menu at:', contextMenuPosition);
+    
 
     return (
       <div 
@@ -2204,24 +2204,24 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
     
     if (Array.isArray((localModelResults as any)?.results)) {
       // Direct results array (the working approach from Auto regressive 19 Aug)
-      console.log('🔧 getResultsArray: Found results in localModelResults.results (direct array)');
+      
       allResults = (localModelResults as any).results;
     } else if ((localModelResults as any)?.results?.combination_results && Array.isArray((localModelResults as any).results.combination_results)) {
       // Fallback: nested structure (old approach)
-      console.log('🔧 getResultsArray: Found results in localModelResults.results.combination_results (fallback)');
+      
       allResults = (localModelResults as any).results.combination_results;
     } else if (Array.isArray((localModelResults as any)?.combination_results)) {
       // Fallback: direct combination_results
-      console.log('🔧 getResultsArray: Found results in localModelResults.combination_results (fallback)');
+      
       allResults = (localModelResults as any).combination_results;
     } else if (Array.isArray(localModelResults)) {
       // If the entire response is an array
-      console.log('🔧 getResultsArray: localModelResults is an array (fallback)');
+      
       allResults = localModelResults;
     }
     
     if (!allResults) {
-      console.log('🔧 getResultsArray: No valid results array found');
+      
       return null;
     }
     
@@ -2306,7 +2306,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
       return filteredResults;
     }
     
-    console.log('🔧 getResultsArray: No selected combinations filter, returning all results');
+    
     return allResults;
   };
 
@@ -2367,7 +2367,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                           size="sm"
                           onClick={(e) => {
                             e.stopPropagation();
-                            console.log('🔧 Remove button clicked for combination:', combination);
+                            
                             removeCombination(combination);
                           }}
                           className="h-5 w-5 p-0 ml-1 hover:bg-red-50 hover:text-red-600 transition-colors z-10"
@@ -2760,8 +2760,8 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                 }
                                 
                                 const chartData = generateRealForecastData(result, parseInt(forecastHorizon));
-                                console.log('🔧 Chart data for line chart:', chartData);
-                                console.log('🔧 Chart data length:', chartData.length);
+                                
+                                
                                 
                                 if (chartData.length === 0) {
                                   return (
@@ -2954,8 +2954,8 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                          }}
                                          iconType="line"
                                          onClick={(entry) => {
-                                           console.log('🔧 Legend clicked via Recharts:', entry);
-                                           console.log('🔧 index value:', index);
+                                           
+                                           
                                            handleLegendClick(entry, index);
                                          }}
                                          className="interactive-legend"
@@ -3232,7 +3232,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                               <div className="flex items-center bg-gray-100 rounded-lg p-1 space-x-8">
                                 <button
                                   onClick={() => {
-                                    console.log('🔧 Quarterly button clicked!');
+                                    
                                     setSelectedGrowthPeriod('quarterly');
                                     // Check if we have models selected for this combination
                                     const currentModels = combinationGrowthModels[result.combination_id] || [];
@@ -3251,7 +3251,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                 </button>
                                 <button
                                   onClick={() => {
-                                    console.log('🔧 Half-Yearly button clicked!');
+                                    
                                     setSelectedGrowthPeriod('halfyearly');
                                     // Check if we have models selected for this combination
                                     const currentModels = combinationGrowthModels[result.combination_id] || [];
@@ -3270,7 +3270,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                 </button>
                                 <button
                                   onClick={() => {
-                                    console.log('🔧 Yearly button clicked!');
+                                    
                                     setSelectedGrowthPeriod('yearly');
                                     // Check if we have models selected for this combination
                                     const currentModels = combinationGrowthModels[result.combination_id] || [];
@@ -3357,7 +3357,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                           
                                           // If still no data, try to get it from the root level
                                           if (rawData.length === 0 && combinationData.data) {
-                                            console.log('🔧 No data found in nested structure, trying root level');
+                                            
                                             if (selectedGrowthPeriod === 'quarterly') {
                                               rawData = combinationData.quarterly_growth || [];
                                             } else if (selectedGrowthPeriod === 'halfyearly') {
@@ -3367,40 +3367,40 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                             }
                                           }
                                           
-                                          console.log('🔧 Raw data from combinationData:', rawData);
-                                          console.log('🔧 Raw data length:', rawData.length);
-                                          console.log('🔧 Selected growth period:', selectedGrowthPeriod);
-                                          console.log('🔧 Combination data structure:', combinationData);
-                                          console.log('🔧 Available data keys:', combinationData.data ? Object.keys(combinationData.data) : 'No data');
+                                          
+                                          
+                                          
+                                          
+                                          
                                           
                                           // Debug the nested structure
                                           if (combinationData.data?.quarterly_growth) {
-                                            console.log('🔧 quarterly_growth structure:', combinationData.data.quarterly_growth);
-                                            console.log('🔧 quarterly_growth type:', typeof combinationData.data.quarterly_growth);
-                                            console.log('🔧 quarterly_growth isArray:', Array.isArray(combinationData.data.quarterly_growth));
+                                            
+                                            
+                                            
                                             if (combinationData.data.quarterly_growth.quarterly_growth) {
-                                              console.log('🔧 nested quarterly_growth:', combinationData.data.quarterly_growth.quarterly_growth);
-                                              console.log('🔧 nested quarterly_growth length:', combinationData.data.quarterly_growth.quarterly_growth.length);
+                                              
+                                              
                                             }
                                           }
                                           
                                           // Debug: Check if rawData has the expected structure
                                           if (rawData.length > 0) {
-                                            console.log('🔧 Sample raw data item:', rawData[0]);
-                                            console.log('🔧 Raw data item keys:', Object.keys(rawData[0]));
+                                            
+                                            
                                           } else {
-                                            console.log('🔧 No raw data available - checking data structure');
-                                            console.log('🔧 combinationData.data:', combinationData.data);
+                                            
+                                            
                                             if (combinationData.data) {
-                                              console.log('🔧 quarterly_growth:', combinationData.data.quarterly_growth);
-                                              console.log('🔧 halfyearly_growth:', combinationData.data.halfyearly_growth);
-                                              console.log('🔧 fiscal_growth:', combinationData.data.fiscal_growth);
+                                              
+                                              
+                                              
                                             }
                                           }
                                           
                                           // Add detailed debugging for raw data
                                           if (Array.isArray(rawData) && rawData.length > 0) {
-                                            console.log('🔧 Sample raw data items:');
+                                            
                                             const safeRawData = Array.isArray(rawData) ? rawData : [];
                                             safeRawData.slice(0, 5).forEach((item, index) => {
                                               console.log(`🔧 Raw item ${index}:`, {
@@ -3412,8 +3412,8 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                 growth_rate: item.growth_rate
                                               });
                                             });
-                                            console.log('🔧 All fiscal_half values in raw data:', safeRawData.map(item => item.fiscal_half));
-                                            console.log('🔧 All fiscal_year values in raw data:', safeRawData.map(item => item.fiscal_year));
+                                            
+                                            
                                           }
                                           
                                           // Transform data for grouped bar chart - group by model (x-axis) with fiscal years as legends
@@ -3422,7 +3422,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                           
                                           // If no data found, try to extract from the matrix data structure
                                           if (arrayData.length === 0) {
-                                            console.log('🔧 No array data found, checking matrix data structure');
+                                            
                                             let matrixData = [];
                                             
                                             if (selectedGrowthPeriod === 'quarterly') {
@@ -3440,24 +3440,24 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                             }
                                             
                                             if (Array.isArray(matrixData) && matrixData.length > 0) {
-                                              console.log('🔧 Found matrix data, using it as raw data');
+                                              
                                               arrayData = matrixData;
                                             }
                                           }
                                           
-                                          console.log('🔧 Raw data type check:', typeof rawData, 'isArray:', Array.isArray(rawData), 'length:', arrayData.length);
-                                          console.log('🔧 Final array data length:', arrayData.length);
+                                          
+                                          
                                           
                                           // Transform data for grouped bar chart - group by model (x-axis) with fiscal years as legends
                                           const filteredData = arrayData.filter((row: any) => {
                                             return currentModels.length === 0 || currentModels.includes(row.model);
                                           });
 
-                                          console.log('🔧 Filtered data:', filteredData);
+                                          
                                           
                                           // Add debugging for filtered data
                                           if (filteredData.length > 0) {
-                                            console.log('🔧 Sample filtered data items:');
+                                            
                                             filteredData.slice(0, 5).forEach((item, index) => {
                                               console.log(`🔧 Filtered item ${index}:`, {
                                                 model: item.model,
@@ -3468,7 +3468,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                 growth_rate: item.growth_rate
                                               });
                                             });
-                                            console.log('🔧 All fiscal_half values in filtered data:', filteredData.map(item => item.fiscal_half));
+                                            
                                           }
                                           
                                           // Group by model and create chart data with fiscal years as legends
@@ -3508,9 +3508,9 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                             return 0;
                                           });
                                           
-                                          console.log('🔧 All fiscal years found:', sortedFiscalYears);
-                                          console.log('🔧 Number of fiscal years:', sortedFiscalYears.length);
-                                          console.log('🔧 Filtered data length:', filteredData.length);
+                                          
+                                          
+                                          
                                           
                                           filteredData.forEach((row: any) => {
                                             const model = row.model;
@@ -3551,13 +3551,13 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                           const ensembleData: { [key: string]: any } = { model: 'Ensemble' };
           
                                           // Initialize ensemble with all fiscal year keys set to 0
-                                          console.log('🔧 Initializing ensemble data with fiscal years:', sortedFiscalYears);
+                                          
                                           sortedFiscalYears.forEach(fiscalYear => {
                                             const dataKey = `${fiscalYear.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '')}_growth_rate`;
                                             ensembleData[dataKey] = 0;
                                             console.log(`🔧 Added ensemble key: ${dataKey}`);
                                           });
-                                          console.log('🔧 Ensemble data after initialization:', ensembleData);
+                                          
                                           
                                           Object.keys(groupedData).forEach(model => {
                                             const modelData = groupedData[model];
@@ -3620,8 +3620,8 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                           // Replace the original groupedData with the reordered and filtered version
                                           groupedData = finalGroupedData;
 
-                                          console.log('🔧 Final grouped data keys:', Object.keys(groupedData));
-                                          console.log('🔧 Final grouped data:', groupedData);
+                                          
+                                          
                                           
                                           // Debug: Check the structure of each model's data
                                           Object.keys(groupedData).forEach(model => {
@@ -3645,31 +3645,31 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                             return hasValidData;
                                           });
                                           
-                                          console.log('🔧 Transformed chart data:', safeTransformedData);
-                                          console.log('🔧 Filtered chart data:', filteredTransformedData);
-                                          console.log('🔧 Sample transformed item:', safeTransformedData[0]);
-                                          console.log('🔧 All transformed items:', JSON.stringify(safeTransformedData, null, 2));
-                                          console.log('🔧 Selected growth models:', selectedGrowthModels);
-                                          console.log('🔧 Chart data length:', safeTransformedData.length);
-                                          console.log('🔧 Filtered chart data length:', filteredTransformedData.length);
-                                          console.log('🔧 Chart data keys:', safeTransformedData.length > 0 ? Object.keys(safeTransformedData[0]) : 'No data');
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
+                                          
                                           
                                           // No fallback data - only show real data
                                           if (filteredTransformedData.length === 0) {
-                                            console.log('🔧 No transformed data available - chart will be empty');
+                                            
                                             return [];
                                           }
                                           
                                           return filteredTransformedData;
                                         })();
                                         
-                                        console.log('🔧 Final chart data for rendering:', chartData);
-                                        console.log('🔧 Chart data type:', typeof chartData);
-                                        console.log('🔧 Chart data is array:', Array.isArray(chartData));
+                                        
+                                        
+                                        
                                         
                                         // Test if chart data is valid
                                         if (!chartData || !Array.isArray(chartData) || chartData.length === 0) {
-                                          console.log('🔧 No real data available - chart will be empty');
+                                          
                                           return (
                                             <div className="flex items-center justify-center h-full">
                                               <div className="text-center">
@@ -3686,7 +3686,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                         // Additional validation: Check if the data has the expected structure
                                         const firstItem = chartData[0];
                                         if (!firstItem || !firstItem.model) {
-                                          console.log('🔧 Invalid data structure - missing model field');
+                                          
                                           return (
                                             <div className="flex items-center justify-center h-full">
                                               <div className="text-center">
@@ -3701,13 +3701,13 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                         }
                                         
                                         // Debug: Log the actual chart data structure
-                                        console.log('🔧 Chart data for rendering:', chartData);
-                                        console.log('🔧 First item structure:', chartData[0]);
-                                        console.log('🔧 First item keys:', chartData[0] ? Object.keys(chartData[0]) : 'No keys');
+                                        
+                                        
+                                        
                                         
                                         // Add error boundary for chart rendering
                                         try {
-                                          console.log('🔧 Attempting to render chart with data:', chartData);
+                                          
                                           return (
                                             <ResponsiveContainer width="100%" height="100%">
                                               <BarChart 
@@ -3799,7 +3799,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                     }}
                                                     iconType="rect"
                                                     onClick={(entry: any) => {
-                                                      console.log('🔧 Growth Legend clicked via Recharts:', entry);
+                                                      
                                                       handleGrowthLegendClick(entry, result.combination_id);
                                                     }}
                                                   />
@@ -3835,12 +3835,12 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                     return 0;
                                                   }) : [];
                                                   
-                                                  console.log('🔧 Fiscal years for legends (sorted):', fiscalYears);
-                                                  console.log('🔧 Chart data structure for debugging:', chartData);
+                                                  
+                                                  
                                                   
                                                   // If no fiscal years found, show a message
                                                   if (fiscalYears.length === 0) {
-                                                    console.log('🔧 No fiscal year keys found in chart data');
+                                                    
                                                     return (
                                                       <div className="flex items-center justify-center h-full">
                                                         <div className="text-center">
@@ -3856,7 +3856,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                                   
                                                   // Ensure fiscalYears is an array before mapping
                                                   if (!Array.isArray(fiscalYears)) {
-                                                    console.log('🔧 fiscalYears is not an array:', fiscalYears);
+                                                    
                                                     return null;
                                                   }
                                                   
@@ -4012,17 +4012,17 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                                             matrixData = Array.isArray(fiscalData) ? fiscalData : (fiscalData?.fiscal_growth || []);
                                           }
                                           
-                                          console.log('🔧 Matrix data for table:', matrixData);
-                                          console.log('🔧 Current models for this combination:', currentModels);
+                                          
+                                          
                                           
                                           // Ensure matrixData is an array
                                           if (!Array.isArray(matrixData)) {
-                                            console.log('🔧 Matrix data is not an array, converting...');
+                                            
                                             matrixData = [];
                                           }
                                           
                                           const filteredMatrixData = matrixData.filter((row: any) => {
-                                            console.log('🔧 Filtering row:', row.model, 'Current models:', currentModels);
+                                            
                                             // Filter by model selection
                                             const modelMatches = currentModels.length === 0 || currentModels.includes(row.model);
                                             // Don't filter out rows with 0 growth rates - they are valid (first year has no previous year to compare)
@@ -4196,7 +4196,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                     </span>
                   </div>
                 )}
-                {(() => { console.log('🔧 DEBUG: UI rendering combinationSaveStatus:', combinationSaveStatus); return null; })()}
+                {(() => {  return null; })()}
                 {combinationSaveStatus && combinationSaveStatusMinimized && (
                   <div className="flex items-center gap-1.5 text-xs">
                     <Badge variant="secondary" className="bg-green-200 text-green-800 text-xs px-1.5 py-0.5">
@@ -4325,13 +4325,13 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
 
       {/* Fullscreen Chart Modal */}
       <Dialog open={!!fullscreenChart} onOpenChange={(open) => {
-        console.log('🔧 Dialog onOpenChange:', { open, showContextMenu, showColorSubmenu, isFullscreenMode });
+        
         // Only close the modal if it's explicitly being closed (not when context menu is open)
         if (!open && !showContextMenu && !showColorSubmenu) {
-          console.log('🔧 Closing fullscreen modal');
+          
           setFullscreenChart(null);
         } else if (!open) {
-          console.log('🔧 Preventing modal close due to active context menu');
+          
         }
       }}>
         <DialogContent 
@@ -4580,8 +4580,8 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                            }}
                            iconType="line"
                            onClick={(entry) => {
-                             console.log('🔧 Fullscreen Legend clicked via Recharts:', entry);
-                             console.log('🔧 fullscreenChart.combinationId:', fullscreenChart.combinationId);
+                             
+                             
                              // For fullscreen charts, we'll use a default index since we don't have the combination index
                              handleLegendClick(entry, 0);
                            }}
@@ -4737,7 +4737,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                     return 0;
                   });
                   
-                  console.log('🔧 Fullscreen chart - All fiscal years found:', sortedFiscalYears);
+                  
                   
                   // Group by model and create chart data with fiscal years as legends
                   let groupedData: { [key: string]: any } = {};
@@ -4909,7 +4909,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                             }}
                             iconType="rect"
                             onClick={(entry: any) => {
-                              console.log('🔧 Growth Legend clicked via Recharts:', entry);
+                              
                               if (fullscreenChart?.combinationId) {
                                 handleGrowthLegendClick(entry, fullscreenChart.combinationId);
                               }
@@ -4969,7 +4969,7 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
                             return 0;
                           });
                           
-                          console.log('🔧 Fullscreen chart - Fiscal years for legends (sorted):', fiscalYears);
+                          
                           
                           return fiscalYears.map((fiscalYear, fiscalIndex) => {
                             const dataKey = `${fiscalYear}_growth_rate`;

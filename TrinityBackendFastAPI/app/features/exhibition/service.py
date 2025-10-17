@@ -133,6 +133,14 @@ class ExhibitionStorage:
             if isinstance(metadata, dict):
                 sanitised_component["metadata"] = metadata
 
+            manifest = component.get("manifest")
+            if isinstance(manifest, dict):
+                sanitised_component["manifest"] = manifest
+
+            manifest_id = component.get("manifest_id") or component.get("manifestId")
+            if isinstance(manifest_id, str) and manifest_id.strip():
+                sanitised_component["manifest_id"] = manifest_id.strip()
+
             sanitised.append(sanitised_component)
 
         return sanitised
@@ -372,6 +380,75 @@ class ExhibitionStorage:
             return self._aggregate_entries(client, app, project, records)
 
         return await run_in_threadpool(_lookup)
+
+    async def get_manifest(
+        self,
+        client_name: str,
+        app_name: str,
+        project_name: str,
+        component_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        record = await self.get_configuration(client_name, app_name, project_name)
+        if not record:
+            return None
+
+        component_key = str(component_id).strip()
+        if not component_key:
+            return None
+
+        atoms = record.get("atoms", [])
+        if not isinstance(atoms, list):
+            return None
+
+        for atom in atoms:
+            if not isinstance(atom, dict):
+                continue
+
+            components = atom.get("exhibited_components", [])
+            if not isinstance(components, list):
+                continue
+
+            for component in components:
+                if not isinstance(component, dict):
+                    continue
+
+                raw_id = str(component.get("id", "")).strip()
+                if not raw_id or raw_id != component_key:
+                    continue
+
+                raw_manifest = component.get("manifest")
+                if not isinstance(raw_manifest, dict):
+                    metadata = component.get("metadata")
+                    if isinstance(metadata, dict):
+                        fallback_manifest = metadata.get("visualizationManifest")
+                        raw_manifest = fallback_manifest if isinstance(fallback_manifest, dict) else None
+
+                manifest_payload = dict(raw_manifest) if isinstance(raw_manifest, dict) else None
+
+                raw_metadata = component.get("metadata")
+                metadata_payload = dict(raw_metadata) if isinstance(raw_metadata, dict) else None
+
+                manifest_identifier = component.get("manifest_id")
+                if not isinstance(manifest_identifier, str) or not manifest_identifier.strip():
+                    if isinstance(metadata_payload, dict):
+                        manifest_identifier = metadata_payload.get("manifestId")
+                manifest_identifier = (
+                    manifest_identifier.strip()
+                    if isinstance(manifest_identifier, str) and manifest_identifier.strip()
+                    else None
+                )
+
+                return {
+                    "component_id": raw_id,
+                    "manifest": manifest_payload,
+                    "manifest_id": manifest_identifier,
+                    "metadata": metadata_payload,
+                    "atom_id": atom.get("id"),
+                    "atom_name": atom.get("atom_name"),
+                    "updated_at": record.get("updated_at"),
+                }
+
+        return None
 
     async def save_configuration(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         def _save() -> Dict[str, Any]:

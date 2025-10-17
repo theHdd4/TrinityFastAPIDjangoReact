@@ -18,6 +18,14 @@ class ExhibitionComponent(BaseModel):
         default=None,
         description="Additional metadata captured for the exhibited component",
     )
+    manifest: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Serialised visualisation manifest for the component",
+    )
+    manifest_id: Optional[str] = Field(
+        default=None,
+        description="Stable identifier for the stored manifest",
+    )
 
 
 class ExhibitionAtomEntry(BaseModel):
@@ -47,3 +55,89 @@ class ExhibitionConfigurationOut(ExhibitionConfigurationBase):
 
     class Config:
         orm_mode = True
+
+
+class ExhibitionManifestOut(BaseModel):
+    """Read-only representation of an exhibited component manifest."""
+
+    component_id: str = Field(..., description="Identifier of the requested exhibition component")
+    manifest: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Serialised manifest payload for the component",
+    )
+    manifest_id: Optional[str] = Field(
+        default=None,
+        description="Stable manifest identifier if available",
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Associated metadata stored alongside the manifest",
+    )
+    atom_id: Optional[str] = Field(default=None, description="Identifier of the parent atom")
+    atom_name: Optional[str] = Field(default=None, description="Display name of the parent atom")
+    updated_at: Optional[datetime] = Field(default=None, description="Last update timestamp for the manifest")
+
+
+class ExhibitionLayoutAtom(BaseModel):
+    """Minimal representation of an atom placed on an exhibition slide."""
+
+    id: str = Field(..., min_length=1)
+    atomId: str = Field(..., min_length=1)
+    title: Optional[str] = None
+    category: Optional[str] = None
+    color: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ExhibitionLayoutSlideObject(BaseModel):
+    """Persisted slide object used when restoring exhibition layouts."""
+
+    id: str = Field(..., min_length=1)
+    type: str = Field(..., min_length=1)
+    x: float = Field(...)
+    y: float = Field(...)
+    width: Optional[float] = None
+    height: Optional[float] = None
+    zIndex: Optional[int] = Field(default=None, alias="zIndex")
+    groupId: Optional[str] = Field(default=None, alias="groupId")
+    props: Dict[str, Any] = Field(default_factory=dict)
+
+    class Config:
+        allow_population_by_field_name = True
+
+
+class ExhibitionLayoutCard(BaseModel):
+    """Slide level configuration for the exhibition layout."""
+
+    id: str = Field(..., min_length=1)
+    atoms: List[ExhibitionLayoutAtom] = Field(default_factory=list)
+    catalogueAtoms: List[ExhibitionLayoutAtom] = Field(default_factory=list)
+    isExhibited: bool = Field(default=True)
+    moleculeId: Optional[str] = None
+    moleculeTitle: Optional[str] = None
+    title: Optional[str] = None
+    lastEditedAt: Optional[str] = None
+    presentationSettings: Optional[Dict[str, Any]] = None
+
+
+class ExhibitionLayoutConfigurationBase(BaseModel):
+    client_name: str = Field(..., min_length=1)
+    app_name: str = Field(..., min_length=1)
+    project_name: str = Field(..., min_length=1)
+    cards: List[ExhibitionLayoutCard] = Field(default_factory=list)
+    slide_objects: Dict[str, List[ExhibitionLayoutSlideObject]] = Field(
+        default_factory=dict, alias="slide_objects"
+    )
+
+    class Config:
+        allow_population_by_field_name = True
+
+
+class ExhibitionLayoutConfigurationIn(ExhibitionLayoutConfigurationBase):
+    """Incoming payload when saving the exhibition layout."""
+
+
+class ExhibitionLayoutConfigurationOut(ExhibitionLayoutConfigurationBase):
+    """Response payload when loading the exhibition layout."""
+
+    updated_at: Optional[datetime] = Field(default=None)

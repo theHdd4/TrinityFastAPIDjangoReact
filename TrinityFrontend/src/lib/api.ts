@@ -63,6 +63,14 @@ export const REGISTRY_API =
   normalizeUrl(import.meta.env.VITE_REGISTRY_API) ||
   `${backendOrigin}${djangoPrefix}/registry`;
 
+export const USECASES_API =
+  normalizeUrl(import.meta.env.VITE_USECASES_API) ||
+  `${backendOrigin}${djangoPrefix}/usecases`;
+
+export const TRINITY_V1_ATOMS_API =
+  normalizeUrl(import.meta.env.VITE_TRINITY_V1_ATOMS_API) ||
+  `${backendOrigin}${djangoPrefix}`;
+
 export const TENANTS_API =
   normalizeUrl(import.meta.env.VITE_TENANTS_API) ||
   `${backendOrigin}${djangoPrefix}/tenants`;
@@ -78,6 +86,10 @@ export const CARD_API =
 export const SUBSCRIPTIONS_API =
   normalizeUrl(import.meta.env.VITE_SUBSCRIPTIONS_API) ||
   `${backendOrigin}${djangoPrefix}/subscriptions`;
+
+export const WORKFLOWS_API =
+  normalizeUrl(import.meta.env.VITE_WORKFLOWS_API) ||
+  `${backendOrigin}${djangoPrefix}/workflows`;
 
 export const SIGNUPS_API =
   normalizeUrl(import.meta.env.VITE_SIGNUPS_API) ||
@@ -131,6 +143,10 @@ export const INSIGHT_API = `${TRINITY_AI_API}/insights`;
 
 export const LAB_ACTIONS_API = `${REGISTRY_API}/laboratory-actions`;
 
+export const LABORATORY_API =
+  normalizeUrl(import.meta.env.VITE_LABORATORY_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/laboratory`;
+
 export const CLASSIFIER_API =
   normalizeUrl(import.meta.env.VITE_CLASSIFIER_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/classify`;
@@ -173,6 +189,14 @@ export const EXPLORE_API =
 export const EVALUATE_API =
   normalizeUrl(import.meta.env.VITE_EVALUATE_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/evaluate`;
+
+export const MOLECULES_API =
+  normalizeUrl(import.meta.env.VITE_MOLECULES_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/molecules`;
+
+export const CUSTOM_MOLECULES_API =
+  normalizeUrl(import.meta.env.VITE_CUSTOM_MOLECULES_API) ||
+  `${backendOrigin}${djangoPrefix}/custom-molecules`;
 
 // Signup API function
 export const submitSignup = async (data: {

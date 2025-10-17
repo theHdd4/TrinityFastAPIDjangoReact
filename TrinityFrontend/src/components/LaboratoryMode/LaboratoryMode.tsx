@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Play, Save, Share2, Undo2, List } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
+import { atoms as allAtoms } from '@/components/AtomList/data';
 import {
   sanitizeLabConfig,
   saveCurrentProject,
@@ -39,7 +40,7 @@ const LaboratoryMode = () => {
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
-  const [auxActive, setAuxActive] = useState<string | null>(null);
+  const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'superagent' | null>(null);
   const { toast } = useToast();
   const { cards, setCards: setLabCards } = useLaboratoryStore();
   const setExhibitionCards = useExhibitionStore(state => state.setCards);
@@ -131,6 +132,66 @@ const LaboratoryMode = () => {
       toast({ title: 'Successfully Loaded Existing Project State' });
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load workflow data from WorkflowMode
+  useEffect(() => {
+    const workflowData = localStorage.getItem('workflow-data');
+    if (workflowData) {
+      try {
+        const data = JSON.parse(workflowData);
+        console.log('Loading workflow data:', data);
+        
+        if (data.molecules && Array.isArray(data.molecules)) {
+          // Convert workflow data to the format expected by CanvasArea
+          const workflowSelectedAtoms: Array<{
+            atomName: string;
+            moleculeId: string;
+            moleculeTitle: string;
+            order: number;
+          }> = [];
+          
+          data.molecules.forEach((molecule: any) => {
+            (molecule.atomOrder || molecule.atoms || []).forEach((atomId: string, index: number) => {
+              // Find the atom definition to get the proper name
+              const atomDefinition = allAtoms.find(atom => atom.id === atomId);
+              const atomName = atomDefinition?.title || atomId;
+              
+              workflowSelectedAtoms.push({
+                atomName: atomName,
+                moleculeId: molecule.id,
+                moleculeTitle: molecule.title,
+                order: index
+              });
+            });
+          });
+
+          // Save in the format that CanvasArea expects
+          localStorage.setItem('workflow-selected-atoms', JSON.stringify(workflowSelectedAtoms));
+          
+          // Clear the old workflow data
+          localStorage.removeItem('workflow-data');
+          
+          // Clear any existing laboratory config to force reload
+          localStorage.removeItem('laboratory-config');
+          
+          toast({
+            title: 'Workflow Loaded',
+            description: `Successfully loaded ${workflowSelectedAtoms.length} atoms from ${data.molecules.length} molecules`
+          });
+          
+          // Force a page reload to trigger the CanvasArea workflow loading
+          window.location.reload();
+        }
+      } catch (error) {
+        console.error('Error loading workflow data:', error);
+        toast({
+          title: 'Error Loading Workflow',
+          description: 'Failed to load workflow data',
+          variant: 'destructive'
+        });
+      }
+    }
+  }, [setLabCards, setExhibitionCards, toast]);
 
   const handleUndo = async () => {
     if (!canEdit) return;

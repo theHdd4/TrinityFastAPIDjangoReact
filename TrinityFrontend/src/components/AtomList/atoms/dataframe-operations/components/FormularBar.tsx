@@ -230,8 +230,9 @@ const validateFormulaSyntax = (expression: string): ValidationResult => {
     };
   }
   
-  // Check for basic syntax errors
-  if (trimmed.match(/[=]{2,}/)) {
+  // Check for basic syntax errors - but allow == for comparison operators
+  // This regex looks for 3 or more consecutive = signs, or == at the beginning of the formula
+  if (trimmed.match(/[=]{3,}/) || trimmed.match(/^==/)) {
     return {
       isValid: false,
       error: 'Multiple = signs not allowed',
@@ -241,7 +242,9 @@ const validateFormulaSyntax = (expression: string): ValidationResult => {
   }
   
   // Check for invalid characters in function names
-  if (trimmed.match(/=[^A-Za-z_\(]/)) {
+  // Only check the first character after = to avoid false positives with operators inside functions
+  const afterEquals = trimmed.slice(1); // Everything after the =
+  if (afterEquals.length > 0 && !/^[A-Za-z_\(]/.test(afterEquals)) {
     return {
       isValid: false,
       error: 'Invalid character after =',

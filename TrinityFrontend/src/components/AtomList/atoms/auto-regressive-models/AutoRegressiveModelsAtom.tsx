@@ -54,11 +54,11 @@ interface Props {
 }
 
 const AutoRegressiveModelsAtom: React.FC<Props> = ({ atomId }) => {
-  console.log('🔧 AutoRegressiveModelsAtom: Component rendered with atomId:', atomId);
+  // Component rendered
   
   try {
     const atom = useLaboratoryStore(state => state.getAtom(atomId));
-    console.log('🔧 AutoRegressiveModelsAtom: Retrieved atom from store:', atom);
+    // Retrieved atom from store
     
     const defaultData = {
       uploadedFile: null,
@@ -115,11 +115,7 @@ const AutoRegressiveModelsAtom: React.FC<Props> = ({ atomId }) => {
         : defaultData.selectedModels
     };
 
-    console.log('🔧 AutoRegressiveModelsAtom: Settings for atomId', atomId, ':', settings);
-    console.log('🔧 AutoRegressiveModelsAtom: Selected scope:', completeData?.selectedScope);
-    console.log('🔧 AutoRegressiveModelsAtom: Selected combinations:', completeData?.selectedCombinations);
-    console.log('🔧 AutoRegressiveModelsAtom: Selected models:', completeData?.selectedModels);
-    console.log('🔧 AutoRegressiveModelsAtom: Settings data selectedModels:', settings.data?.selectedModels);
+    // Settings and data loaded
 
     return (
       <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col">
@@ -137,7 +133,7 @@ const AutoRegressiveModelsAtom: React.FC<Props> = ({ atomId }) => {
       </div>
     );
   } catch (err) {
-    console.error('🔧 AutoRegressiveModelsAtom: Component error:', err);
+    console.error('AutoRegressiveModelsAtom: Component error:', err);
     return (
       <div className="w-full h-full bg-white rounded-lg overflow-hidden flex flex-col items-center justify-center">
         <div className="text-red-500 text-center">
