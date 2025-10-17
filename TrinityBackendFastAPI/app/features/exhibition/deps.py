@@ -17,13 +17,14 @@ except Exception:  # pragma: no cover - executed only when pymongo missing
 
 DEFAULT_DATABASE = os.getenv("MONGO_DB", "trinity_db")
 DEFAULT_COLLECTION = os.getenv("EXHIBITION_COLLECTION", "exhibition_catalogue")
+LAYOUT_COLLECTION = os.getenv("EXHIBITION_LAYOUT_COLLECTION", "exhibition_list_configuration")
 
 
 def _default_mongo_uri() -> str:
     """Construct the exhibition Mongo URI using runtime configuration."""
 
-    username_env = os.getenv("MONGO_USERNAME")
-    password_env = os.getenv("MONGO_PASSWORD")
+    username_env = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER")
+    password_env = os.getenv("MONGO_PASSWORD") or os.getenv("MONGO_PASS")
 
     username = (
         username_env.strip()
@@ -36,7 +37,7 @@ def _default_mongo_uri() -> str:
         else "pass_dev"
     )
 
-    auth_source_env = os.getenv("MONGO_AUTH_SOURCE")
+    auth_source_env = os.getenv("MONGO_AUTH_SOURCE") or os.getenv("MONGO_AUTH_DB")
     auth_source = (
         auth_source_env.strip()
         if isinstance(auth_source_env, str) and auth_source_env.strip()
@@ -58,9 +59,13 @@ def _mongo_auth_kwargs(uri: str) -> dict[str, str]:
     if "@" in uri.split("//", 1)[-1]:
         return {}
 
-    username = os.getenv("MONGO_USERNAME", "").strip()
-    password = os.getenv("MONGO_PASSWORD", "").strip()
-    auth_source = os.getenv("MONGO_AUTH_SOURCE", "").strip() or "admin"
+    username = (os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER") or "").strip()
+    password = (os.getenv("MONGO_PASSWORD") or os.getenv("MONGO_PASS") or "").strip()
+    auth_source = (
+        os.getenv("MONGO_AUTH_SOURCE")
+        or os.getenv("MONGO_AUTH_DB")
+        or "admin"
+    ).strip()
     auth_mechanism = os.getenv("MONGO_AUTH_MECHANISM", "").strip()
 
     kwargs: dict[str, str] = {}
@@ -114,3 +119,29 @@ async def get_exhibition_collection(
     await _ensure_collection()
 
     return database[DEFAULT_COLLECTION]
+
+
+async def get_exhibition_layout_collection(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+) -> AsyncIOMotorCollection:
+    async def _ensure_collection() -> None:
+        try:
+            collections = await database.list_collection_names()
+        except PyMongoError as exc:  # pragma: no cover - best effort logging
+            logging.warning("Unable to list Mongo collections for exhibition layouts: %s", exc)
+            return
+
+        if LAYOUT_COLLECTION in collections:
+            return
+
+        try:
+            await database.create_collection(LAYOUT_COLLECTION)
+        except CollectionInvalid:
+            # Collection created concurrently by another process.
+            pass
+        except PyMongoError as exc:  # pragma: no cover - best effort logging
+            logging.warning("Unable to create exhibition layout collection: %s", exc)
+
+    await _ensure_collection()
+
+    return database[LAYOUT_COLLECTION]

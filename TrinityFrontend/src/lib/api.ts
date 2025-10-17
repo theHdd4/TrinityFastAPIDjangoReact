@@ -91,6 +91,10 @@ export const WORKFLOWS_API =
   normalizeUrl(import.meta.env.VITE_WORKFLOWS_API) ||
   `${backendOrigin}${djangoPrefix}/workflows`;
 
+export const SIGNUPS_API =
+  normalizeUrl(import.meta.env.VITE_SIGNUPS_API) ||
+  `${backendOrigin}${djangoPrefix}/signups`;
+
 export const VALIDATE_API =
   normalizeUrl(import.meta.env.VITE_VALIDATE_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/data-upload-validate`;
@@ -138,6 +142,10 @@ export const TRINITY_AI_API = normalizedAiBase.endsWith('/trinityai')
 export const INSIGHT_API = `${TRINITY_AI_API}/insights`;
 
 export const LAB_ACTIONS_API = `${REGISTRY_API}/laboratory-actions`;
+
+export const LABORATORY_API =
+  normalizeUrl(import.meta.env.VITE_LABORATORY_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/laboratory`;
 
 export const CLASSIFIER_API =
   normalizeUrl(import.meta.env.VITE_CLASSIFIER_API) ||
@@ -189,6 +197,29 @@ export const MOLECULES_API =
 export const CUSTOM_MOLECULES_API =
   normalizeUrl(import.meta.env.VITE_CUSTOM_MOLECULES_API) ||
   `${backendOrigin}${djangoPrefix}/custom-molecules`;
+
+// Signup API function
+export const submitSignup = async (data: {
+  first_name: string;
+  last_name: string;
+  email: string;
+  institution_company: string;
+}) => {
+  const response = await fetch(`${SIGNUPS_API}/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.email?.[0] || errorData.message || 'Signup failed');
+  }
+
+  return response.json();
+};
 
 // Growth Rates API functions
 export const calculateFiscalGrowth = async (params: {

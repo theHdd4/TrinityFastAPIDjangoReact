@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Eye, EyeOff, User, Lock, ArrowLeft } from 'lucide-react';
+import { Eye, EyeOff, User, Lock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
+import { BackToAppsIcon } from '@/components/PrimaryMenu/TrinityAssets';
 import LoginAnimation from '@/components/LoginAnimation';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 
@@ -150,16 +151,23 @@ const Login = () => {
       <LoginAnimation active={showAnimation} onComplete={handleAnimationComplete} />
       
       {/* Back to Home Button */}
-      <Button
-        variant="ghost"
-        onClick={() => navigate('/')}
-        className={`absolute top-6 left-6 z-20 text-[#fec107] hover:text-[#e0ad06] hover:bg-transparent font-mono font-light transition-all duration-300 border-0 ${
+      <div
+        className={`absolute top-6 left-6 z-20 transition-opacity duration-500 ${
           showAnimation ? 'opacity-0 pointer-events-none' : 'opacity-100'
         }`}
       >
-        <ArrowLeft className="w-4 h-4 mr-2" />
-        Back to Home
-      </Button>
+        <div className="rounded-lg border border-white/10 bg-white/5 backdrop-blur-lg text-white shadow-2xl overflow-hidden">
+          <Button
+            variant="ghost"
+            type="button"
+            onClick={() => navigate('/')}
+            className="flex items-center gap-2 px-4 py-2 text-[#fec107] hover:text-[#e0ad06] hover:bg-white/10 font-mono font-light transition-colors duration-300 rounded-lg"
+          >
+            <BackToAppsIcon className="w-4 h-4 text-[#fec107]" />
+            Back to Home
+          </Button>
+        </div>
+      </div>
       
       <video
         autoPlay

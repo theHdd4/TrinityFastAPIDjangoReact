@@ -60,7 +60,7 @@ const Header: React.FC<HeaderProps> = ({ projectCount = 0 }) => {
               });
               break;
             case 'blank':
-              setAppInfo({ title: 'Blank App', Icon: Plus, color: 'from-gray-500 to-gray-700' });
+              setAppInfo({ title: 'Custom Workspace', Icon: Plus, color: 'from-gray-500 to-gray-700' });
               break;
             default:
               setAppInfo(null);

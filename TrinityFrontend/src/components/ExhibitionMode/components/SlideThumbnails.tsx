@@ -19,6 +19,9 @@ export const SlideThumbnails: React.FC<SlideThumbnailsProps> = ({
   onClose,
 }) => {
   const getSlideTitle = (card: LayoutCard, index: number) => {
+    if (typeof card.title === 'string' && card.title.trim().length > 0) {
+      return card.title.trim();
+    }
     if (card.moleculeTitle) {
       return card.atoms.length > 0
         ? `${card.moleculeTitle} - ${card.atoms[0].title}`

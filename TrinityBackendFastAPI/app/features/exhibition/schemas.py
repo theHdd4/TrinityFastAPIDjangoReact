@@ -6,71 +6,36 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
-class ExhibitionSku(BaseModel):
-    id: str = Field(..., description="Unique identifier for the SKU")
-    title: str = Field(..., description="Display name for the SKU")
-    details: Optional[Dict[str, Any]] = Field(
+class ExhibitionComponent(BaseModel):
+    """Represents a component exhibited from a specific atom."""
+
+    id: str = Field(..., description="Identifier of the exhibited component")
+    atomId: Optional[str] = Field(None, description="Source atom identifier for the component")
+    title: Optional[str] = Field(None, description="Display label for the exhibited component")
+    category: Optional[str] = Field(None, description="Category of the exhibited component")
+    color: Optional[str] = Field(None, description="Accent colour associated with the component")
+    metadata: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="Additional metadata captured for the SKU",
+        description="Additional metadata captured for the exhibited component",
+    )
+    manifest: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Serialised visualisation manifest for the component",
+    )
+    manifest_id: Optional[str] = Field(
+        default=None,
+        description="Stable identifier for the stored manifest",
     )
 
 
-class ExhibitionComponents(BaseModel):
-    skuStatistics: bool = Field(False, description="Include SKU statistics summary")
-    trendAnalysis: bool = Field(False, description="Include trend analysis visuals")
+class ExhibitionAtomEntry(BaseModel):
+    """Grouping of exhibited components for a single atom."""
 
-
-class ExhibitionTrendSettings(BaseModel):
-    chartType: str = Field(..., description="Active chart type used in trend analysis")
-    theme: str = Field(..., description="Selected colour theme identifier")
-    colorPalette: Optional[List[str]] = Field(
-        default=None,
-        description="Resolved colour palette for the current chart theme",
-    )
-    showGrid: bool = Field(True, description="Whether the grid overlay is visible")
-    showLegend: bool = Field(True, description="Whether the legend is displayed")
-    showDataLabels: bool = Field(False, description="Whether data labels are rendered")
-    showAxisLabels: bool = Field(True, description="Whether axis labels are rendered")
-    xAxisField: Optional[str] = Field(
-        default=None,
-        description="Source field powering the X axis",
-    )
-    yAxisField: Optional[str] = Field(
-        default=None,
-        description="Source field powering the Y axis",
-    )
-
-
-class ExhibitionSkuStatisticsSettings(BaseModel):
-    visibility: Dict[str, bool] = Field(
-        default_factory=dict,
-        description="Visibility toggles for SKU statistics table elements",
-    )
-    tableRows: Optional[List[Dict[str, Any]]] = Field(
-        default=None,
-        description="Snapshot of the SKU statistics rows staged for exhibition",
-    )
-    tableColumns: Optional[List[str]] = Field(
-        default=None,
-        description="Column order used when capturing the SKU statistics table",
-    )
-
-
-class ExhibitionFeatureOverview(BaseModel):
-    atomId: str = Field(..., description="Identifier of the Feature Overview atom")
-    cardId: str = Field(..., description="Identifier of the parent card")
-    components: ExhibitionComponents = Field(
-        default_factory=ExhibitionComponents,
-        description="Which sections should render in exhibition mode",
-    )
-    skus: List[ExhibitionSku] = Field(default_factory=list)
-    chartSettings: Optional[ExhibitionTrendSettings] = Field(
-        default=None,
-        description="Chart configuration applied to trend analysis visuals",
-    )
-    skuStatisticsSettings: Optional[ExhibitionSkuStatisticsSettings] = Field(
-        default=None,
-        description="Display preferences for the SKU statistics table",
+    id: str = Field(..., min_length=1, description="Stable identifier for the exhibited atom entry")
+    atom_name: str = Field(..., min_length=1, description="Human friendly name of the atom")
+    exhibited_components: List[ExhibitionComponent] = Field(
+        default_factory=list,
+        description="Components from the atom that should appear in the exhibition catalogue",
     )
 
 
@@ -78,8 +43,7 @@ class ExhibitionConfigurationBase(BaseModel):
     client_name: str = Field(..., min_length=1)
     app_name: str = Field(..., min_length=1)
     project_name: str = Field(..., min_length=1)
-    cards: List[Dict[str, Any]] = Field(default_factory=list)
-    feature_overview: Optional[List[ExhibitionFeatureOverview]] = None
+    atoms: List[ExhibitionAtomEntry] = Field(default_factory=list)
 
 
 class ExhibitionConfigurationIn(ExhibitionConfigurationBase):
@@ -87,7 +51,93 @@ class ExhibitionConfigurationIn(ExhibitionConfigurationBase):
 
 
 class ExhibitionConfigurationOut(ExhibitionConfigurationBase):
-    updated_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = Field(default=None, description="Timestamp of the last update")
 
     class Config:
         orm_mode = True
+
+
+class ExhibitionManifestOut(BaseModel):
+    """Read-only representation of an exhibited component manifest."""
+
+    component_id: str = Field(..., description="Identifier of the requested exhibition component")
+    manifest: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Serialised manifest payload for the component",
+    )
+    manifest_id: Optional[str] = Field(
+        default=None,
+        description="Stable manifest identifier if available",
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Associated metadata stored alongside the manifest",
+    )
+    atom_id: Optional[str] = Field(default=None, description="Identifier of the parent atom")
+    atom_name: Optional[str] = Field(default=None, description="Display name of the parent atom")
+    updated_at: Optional[datetime] = Field(default=None, description="Last update timestamp for the manifest")
+
+
+class ExhibitionLayoutAtom(BaseModel):
+    """Minimal representation of an atom placed on an exhibition slide."""
+
+    id: str = Field(..., min_length=1)
+    atomId: str = Field(..., min_length=1)
+    title: Optional[str] = None
+    category: Optional[str] = None
+    color: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ExhibitionLayoutSlideObject(BaseModel):
+    """Persisted slide object used when restoring exhibition layouts."""
+
+    id: str = Field(..., min_length=1)
+    type: str = Field(..., min_length=1)
+    x: float = Field(...)
+    y: float = Field(...)
+    width: Optional[float] = None
+    height: Optional[float] = None
+    zIndex: Optional[int] = Field(default=None, alias="zIndex")
+    groupId: Optional[str] = Field(default=None, alias="groupId")
+    props: Dict[str, Any] = Field(default_factory=dict)
+
+    class Config:
+        allow_population_by_field_name = True
+
+
+class ExhibitionLayoutCard(BaseModel):
+    """Slide level configuration for the exhibition layout."""
+
+    id: str = Field(..., min_length=1)
+    atoms: List[ExhibitionLayoutAtom] = Field(default_factory=list)
+    catalogueAtoms: List[ExhibitionLayoutAtom] = Field(default_factory=list)
+    isExhibited: bool = Field(default=True)
+    moleculeId: Optional[str] = None
+    moleculeTitle: Optional[str] = None
+    title: Optional[str] = None
+    lastEditedAt: Optional[str] = None
+    presentationSettings: Optional[Dict[str, Any]] = None
+
+
+class ExhibitionLayoutConfigurationBase(BaseModel):
+    client_name: str = Field(..., min_length=1)
+    app_name: str = Field(..., min_length=1)
+    project_name: str = Field(..., min_length=1)
+    cards: List[ExhibitionLayoutCard] = Field(default_factory=list)
+    slide_objects: Dict[str, List[ExhibitionLayoutSlideObject]] = Field(
+        default_factory=dict, alias="slide_objects"
+    )
+
+    class Config:
+        allow_population_by_field_name = True
+
+
+class ExhibitionLayoutConfigurationIn(ExhibitionLayoutConfigurationBase):
+    """Incoming payload when saving the exhibition layout."""
+
+
+class ExhibitionLayoutConfigurationOut(ExhibitionLayoutConfigurationBase):
+    """Response payload when loading the exhibition layout."""
+
+    updated_at: Optional[datetime] = Field(default=None)

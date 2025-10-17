@@ -25,11 +25,72 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import { SIGNUPS_API } from '@/lib/api';
 
 const Home = () => {
   const navigate = useNavigate();
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [currentSlide, setCurrentSlide] = useState(0);
+
+
+    // Animation styles
+    const animationStyles = `
+      @keyframes drawLine {
+        0% {
+          stroke-dashoffset: 200;
+          transform: scaleX(1);
+          opacity: 0;
+        }
+        30% {
+          stroke-dashoffset: 0;
+          transform: scaleX(1.05);
+          opacity: 1;
+        }
+        70% {
+          stroke-dashoffset: 0;
+          transform: scaleX(1.05);
+          opacity: 1;
+        }
+        100% {
+          stroke-dashoffset: 0;
+          transform: scaleX(1);
+          opacity: 1;
+        }
+      }
+
+      @keyframes wordProminent {
+        0%, 100% {
+          transform: scale(1);
+        }
+        30%, 70% {
+          transform: scale(1.05);
+        }
+      }
+
+      .animate-draw-line {
+        stroke-dasharray: 200;
+        stroke-dashoffset: 200;
+        animation: drawLine 2s ease-in-out forwards;
+      }
+
+      .animate-word-prominent {
+        display: inline-block;
+        animation: wordProminent 2s ease-in-out;
+      }
+    `;
+  
+  // Signup form state
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    institutionCompany: ''
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+
+
+  
 
   const heroSlides = [
     {
@@ -95,6 +156,76 @@ const Home = () => {
     return () => clearInterval(slideInterval);
   }, []);
 
+  // Handle form input changes
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  // Handle form submission
+  const handleSignupSubmit = async () => {
+    // Validate form
+    if (!formData.firstName || !formData.lastName || !formData.email || !formData.institutionCompany) {
+      setSubmitMessage({ type: 'error', text: 'Please fill in all fields' });
+      setTimeout(() => setSubmitMessage(null), 5000);
+      return;
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email)) {
+      setSubmitMessage({ type: 'error', text: 'Please enter a valid email address' });
+      setTimeout(() => setSubmitMessage(null), 5000);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitMessage(null);
+
+    try {
+      const response = await fetch(`${SIGNUPS_API}/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          email: formData.email,
+          institution_company: formData.institutionCompany
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.email?.[0] || data.message || 'Signup failed');
+      }
+
+      setSubmitMessage({ type: 'success', text: data.message || 'Thank you for signing up! You have been added to the waitlist. We will contact you soon.' });
+      // Clear form
+      setFormData({
+        firstName: '',
+        lastName: '',
+        email: '',
+        institutionCompany: ''
+      });
+      setTimeout(() => setSubmitMessage(null), 8000);
+    } catch (error) {
+      console.error('Signup error:', error);
+      setSubmitMessage({ 
+        type: 'error', 
+        text: error instanceof Error ? error.message : 'Failed to submit. Please try again.' 
+      });
+      setTimeout(() => setSubmitMessage(null), 5000);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -103,18 +234,18 @@ const Home = () => {
     {
       icon: Plug,
       title: "AI-Guided Intelligence",
-      description: "State your question — Trinity AI creates and runs the analysis automatically."
+      description: "State your question - Trinity AI creates and runs the analysis automatically."
     }
     ,
     {
       icon: BarChart3,
       title: "Insights to slides - in a few clicks. ",
-      description: "Save hours of manual work — share your findings instantly with clear, impactful slides."
+      description: "Save hours of manual work - share your findings instantly with clear, impactful slides."
     },
     {
       icon: Brain,
       title: "Machine Learning Simplified",
-      description: "Run modeling pipelines in seconds — regression, classification, clustering & more."
+      description: "Run modeling pipelines in seconds - regression, classification, clustering & more."
     }
     ,
     {
@@ -130,14 +261,14 @@ const Home = () => {
     {
       icon: Database,
       title: "DataFrame Operations Made Easy",
-      description: "Merge, filter, groupby — all done via intuitive UI blocks."
+      description: "Merge, filter, groupby - all done via intuitive UI blocks."
     }
   ];
 
   const faqs = [
     {
       question: "What is Trinity?",
-      answer: "Trinity is an AI-powered decision intelligence platform that helps business managers analyze data, forecast outcomes, and make smarter decisions — without needing coding or data science expertise. It combines predictive modeling, causal analysis, and storytelling tools in one intuitive workspace."
+      answer: "Trinity is an AI-powered decision intelligence platform that helps business managers analyze data, forecast outcomes, and make smarter decisions - without needing coding or data science expertise. It combines predictive modeling, causal analysis, and storytelling tools in one intuitive workspace."
     },
     {
       question: "Who is Trinity designed for?",
@@ -157,7 +288,7 @@ const Home = () => {
     },
     {
       question: "How does Trinity ensure accuracy and transparency?",
-      answer: "Every model and output is fully explainable and traceable. You can see which variables drive outcomes and why — helping you trust every insight you act on."
+      answer: "Every model and output is fully explainable and traceable. You can see which variables drive outcomes and why - helping you trust every insight you act on."
     },
     {
       question: "What does \"Agentic AI\" mean in Trinity?",
@@ -169,7 +300,7 @@ const Home = () => {
     },
     {
       question: "Is Trinity available on-premise?",
-      answer: "Soon. For enterprises requiring enhanced data security, Trinity will offer on-premise deployment — providing the same flexibility as the SaaS version while keeping all data within your organization."
+      answer: "Soon. For enterprises requiring enhanced data security, Trinity will offer on-premise deployment - providing the same flexibility as the SaaS version while keeping all data within your organization."
     },
     {
       question: "What does pricing look like?",
@@ -194,7 +325,8 @@ const Home = () => {
             opacity: 0.9;
           }
         }
-      `}</style>
+      `}
+      {animationStyles}</style>
       <div 
         className="min-h-screen bg-white relative"
         style={{
@@ -355,29 +487,29 @@ const Home = () => {
               <h1 className="text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-extrabold text-foreground leading-[1.1]">
                 Business decisions made{' '}
                 <span className="relative inline-block">
-                  <span className="text-primary">smarter</span>
+                  <span className="text-primary animate-word-prominent" style={{ animationDelay: '0.4s' }}>smarter</span>
                   <svg className="absolute -bottom-2 left-0 w-full" height="10" viewBox="0 0 200 12" fill="none">
-                    <path d="M2 10C50 5 150 5 198 10" stroke="currentColor" strokeWidth="3" className="text-primary/30"/>
+                    <path d="M2 10C50 5 150 5 198 10" stroke="currentColor" strokeWidth="3" className="text-primary/30 animate-draw-line" style={{ animationDelay: '0.4s' }}/>
                   </svg>
                 </span>
                 ,{' '}
                 <span className="relative inline-block">
-                  <span className="text-secondary">faster</span>
+                  <span className="text-secondary animate-word-prominent" style={{ animationDelay: '0.4s' }}>faster</span>
                   <svg className="absolute -bottom-2 left-0 w-full" height="10" viewBox="0 0 200 12" fill="none">
-                    <path d="M2 10C50 5 150 5 198 10" stroke="currentColor" strokeWidth="3" className="text-secondary/30"/>
+                    <path d="M2 10C50 5 150 5 198 10" stroke="currentColor" strokeWidth="3" className="text-secondary/30 animate-draw-line" style={{ animationDelay: '0.4s' }}/>
                   </svg>
                 </span>
                 {' '}and{' '}
                 <span className="relative inline-block">
-                  <span className="text-accent">simpler</span>
+                  <span className="text-accent animate-word-prominent" style={{ animationDelay: '0.4s' }}>simpler</span>
                   <svg className="absolute -bottom-2 left-0 w-full" height="10" viewBox="0 0 200 12" fill="none">
-                    <path d="M2 10C50 5 150 5 198 10" stroke="currentColor" strokeWidth="3" className="text-accent/30"/>
+                    <path d="M2 10C50 5 150 5 198 10" stroke="currentColor" strokeWidth="3" className="text-accent/30 animate-draw-line" style={{ animationDelay: '0.4s' }}/>
                   </svg>
                 </span>
               </h1>
               
               <p className="text-lg md:text-xl text-muted-foreground leading-relaxed max-w-2xl">
-              Uncover insights, forecast outcomes, and test scenarios — all in minutes, not months. Step beyond spreadsheets into an AI-driven era of decision-making.
+              Uncover insights, forecast outcomes, and test scenarios - all in minutes, not months. Step beyond spreadsheets into an AI-driven era of decision-making.
               </p>
               
               <div className="flex flex-wrap gap-4 pt-4">
@@ -404,7 +536,7 @@ const Home = () => {
               <div className="flex flex-wrap gap-8 pt-6">
                 <div className="group cursor-default">
                   <div className="text-2xl font-bold text-primary group-hover:scale-110 transition-transform">20+</div>
-                  <div className="text-xs text-muted-foreground">Reusable Workflow built</div>
+                  <div className="text-xs text-muted-foreground">Approved Workflows</div>
                 </div>
                 <div className="group cursor-default">
                   <div className="text-2xl font-bold text-secondary group-hover:scale-110 transition-transform">50M+</div>
@@ -897,7 +1029,7 @@ const Home = () => {
               Data science for <span className="text-primary">everyone</span>
             </h2>
             <p className="text-lg md:text-xl text-muted-foreground max-w-4xl mx-auto">
-              Trinity breaks down technical barriers, empowering business managers with enterprise-grade data science through an intuitive visual interface.
+              Trinity breaks technical barriers, empowering business managers with enterprise-grade data science through an intuitive visual interface.
             </p>
           </div>
 
@@ -981,7 +1113,7 @@ const Home = () => {
                360° analytics for your <span className="text-primary">decisions</span>
              </h2>
             <p className="text-lg md:text-xl text-muted-foreground max-w-3xl mx-auto">
-              Trinity brings the analytics you need together - ready when you are
+              Trinity brings the analytics you need together - ready when you are.
             </p>
           </div>
 
@@ -1065,7 +1197,7 @@ const Home = () => {
                   Reduces dependency on data scientists or consultants by up to <span className="text-primary">80%</span>
                 </h3>
                 <p className="text-lg text-muted-foreground leading-relaxed">
-                  Putting decision intelligence directly into the hands of business teams. No more waiting weeks for external resources—make data-driven decisions instantly.
+                  Putting decision intelligence directly into the hands of business teams. No more waiting weeks for external resources -make data-driven decisions instantly.
                 </p>
               </div>
             </div>
@@ -1259,7 +1391,7 @@ const Home = () => {
                   Powered by <span className="text-accent">Agentic AI co-pilot</span>
                 </h3>
                 <p className="text-lg text-muted-foreground leading-relaxed">
-                  Reduces analytical workload by up to 70%, automatically guiding model building, explaining results, and suggesting next steps. Your intelligent assistant for data science.
+                  Powered by Parameter-Efficient Fine-Tuning (PEFT), Iterative Distillation, and adaptive Data Augmentation, our AI reduces analytical workload by up to 70% - dynamically guiding model development, interpreting outcomes, and refining predictions via Test-Time Scaling (TTS). Your intelligent co-pilot for end-to-end data science.
                 </p>
               </div>
             </div>
@@ -1271,7 +1403,7 @@ const Home = () => {
                   Advanced <span className="text-primary">Predictive & Causal</span> Intelligence
                 </h3>
                 <p className="text-lg text-muted-foreground leading-relaxed">
-                  Improves forecast and decision accuracy by 15–25%, using predictive and causal models that learn continuously from new data. Make confident, data-backed decisions.
+                  Improves forecast and decision accuracy by 15-25%, using predictive and causal models that learn continuously from new data. Make confident, data-backed decisions.
                 </p>
               </div>
 
@@ -1462,7 +1594,7 @@ const Home = () => {
                   <span className="text-secondary">Reusable</span>, Shareable, <span className="text-accent">Scalable</span>
                 </h3>
                 <p className="text-lg text-muted-foreground leading-relaxed">
-                  Cuts redundant analytics effort by 50–60% through reusable templates, collaborative workspaces, and organization-wide knowledge sharing. Build once, use everywhere.
+                  Cuts redundant analytics effort by 50-60% through reusable templates, collaborative workspaces, and organization-wide knowledge sharing. Build once, use everywhere.
                 </p>
               </div>
             </div>
@@ -1478,7 +1610,7 @@ const Home = () => {
               Everything you need <span className="text-primary">in one platform</span>
             </h2>
             <p className="text-lg md:text-xl text-muted-foreground max-w-3xl mx-auto">
-              Powerful features designed to make data science accessible to everyone
+              Powerful features designed to make data science accessible to everyone.
             </p>
           </div>
 
@@ -1526,7 +1658,7 @@ const Home = () => {
               See how it <span className="text-secondary">works</span>
             </h2>
             <p className="text-lg md:text-xl text-muted-foreground max-w-3xl mx-auto">
-              From data to insights in three simple steps
+              From data to insights in three simple steps.
             </p>
           </div>
 
@@ -1609,8 +1741,8 @@ const Home = () => {
             </div>
             
              <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold text-[#fec107]">
-               Reserve your spot - empower your analytics with Trinity.
-             </h2>
+               Reserve your spot - empower your analytics with Trinity
+            </h2>
             {/* <p className="text-lg md:text-xl text-white/90 max-w-3xl mx-auto">
               Make smarter decisions with data.
             </p> */}
@@ -1620,33 +1752,59 @@ const Home = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                   <Input 
                     type="text" 
+                    name="firstName"
                     placeholder="First Name" 
+                    value={formData.firstName}
+                    onChange={handleInputChange}
+                    disabled={isSubmitting}
                     className="h-12 text-base bg-white/95 border-0 focus:ring-2 focus:ring-white text-foreground placeholder:text-muted-foreground rounded-xl"
                   />
                   <Input 
                     type="text" 
+                    name="lastName"
                     placeholder="Last Name" 
+                    value={formData.lastName}
+                    onChange={handleInputChange}
+                    disabled={isSubmitting}
                     className="h-12 text-base bg-white/95 border-0 focus:ring-2 focus:ring-white text-foreground placeholder:text-muted-foreground rounded-xl"
                   />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <Input 
-                    type="email" 
+                <Input 
+                  type="email" 
+                    name="email"
                     placeholder="Work Email" 
+                    value={formData.email}
+                    onChange={handleInputChange}
+                    disabled={isSubmitting}
                     className="h-12 text-base bg-white/95 border-0 focus:ring-2 focus:ring-white text-foreground placeholder:text-muted-foreground rounded-xl"
                   />
                   <Input 
                     type="text" 
+                    name="institutionCompany"
                     placeholder="Institution/Company" 
+                    value={formData.institutionCompany}
+                    onChange={handleInputChange}
+                    disabled={isSubmitting}
                     className="h-12 text-base bg-white/95 border-0 focus:ring-2 focus:ring-white text-foreground placeholder:text-muted-foreground rounded-xl"
                   />
                 </div>
+                {submitMessage && (
+                  <div className={`mb-4 p-3 rounded-xl text-sm font-medium ${
+                    submitMessage.type === 'success' 
+                      ? 'bg-green-500/20 text-green-100 border border-green-500/30' 
+                      : 'bg-red-500/20 text-red-100 border border-red-500/30'
+                  }`}>
+                    {submitMessage.text}
+                  </div>
+                )}
                 <Button 
                   size="lg"
-                  className="w-full h-12 bg-[#fec107] hover:bg-[#e0ad06] text-black font-bold text-base rounded-xl shadow-lg hover:shadow-xl hover:scale-105 transition-all"
-                  onClick={() => navigate('/login')}
+                  className="w-full h-12 bg-[#fec107] hover:bg-[#e0ad06] text-black font-bold text-base rounded-xl shadow-lg hover:shadow-xl hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={handleSignupSubmit}
+                  disabled={isSubmitting}
                 >
-                    Get early access
+                    {isSubmitting ? 'Submitting...' : 'Get early access'}
                   <ArrowRight className="ml-2 w-5 h-5" />
                 </Button>
               </div>
@@ -1707,30 +1865,30 @@ const Home = () => {
               Common <span className="text-accent">questions</span>
             </h2>
             <p className="text-lg md:text-xl text-muted-foreground">
-              Everything you need to know about Trinity
+              Everything you need to know about Trinity.
             </p>
           </div>
 
           <Accordion type="single" collapsible className="max-w-7xl mx-auto">
             <div className="grid md:grid-cols-2 gap-4 items-start">
-              {faqs.map((faq, index) => {
-                const colors = ['primary', 'secondary', 'accent'];
-                const color = colors[index % colors.length];
-                return (
-                  <AccordionItem 
-                    key={index}
-                    value={`item-${index}`}
+            {faqs.map((faq, index) => {
+              const colors = ['primary', 'secondary', 'accent'];
+              const color = colors[index % colors.length];
+              return (
+                <AccordionItem 
+                  key={index} 
+                  value={`item-${index}`}
                     className={`bg-gradient-to-r from-white to-${color}/5 border-2 border-border rounded-2xl px-8 py-2 hover:border-${color} hover:shadow-lg transition-all duration-300 self-start`}
-                  >
-                    <AccordionTrigger className={`text-left text-lg md:text-xl font-bold text-foreground hover:no-underline hover:text-${color} transition-colors py-6`}>
-                      {faq.question}
-                    </AccordionTrigger>
-                    <AccordionContent className="text-base md:text-lg text-muted-foreground leading-relaxed pb-6">
-                      {faq.answer}
-                    </AccordionContent>
-                  </AccordionItem>
-                );
-              })}
+                >
+                  <AccordionTrigger className={`text-left text-lg md:text-xl font-bold text-foreground hover:no-underline hover:text-${color} transition-colors py-6`}>
+                    {faq.question}
+                  </AccordionTrigger>
+                  <AccordionContent className="text-base md:text-lg text-muted-foreground leading-relaxed pb-6">
+                    {faq.answer}
+                  </AccordionContent>
+                </AccordionItem>
+              );
+            })}
             </div>
           </Accordion>
         </div>

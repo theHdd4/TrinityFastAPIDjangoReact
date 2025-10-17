@@ -62,9 +62,7 @@ const Apps = () => {
             'Content-Type': 'application/json',
           }
         });
-        console.log('📊 Registry apps response status:', registryRes.status);
-        console.log('📊 Registry apps response headers:', Object.fromEntries(registryRes.headers.entries()));
-        
+    
         if (registryRes.ok) {
           const registryData = await registryRes.json();
           console.log('✅ Loaded tenant apps:', registryData);
@@ -303,10 +301,10 @@ const Apps = () => {
           <div className="max-w-7xl mx-auto px-6 py-8 pb-20">
             {/* Hero Section */}
             <div className="text-center mb-8 animate-fade-in" style={animationStyle(0.4)}>
-              <h2 className="text-4xl md:text-5xl font-bold text-foreground mb-4 bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text">
+              <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-3 bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text">
                 Choose Your Analytics Application
               </h2>
-              <p className="text-lg text-muted-foreground max-w-3xl mx-auto mb-8">
+              <p className="text-sm text-muted-foreground max-w-2xl mx-auto mb-6">
                 Powerful pre-configured applications for every analytics need. Select your use case and start building insights immediately.
               </p>
 
@@ -328,7 +326,7 @@ const Apps = () => {
                       placeholder="Search applications..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-12 pr-4 py-6 text-lg bg-card border-2 border-border focus:border-primary transition-all shadow-sm"
+                      className="pl-12 pr-4 py-4 text-sm bg-card border-2 border-border focus:border-primary transition-all shadow-sm"
                     />
                   </div>
                 </div>
@@ -363,7 +361,7 @@ const Apps = () => {
               <div className="mb-12 animate-fade-in" style={animationStyle(1.0)}>
                 <div className="flex items-center gap-2 mb-6">
                   <Sparkles className="w-5 h-5 text-primary" />
-                  <h3 className="text-2xl font-bold text-foreground">Featured Applications</h3>
+                  <h3 className="text-lg font-bold text-foreground">Featured Applications</h3>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {featuredApps.map((app, index) => {
@@ -378,20 +376,20 @@ const Apps = () => {
                         {/* Gradient Overlay */}
                         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                         
-                        <div className="relative p-6">
-                          <div className="flex items-start justify-between mb-4">
-                            <div className={`${app.color} w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg group-hover:scale-110 transition-transform duration-300`}>
-                              <Icon className="w-7 h-7 text-white" />
+                        <div className="relative p-4">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg group-hover:scale-110 transition-transform duration-300`}>
+                              <Icon className="w-5 h-5 text-white" />
                             </div>
                             <Badge variant="secondary" className="bg-primary/10 text-primary">
                               Featured
                             </Badge>
                           </div>
                           
-                          <h3 className="text-xl font-bold text-foreground mb-2 group-hover:text-primary transition-colors">
+                          <h3 className="text-lg font-bold text-foreground mb-1 group-hover:text-primary transition-colors">
                             {app.title}
                           </h3>
-                          <p className="text-muted-foreground text-sm leading-relaxed mb-4 line-clamp-2">
+                          <p className="text-muted-foreground text-xs leading-relaxed mb-3 line-clamp-2">
                             {app.description}
                           </p>
                           
@@ -441,7 +439,7 @@ const Apps = () => {
               <div className="mb-12 animate-fade-in" style={animationStyle(1.4)}>
                 <div className="flex items-center gap-2 mb-6">
                   <Plus className="w-5 h-5 text-primary" />
-                  <h3 className="text-2xl font-bold text-foreground">Custom Applications</h3>
+                  <h3 className="text-lg font-bold text-foreground">Custom Applications</h3>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {customApps.map((app, index) => {
@@ -455,17 +453,17 @@ const Apps = () => {
                       >
                         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                         
-                        <div className="relative p-6">
-                          <div className="flex items-start justify-between mb-4">
-                            <div className={`${app.color} w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg group-hover:scale-110 transition-transform duration-300`}>
-                              <Icon className="w-7 h-7 text-white" />
+                        <div className="relative p-4">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg group-hover:scale-110 transition-transform duration-300`}>
+                              <Icon className="w-5 h-5 text-white" />
                             </div>
         </div>
 
-                          <h3 className="text-xl font-bold text-foreground mb-2 group-hover:text-primary transition-colors">
+                          <h3 className="text-lg font-bold text-foreground mb-1 group-hover:text-primary transition-colors">
                             {app.title}
                           </h3>
-                          <p className="text-muted-foreground text-sm leading-relaxed mb-4">
+                          <p className="text-muted-foreground text-xs leading-relaxed mb-3">
                             {app.description}
                           </p>
                           
@@ -491,7 +489,7 @@ const Apps = () => {
             {/* All Other Apps */}
             {!loading && otherApps.length > 0 && (
               <div className="animate-fade-in" style={animationStyle(1.6)}>
-                <h3 className="text-2xl font-bold text-foreground mb-6">All Applications</h3>
+                <h3 className="text-lg font-bold text-foreground mb-4">All Applications</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {otherApps.map((app, index) => {
             const Icon = app.icon;
@@ -502,17 +500,17 @@ const Apps = () => {
                         style={animationStyle(1.7 + index * 0.05)}
                 onClick={() => handleAppSelect(app.id)}
               >
-                        <div className="p-6">
-                          <div className="flex items-start gap-4 mb-4">
-                            <div className={`${app.color} w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-110 transition-transform duration-300`}>
-                              <Icon className="w-6 h-6 text-white" />
+                        <div className="p-4">
+                          <div className="flex items-start gap-3 mb-3">
+                            <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-110 transition-transform duration-300`}>
+                              <Icon className="w-5 h-5 text-white" />
                     </div>
 
                     <div className="flex-1 min-w-0">
-                              <h3 className="text-lg font-bold text-foreground mb-1 group-hover:text-primary transition-colors">
+                              <h3 className="text-base font-bold text-foreground mb-1 group-hover:text-primary transition-colors">
                         {app.title}
                       </h3>
-                              <p className="text-muted-foreground text-sm leading-relaxed line-clamp-2">
+                              <p className="text-muted-foreground text-xs leading-relaxed line-clamp-2">
                                 {app.description}
                               </p>
                             </div>
@@ -565,7 +563,7 @@ const Apps = () => {
                 <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-secondary/50 flex items-center justify-center">
                   <Search className="w-10 h-10 text-muted-foreground" />
                 </div>
-                <h3 className="text-xl font-semibold text-foreground mb-2">No applications found</h3>
+                <h3 className="text-lg font-semibold text-foreground mb-2">No applications found</h3>
                 <p className="text-muted-foreground">Try adjusting your search or filter criteria</p>
               </div>
             )}

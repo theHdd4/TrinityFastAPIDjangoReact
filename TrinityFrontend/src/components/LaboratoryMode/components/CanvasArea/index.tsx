@@ -14,6 +14,7 @@ import {
   TEXT_API,
   CARD_API,
   LAB_ACTIONS_API,
+  LABORATORY_API,
   VALIDATE_API,
   FEATURE_OVERVIEW_API,
   CLASSIFIER_API,
@@ -1047,11 +1048,11 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
 const addNewCard = (moleculeId?: string, position?: number) => {
   const info = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
   const newCard: LayoutCard = {
-    id: `card-${Date.now()}`,
+    id: generateClientId('card'),
     atoms: [],
     isExhibited: false,
     moleculeId,
-    moleculeTitle: info?.title
+    moleculeTitle: info?.title,
   };
   if (position === undefined || position >= (Array.isArray(layoutCards) ? layoutCards.length : 0)) {
     setLayoutCards([...(Array.isArray(layoutCards) ? layoutCards : []), newCard]);
@@ -1060,84 +1061,178 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     setLayoutCards([
       ...arr.slice(0, position),
       newCard,
-      ...arr.slice(position)
+      ...arr.slice(position),
     ]);
   }
   setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
-  
+
   // Scroll to the newly created card after a short delay to ensure it's rendered
   setTimeout(() => {
     const cardElement = document.querySelector(`[data-card-id="${newCard.id}"]`);
     if (cardElement) {
-      cardElement.scrollIntoView({ 
-        behavior: 'smooth', 
-        block: 'center' 
+      cardElement.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
       });
     }
   }, 100);
 };
 
-const addNewCardWithAtom = (
-  atomId: string,
-  moleculeId?: string,
-  position?: number
-) => {
-  const cardInfo = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
-  const atomInfo = allAtoms.find(a => a.id === atomId);
-  const newAtom: DroppedAtom = {
-    id: `${atomId}-${Date.now()}`,
-    atomId,
-    title: atomInfo?.title || atomId,
-    category: atomInfo?.category || 'Atom',
-    color: atomInfo?.color || 'bg-gray-400',
-    source: 'manual',
-    llm: LLM_MAP[atomId],
-    settings:
-      atomId === 'text-box'
-        ? { ...DEFAULT_TEXTBOX_SETTINGS }
-        : atomId === 'data-upload-validate'
-        ? createDefaultDataUploadSettings()
-        : atomId === 'feature-overview'
-        ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
-        : atomId === 'explore'
-        ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
-        : atomId === 'chart-maker'
-        ? { ...DEFAULT_CHART_MAKER_SETTINGS }
-        : atomId === 'dataframe-operations'
-        ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
-        : atomId === 'select-models-feature'
-        ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
-        : atomId === 'auto-regressive-models'
-        ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
-        : undefined,
+type AtomPayload = Partial<DroppedAtom> & {
+  atomId?: string;
+  settings?: any;
+  source?: 'ai' | 'manual';
+  llm?: string;
+};
+
+type CardPayload = Partial<Omit<LayoutCard, 'atoms'>> & {
+  atoms?: AtomPayload[];
+};
+
+function generateClientId(prefix: string) {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  const random = Math.random().toString(36).slice(2);
+  return `${prefix}-${Date.now()}-${random}`;
+}
+
+const getDefaultSettingsForAtom = (atomId: string) => {
+  switch (atomId) {
+    case 'text-box':
+      return { ...DEFAULT_TEXTBOX_SETTINGS };
+    case 'data-upload-validate':
+      return createDefaultDataUploadSettings();
+    case 'feature-overview':
+      return { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS };
+    case 'explore':
+      return { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } };
+    case 'chart-maker':
+      return { ...DEFAULT_CHART_MAKER_SETTINGS };
+    case 'dataframe-operations':
+      return { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS };
+    case 'select-models-feature':
+      return { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS };
+    case 'auto-regressive-models':
+      return {
+        data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA },
+        settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS },
+      };
+    default:
+      return undefined;
+  }
+};
+
+const buildAtomFromApiPayload = (fallbackAtomId: string, payload?: AtomPayload): DroppedAtom => {
+  const resolvedAtomId = payload?.atomId ?? fallbackAtomId;
+  const atomInfo = allAtoms.find(a => a.id === resolvedAtomId);
+  return {
+    id: payload?.id ?? generateClientId(resolvedAtomId),
+    atomId: resolvedAtomId,
+    title: payload?.title ?? atomInfo?.title ?? resolvedAtomId,
+    category: payload?.category ?? atomInfo?.category ?? 'Atom',
+    color: payload?.color ?? atomInfo?.color ?? 'bg-gray-400',
+    source: payload?.source ?? 'manual',
+    llm: payload?.llm ?? LLM_MAP[resolvedAtomId],
+    settings: payload?.settings ?? getDefaultSettingsForAtom(resolvedAtomId),
   };
-  const newCard: LayoutCard = {
-    id: `card-${Date.now()}`,
-    atoms: [newAtom],
+};
+
+const buildCardFromApiPayload = (
+  payload: CardPayload | null | undefined,
+  fallbackAtomId: string,
+  fallbackMoleculeId?: string,
+): LayoutCard => {
+  const cardId = payload?.id ?? generateClientId('card');
+  const atomsPayload =
+    payload?.atoms && Array.isArray(payload.atoms) && payload.atoms.length > 0
+      ? payload.atoms
+      : [{ atomId: fallbackAtomId }];
+  const atoms = atomsPayload.map(atom => buildAtomFromApiPayload(atom.atomId ?? fallbackAtomId, atom));
+  const moleculeId = payload?.moleculeId ?? fallbackMoleculeId;
+  const moleculeInfo = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
+
+  return {
+    id: cardId,
+    atoms,
+    isExhibited: Boolean(payload?.isExhibited),
+    moleculeId,
+    moleculeTitle: payload?.moleculeTitle ?? moleculeInfo?.title,
+  };
+};
+
+const prefillAtomIfRequired = (cardId: string, atom: DroppedAtom) => {
+  if (atom.atomId === 'feature-overview') {
+    void prefillFeatureOverview(cardId, atom.id);
+  } else if (atom.atomId === 'column-classifier') {
+    void prefillColumnClassifier(atom.id);
+  } else if (atom.atomId === 'scope-selector') {
+    void prefillScopeSelector(atom.id);
+  }
+};
+
+const createFallbackCard = (atomId: string, moleculeId?: string): LayoutCard => {
+  const cardInfo = moleculeId ? molecules.find(m => m.id === moleculeId) : undefined;
+  const fallbackAtom = buildAtomFromApiPayload(atomId, {
+    atomId,
+    source: 'manual',
+  });
+  return {
+    id: generateClientId('card'),
+    atoms: [fallbackAtom],
     isExhibited: false,
     moleculeId,
     moleculeTitle: cardInfo?.title,
   };
+};
+
+const addNewCardWithAtom = async (
+  atomId: string,
+  moleculeId?: string,
+  position?: number
+) => {
   const arr = Array.isArray(layoutCards) ? layoutCards : [];
   const insertIndex =
     position === undefined || position >= arr.length ? arr.length : position;
-  setLayoutCards([
-    ...arr.slice(0, insertIndex),
-    newCard,
-    ...arr.slice(insertIndex),
-  ]);
-  setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
 
-  if (atomId === 'feature-overview') {
-    prefillFeatureOverview(newCard.id, newAtom.id);
-  } else if (atomId === 'column-classifier') {
-    prefillColumnClassifier(newAtom.id);
-  } else if (atomId === 'scope-selector') {
-    prefillScopeSelector(newAtom.id);
+  try {
+    const response = await fetch(`${LABORATORY_API}/cards`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ atomId, moleculeId }),
+    });
+    if (!response.ok) {
+      throw new Error(`Request failed with status ${response.status}`);
+    }
+    const payload = (await response.json()) as CardPayload;
+    const newCard = buildCardFromApiPayload(payload, atomId, moleculeId);
+    setLayoutCards([
+      ...arr.slice(0, insertIndex),
+      newCard,
+      ...arr.slice(insertIndex),
+    ]);
+    setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
+    newCard.atoms.forEach(atom => prefillAtomIfRequired(newCard.id, atom));
+  } catch (err) {
+    console.error('⚠️ Failed to create laboratory card via API, using fallback', err);
+    toast({
+      title: 'Unable to reach laboratory service',
+      description: 'Using local defaults for the new card. Please verify your network connection.',
+      variant: 'destructive',
+    });
+    const fallbackCard = createFallbackCard(atomId, moleculeId);
+    setLayoutCards([
+      ...arr.slice(0, insertIndex),
+      fallbackCard,
+      ...arr.slice(insertIndex),
+    ]);
+    setCollapsedCards(prev => ({ ...prev, [fallbackCard.id]: false }));
+    fallbackCard.atoms.forEach(atom => prefillAtomIfRequired(fallbackCard.id, atom));
   }
 };
 
-const handleDropNewCard = (
+const handleDropNewCard = async (
   e: React.DragEvent,
   moleculeId?: string,
   position?: number
@@ -1149,7 +1244,7 @@ const handleDropNewCard = (
   if (!atomData) return;
   const atom = JSON.parse(atomData);
   if (!atom?.id) return;
-  addNewCardWithAtom(atom.id, moleculeId, position);
+  await addNewCardWithAtom(atom.id, moleculeId, position);
 };
 
 const handleAddDragEnter = (e: React.DragEvent, targetId: string) => {
@@ -1192,46 +1287,17 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       a => normalizeName(a.id) === norm || normalizeName(a.title) === norm
     );
     if (!info) return;
-    const newAtom: DroppedAtom = {
-      id: `${info.id}-${Date.now()}`,
+    const newAtom = buildAtomFromApiPayload(info.id, {
       atomId: info.id,
-      title: info.title,
-      category: info.category,
-      color: info.color,
       source: 'ai',
-      llm: LLM_MAP[info.id] || info.id,
-      settings:
-        info.id === 'text-box'
-          ? { ...DEFAULT_TEXTBOX_SETTINGS }
-          : info.id === 'data-upload-validate'
-          ? createDefaultDataUploadSettings()
-          : info.id === 'feature-overview'
-          ? { ...DEFAULT_FEATURE_OVERVIEW_SETTINGS }
-          : info.id === 'dataframe-operations'
-          ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
-          : info.id === 'chart-maker'
-          ? { ...DEFAULT_CHART_MAKER_SETTINGS }
-          : info.id === 'explore'
-          ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
-          : info.id === 'auto-regressive-models'
-          ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
-          : info.id === 'select-models-feature'
-          ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
-          : undefined,
-    };
+    });
     setLayoutCards(
       (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
         card.id === cardId ? { ...card, atoms: [...card.atoms, newAtom] } : card
       )
     );
 
-    if (info.id === 'feature-overview') {
-      prefillFeatureOverview(cardId, newAtom.id);
-    } else if (info.id === 'column-classifier') {
-      prefillColumnClassifier(newAtom.id);
-    } else if (info.id === 'scope-selector') {
-      prefillScopeSelector(newAtom.id);
-    }
+    prefillAtomIfRequired(cardId, newAtom);
   };
 
   const handleAddAtomFromSuggestion = (atomId: string, atomData: any, targetCardId?: string) => {
@@ -1602,7 +1668,9 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         onDragEnter={e => handleAddDragEnter(e, `m-${molecule.moleculeId}`)}
                         onDragLeave={handleAddDragLeave}
                         onDragOver={e => e.preventDefault()}
-                        onDrop={e => handleDropNewCard(e, molecule.moleculeId)}
+                        onDrop={e => {
+                          void handleDropNewCard(e, molecule.moleculeId);
+                        }}
                         className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `m-${molecule.moleculeId}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
                       >
                         <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `m-${molecule.moleculeId}` ? 'scale-125 mb-2' : ''}`} />
@@ -1852,7 +1920,9 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                 onDragEnter={e => handleAddDragEnter(e, `p-${index}`)}
                 onDragLeave={handleAddDragLeave}
                 onDragOver={e => e.preventDefault()}
-                onDrop={e => handleDropNewCard(e, undefined, index + 1)}
+                onDrop={e => {
+                  void handleDropNewCard(e, undefined, index + 1);
+                }}
                 className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `p-${index}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
                 title="Add new card"
               >
@@ -1876,7 +1946,9 @@ const handleAddDragLeave = (e: React.DragEvent) => {
             onDragEnter={e => handleAddDragEnter(e, 'end')}
             onDragLeave={handleAddDragLeave}
             onDragOver={e => e.preventDefault()}
-            onDrop={e => handleDropNewCard(e)}
+            onDrop={e => {
+              void handleDropNewCard(e);
+            }}
             className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === 'end' ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
           >
             <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === 'end' ? 'scale-125 mb-2' : ''}`} />

@@ -66,7 +66,7 @@ class Command(BaseCommand):
                 'modules': ['data-connectors', 'etl-pipeline', 'data-quality']
             },
             {
-                'name': 'Create Blank App',
+                'name': 'Create Custom App',
                 'slug': 'blank',
                 'description': 'Start from scratch with a clean canvas and build your custom analysis workflow',
                 'modules': []
@@ -88,9 +88,7 @@ class Command(BaseCommand):
             
             if created:
                 created_count += 1
-                self.stdout.write(
-                    self.style.SUCCESS(f'✅ Created: {usecase.name}')
-                )
+                # Remove verbose logging for individual use case creation
             else:
                 # Update existing record
                 usecase.name = app_data['name']
@@ -98,13 +96,12 @@ class Command(BaseCommand):
                 usecase.modules = app_data['modules']
                 usecase.save()
                 updated_count += 1
-                self.stdout.write(
-                    self.style.WARNING(f'🔄 Updated: {usecase.name}')
-                )
+                # Remove verbose logging for individual use case updates
 
-        self.stdout.write(
-            self.style.SUCCESS(
-                f'✅ Successfully processed {len(apps_data)} use cases. '
-                f'Created: {created_count}, Updated: {updated_count}'
+        # Only show summary if there were changes made
+        if created_count > 0 or updated_count > 0:
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f'✅ Processed {len(apps_data)} use cases (Created: {created_count}, Updated: {updated_count})'
+                )
             )
-        )

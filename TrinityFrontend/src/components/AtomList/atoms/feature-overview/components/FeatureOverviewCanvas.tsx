@@ -6,6 +6,7 @@ import Table from "@/templates/tables/table";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FEATURE_OVERVIEW_API } from "@/lib/api";
+import { resolvePalette } from "@/components/AtomList/atoms/feature-overview/utils/colorPalettes";
 import { fetchDimensionMapping } from "@/lib/dimensions";
 import { BarChart3, TrendingUp, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Plus, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
@@ -27,6 +28,10 @@ import { logSessionState, addNavigationItem } from "@/lib/session";
 import {
   useLaboratoryStore,
   type FeatureOverviewExhibitionSelection,
+  type FeatureOverviewExhibitionComponentType,
+  type FeatureOverviewExhibitionSelectionChartState,
+  type FeatureOverviewExhibitionSelectionContext,
+  type FeatureOverviewVisualizationManifest,
 } from "@/components/LaboratoryMode/store/laboratoryStore";
 import { useToast } from "@/hooks/use-toast";
 import { csvParse } from "d3-dsv";
@@ -89,6 +94,23 @@ const parseNumericValue = (raw: string): number | null => {
 
   const value = Number(normalized);
   return Number.isFinite(value) ? value : null;
+};
+
+const humanizeAxisLabel = (value?: string | null): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return trimmed
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .replace(/^./, char => char.toUpperCase());
 };
 
 type LoadedSkuDataset = {
@@ -540,7 +562,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   // Chart type and theme state for chart type changes
   const [chartType, setChartType] = useState<string>('line_chart');
   const [chartTheme, setChartTheme] = useState<string>('default');
-
+  const [chartSortOrder, setChartSortOrder] = useState<'asc' | 'desc' | null>(null);
+  
   // Chart display options state
   const [showDataLabels, setShowDataLabels] = useState<boolean>(false);
   const [showAxisLabels, setShowAxisLabels] = useState<boolean>(true);
@@ -882,6 +905,11 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     setChartTheme(newTheme);
   };
 
+  // Handle chart sort order change
+  const handleChartSortOrderChange = (order: 'asc' | 'desc' | null) => {
+    setChartSortOrder(order);
+  };
+
   // Handle data labels toggle
   const handleDataLabelsToggle = (show: boolean) => {
     setShowDataLabels(show);
@@ -1053,7 +1081,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   }, [settings.exhibitionSelections]);
 
   const createSelectionDescriptor = React.useCallback(
-    (row: any, metric: string) => {
+    (row: any, metric: string, componentType: FeatureOverviewExhibitionComponentType) => {
       const dimensionEntries = dimensionCols
         .map((column) => {
           const rawValue = row?.[column.toLowerCase()];
@@ -1070,7 +1098,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       const keyParts = dimensionEntries
         .map((entry) => `${entry.name.toLowerCase()}=${entry.value}`)
         .sort((a, b) => a.localeCompare(b));
-      const key = `${(metric || "").toString().toLowerCase()}::${keyParts.join("|")}`;
+      const key = `${componentType}::${(metric || "").toString().toLowerCase()}::${keyParts.join("|")}`;
 
       const labelValues = dimensionEntries
         .map((entry) => entry.value)
@@ -1082,14 +1110,105 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         combination,
         dimensions: dimensionEntries,
         label,
+        componentType,
       };
     },
     [dimensionCols],
   );
 
+  const buildVisualizationManifest = React.useCallback(
+    (
+      descriptor: ReturnType<typeof createSelectionDescriptor>,
+      options: {
+        componentType: FeatureOverviewExhibitionComponentType;
+        metric: string;
+        chartState?: FeatureOverviewExhibitionSelectionChartState;
+        metricSnapshot?: any;
+        row?: Record<string, any>;
+        featureContext?: FeatureOverviewExhibitionSelectionContext;
+        capturedAt: string;
+      },
+    ): FeatureOverviewVisualizationManifest => {
+      const { componentType, metric, chartState, metricSnapshot, row, featureContext, capturedAt } = options;
+      const manifestId = `${descriptor.key}::manifest`;
+
+      const summarySnapshot = metricSnapshot?.summary ? cloneDeep(metricSnapshot.summary) : undefined;
+      const timeseriesSnapshot = Array.isArray(metricSnapshot?.timeseries)
+        ? cloneDeep(metricSnapshot?.timeseries)
+        : undefined;
+      const fullSnapshot = metricSnapshot ? cloneDeep(metricSnapshot) : undefined;
+      const skuSnapshot = row ? cloneDeep(row) : undefined;
+      const combinationSnapshot = descriptor?.combination ? { ...descriptor.combination } : {};
+
+      const yFieldCandidates = new Set<string>();
+      if (chartState?.yAxisField) {
+        yFieldCandidates.add(chartState.yAxisField);
+      }
+      if (metric) {
+        yFieldCandidates.add(metric);
+      }
+
+        const chart =
+          componentType === "trend_analysis" && chartState
+            ? {
+                type: chartState.chartType,
+                theme: chartState.theme,
+                showLegend: chartState.showLegend,
+                showAxisLabels: chartState.showAxisLabels,
+                showDataLabels: chartState.showDataLabels,
+                showGrid: chartState.showGrid,
+                xField: chartState.xAxisField,
+                yField: chartState.yAxisField ?? metric,
+                yFields: Array.from(yFieldCandidates).filter(Boolean),
+                colorPalette: chartState.colorPalette,
+                legendField: chartState.legendField,
+                xAxisLabel: chartState.xAxisLabel,
+                yAxisLabel: chartState.yAxisLabel,
+                sortOrder: chartState.sortOrder ?? null,
+              }
+            : undefined;
+
+      const table =
+        componentType === "statistical_summary" && skuSnapshot
+          ? {
+              columns: Object.keys(skuSnapshot),
+              rows: [cloneDeep(skuSnapshot)],
+            }
+          : undefined;
+
+      return {
+        id: manifestId,
+        version: "1.0.0",
+        componentType,
+        metric,
+        label: descriptor?.label,
+        dimensions: Array.isArray(descriptor?.dimensions)
+          ? descriptor.dimensions.map((entry) => ({ name: entry.name, value: entry.value }))
+          : [],
+        capturedAt,
+        data: {
+          summary: summarySnapshot,
+          timeseries: timeseriesSnapshot,
+          skuRow: skuSnapshot,
+          combination: combinationSnapshot,
+          statisticalFull: fullSnapshot,
+        },
+        chart,
+        table,
+        featureContext: featureContext ? cloneDeep(featureContext) : undefined,
+      };
+    },
+    [createSelectionDescriptor],
+  );
+
   const updateExhibitionSelection = React.useCallback(
-    (row: any, metric: string, checked: boolean | "indeterminate") => {
-      const descriptor = createSelectionDescriptor(row, metric);
+    (
+      row: any,
+      metric: string,
+      componentType: FeatureOverviewExhibitionComponentType,
+      checked: boolean | "indeterminate",
+    ) => {
+      const descriptor = createSelectionDescriptor(row, metric, componentType);
       const existingIndex = exhibitionSelections.findIndex((entry) => entry.key === descriptor.key);
       const nextChecked = checked === true;
 
@@ -1106,32 +1225,52 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           {},
         );
 
+        const capturedAt = new Date().toISOString();
+        const resolvedXAxisLabel = humanizeAxisLabel(settings?.xAxis) || humanizeAxisLabel(xAxisField) || xAxisField;
+        const resolvedYAxisLabel = humanizeAxisLabel(metric) || metric;
+        const chartStateSnapshot:
+          | FeatureOverviewExhibitionSelectionChartState
+          | undefined =
+          componentType === "trend_analysis"
+            ? {
+                chartType,
+                theme: chartTheme,
+                showDataLabels,
+                showAxisLabels,
+                showGrid,
+                showLegend,
+                xAxisField,
+                yAxisField: metric,
+                xAxisLabel: resolvedXAxisLabel,
+                yAxisLabel: resolvedYAxisLabel,
+                sortOrder: chartSortOrder ?? null,
+                colorPalette: resolvePalette(chartTheme),
+              }
+            : undefined;
+
         const selectionSnapshot: FeatureOverviewExhibitionSelection = {
           key: descriptor.key,
           metric,
+          componentType,
           combination: descriptor.combination,
           dimensions: descriptor.dimensions,
           rowId: row?.id ?? undefined,
           label: descriptor.label,
           statisticalDetails: metricSnapshot
             ? {
-                summary: metricSnapshot.summary ? cloneDeep(metricSnapshot.summary) : undefined,
+                summary:
+                  componentType === "statistical_summary"
+                    ? metricSnapshot.summary
+                      ? cloneDeep(metricSnapshot.summary)
+                      : undefined
+                    : undefined,
                 timeseries: Array.isArray(metricSnapshot.timeseries)
                   ? cloneDeep(metricSnapshot.timeseries)
                   : undefined,
                 full: metricSnapshot,
               }
             : undefined,
-          chartState: {
-            chartType,
-            theme: chartTheme,
-            showDataLabels,
-            showAxisLabels,
-            showGrid,
-            showLegend,
-            xAxisField,
-            yAxisField: metric,
-          },
+          chartState: chartStateSnapshot,
           featureContext: {
             dataSource: dataSourceName,
             availableMetrics: [...availableMetrics],
@@ -1139,8 +1278,21 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
             dimensionMap: dimensionContext,
           },
           skuRow: row ? cloneDeep(row) : undefined,
-          capturedAt: new Date().toISOString(),
+          capturedAt,
         };
+
+        const visualizationManifest = buildVisualizationManifest(descriptor, {
+          componentType,
+          metric,
+          chartState: chartStateSnapshot,
+          metricSnapshot,
+          row,
+          featureContext: selectionSnapshot.featureContext,
+          capturedAt,
+        });
+
+        selectionSnapshot.manifestId = visualizationManifest.id;
+        selectionSnapshot.visualizationManifest = visualizationManifest;
 
         const nextSelections = [...exhibitionSelections];
         if (existingIndex >= 0) {
@@ -1171,6 +1323,23 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       statDataMap,
       xAxisField,
     ],
+  );
+
+  const stageSelectionForExhibition = React.useCallback(
+    (row: any, metric: string, componentType: FeatureOverviewExhibitionComponentType) => {
+      const descriptor = createSelectionDescriptor(row, metric, componentType);
+      const alreadySelected = exhibitionSelections.some((entry) => entry.key === descriptor.key);
+
+      updateExhibitionSelection(row, metric, componentType, true);
+      toast({
+        title: alreadySelected ? "Exhibition staging updated" : "Component staged for exhibition",
+        description:
+          descriptor.label
+            ? `${descriptor.label} is now available in the Exhibition panel.`
+            : "This component is now available in the Exhibition panel.",
+      });
+    },
+    [createSelectionDescriptor, exhibitionSelections, toast, updateExhibitionSelection],
   );
 
   const getSkuUniqueColumnValues = (column: string): string[] => {
@@ -2015,6 +2184,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                               </button>
                             </div>
                             <div className="p-4 overflow-auto flex-1">
+                              <p className="text-xs text-gray-500 mb-3">
+                                Right-click a metric row or its trend chart to stage it for exhibition.
+                              </p>
                               <div className="overflow-x-auto">
                                 <table className="min-w-full text-sm whitespace-nowrap">
                                   <thead>
@@ -2025,77 +2197,161 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                       <th className="p-3 text-right whitespace-nowrap font-semibold">Avg</th>
                                       <th className="p-3 text-right whitespace-nowrap font-semibold">Min</th>
                                       <th className="p-3 text-right whitespace-nowrap font-semibold">Max</th>
-                                      <th className="p-3 text-center whitespace-nowrap font-semibold">Exhibition</th>
                                       <th className="p-3 text-right whitespace-nowrap font-semibold">Action</th>
                                     </tr>
                                   </thead>
                                   <tbody>
                                     {(Array.isArray(settings.yAxes) ? settings.yAxes : []).map((m) => {
-                                      const descriptor = createSelectionDescriptor(row, m);
-                                      const isSelected = exhibitionSelections.some(
-                                        (entry) => entry.key === descriptor.key,
+                                      const summaryDescriptor = createSelectionDescriptor(
+                                        row,
+                                        m,
+                                        "statistical_summary",
+                                      );
+                                      const chartDescriptor = createSelectionDescriptor(
+                                        row,
+                                        m,
+                                        "trend_analysis",
+                                      );
+                                      const isSummarySelected = exhibitionSelections.some(
+                                        (entry) => entry.key === summaryDescriptor.key,
+                                      );
+                                      const isChartSelected = exhibitionSelections.some(
+                                        (entry) => entry.key === chartDescriptor.key,
                                       );
 
                                       return (
                                         <React.Fragment key={m}>
-                                          <tr className="border-b last:border-0 hover:bg-gray-50">
-                                            <td className="p-3 whitespace-nowrap sticky left-0 bg-white z-10 font-medium">{m}</td>
-                                            <td className="p-3 text-right whitespace-nowrap">
-                                              {statDataMap[m]?.summary.avg?.toFixed(2) ?? "-"}
-                                            </td>
-                                            <td className="p-3 text-right whitespace-nowrap">
-                                              {statDataMap[m]?.summary.min?.toFixed(2) ?? "-"}
-                                            </td>
-                                            <td className="p-3 text-right whitespace-nowrap">
-                                              {statDataMap[m]?.summary.max?.toFixed(2) ?? "-"}
-                                            </td>
-                                            <td className="p-3 text-center whitespace-nowrap">
-                                              <Checkbox
-                                                aria-label={`Exhibit ${m}`}
-                                                checked={isSelected}
-                                                onCheckedChange={(checked) =>
-                                                  updateExhibitionSelection(row, m, checked)
-                                                }
-                                              />
-                                            </td>
-                                            <td className="p-3 text-right whitespace-nowrap">
-                                              <button
-                                                className="text-blue-600 hover:text-blue-800 font-medium underline transition-colors"
-                                                onClick={() => handleMetricView(m)}
+                                          <ContextMenu>
+                                            <ContextMenuTrigger asChild>
+                                              <tr
+                                                className={`border-b last:border-0 hover:bg-gray-50 transition-colors ${
+                                                  isSummarySelected ? "bg-amber-50/60" : ""
+                                                }`}
                                               >
-                                                View
-                                              </button>
-                                            </td>
-                                          </tr>
+                                                <td className="p-3 whitespace-nowrap sticky left-0 bg-white z-10 font-medium">
+                                                  <div className="flex items-center gap-2">
+                                                    <span>{m}</span>
+                                                    {isSummarySelected && (
+                                                      <Badge
+                                                        variant="outline"
+                                                        className="text-[10px] uppercase tracking-wide text-amber-700 border-amber-300 bg-amber-50"
+                                                      >
+                                                        Staged
+                                                      </Badge>
+                                                    )}
+                                                  </div>
+                                                </td>
+                                                <td className="p-3 text-right whitespace-nowrap">
+                                                  {statDataMap[m]?.summary.avg?.toFixed(2) ?? "-"}
+                                                </td>
+                                                <td className="p-3 text-right whitespace-nowrap">
+                                                  {statDataMap[m]?.summary.min?.toFixed(2) ?? "-"}
+                                                </td>
+                                                <td className="p-3 text-right whitespace-nowrap">
+                                                  {statDataMap[m]?.summary.max?.toFixed(2) ?? "-"}
+                                                </td>
+                                                <td className="p-3 text-right whitespace-nowrap">
+                                                  <button
+                                                    className="text-blue-600 hover:text-blue-800 font-medium underline transition-colors"
+                                                    onClick={() => handleMetricView(m)}
+                                                  >
+                                                    View
+                                                  </button>
+                                                </td>
+                                              </tr>
+                                            </ContextMenuTrigger>
+                                            <ContextMenuContent className="w-56 bg-white border border-gray-200 shadow-lg rounded-md p-1">
+                                              <ContextMenuItem
+                                                onClick={() =>
+                                                  stageSelectionForExhibition(
+                                                    row,
+                                                    m,
+                                                    "statistical_summary",
+                                                  )
+                                                }
+                                                className="cursor-pointer"
+                                              >
+                                                Exhibit this component
+                                              </ContextMenuItem>
+                                            </ContextMenuContent>
+                                          </ContextMenu>
                                           {expandedMetrics.has(m) && (
                                             <tr className="border-b last:border-0">
-                                              <td className="p-0" colSpan={6}>
-                                                <Card className="border border-gray-200 shadow-lg bg-white/95 backdrop-blur-sm overflow-hidden transform transition-all duration-300 relative flex flex-col group hover:shadow-xl m-4">
-                                                  <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-between relative flex-shrink-0">
-                                                    <h6 className="font-bold text-gray-900 text-md flex items-center">
-                                                      <TrendingUp className="w-4 h-4 mr-2 text-gray-900" />
-                                                      {m} - Trend Analysis
-                                                    </h6>
-                                                    <div className="flex items-center gap-2">
-                                                      <Dialog>
-                                                        <DialogTrigger asChild>
-                                                          <button type="button" aria-label="Full screen" className="text-gray-500 hover:text-gray-700 transition-colors">
-                                                            <Maximize2 className="w-4 h-4" />
+                                              <td className="p-0" colSpan={5}>
+                                                <ContextMenu>
+                                                  <ContextMenuTrigger asChild>
+                                                    <Card
+                                                      className={`border ${
+                                                        isChartSelected ? "border-amber-400" : "border-gray-200"
+                                                      } shadow-lg bg-white/95 backdrop-blur-sm overflow-hidden transform transition-all duration-300 relative flex flex-col group hover:shadow-xl m-4`}
+                                                    >
+                                                      <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-between relative flex-shrink-0">
+                                                        <h6 className="font-bold text-gray-900 text-md flex items-center">
+                                                          <TrendingUp className="w-4 h-4 mr-2 text-gray-900" />
+                                                          {m} - Trend Analysis
+                                                        </h6>
+                                                        <div className="flex items-center gap-2">
+                                                          <Dialog>
+                                                            <DialogTrigger asChild>
+                                                              <button
+                                                                type="button"
+                                                                aria-label="Full screen"
+                                                                className="text-gray-500 hover:text-gray-700 transition-colors"
+                                                              >
+                                                                <Maximize2 className="w-4 h-4" />
+                                                              </button>
+                                                            </DialogTrigger>
+                                                            <DialogContent className="max-w-7xl w-[95vw] h-[90vh]">
+                                                              <div className="w-full h-full flex flex-col">
+                                                                <div className="flex-1 min-h-0">
+                                                                  <RechartsChartRenderer
+                                                                    type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
+                                                                    data={statDataMap[m]?.timeseries || []}
+                                                                    xField="date"
+                                                                    yField="value"
+                                                                    width={undefined}
+                                                                    height={undefined}
+                                                                    title=""
+                                                                    xAxisLabel={settings.xAxis || "Date"}
+                                                                    yAxisLabel={m || "Value"}
+                                                                    showDataLabels={showDataLabels}
+                                                                    showAxisLabels={showAxisLabels}
+                                                                    showGrid={showGrid}
+                                                                    showLegend={showLegend}
+                                                                    theme={chartTheme}
+                                                                    onChartTypeChange={handleChartTypeChange}
+                                                                    onThemeChange={handleChartThemeChange}
+                                                                    onDataLabelsToggle={handleDataLabelsToggle}
+                                                                    onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                                    sortOrder={chartSortOrder}
+                                                                    onSortChange={handleChartSortOrderChange}
+                                                                  />
+                                                                </div>
+                                                              </div>
+                                                            </DialogContent>
+                                                          </Dialog>
+                                                          <button
+                                                            onClick={() => handleCloseMetric(m)}
+                                                            className="text-gray-500 hover:text-gray-700 transition-colors"
+                                                            aria-label="Close graph"
+                                                          >
+                                                            <X className="w-4 h-4" />
                                                           </button>
-                                                        </DialogTrigger>
-                                                        <DialogContent className="max-w-7xl w-[95vw] h-[90vh]">
-                                                          <div className="w-full h-full flex flex-col">
-                                                            <div className="flex-1 min-h-0">
-                                                              <RechartsChartRenderer
-                                                                type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
-                                                                data={statDataMap[m]?.timeseries || []}
-                                                                xField="date"
-                                                                yField="value"
-                                                                width={undefined}
-                                                                height={undefined}
-                                                                title=""
-                                                                xAxisLabel={settings.xAxis || "Date"}
-                                                                yAxisLabel={m || "Value"}
+                                                        </div>
+                                                      </div>
+                                                      <div className="p-4 flex-1 flex items-center justify-center min-h-0">
+                                                        <div className="w-full h-[400px] flex items-center justify-center">
+                                                          <div className="w-full h-full">
+                                                            <RechartsChartRenderer
+                                                              type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
+                                                              data={statDataMap[m]?.timeseries || []}
+                                                              xField="date"
+                                                              yField="value"
+                                                              width={undefined}
+                                                              height={undefined}
+                                                              title=""
+                                                              xAxisLabel={settings.xAxis || "Date"}
+                                                              yAxisLabel={m || "Value"}
                                                               showDataLabels={showDataLabels}
                                                               showAxisLabels={showAxisLabels}
                                                               showGrid={showGrid}
@@ -2105,51 +2361,29 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                                               onThemeChange={handleChartThemeChange}
                                                               onDataLabelsToggle={handleDataLabelsToggle}
                                                               onAxisLabelsToggle={handleAxisLabelsToggle}
-                                                              onGridToggle={handleGridToggle}
-                                                              onLegendToggle={handleLegendToggle}
+                                                              sortOrder={chartSortOrder}
+                                                              onSortChange={handleChartSortOrderChange}
                                                             />
-                                                            </div>
                                                           </div>
-                                                        </DialogContent>
-                                                      </Dialog>
-                                                      <button
-                                                        onClick={() => handleCloseMetric(m)}
-                                                        className="text-gray-500 hover:text-gray-700 transition-colors"
-                                                        aria-label="Close graph"
-                                                      >
-                                                        <X className="w-4 h-4" />
-                                                      </button>
-                                                    </div>
-                                                  </div>
-                                                  <div className="p-4 flex-1 flex items-center justify-center min-h-0">
-                                                    <div className="w-full h-[400px] flex items-center justify-center">
-                                                      <div className="w-full h-full">
-                                                        <RechartsChartRenderer
-                                                          type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
-                                                          data={statDataMap[m]?.timeseries || []}
-                                                          xField="date"
-                                                          yField="value"
-                                                          width={undefined}
-                                                          height={undefined}
-                                                          title=""
-                                                          xAxisLabel={settings.xAxis || "Date"}
-                                                          yAxisLabel={m || "Value"}
-                                                          showDataLabels={showDataLabels}
-                                                          showAxisLabels={showAxisLabels}
-                                                          showGrid={showGrid}
-                                                          showLegend={showLegend}
-                                                          theme={chartTheme}
-                                                          onChartTypeChange={handleChartTypeChange}
-                                                          onThemeChange={handleChartThemeChange}
-                                                          onDataLabelsToggle={handleDataLabelsToggle}
-                                                          onAxisLabelsToggle={handleAxisLabelsToggle}
-                                                          onGridToggle={handleGridToggle}
-                                                          onLegendToggle={handleLegendToggle}
-                                                        />
+                                                        </div>
                                                       </div>
-                                                    </div>
-                                                  </div>
-                                                </Card>
+                                                    </Card>
+                                                  </ContextMenuTrigger>
+                                                 <ContextMenuContent className="w-56 bg-white border border-gray-200 shadow-lg rounded-md p-1">
+                                                   <ContextMenuItem
+                                                      onClick={() =>
+                                                        stageSelectionForExhibition(
+                                                          row,
+                                                          m,
+                                                          "trend_analysis",
+                                                        )
+                                                      }
+                                                      className="cursor-pointer"
+                                                    >
+                                                      Exhibit this component
+                                                    </ContextMenuItem>
+                                                  </ContextMenuContent>
+                                                </ContextMenu>
                                               </td>
                                             </tr>
                                           )}

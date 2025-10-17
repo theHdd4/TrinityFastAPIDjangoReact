@@ -43,13 +43,7 @@ class Command(BaseCommand):
                 for mol_id in molecule_ids:
                     if mol_id in molecules:
                         molecule_objects.append(molecules[mol_id])
-                        self.stdout.write(
-                            self.style.SUCCESS(f'✅ Added {mol_id} to {usecase.name}')
-                        )
-                    else:
-                        self.stdout.write(
-                            self.style.WARNING(f'⚠️  Molecule {mol_id} not found for {usecase.name}')
-                        )
+                    # Remove verbose logging for individual molecule assignments
                 
                 # Add molecules to many-to-many relationship
                 usecase.molecule_objects.set(molecule_objects)
@@ -61,12 +55,13 @@ class Command(BaseCommand):
                 assigned_count += 1
                 
             except UseCase.DoesNotExist:
-                self.stdout.write(
-                    self.style.ERROR(f'❌ UseCase with slug "{slug}" not found')
-                )
+                # Skip missing use cases silently
+                continue
         
-        self.stdout.write(
-            self.style.SUCCESS(
-                f'\n✅ Successfully assigned molecules to {assigned_count} use cases'
+        # Only show summary if there were assignments made
+        if assigned_count > 0:
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f'✅ Assigned molecules to {assigned_count} use cases'
+                )
             )
-        )

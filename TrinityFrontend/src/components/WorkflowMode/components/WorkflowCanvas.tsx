@@ -38,14 +38,13 @@ const nodeTypes = { molecule: MoleculeNode };
 const STORAGE_KEY = 'workflow-canvas-molecules';
 
 // Custom Zoom Controls Component
-const ZoomControls: React.FC = () => {
-  const { zoomIn, zoomOut, zoomTo } = useReactFlow();
+const ZoomControls: React.FC<{ zoomLevel: number }> = ({ zoomLevel }) => {
+  const { zoomIn, zoomOut, zoomTo, fitView } = useReactFlow();
 
   return (
     <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-50">
       <Button
         onClick={() => {
-          console.log('Zoom In clicked');
           zoomIn();
         }}
         size="sm"
@@ -56,7 +55,6 @@ const ZoomControls: React.FC = () => {
       </Button>
       <Button
         onClick={() => {
-          console.log('Zoom Out clicked');
           zoomOut();
         }}
         size="sm"
@@ -67,14 +65,27 @@ const ZoomControls: React.FC = () => {
       </Button>
       <Button
         onClick={() => {
-          console.log('Reset Zoom clicked');
           zoomTo(1);
         }}
         size="sm"
-        className="w-12 h-12 p-0 rounded-full shadow-xl bg-white hover:bg-gray-50 border-2 border-gray-300 hover:border-blue-400 transition-all text-xs font-bold"
-        title="Reset Zoom"
+        className={`w-12 h-12 p-0 rounded-full shadow-xl transition-all text-xs font-bold ${
+          Math.abs(zoomLevel - 1) < 0.1 
+            ? 'bg-green-100 border-2 border-green-400 text-green-700' 
+            : 'bg-white hover:bg-gray-50 border-2 border-gray-300 hover:border-blue-400'
+        }`}
+        title="Reset Zoom to 1:1"
       >
-        1:1
+        {Math.abs(zoomLevel - 1) < 0.1 ? '✓' : '1:1'}
+      </Button>
+      <Button
+        onClick={() => {
+          fitView({ padding: 0.1, duration: 300 });
+        }}
+        size="sm"
+        className="w-12 h-12 p-0 rounded-full shadow-xl bg-white hover:bg-gray-50 border-2 border-gray-300 hover:border-blue-400 transition-all"
+        title="Fit View - Show all molecules"
+      >
+        <ZoomIn className="w-4 h-4 text-gray-700" />
       </Button>
     </div>
   );
@@ -95,6 +106,16 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   const [edges, setEdges] = useState<Edge[]>([]);
   const reactFlowWrapper = useRef<HTMLDivElement | null>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
+  const [zoomLevel, setZoomLevel] = useState(1);
+
+  // Initialize zoom level tracking when ReactFlow instance is ready
+  useEffect(() => {
+    if (reactFlowInstance) {
+      // Get initial zoom level from ReactFlow instance
+      const initialViewport = reactFlowInstance.getViewport();
+      setZoomLevel(initialViewport.zoom);
+    }
+  }, [reactFlowInstance]);
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => setNodes(ns => applyNodeChanges(changes, ns)),
@@ -108,6 +129,32 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
     (connection: Connection) => setEdges(es => addEdge(connection, es)),
     []
   );
+
+  const onZoomChange = useCallback((zoom: number) => {
+    setZoomLevel(zoom);
+  }, []);
+
+  // Save viewport state to localStorage when it changes
+  const onViewportChange = useCallback((viewport: any) => {
+    localStorage.setItem('workflow-viewport', JSON.stringify(viewport));
+  }, []);
+
+  // Load viewport state from localStorage on mount
+  useEffect(() => {
+    if (reactFlowInstance) {
+      const savedViewport = localStorage.getItem('workflow-viewport');
+      if (savedViewport) {
+        try {
+          const viewport = JSON.parse(savedViewport);
+          // Restore saved viewport position and zoom
+          reactFlowInstance.setViewport(viewport);
+          setZoomLevel(viewport.zoom);
+        } catch (error) {
+          console.warn('Failed to restore viewport:', error);
+        }
+      }
+    }
+  }, [reactFlowInstance]);
 
   const removeNode = useCallback((id: string) => {
     setNodes(ns => ns.filter(n => n.id !== id));
@@ -453,6 +500,8 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
             onInit={setReactFlowInstance}
             onDrop={onDrop}
             onDragOver={onDragOver}
+            onZoomChange={onZoomChange}
+            onMove={onViewportChange}
             zoomOnScroll={false}
             zoomOnPinch={false}
             zoomOnDoubleClick={false}
@@ -469,7 +518,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
             }}
           >
             <Background gap={24} color="hsl(var(--border) / 0.3)" className="opacity-50" />
-            <ZoomControls />
+            <ZoomControls zoomLevel={zoomLevel} />
           </ReactFlow>
         </ReactFlowProvider>
       </div>

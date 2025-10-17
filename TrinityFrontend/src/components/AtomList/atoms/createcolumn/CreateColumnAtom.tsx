@@ -7,7 +7,7 @@ import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratory
 
 interface Operation {
   id: string;
-  type: 'add' | 'subtract' | 'multiply' | 'divide' | 'dummy' | 'rpi';
+  type: 'add' | 'subtract' | 'multiply' | 'divide' | 'dummy' | 'rpi' | 'datetime';
   name: string;
   columns?: string[];
   newColumnName: string;
