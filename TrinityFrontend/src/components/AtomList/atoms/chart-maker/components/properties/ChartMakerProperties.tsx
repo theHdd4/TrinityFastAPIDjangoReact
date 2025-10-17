@@ -23,6 +23,14 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_CHART_MAKER_SETTINGS };
   const { toast } = useToast();
+  
+  // Watch for selectedChartIndex changes to auto-switch to visualization tab
+  useEffect(() => {
+    const selectedChartIndex = (settings as any).selectedChartIndex;
+    if (selectedChartIndex !== undefined && selectedChartIndex >= 0) {
+      setTab('visualization');
+    }
+  }, [(settings as any).selectedChartIndex]);
 
   // Track if this is the initial mount to prevent false notifications
   const isInitialMount = useRef(true);
@@ -81,7 +89,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
     }
   };
 
-  const handleDataUpload = async (data: ChartData | null, fileId: string, dataSource?: string) => {
+  const handleDataUpload = async (data: ChartData | null, fileId: string, dataSource?: string, preserveCharts: boolean = false) => {
     try {
       setError(undefined);
 
@@ -95,7 +103,8 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
       }
 
       // Update data immediately
-      const updatedCharts = settings.charts.map(chart => ({
+      // Only reset charts if NOT preserving them (i.e., this is a new file upload, not a reload)
+      const updatedCharts = preserveCharts ? settings.charts : settings.charts.map(chart => ({
         ...chart,
         xAxis: '',
         yAxis: '',
@@ -106,13 +115,9 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         lastUpdateTime: undefined
       }));
       
-      handleSettingsChange({
-        uploadedData: data,
-        fileId: fileId,
-        dataSource: dataSource || settings.dataSource,
-        charts: updatedCharts
-      });
-
+      // Don't update settings yet - wait until we have all data including unique values
+      // This prevents multiple re-renders and potential filter loss
+      
       // Fetch all required data from backend
       setLoading({ fetchingColumns: true, uploading: false });
       
@@ -123,10 +128,26 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         chartMakerApi.getColumns(fileId).then(response => response.categorical_columns)
       ]);
 
-      // Get unique values for categorical columns
-      if (categoricalColumns.length > 0) {
+      // When preserving charts, ensure we fetch unique values for columns already used in filters
+      let columnsToFetch = categoricalColumns;
+      if (preserveCharts) {
+        const filterColumns = new Set<string>();
+        updatedCharts.forEach(chart => {
+          // Collect filter columns from simple mode
+          Object.keys(chart.filters || {}).forEach(col => filterColumns.add(col));
+          // Collect filter columns from advanced mode traces
+          (chart.traces || []).forEach(trace => {
+            Object.keys(trace.filters || {}).forEach(col => filterColumns.add(col));
+          });
+        });
+        // Merge with categorical columns to ensure all needed columns are fetched
+        columnsToFetch = Array.from(new Set([...categoricalColumns, ...Array.from(filterColumns)]));
+      }
+
+      // Get unique values for categorical columns (and filter columns if preserving charts)
+      if (columnsToFetch.length > 0) {
         setLoading({ fetchingUniqueValues: true, fetchingColumns: false });
-        const uniqueValuesResponse = await chartMakerApi.getUniqueValues(fileId, categoricalColumns);
+        const uniqueValuesResponse = await chartMakerApi.getUniqueValues(fileId, columnsToFetch);
         
         // Update uploaded data with comprehensive information
         handleSettingsChange({
@@ -136,7 +157,10 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
             numericColumns: columnsResponse.numeric_columns,
             categoricalColumns: columnsResponse.categorical_columns,
             uniqueValuesByColumn: uniqueValuesResponse.values
-          }
+          },
+          fileId: fileId,
+          dataSource: dataSource || settings.dataSource,
+          charts: updatedCharts
         });
       } else {
         // Update uploaded data with column information
@@ -147,7 +171,10 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
             numericColumns: columnsResponse.numeric_columns,
             categoricalColumns: columnsResponse.categorical_columns,
             uniqueValuesByColumn: {}
-          }
+          },
+          fileId: fileId,
+          dataSource: dataSource || settings.dataSource,
+          charts: updatedCharts
         });
       }
 
@@ -214,7 +241,8 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
             file_id: uploadResponse.file_id,
             row_count: uploadResponse.row_count,
           };
-          await handleDataUpload(chartData, uploadResponse.file_id, settings.dataSource);
+          // Pass preserveCharts=true to keep existing chart configurations when reloading file
+          await handleDataUpload(chartData, uploadResponse.file_id, settings.dataSource, true);
         } catch (err) {
           console.error('[ChartMakerProperties] Failed to reload dataframe:', err);
           setError(err instanceof Error ? err.message : 'Failed to reload dataframe');
@@ -255,7 +283,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
 
           // Prepare chart request
           const chartRequest = {
-            file_id: settings.fileId!,
+            file_id: (settings as any).dataSource || settings.fileId!,
             chart_type: migratedChart.type,
             traces: traces,
             title: migratedChart.title,
@@ -282,9 +310,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
       );
 
       handleSettingsChange({
-        charts: updatedCharts,
-        chartRendered: true,
-        lastUpdateTime: Date.now()
+        charts: updatedCharts
       });
 
       setLoading({ filtering: false });

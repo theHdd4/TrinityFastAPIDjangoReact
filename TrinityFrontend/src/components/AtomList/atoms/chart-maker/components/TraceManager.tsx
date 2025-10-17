@@ -130,12 +130,15 @@ const TraceManager: React.FC<TraceManagerProps> = ({
   const handleAddGlobalFilter = (column: string) => {
     if (traces.length === 0) return;
     
-    // Update all traces to include this filter column with empty values initially
+    // Initialize with ALL unique values selected by default
+    const allValues = getUniqueValues(column);
+    
+    // Update all traces to include this filter column with all values selected
     const updatedTraces = traces.map(trace => ({
       ...trace,
       filters: {
         ...trace.filters,
-        [column]: []
+        [column]: allValues
       }
     }));
     

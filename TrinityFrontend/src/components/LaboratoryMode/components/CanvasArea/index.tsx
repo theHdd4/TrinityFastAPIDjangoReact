@@ -4,6 +4,7 @@ import { safeStringify } from '@/utils/safeStringify';
 import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon } from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -130,6 +131,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [showAtomSuggestion, setShowAtomSuggestion] = useState<Record<string, boolean>>({});
   const [isCanvasLoading, setIsCanvasLoading] = useState(true);
+  const [atomToDelete, setAtomToDelete] = useState<{ cardId: string; atomId: string; atomTitle: string } | null>(null);
   const loadingMessages = useMemo(
     () => [
       'Loading project canvas',
@@ -1187,6 +1189,13 @@ const handleAddDragLeave = (e: React.DragEvent) => {
     );
   };
 
+  const handleConfirmDelete = () => {
+    if (atomToDelete === null) return;
+    
+    removeAtom(atomToDelete.cardId, atomToDelete.atomId);
+    setAtomToDelete(null);
+  };
+
 
   const normalizeName = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
   const aliasMap: Record<string, string> = {
@@ -1500,7 +1509,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                       <button
                                         onClick={e => {
                                           e.stopPropagation();
-                                          removeAtom(card.id, atom.id);
+                                          setAtomToDelete({ cardId: card.id, atomId: atom.id, atomTitle: atom.title });
                                         }}
                                         className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
                                       >
@@ -1714,7 +1723,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            removeAtom(card.id, atom.id);
+                            setAtomToDelete({ cardId: card.id, atomId: atom.id, atomTitle: atom.title });
                           }}
                           className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
                         >
@@ -1892,7 +1901,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              removeAtom(card.id, atom.id);
+                              setAtomToDelete({ cardId: card.id, atomId: atom.id, atomTitle: atom.title });
                             }}
                             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                           >
@@ -1958,6 +1967,24 @@ const handleAddDragLeave = (e: React.DragEvent) => {
         </div>,
         document.body,
       )}
+
+      {/* Atom Deletion Confirmation Dialog */}
+      <AlertDialog open={atomToDelete !== null} onOpenChange={(open) => !open && setAtomToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove Atom?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to remove {atomToDelete !== null ? `"${atomToDelete.atomTitle}"` : 'this atom'} atom from the card? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setAtomToDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDelete} className="bg-red-600 hover:bg-red-700">
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

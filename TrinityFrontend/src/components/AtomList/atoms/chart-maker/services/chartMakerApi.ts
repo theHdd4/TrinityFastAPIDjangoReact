@@ -35,6 +35,7 @@ export interface ChartTrace {
   aggregation?: "sum" | "mean" | "count" | "min" | "max";
   color?: string;
   filters?: Record<string, string[]>;  // Trace-specific filters
+  legend_field?: string;  // Field to segregate values by (like channel, region, etc.)
 }
 
 export interface ChartRequest {

@@ -36,7 +36,7 @@ export const migrateLegacyChart = (chart: ChartMakerConfig): ChartMakerConfig =>
     name: chart.yAxis,
     filters: chart.filters || {},
     color: DEFAULT_TRACE_COLORS[0],
-    aggregation: 'sum',
+    aggregation: chart.aggregation || 'sum',
   };
 
   return {
@@ -69,7 +69,8 @@ export const buildTracesForAPI = (chart: ChartMakerConfig): ChartTrace[] => {
     y_column: chart.yAxis,
     name: chart.title,
     chart_type: chart.type,
-    aggregation: 'sum',
+    aggregation: chart.aggregation || 'sum',
+    legend_field: chart.legendField && chart.legendField !== 'aggregate' ? chart.legendField : undefined,
   }];
 };
 

@@ -431,6 +431,8 @@ export interface ChartMakerConfig {
   xAxis: string;
   yAxis: string;
   filters: Record<string, string[]>;
+  aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
+  legendField?: string;
   chartConfig?: any;
   filteredData?: Record<string, any>[];
   chartRendered?: boolean;
@@ -556,6 +558,8 @@ export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
       xAxis: '',
       yAxis: '',
       filters: {},
+      aggregation: 'sum',
+      legendField: 'aggregate',
       chartRendered: false,
       chartLoading: false,
       isAdvancedMode: false,

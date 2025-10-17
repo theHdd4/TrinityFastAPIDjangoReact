@@ -1102,7 +1102,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   
   // Custom tick formatter for X-axis to show full value
   const xAxisTickFormatter = (value: any) => {
-    return String(value);
+    const strValue = String(value);
+    return strValue.length > 15 ? strValue.substring(0, 15) + '...' : strValue;
   };
   const axisLabelStyle = {
     fontFamily: FONT_FAMILY,
@@ -2149,6 +2150,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tickLine={false}
                 allowDuplicatedCategory={false}
                 tickFormatter={xAxisTickFormatter}
+                interval={0}
+                minTickGap={0}
+                height={80}
               />
               <YAxis
                 tickFormatter={formatLargeNumber}
@@ -2156,7 +2160,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tick={axisTickStyle}
                 tickLine={false}
               />
-              <Tooltip
+              <Tooltip 
                 content={({ active, payload, label }) => {
                   if (active && payload && payload.length) {
                     return (
@@ -2164,12 +2168,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
                         <p className="font-semibold text-gray-900 mb-2 text-sm">{label}</p>
                         {payload.map((entry: any, index: number) => (
                           <div key={index} className="flex items-center gap-2 mb-1">
-                            <div
-                              className="w-3 h-3 rounded-full"
+                            <div 
+                              className="w-3 h-3 rounded-full" 
                               style={{ backgroundColor: entry.color }}
                             />
                             <span className="text-sm font-medium text-gray-700">
-                              {entry.dataKey}:
+                              {entry.dataKey}: 
                             </span>
                             <span className="text-sm font-semibold text-gray-700">
                               {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
@@ -2199,6 +2203,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   fill={palette[idx % palette.length]}
                   animationDuration={800}
                   animationEasing="ease-out"
+                  isAnimationActive={false}
                 >
                   {currentShowDataLabels && (
                     <LabelList
@@ -2223,6 +2228,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
               tick={xAxisTickStyle}
               tickLine={false}
               tickFormatter={xAxisTickFormatter}
+              interval={0}
+              minTickGap={0}
+              height={80}
             />
             {/* Primary Y-Axis (Left) */}
             <YAxis 
@@ -2372,6 +2380,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tickLine={false}
                 allowDuplicatedCategory={false}
                 tickFormatter={isDateAxisMultiLine ? (value) => formatDateTickMultiLine(new Date(value)) : xAxisTickFormatter}
+                interval={0}
+                minTickGap={0}
+                height={80}
               />
               <YAxis
                 tickFormatter={formatLargeNumber}
@@ -2457,6 +2468,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tick={xAxisTickStyle}
                 tickLine={false}
                 tickFormatter={isDateAxis ? (value) => formatDateTick(new Date(value)) : xAxisTickFormatter}
+                interval={0}
+                minTickGap={0}
+                height={80}
               />
               {/* Primary Y-Axis (Left) */}
               <YAxis
@@ -2625,6 +2639,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tickLine={false}
                 allowDuplicatedCategory={false}
                 tickFormatter={isDateAxisArea ? (value) => formatDateTickArea(new Date(value)) : xAxisTickFormatter}
+                interval={0}
+                minTickGap={0}
+                height={80}
               />
               <YAxis
                 label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
@@ -2691,6 +2708,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
               tick={xAxisTickStyle}
               tickLine={false}
               tickFormatter={xAxisTickFormatter}
+              interval={0}
+              minTickGap={0}
+              height={80}
             />
             <YAxis
               yAxisId={0}
@@ -2772,6 +2792,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
               tickLine={false}
               allowDuplicatedCategory={false}
               tickFormatter={isDateAxisScatter ? (value) => formatDateTickScatter(new Date(value)) : xAxisTickFormatter}
+              interval={0}
+              minTickGap={0}
+              height={80}
             />
             <YAxis
               yAxisId={0}
@@ -3176,7 +3199,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   return (
     <div className="w-full h-full flex flex-col">
-      <div className="mb-6 flex justify-center">
+      {/* <div className="mb-6 flex justify-center">
         <div className="relative w-full max-w-3xl">
           {(((isTitleFocused ? titleEditableRef.current?.textContent : resolvedTitle) ?? '').trim().length === 0) && (
             <span className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl font-semibold text-gray-400">
@@ -3197,7 +3220,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             spellCheck={true}
           />
         </div>
-      </div>
+      </div> */}
 
       <div
         className="w-full h-full relative flex-1 min-w-0"
