@@ -121,16 +121,32 @@ def _default_cors_origins() -> List[str]:
     return [origin for origin in dict.fromkeys(defaults) if origin]
 
 
+def _merge_unique_origins(*origin_lists: Iterable[str]) -> List[str]:
+    """Return a list of unique origins preserving the first-seen order."""
+
+    seen = set()
+    merged: List[str] = []
+    for origins in origin_lists:
+        for origin in origins:
+            if not origin or origin in seen:
+                continue
+            seen.add(origin)
+            merged.append(origin)
+    return merged
+
+
 def _load_cors_origins() -> List[str]:
-    """Return configured origins or the calculated default list."""
+    """Return configured origins merged with calculated defaults."""
 
     configured = os.getenv("FASTAPI_CORS_ORIGINS")
+    defaults = _default_cors_origins()
     if configured:
         configured = configured.strip()
         if configured == "*":
             return ["*"]
-        return _split_hosts(configured)
-    return _default_cors_origins()
+        configured_hosts = _split_hosts(configured)
+        return _merge_unique_origins(configured_hosts, defaults)
+    return defaults
 
 
 app = FastAPI()

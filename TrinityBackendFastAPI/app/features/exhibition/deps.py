@@ -53,19 +53,33 @@ def _default_mongo_uri() -> str:
 
 
 def _mongo_auth_kwargs(uri: str) -> dict[str, str]:
+    """Build authentication keyword arguments for Motor clients."""
+
     # If credentials are already embedded in the URI (i.e. contains '@'),
     # the client will authenticate using those values so we avoid providing
     # duplicate username/password parameters.
     if "@" in uri.split("//", 1)[-1]:
         return {}
 
-    username = (os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER") or "").strip()
-    password = (os.getenv("MONGO_PASSWORD") or os.getenv("MONGO_PASS") or "").strip()
+    username_env = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER")
+    password_env = os.getenv("MONGO_PASSWORD") or os.getenv("MONGO_PASS")
+    auth_source_env = os.getenv("MONGO_AUTH_SOURCE") or os.getenv("MONGO_AUTH_DB")
+
+    username = (
+        username_env.strip()
+        if isinstance(username_env, str) and username_env.strip()
+        else "admin_dev"
+    )
+    password = (
+        password_env.strip()
+        if isinstance(password_env, str) and password_env.strip()
+        else "pass_dev"
+    )
     auth_source = (
-        os.getenv("MONGO_AUTH_SOURCE")
-        or os.getenv("MONGO_AUTH_DB")
-        or "admin"
-    ).strip()
+        auth_source_env.strip()
+        if isinstance(auth_source_env, str) and auth_source_env.strip()
+        else "admin"
+    )
     auth_mechanism = os.getenv("MONGO_AUTH_MECHANISM", "").strip()
 
     kwargs: dict[str, str] = {}
@@ -73,7 +87,7 @@ def _mongo_auth_kwargs(uri: str) -> dict[str, str]:
         kwargs["username"] = username
     if password:
         kwargs["password"] = password
-    if (username or password) and auth_source:
+    if auth_source:
         kwargs["authSource"] = auth_source
     if auth_mechanism:
         kwargs["authMechanism"] = auth_mechanism

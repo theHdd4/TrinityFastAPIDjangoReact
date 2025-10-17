@@ -107,3 +107,17 @@ def test_default_cors_respects_env_hosts(monkeypatch):
     assert "http://lab.example.com:8081" in origins
     assert "https://trinity.quantmatrixai.com" in origins
     assert "http://192.168.1.5:8080" in origins
+
+
+def test_configured_cors_includes_detected_hosts(monkeypatch):
+    monkeypatch.setenv("HOST_IP", "10.2.3.238")
+    monkeypatch.setenv("FRONTEND_PORT", "9090")
+    monkeypatch.setenv("FASTAPI_CORS_ORIGINS", "http://frontend.local:8080")
+
+    module = _load_main_module(monkeypatch)
+    monkeypatch.setattr(module, "_detect_runtime_hosts", lambda: [])
+
+    origins = module._load_cors_origins()
+
+    assert origins[0] == "http://frontend.local:8080"
+    assert "http://10.2.3.238:9090" in origins
