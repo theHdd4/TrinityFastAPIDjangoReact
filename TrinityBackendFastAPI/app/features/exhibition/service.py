@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -40,11 +42,58 @@ else:  # pragma: no cover - allows direct module loading in unit tests
 DISABLE_MONGO = os.getenv("EXHIBITION_DISABLE_MONGO", "").strip().lower() in {"1", "true", "yes"}
 
 
-def _default_storage_path() -> Path:
-    """Return the default JSON file location for exhibition configurations."""
+def _is_writable_directory(path: Path) -> bool:
+    """Return ``True`` when ``path`` exists (or can be created) and is writable."""
 
-    root_dir = Path(os.getenv("EXHIBITION_STORAGE_DIR", "").strip() or Path(__file__).resolve().parents[3] / "storage")
-    return Path(root_dir) / "exhibition_configurations.json"
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".writable"
+        with probe.open("w", encoding="utf-8") as handle:
+            handle.write("ok")
+        probe.unlink(missing_ok=True)
+    except OSError:
+        return False
+
+    return True
+
+
+def _default_storage_path() -> Path:
+    """Return the JSON storage location, preferring OS data directories."""
+
+    env_override = os.getenv("EXHIBITION_STORAGE_DIR", "").strip()
+    if env_override:
+        return Path(env_override) / "exhibition_configurations.json"
+
+    repo_file = Path(__file__).resolve().parents[3] / "storage" / "exhibition_configurations.json"
+
+    candidate_roots: List[Path] = []
+
+    xdg_data = os.getenv("XDG_DATA_HOME", "").strip()
+    if xdg_data:
+        candidate_roots.append(Path(xdg_data) / "trinity")
+
+    if os.name == "nt":
+        local_app_data = os.getenv("LOCALAPPDATA", "").strip()
+        if local_app_data:
+            candidate_roots.append(Path(local_app_data) / "Trinity")
+    else:
+        candidate_roots.append(Path.home() / ".local" / "share" / "trinity")
+
+    candidate_roots.append(Path(tempfile.gettempdir()) / "trinity_exhibition")
+
+    for root in candidate_roots:
+        if not _is_writable_directory(root):
+            continue
+
+        storage_file = root / "exhibition_configurations.json"
+        if not storage_file.exists() and repo_file.exists():
+            try:
+                shutil.copyfile(repo_file, storage_file)
+            except OSError:
+                logging.warning("Failed to seed exhibition storage from bundled JSON", exc_info=True)
+        return storage_file
+
+    return repo_file
 
 
 class ExhibitionStorage:

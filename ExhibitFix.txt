@@ -1,0 +1,17 @@
+Root cause:
+The exhibition configuration service always wrote to /code/TrinityBackendFastAPI/storage/exhibition_configurations.json. That directory ships from the container image with 755 permissions and the JSON file is 644, both owned by root. When the API runs under a non-root user (the default in our deployment) it cannot create or truncate files in that directory, so the save action fails with PermissionError.
+
+Fix:
+The storage layer now resolves the JSON file inside a writable operating-system data directory (XDG data home on Linux, %LOCALAPPDATA% on Windows, or a temp-backed directory as a last resort). When the file does not yet exist we seed it from the bundled exhibition_configurations.json so existing demo data still loads. Deployments that need a custom location can continue to set EXHIBITION_STORAGE_DIR.
+
+Why do we have exhibition_configurations.json?
+* It is a compact JSON persistence layer that mirrors the MongoDB data model for exhibition configurations. When MongoDB is disabled or unavailable the service reads and writes this file instead so that components can still be exhibited, edited, and retrieved.
+* The copy that lives under TrinityBackendFastAPI/storage contains seed data for local demos and automated tests. We now treat it purely as read-only seed content and copy it into a writable area the first time the API runs.
+
+Better long-term storage options:
+1. **External database** – Running MongoDB (already supported by the service) keeps configuration history in a multi-user store and removes file-system concerns entirely.
+2. **Configurable data directory** – Point EXHIBITION_STORAGE_DIR at a volume mount or cloud blob directory that is backed up and shared between API replicas.
+3. **Platform data folders** – The new default behaviour lands the file in XDG_DATA_HOME (Linux), %LOCALAPPDATA% (Windows), or a temp-backed directory, which keeps mutable data out of the code checkout.
+4. **Object storage** – For serverless or container deployments, persisting the JSON file to S3/Azure Blob/GCS via a lightweight adapter avoids coupling writes to the container file system.
+
+Any of these approaches keep the repository itself read-only and allow the running service to persist changes safely.
