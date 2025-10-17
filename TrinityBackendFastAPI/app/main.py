@@ -60,16 +60,36 @@ def _detect_runtime_hosts() -> List[str]:
     return hosts
 
 
+def _collect_dynamic_hosts() -> List[str]:
+    """Return hostnames/IPs that should be mirrored in the CORS list.
+
+    The helper prefers explicit configuration (``HOST_IP``/``FRONTEND_HOST``)
+    and augments it with best-effort runtime inspection so deployments without
+    a static configuration still inherit permissive defaults.
+    """
+
+    dynamic_hosts: List[str] = []
+
+    for env_var in ("HOST_IP", "FRONTEND_HOST", "VITE_HOST_IP"):
+        value = os.getenv(env_var, "").strip()
+        if value and value not in dynamic_hosts:
+            dynamic_hosts.append(value)
+
+    for host in _detect_runtime_hosts():
+        if host not in dynamic_hosts:
+            dynamic_hosts.append(host)
+
+    return dynamic_hosts
+
+
 def _default_cors_origins() -> List[str]:
     """Build the default list of CORS origins.
 
-    Combine the historical explicit hosts with dynamic values derived from the
-    container's HOST_IP/FRONTEND_PORT and common localhost URLs. This mirrors the
-    broader compatibility that existed on ``codex/fix-cors-error-in-api`` while
-    keeping prior ``dev`` behaviour.
+    Combine historical explicit hosts with dynamic values derived from the
+    container's configuration/environment so the "current" host/IP is always
+    present without having to hard-code it ahead of time.
     """
 
-    host_ip = os.getenv("HOST_IP", "").strip()
     frontend_port = os.getenv("FRONTEND_PORT", "8080").strip() or "8080"
 
     defaults = [
@@ -77,7 +97,6 @@ def _default_cors_origins() -> List[str]:
         "http://10.2.4.48:8080",
         "http://127.0.0.1:8080",
         "http://10.2.1.207:8080",
-        "http://10.2.3.238:8080",
         "http://172.22.64.1:8080",
         "http://10.2.3.55:8080",
         "https://trinity.quantmatrixai.com",
@@ -85,12 +104,12 @@ def _default_cors_origins() -> List[str]:
         "http://localhost:8080",
     ]
 
-    ports = [frontend_port, "8080", "8081"]
+    ports: List[str] = [frontend_port]
+    for fallback_port in ("8080", "8081"):
+        if fallback_port not in ports:
+            ports.append(fallback_port)
 
-    if host_ip:
-        defaults.extend(_iter_host_variants([host_ip], ports))
-
-    defaults.extend(_iter_host_variants(_detect_runtime_hosts(), ports))
+    defaults.extend(_iter_host_variants(_collect_dynamic_hosts(), ports))
 
     defaults.extend(
         [
