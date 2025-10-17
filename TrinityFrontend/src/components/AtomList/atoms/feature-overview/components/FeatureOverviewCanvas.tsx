@@ -2169,8 +2169,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                     {activeRow === row.id && showStatsSummary && (
                       <tr className="table-row">
                         <td className="table-cell" colSpan={colSpan}>
-                          <Card className="border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] hover:-translate-y-1 transition-all duration-300 relative flex flex-col group hover:shadow-2xl">
-                            <div className="bg-white border-b border-black px-4 py-2 flex items-center justify-between relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
+                          <Card className="border border-green-300 shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] hover:-translate-y-1 transition-all duration-300 relative flex flex-col group hover:shadow-2xl">
+                            <div className="bg-white border-b border-green-300 px-4 py-2 flex items-center justify-between relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
                               <h5 className="font-bold text-gray-900 text-sm flex items-center">
                                 <BarChart3 className="w-4 h-4 mr-2 text-gray-900" />
                                 Statistical Summary
