@@ -81,7 +81,7 @@ class Command(BaseCommand):
                 'tags': ['columns', 'classification', 'categorization'],
                 'color': 'bg-green-500'
             },
-            'createcolumn': {
+            'create-column': {
                 'description': 'Create new columns from existing data',
                 'tags': ['columns', 'creation', 'transformation'],
                 'color': 'bg-green-500'
