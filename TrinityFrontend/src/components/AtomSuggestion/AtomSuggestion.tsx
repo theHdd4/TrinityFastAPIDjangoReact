@@ -66,7 +66,7 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
   }, [allAtoms]);
 
   const hasCreateAndTransformAtom = useMemo(() => {
-    return allAtoms.some(atom => atom.atomId === 'createcolumn');
+    return allAtoms.some(atom => atom.atomId === 'create-column');
   }, [allAtoms]);
 
   const hasChartMakerAtom = useMemo(() => {
@@ -385,9 +385,9 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
       });
       
       suggestions.push({
-        id: 'createcolumn',
-        name: 'Create and transform',
-        color: 'bg-indigo-500'
+        id: 'create-column',
+        name: 'Create and Transform Features',
+        color: 'bg-green-500'
       });
       
       suggestions.push({

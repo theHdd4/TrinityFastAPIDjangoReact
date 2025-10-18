@@ -182,8 +182,7 @@ const SortableAtomItem: React.FC<SortableAtomItemProps> = ({
       'Scope Selector': 'green',
       'Row Operations': 'green',
       'Column Classifier': 'green',
-      'Create Column': 'green',
-      'Create and Transform': 'green',
+      'Create and Transform Features': 'green',
       'Dataframe Operations': 'green',
       'feature-overview': 'green',
       'groupby-weighted-average': 'green',
@@ -193,7 +192,6 @@ const SortableAtomItem: React.FC<SortableAtomItemProps> = ({
       'row-operations': 'green',
       'column-classifier': 'green',
       'create-column': 'green',
-      'create-and-transform': 'green',
       'dataframe-operations': 'green',
       'groupby-wtg-avg': 'green',
       
@@ -383,7 +381,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
       'Scope Selector': 'green',
       'Row Operations': 'green',
       'Column Classifier': 'green',
-      'Create Column': 'green',
+      'Create and Transform Features': 'green',
       'Dataframe Operations': 'green',
       'feature-overview': 'green',
       'groupby-weighted-average': 'green',
@@ -393,9 +391,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
       'row-operations': 'green',
       'column-classifier': 'green',
       'create-column': 'green',
-      'create-and-transform': 'green',
       'dataframe-operations': 'green',
-      'GroupBy Weighted Average': 'green',
       'groupby-wtg-avg': 'green',
       
       // Analytics - Purple

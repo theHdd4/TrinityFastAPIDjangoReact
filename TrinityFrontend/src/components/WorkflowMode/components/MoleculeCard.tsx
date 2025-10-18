@@ -108,8 +108,8 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
       'row-operations': 'green',
       'Column Classifier': 'green',
       'column-classifier': 'green',
-      'Create Column': 'green',
-      'createcolumn': 'green',
+      'Create and Transform Features': 'green',
+      'create-column': 'green',
       'Dataframe Operations': 'green',
       'dataframe-operations': 'green',
       
