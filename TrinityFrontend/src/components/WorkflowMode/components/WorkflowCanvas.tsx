@@ -44,7 +44,7 @@ const STORAGE_KEY = 'workflow-canvas-molecules';
 const MOLECULE_DIMENSIONS = {
   width: 280,  // Width of each molecule card
   height: 200, // Height of each molecule card
-  spacing: 30  // Spacing between molecules
+  spacing: 50  // Spacing between molecules (increased from 30 to 50)
 };
 
 // Custom Zoom Controls Component

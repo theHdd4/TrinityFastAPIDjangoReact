@@ -265,7 +265,7 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
 
       {/* Collapsible Atoms Content */}
       {!isCollapsed && (
-        <div className="grid grid-cols-3 gap-3 pl-2">
+        <div className="grid grid-cols-4 gap-3 pl-2">
           {molecule.atoms.map((atom, index) => {
             const borderColor = getAtomBorderColor(atom);
             const AtomIcon = getAtomIcon(atom);

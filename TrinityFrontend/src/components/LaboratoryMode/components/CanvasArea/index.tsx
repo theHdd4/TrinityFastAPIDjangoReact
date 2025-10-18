@@ -766,14 +766,41 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
 
       const normalizedCards = Array.isArray(cards) ? cards : [];
       setLayoutCards(normalizedCards);
-      const workflow = workflowOverride ?? deriveWorkflowMolecules(normalizedCards);
+      
+      // Check for saved workflowMolecules in localStorage if no override provided
+      let workflow = workflowOverride;
+      if (!workflow) {
+        const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+        if (storedWorkflowMolecules) {
+          try {
+            workflow = JSON.parse(storedWorkflowMolecules);
+          } catch (e) {
+            console.error('Failed to parse stored workflow molecules', e);
+            workflow = deriveWorkflowMolecules(normalizedCards);
+          }
+        } else {
+          workflow = deriveWorkflowMolecules(normalizedCards);
+        }
+      }
+      
       setWorkflowMolecules(workflow);
+
+      // Set all workflow molecules as collapsed by default
+      if (workflow.length > 0) {
+        const initialCollapsedState: Record<string, boolean> = {};
+        workflow.forEach(molecule => {
+          initialCollapsedState[molecule.moleculeId] = true; // true = collapsed
+        });
+        setCollapsedMolecules(initialCollapsedState);
+      }
 
       hasAppliedInitialCards = true;
       markLoadingComplete();
     };
 
+    // Check for both workflow-selected-atoms and workflow-data
     const storedAtoms = localStorage.getItem('workflow-selected-atoms');
+    const storedWorkflowData = localStorage.getItem('workflow-data');
     let workflowAtoms: {
       atomName: string;
       moleculeId: string;
@@ -841,6 +868,87 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         console.error('Failed to parse workflow atoms', e);
         workflowAtoms = [];
       }
+    } else if (storedWorkflowData) {
+      // Handle workflow-data format from handleRenderWorkflow
+      try {
+        const workflowData = JSON.parse(storedWorkflowData);
+        console.log('Processing workflow-data:', workflowData);
+        
+        if (workflowData.molecules && Array.isArray(workflowData.molecules)) {
+          // Convert workflow-data format to workflowAtoms format
+          workflowAtoms = [];
+          workflowData.molecules.forEach((molecule: any, moleculeIndex: number) => {
+            if (molecule.atoms && Array.isArray(molecule.atoms)) {
+              molecule.atoms.forEach((atomId: string, atomIndex: number) => {
+                workflowAtoms.push({
+                  atomName: atomId,
+                  moleculeId: molecule.id,
+                  moleculeTitle: molecule.title,
+                  order: atomIndex
+                });
+              });
+            }
+          });
+
+          const moleculeMap = new Map<string, WorkflowMolecule>();
+          workflowAtoms.forEach(atom => {
+            if (!moleculeMap.has(atom.moleculeId)) {
+              moleculeMap.set(atom.moleculeId, {
+                moleculeId: atom.moleculeId,
+                moleculeTitle: atom.moleculeTitle,
+                atoms: [],
+              });
+            }
+            moleculeMap.get(atom.moleculeId)!.atoms.push({
+              atomName: atom.atomName,
+              order: atom.order,
+            });
+          });
+
+          moleculeMap.forEach(molecule => {
+            molecule.atoms.sort((a, b) => a.order - b.order);
+          });
+
+          const molecules = Array.from(moleculeMap.values());
+          if (molecules.length > 0) {
+            initialWorkflow = molecules;
+            // Save the molecules to workflow-molecules localStorage for future switches
+            localStorage.setItem('workflow-molecules', JSON.stringify(molecules));
+          }
+
+          const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
+          initialCards = workflowAtoms.map(atom => {
+            const atomInfo =
+              allAtoms.find(
+                a =>
+                  normalize(a.id) === normalize(atom.atomName) ||
+                  normalize(a.title) === normalize(atom.atomName),
+              ) || ({} as any);
+            const atomId = atomInfo.id || atom.atomName;
+            const dropped: DroppedAtom = {
+              id: `${atom.atomName}-${Date.now()}-${Math.random()}`,
+              atomId,
+              title: atomInfo.title || atom.atomName,
+              category: atomInfo.category || 'Atom',
+              color: atomInfo.color || 'bg-gray-400',
+              source: 'manual',
+              llm: LLM_MAP[atomId],
+            };
+            return {
+              id: `card-${atom.atomName}-${Date.now()}-${Math.random()}`,
+              atoms: [dropped],
+              isExhibited: false,
+              moleculeId: atom.moleculeId,
+              moleculeTitle: atom.moleculeTitle,
+            } as LayoutCard;
+          });
+
+          localStorage.removeItem('workflow-data');
+        }
+      } catch (e) {
+        console.error('Failed to parse workflow-data', e);
+        localStorage.removeItem('workflow-data');
+      }
     }
 
     if (!workflowAtoms.length) {
@@ -895,8 +1003,18 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
                     );
                   }
 
+                  // Check for workflowMolecules in the project state
+                  if (data.state.workflowMolecules && Array.isArray(data.state.workflowMolecules)) {
+                    localStorage.setItem('workflow-molecules', safeStringify(data.state.workflowMolecules));
+                  }
+
                   const cardsFromConfig = hydrateLayoutCards(cfg.cards);
-                  applyInitialCards(cardsFromConfig);
+                  // Check for workflowMolecules in the project state before applying cards
+                  let projectWorkflow = initialWorkflow;
+                  if (data.state.workflowMolecules && Array.isArray(data.state.workflowMolecules) && !projectWorkflow) {
+                    projectWorkflow = data.state.workflowMolecules;
+                  }
+                  applyInitialCards(cardsFromConfig, projectWorkflow);
                 }
               })
               .catch(() => {
@@ -913,9 +1031,41 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
 
     if (initialCards) {
+      // If no initialWorkflow was set from workflow atoms/data, check for saved workflow molecules
+      if (!initialWorkflow) {
+        const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+        if (storedWorkflowMolecules) {
+          try {
+            initialWorkflow = JSON.parse(storedWorkflowMolecules);
+          } catch (e) {
+            console.error('Failed to parse stored workflow molecules during layout load', e);
+          }
+        }
+      }
       applyInitialCards(initialCards, initialWorkflow);
     } else if (!hasPendingAsyncLoad && !hasAppliedInitialCards) {
-      markLoadingComplete();
+      // Even if no initialCards, check if we need to restore workflow molecules from saved layout
+      const storedLayout = localStorage.getItem(STORAGE_KEY);
+      const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+      
+      if (storedLayout && storedLayout !== 'undefined' && storedWorkflowMolecules) {
+        try {
+          const raw = JSON.parse(storedLayout);
+          const layoutCards = hydrateLayoutCards(raw);
+          const workflowMolecules = JSON.parse(storedWorkflowMolecules);
+          
+          if (layoutCards && layoutCards.length > 0 && workflowMolecules && workflowMolecules.length > 0) {
+            applyInitialCards(layoutCards, workflowMolecules);
+          } else {
+            markLoadingComplete();
+          }
+        } catch (e) {
+          console.error('Failed to parse stored layout or workflow molecules', e);
+          markLoadingComplete();
+        }
+      } else {
+        markLoadingComplete();
+      }
     }
 
     return () => {
@@ -959,11 +1109,16 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       if (current) {
         try {
           const proj = JSON.parse(current);
+          // Include workflowMolecules in the state being saved
+          const stateWithMolecules = {
+            ...prevLayout.current,
+            workflowMolecules: workflowMolecules
+          };
           fetch(`${LAB_ACTIONS_API}/`, {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ project: proj.id, state: prevLayout.current }),
+            body: JSON.stringify({ project: proj.id, state: stateWithMolecules }),
           }).catch(() => {});
         } catch {
           /* ignore */
@@ -973,12 +1128,51 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         ? layoutCards.map(c => ({ ...c, atoms: [...c.atoms] }))
         : [];
     }
-  }, [layoutCards]);
+  }, [layoutCards, workflowMolecules]);
 
   // Sync cards with exhibition store
   useEffect(() => {
     setCards(layoutCards);
   }, [layoutCards, setCards]);
+
+  // Persist workflowMolecules to localStorage
+  useEffect(() => {
+    if (workflowMolecules.length > 0) {
+      localStorage.setItem('workflow-molecules', JSON.stringify(workflowMolecules));
+    }
+  }, [workflowMolecules]);
+
+  // Ensure workflow molecules are restored when layout cards exist but workflow molecules are missing
+  useEffect(() => {
+    // Only run after initial loading is complete
+    if (isCanvasLoading) return;
+    
+    // Check if we have layout cards but no workflow molecules
+    const hasCardsWithMoleculeId = Array.isArray(layoutCards) && 
+      layoutCards.some(card => card.moleculeId);
+    
+    if (hasCardsWithMoleculeId && workflowMolecules.length === 0) {
+      // Try to restore workflow molecules from localStorage
+      const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+      if (storedWorkflowMolecules) {
+        try {
+          const molecules = JSON.parse(storedWorkflowMolecules);
+          if (Array.isArray(molecules) && molecules.length > 0) {
+            setWorkflowMolecules(molecules);
+            
+            // Set collapsed state for restored molecules
+            const initialCollapsedState: Record<string, boolean> = {};
+            molecules.forEach((molecule: any) => {
+              initialCollapsedState[molecule.moleculeId] = true; // collapsed by default
+            });
+            setCollapsedMolecules(initialCollapsedState);
+          }
+        } catch (e) {
+          console.error('Failed to restore workflow molecules from localStorage:', e);
+        }
+      }
+    }
+  }, [layoutCards, workflowMolecules, isCanvasLoading]);
 
   const handleDragOver = (e: React.DragEvent, cardId: string) => {
     e.preventDefault();
@@ -1405,6 +1599,38 @@ const handleAddDragLeave = (e: React.DragEvent) => {
     setCollapsedMolecules(prev => ({ ...prev, [moleculeId]: !prev[moleculeId] }));
   };
 
+  const deleteMoleculeContainer = async (moleculeId: string) => {
+    // Get all cards associated with this molecule
+    const arr = Array.isArray(layoutCards) ? layoutCards : [];
+    const moleculeCards = arr.filter(card => card.moleculeId === moleculeId);
+    
+    // Delete all cards in this molecule
+    for (const card of moleculeCards) {
+      await deleteCard(card.id);
+    }
+    
+    // Remove the molecule from workflowMolecules and update localStorage
+    setWorkflowMolecules(prev => {
+      const updatedMolecules = prev.filter(mol => mol.moleculeId !== moleculeId);
+      
+      // Update localStorage
+      if (updatedMolecules.length > 0) {
+        localStorage.setItem('workflow-molecules', JSON.stringify(updatedMolecules));
+      } else {
+        localStorage.removeItem('workflow-molecules');
+      }
+      
+      return updatedMolecules;
+    });
+    
+    // Clear collapsed state for this molecule
+    setCollapsedMolecules(prev => {
+      const copy = { ...prev };
+      delete copy[moleculeId];
+      return copy;
+    });
+  };
+
   const handleExhibitionToggle = (cardId: string, isExhibited: boolean) => {
     const updated = (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
       card.id === cardId ? { ...card, isExhibited } : card
@@ -1480,13 +1706,25 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                       </div>
                     </div>
                   </div>
-                  <button className="p-2 hover:bg-white/50 rounded-lg transition-all duration-200 hover:shadow-sm">
-                    <ChevronDown 
-                      className={`w-5 h-5 text-gray-700 transition-transform duration-300 ${
-                        isCollapsed ? '-rotate-90' : 'rotate-0'
-                      }`}
-                    />
-                  </button>
+                  <div className="flex items-center space-x-2">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteMoleculeContainer(molecule.moleculeId);
+                      }}
+                      className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 hover:shadow-sm"
+                      title="Delete Container"
+                    >
+                      <Trash2 className="w-4 h-4 text-gray-600 hover:text-red-600" />
+                    </button>
+                    <button className="p-2 hover:bg-white/50 rounded-lg transition-all duration-200 hover:shadow-sm">
+                      <ChevronDown 
+                        className={`w-5 h-5 text-gray-700 transition-transform duration-300 ${
+                          isCollapsed ? '-rotate-90' : 'rotate-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Molecule Content */}
