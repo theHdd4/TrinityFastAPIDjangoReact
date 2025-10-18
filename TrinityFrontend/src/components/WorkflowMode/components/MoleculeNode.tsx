@@ -86,9 +86,9 @@ const PortalTooltip: React.FC<PortalTooltipProps> = ({ children, content, disabl
             transform: 'translateX(-50%) translateY(-100%)'
           }}
         >
-          <div className="bg-gray-900 text-white text-sm px-2 py-1 rounded shadow-lg whitespace-nowrap">
+          <div className="bg-white text-black text-sm px-2 py-1 rounded shadow-lg whitespace-nowrap border border-gray-200">
             {content}
-            <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
+            <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-white"></div>
           </div>
         </div>,
         document.body
@@ -315,13 +315,13 @@ const SortableAtomItem: React.FC<SortableAtomItemProps> = ({
       </ContextMenuTrigger>
       <ContextMenuContent className="min-w-[200px]">
         <div className="px-2 py-1.5 text-xs font-semibold text-gray-600 border-b border-gray-200 mb-1">
-          Move Atom
+          Move {atom} to
         </div>
         <ContextMenuItem
           onClick={() => onMoveAtomToAtomList?.(atom, currentMoleculeId)}
           className="cursor-pointer"
         >
-          Move to Atom List
+          Remove Atom
         </ContextMenuItem>
         {availableMolecules.filter(m => m.id !== currentMoleculeId).length > 0 && (
           <>
@@ -720,7 +720,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
         className="w-3.5 h-3.5 !bg-purple-500/70 !border-2 !border-background shadow-md transition-all group-hover:!bg-purple-500 group-hover:scale-125 group-hover:shadow-lg group-hover:shadow-purple-500/30" 
       />
       <Card
-        className={`relative w-70 select-none ${getTypeColor(data.type)} rounded-xl overflow-hidden group hover:scale-105 transition-all duration-300`}
+        className={`relative w-60 select-none ${getTypeColor(data.type)} rounded-xl overflow-hidden group hover:scale-105 transition-all duration-300`}
         onClick={e => {
           e.stopPropagation();
           data.onClick(id);
@@ -729,7 +729,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
         {/* Header */}
         <div className="relative">
           
-          <div className="drag-handle cursor-move p-3 pb-2 relative z-10">
+          <div className="drag-handle cursor-move p-2 pb-1 relative z-10">
             <div className="flex items-center justify-between mb-1">
               {/* Left-aligned title */}
               <div className="flex-1 min-w-0">
@@ -816,12 +816,12 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
         </div>
         
         {/* Content Section - Atoms or Contained Molecules */}
-        <div className="border-t border-border/50 px-3 py-2 bg-gradient-to-b from-transparent to-muted/5">
+        <div className="border-t border-border/50 px-2 py-1.5 bg-gradient-to-b from-transparent to-muted/5">
           {/* Check if molecule has atoms or is a container */}
           {data.atomOrder.length > 0 ? (
             // Show atoms section
             <>
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-1.5">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide bg-gradient-to-r from-muted-foreground to-muted-foreground/70 bg-clip-text text-transparent">
                   Atoms
                 </p>
@@ -833,7 +833,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
           ) : (
             // Show empty container state (ready to be replaced)
             <>
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-1.5">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide bg-gradient-to-r from-muted-foreground to-muted-foreground/70 bg-clip-text text-transparent">
                   Container
                 </p>
@@ -842,7 +842,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                 </span>
               </div>
               <div className="text-center py-2">
-                <p className="text-xs text-muted-foreground mb-1">Drop molecule here to replace</p>
+                <p className="text-xs text-muted-foreground mb-1">Drag molecules or select atoms</p>
                 <div 
                   className="border-2 border-dashed border-muted-foreground/30 rounded-lg p-2 transition-colors hover:border-primary/50"
                   onDragOver={(e) => {
@@ -880,7 +880,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
           {/* Show atoms grid when atoms are assigned */}
           {data.atomOrder.length > 0 && (
             <div 
-              className="grid grid-cols-5 gap-2 max-h-48 overflow-y-auto pr-1"
+              className="grid grid-cols-5 gap-1.5 max-h-40 overflow-y-auto pr-1"
               onPointerDownCapture={e => e.stopPropagation()}
               style={{ scrollbarWidth: 'thin', overflowX: 'visible' }}
             >

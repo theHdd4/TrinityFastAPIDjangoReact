@@ -80,68 +80,121 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
   // Get category color based on atom categories from laboratory mode
   const getCategoryColor = (atomName: string) => {
     // Map atom names to their categories based on laboratory mode categories
+    // Supports both display names and atom IDs (kebab-case)
     const atomCategoryMap: Record<string, string> = {
       // Data Sources - Blue
       'Data Upload Validate': 'blue',
-      'CSV Import': 'blue', 
+      'data-upload-validate': 'blue',
+      'CSV Import': 'blue',
+      'csv-import': 'blue', 
       'JSON Import': 'blue',
+      'json-import': 'blue',
       'Database Connect': 'blue',
+      'database-connect': 'blue',
       
       // Data Processing - Green
       'Feature Overview': 'green',
+      'feature-overview': 'green',
       'GroupBy Weighted Average': 'green',
+      'groupby-weighted-average': 'green',
+      'groupby-wtg-avg': 'green',
       'Merge': 'green',
+      'merge': 'green',
       'Concat': 'green',
+      'concat': 'green',
       'Scope Selector': 'green',
+      'scope-selector': 'green',
       'Row Operations': 'green',
+      'row-operations': 'green',
       'Column Classifier': 'green',
+      'column-classifier': 'green',
       'Create Column': 'green',
+      'createcolumn': 'green',
       'Dataframe Operations': 'green',
+      'dataframe-operations': 'green',
       
       // Analytics - Purple
       'Correlation': 'purple',
+      'correlation': 'purple',
       'EDA': 'purple',
+      'eda': 'purple',
+      'Explore': 'purple',
+      'explore': 'purple',
       'Descriptive Stats': 'purple',
+      'descriptive-stats': 'purple',
       'Trend Analysis': 'purple',
+      'trend-analysis': 'purple',
       
       // Machine Learning - Orange
       'Auto-regressive models': 'orange',
+      'auto-regressive-models': 'orange',
       'Model Output - Non CSF': 'orange',
+      'model-output-non-csf': 'orange',
       'Single Modeling': 'orange',
+      'single-modeling': 'orange',
       'Bulk Model Output - CSF': 'orange',
+      'bulk-model-output-csf': 'orange',
       'Bulk Modeling': 'orange',
+      'bulk-modeling': 'orange',
       'Model Performance': 'orange',
+      'model-performance': 'orange',
       'Model Selector': 'orange',
+      'model-selector': 'orange',
       'Clustering': 'orange',
+      'clustering': 'orange',
+      'Build model - feature based': 'orange',
+      'build-model-feature-based': 'orange',
+      'Regression - feature based': 'orange',
+      'regression-feature-based': 'orange',
+      'Select models - feature': 'orange',
+      'select-models-feature': 'orange',
+      'Evaluate models - feature': 'orange',
+      'evaluate-models-feature': 'orange',
+      'Select models - auto regressive': 'orange',
+      'select-models-auto-regressive': 'orange',
+      'Evaluate models - auto regressive': 'orange',
+      'evaluate-models-auto-regressive': 'orange',
       
       // Visualization - Pink
       'Chart Maker': 'pink',
+      'chart-maker': 'pink',
       'Text Box': 'pink',
+      'text-box': 'pink',
       'Scatter Plot': 'pink',
+      'scatter-plot': 'pink',
       'Histogram': 'pink',
+      'histogram': 'pink',
       
       // Planning & Optimization - Indigo
       'Scenario Planner': 'indigo',
+      'scenario-planner': 'indigo',
       'Optimizer': 'indigo',
+      'optimizer': 'indigo',
       
       // Utilities - Gray
       'Atom Maker': 'gray',
+      'atom-maker': 'gray',
       'Read Presentation Summarize': 'gray',
+      'read-presentation-summarize': 'gray',
       
       // Business Intelligence - Emerald
       'Base Price Estimator': 'emerald',
+      'base-price-estimator': 'emerald',
       'Promo Estimator': 'emerald',
+      'promo-estimator': 'emerald',
       'Promo Comparison': 'emerald',
+      'promo-comparison': 'emerald',
       'Promotion Intensity Analysis': 'emerald',
+      'promotion-intensity-analysis': 'emerald',
     };
     
-    return atomCategoryMap[atomName] || 'gray';
+    return atomCategoryMap[atomName] || 'blue'; // Default to blue instead of gray for better visual appeal
   };
 
   const getMoleculeColor = () => {
     // Determine the primary category color based on the first atom in the molecule
     const primaryAtom = molecule.atoms[0];
-    const categoryColor = primaryAtom ? getCategoryColor(primaryAtom) : 'gray';
+    const categoryColor = primaryAtom ? getCategoryColor(primaryAtom) : 'blue';
     
     switch (categoryColor) {
       case 'blue': return 'bg-gradient-to-br from-blue-500 to-blue-600 shadow-blue-200/50';
@@ -152,7 +205,7 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
       case 'indigo': return 'bg-gradient-to-br from-indigo-500 to-indigo-600 shadow-indigo-200/50';
       case 'emerald': return 'bg-gradient-to-br from-emerald-500 to-emerald-600 shadow-emerald-200/50';
       case 'gray': return 'bg-gradient-to-br from-gray-500 to-gray-600 shadow-gray-200/50';
-      default: return 'bg-gradient-to-br from-gray-500 to-gray-600 shadow-gray-200/50';
+      default: return 'bg-gradient-to-br from-blue-500 to-blue-600 shadow-blue-200/50';
     }
   };
 
@@ -168,7 +221,7 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
       case 'indigo': return 'border-2 border-indigo-400 hover:border-indigo-500 hover:shadow-indigo-200/30';
       case 'emerald': return 'border-2 border-emerald-400 hover:border-emerald-500 hover:shadow-emerald-200/30';
       case 'gray': return 'border-2 border-gray-400 hover:border-gray-500 hover:shadow-gray-200/30';
-      default: return 'border-2 border-gray-400 hover:border-gray-500 hover:shadow-gray-200/30';
+      default: return 'border-2 border-blue-400 hover:border-blue-500 hover:shadow-blue-200/30';
     }
   };
 

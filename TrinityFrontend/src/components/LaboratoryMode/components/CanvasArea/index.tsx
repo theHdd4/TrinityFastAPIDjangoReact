@@ -1854,7 +1854,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
           cancelLabel="Cancel"
           confirmButtonClass="bg-red-500 hover:bg-red-600"
         />
-        <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
+      <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
         <div className={canEdit ? '' : 'pointer-events-none'}>
           <div className="p-6 space-y-6">
             {workflowMolecules.map((molecule) => {
@@ -2380,9 +2380,9 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         </span>
                       </button>
                     </div>
+                </div>
           </div>
         </div>
-      </div>
       </>
     );
   }

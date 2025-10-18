@@ -18,7 +18,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import MoleculeNode, { MoleculeNodeData } from './MoleculeNode';
-import { Plus, Minus, ZoomIn, ZoomOut } from 'lucide-react';
+import { Plus, Minus, ZoomIn, ZoomOut, Grid3X3 } from 'lucide-react';
 
 interface WorkflowCanvasProps {
   onMoleculeSelect: (moleculeId: string) => void;
@@ -31,6 +31,7 @@ interface WorkflowCanvasProps {
   onMoleculeRename?: (moleculeId: string, newName: string) => void;
   onMoleculeAdd?: (molecule: any) => void;
   onMoleculeReplace?: (oldId: string, newMolecule: any) => void; // NEW: Replace molecule in parent state
+  onMoleculePositionsUpdate?: (positions: { moleculeId: string; position: { x: number; y: number } }[]) => void; // NEW: Update molecule positions
   isLibraryVisible?: boolean;
   isRightPanelVisible?: boolean;
   isAtomLibraryVisible?: boolean;
@@ -42,13 +43,13 @@ const STORAGE_KEY = 'workflow-canvas-molecules';
 
 // Standard molecule dimensions - keep consistent across all operations
 const MOLECULE_DIMENSIONS = {
-  width: 280,  // Width of each molecule card
-  height: 200, // Height of each molecule card
+  width: 240,  // Width of each molecule card (reduced from 280)
+  height: 170, // Height of each molecule card (reduced from 200)
   spacing: 50  // Spacing between molecules (increased from 30 to 50)
 };
 
 // Custom Zoom Controls Component
-const ZoomControls: React.FC<{ zoomLevel: number }> = ({ zoomLevel }) => {
+const ZoomControls: React.FC<{ zoomLevel: number; onResetPositions: () => void }> = ({ zoomLevel, onResetPositions }) => {
   const { zoomIn, zoomOut, zoomTo, fitView } = useReactFlow();
 
   return (
@@ -75,17 +76,16 @@ const ZoomControls: React.FC<{ zoomLevel: number }> = ({ zoomLevel }) => {
       </Button>
       <Button
         onClick={() => {
+          // Reset molecules to their default positions
+          onResetPositions();
+          // Also reset zoom to 1
           zoomTo(1);
         }}
         size="sm"
-        className={`w-12 h-12 p-0 rounded-full shadow-xl transition-all text-xs font-bold ${
-          Math.abs(zoomLevel - 1) < 0.1 
-            ? 'bg-green-100 border-2 border-green-400 text-green-700' 
-            : 'bg-white hover:bg-gray-50 border-2 border-gray-300 hover:border-blue-400'
-        }`}
-        title="Reset Zoom to 1:1"
+        className="w-12 h-12 p-0 rounded-full shadow-xl transition-all bg-green-100 border-2 border-green-400 text-green-700 hover:bg-green-200 hover:border-green-500"
+        title="Reset molecules to default grid positions"
       >
-        {Math.abs(zoomLevel - 1) < 0.1 ? '✓' : '1:1'}
+        <Grid3X3 className="w-5 h-5" />
       </Button>
       <Button
         onClick={() => {
@@ -111,6 +111,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   onMoleculeRename,
   onMoleculeAdd,
   onMoleculeReplace,
+  onMoleculePositionsUpdate,
   isLibraryVisible = true,
   isRightPanelVisible = true,
   isAtomLibraryVisible = false
@@ -149,7 +150,27 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
   // Save viewport state to localStorage when it changes
   const onViewportChange = useCallback((viewport: any) => {
-    localStorage.setItem('workflow-viewport', JSON.stringify(viewport));
+    // Only save viewport changes that are meaningful (not just tiny movements)
+    const threshold = 10;
+    const lastViewport = localStorage.getItem('workflow-viewport');
+    let shouldSave = true;
+    
+    if (lastViewport) {
+      try {
+        const last = JSON.parse(lastViewport);
+        const deltaX = Math.abs((viewport.x || 0) - (last.x || 0));
+        const deltaY = Math.abs((viewport.y || 0) - (last.y || 0));
+        
+        // Only save if movement is significant enough
+        shouldSave = deltaX > threshold || deltaY > threshold;
+      } catch (error) {
+        // If parsing fails, save anyway
+      }
+    }
+    
+    if (shouldSave) {
+      localStorage.setItem('workflow-viewport', JSON.stringify(viewport));
+    }
   }, []);
 
   // Load viewport state from localStorage on mount (only position, not zoom)
@@ -290,7 +311,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         } else {
           moleculesPerRow = 4; // Both libraries hidden (default case)
         }
-        const padding = 80; // Padding around molecules
+        const padding = 60; // Padding around molecules
         
         const row = Math.floor(moleculesCount / moleculesPerRow);
         const col = moleculesCount % moleculesPerRow;
@@ -373,6 +394,69 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
     event.dataTransfer.dropEffect = 'copy';
   };
 
+  // Function to reset molecules to their default positions
+  const resetMoleculesToDefaultPositions = useCallback(() => {
+    if (!reactFlowInstance || canvasMolecules.length === 0) return;
+
+    console.log('🔄 Resetting molecules to default positions...');
+
+    // Calculate molecules per row based on current panel visibility
+    let moleculesPerRow;
+    if (isLibraryVisible && isAtomLibraryVisible) {
+      moleculesPerRow = 2; // Both molecule and atom libraries visible
+    } else if (isLibraryVisible && !isAtomLibraryVisible) {
+      moleculesPerRow = 3; // Only molecule library visible
+    } else if (!isLibraryVisible && isAtomLibraryVisible) {
+      moleculesPerRow = 3; // Only atom library visible
+    } else {
+      moleculesPerRow = 4; // Both libraries hidden (default case)
+    }
+
+    const startX = 60;
+    const startY = 60;
+
+    // Calculate new positions and update both nodes and parent state
+    const positionUpdates: { moleculeId: string; position: { x: number; y: number } }[] = [];
+    
+    setNodes(prevNodes => 
+      prevNodes.map((node, index) => {
+        const row = Math.floor(index / moleculesPerRow);
+        const col = index % moleculesPerRow;
+        
+        const positionX = startX + (col * (MOLECULE_DIMENSIONS.width + MOLECULE_DIMENSIONS.spacing));
+        const positionY = startY + (row * (MOLECULE_DIMENSIONS.height + MOLECULE_DIMENSIONS.spacing));
+        
+        const newPosition = { x: positionX, y: positionY };
+        console.log(`📍 Reset position for molecule "${node.data.title}" (${index}):`, newPosition);
+        
+        // Track position update for parent state
+        positionUpdates.push({
+          moleculeId: node.id,
+          position: newPosition
+        });
+        
+        return {
+          ...node,
+          position: newPosition
+        };
+      })
+    );
+
+    // Update parent state with new positions
+    if (onMoleculePositionsUpdate && positionUpdates.length > 0) {
+      onMoleculePositionsUpdate(positionUpdates);
+    }
+
+    // Reset viewport to show the grid from the beginning
+    setTimeout(() => {
+      if (reactFlowInstance) {
+        reactFlowInstance.setViewport({ x: 0, y: 0, zoom: 1 });
+      }
+    }, 100);
+
+    console.log('✅ Molecules reset to default positions');
+  }, [reactFlowInstance, canvasMolecules.length, isLibraryVisible, isAtomLibraryVisible, onMoleculePositionsUpdate]);
+
   // Removed localStorage loading - parent WorkflowMode now manages molecules
 
   // Trigger re-render when panel visibility changes (reposition molecules based on new layout)
@@ -405,8 +489,8 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         moleculesPerRow = 4; // Both libraries hidden (default case)
       }
       console.log(`📐 Layout: Library ${isLibraryVisible ? 'visible' : 'hidden'}, Atom Library ${isAtomLibraryVisible ? 'visible' : 'hidden'}, using ${moleculesPerRow} columns`);
-      const startX = 40;
-      const startY = 40;
+      const startX = 60;
+      const startY = 60;
       
       const row = Math.floor(index / moleculesPerRow);
       const col = index % moleculesPerRow;
@@ -526,17 +610,18 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   // The parent WorkflowMode now manages molecules directly
 
   return (
-    <div className="h-full w-full relative bg-gradient-to-br from-background via-card/50 to-muted/20 rounded-lg border-2 border-border/50 shadow-elegant backdrop-blur-sm overflow-hidden">
+    <div className="h-full w-full relative bg-gradient-to-br from-background via-card/50 to-muted/20 rounded-lg border-2 border-border/50 shadow-elegant backdrop-blur-sm">
       <div 
         ref={reactFlowWrapper} 
-        className="w-full h-full overflow-hidden"
+        className="w-full h-full custom-scrollbar workflow-canvas-container"
         style={{
           scrollbarWidth: 'thin',
           scrollbarColor: '#9ca3af #e5e7eb',
           height: '100%',
           width: '100%',
           minHeight: '100%',
-          position: 'relative'
+          position: 'relative',
+          overflow: 'auto' // Enable scrolling for large content
         }}
       >
         {/* Plus Button for Creating Molecules */}
@@ -580,6 +665,22 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
             maxZoom={4}
             defaultZoom={1}
             proOptions={{ hideAttribution: true }}
+            // Enhanced scrolling and panning configuration
+            panOnScroll={true}
+            panOnScrollMode="free"
+            panOnScrollSpeed={1.2}
+            // Enable smooth panning and better scroll behavior
+            panOnDrag={true}
+            selectNodesOnDrag={false}
+            // Prevent scroll conflicts while maintaining smooth experience
+            preventScrolling={false}
+            // Better handling of large content areas
+            snapToGrid={false}
+            snapGrid={[15, 15]}
+            // Ensure nodes don't interfere with scrolling
+            nodesDraggable={true}
+            nodesConnectable={false}
+            elementsSelectable={true}
             style={{ 
               width: '100%', 
               height: '100%',
@@ -591,7 +692,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
             }}
           >
             <Background gap={24} color="hsl(var(--border) / 0.3)" className="opacity-50" />
-            <ZoomControls zoomLevel={zoomLevel} />
+            <ZoomControls zoomLevel={zoomLevel} onResetPositions={resetMoleculesToDefaultPositions} />
         </ReactFlow>
         </ReactFlowProvider>
       </div>

@@ -127,6 +127,23 @@ const WorkflowMode = () => {
     console.log(`✅ Added molecule "${moleculeData.title}" to canvasMolecules with position:`, moleculeData.position);
   };
 
+  const handleMoleculePositionsUpdate = (positions: { moleculeId: string; position: { x: number; y: number } }[]) => {
+    // Update canvasMolecules with new positions
+    setCanvasMolecules(prev => 
+      prev.map(molecule => {
+        const positionUpdate = positions.find(pos => pos.moleculeId === molecule.id);
+        if (positionUpdate) {
+          return {
+            ...molecule,
+            position: positionUpdate.position
+          };
+        }
+        return molecule;
+      })
+    );
+    console.log('✅ Updated molecule positions:', positions);
+  };
+
   const handleCreateMolecule = () => {
     // Generate numbered name automatically
     const existingNewMolecules = canvasMolecules.filter(m => 
@@ -150,7 +167,7 @@ const WorkflowMode = () => {
       const moleculesPerRow = 4; // Maximum molecules per row
       const moleculeWidth = 280; // Width of each molecule card
       const moleculeHeight = 220; // Height of each molecule card
-      const padding = 100; // Padding around molecules
+      const padding = 60; // Padding around molecules
       
       const row = Math.floor(moleculesCount / moleculesPerRow);
       const col = moleculesCount % moleculesPerRow;
@@ -730,10 +747,12 @@ const WorkflowMode = () => {
 
   return (
     <div className="h-screen bg-muted/30 flex flex-col">
-      <Header />
+      <div className="relative z-30">
+        <Header />
+      </div>
       
       {/* Workflow Header */}
-      <div className="bg-card border-b border-border px-8 py-6 flex-shrink-0">
+      <div className="bg-card border-b border-border px-8 py-6 flex-shrink-0 relative z-20">
         <div className="flex items-center justify-between">
               <div>
             <h1 className="text-3xl font-semibold text-foreground mb-2">Workflow Mode</h1>
@@ -769,7 +788,7 @@ const WorkflowMode = () => {
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden" style={{ minHeight: 0 }}>
         {/* Molecule Library - LEFT SIDE */}
         {isLibraryVisible && (
           <div className="w-80 bg-card border-r border-border flex flex-col">
@@ -779,8 +798,8 @@ const WorkflowMode = () => {
 
         {/* Library Toggle Button - Show when library is hidden */}
         {!isLibraryVisible && (
-          <div className="absolute left-0 top-0 z-20 h-full">
-             <div className="bg-white border-r border-gray-200 transition-all duration-300 flex flex-col w-12" style={{ height: 'calc(100vh - 190px)', marginTop: '190px' }}>
+          <div className="absolute left-0 z-10" style={{ top: '190px', height: 'calc(100vh - 190px)' }}>
+             <div className="bg-white border-r border-gray-200 transition-all duration-300 flex flex-col w-12 h-full">
               <div className="p-3 flex items-center justify-center">
                 <button
                   onClick={toggleLibraryVisibility}
@@ -796,7 +815,7 @@ const WorkflowMode = () => {
         )}
 
         {/* Workflow Canvas - MAIN AREA */}
-        <div className={`flex-1 p-6 relative transition-all duration-300 overflow-hidden ${isLibraryVisible ? 'ml-0' : 'ml-0'}`}>
+        <div className={`flex-1 p-6 relative transition-all duration-300 ${isLibraryVisible ? 'ml-0' : 'ml-0'}`}>
           <WorkflowCanvas
             onMoleculeSelect={handleMoleculeSelect}
             onCreateMolecule={handleCreateMolecule}
@@ -807,6 +826,7 @@ const WorkflowMode = () => {
             onMoleculeRename={handleRenameMolecule}
             onMoleculeAdd={handleMoleculeAdd}
             onMoleculeReplace={handleMoleculeReplace}
+            onMoleculePositionsUpdate={handleMoleculePositionsUpdate}
             isLibraryVisible={isLibraryVisible}
             isRightPanelVisible={isRightPanelVisible}
             isAtomLibraryVisible={isAtomLibraryVisible}
