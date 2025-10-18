@@ -131,6 +131,14 @@ const LaboratoryMode = () => {
       console.log('Successfully Loaded Existing Project State');
       toast({ title: 'Successfully Loaded Existing Project State' });
     }
+    
+    // Hide navigation list when switching from workflow mode
+    const hasWorkflowData = localStorage.getItem('workflow-data') || 
+                           localStorage.getItem('workflow-selected-atoms') || 
+                           localStorage.getItem('workflow-molecules');
+    if (hasWorkflowData) {
+      setShowFloatingNavigationList(false);
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Note: Workflow data loading is now handled entirely by CanvasArea component

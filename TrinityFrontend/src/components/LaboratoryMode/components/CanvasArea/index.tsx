@@ -5,8 +5,9 @@ import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStora
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon, GripVertical } from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
+import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
 import {
@@ -131,9 +132,15 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
   const [collapsedMolecules, setCollapsedMolecules] = useState<Record<string, boolean>>({});
   const [addDragTarget, setAddDragTarget] = useState<string | null>(null);
+  const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
+  const [draggedMoleculeId, setDraggedMoleculeId] = useState<string | null>(null);
+  const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
+  const [dragOverMoleculeId, setDragOverMoleculeId] = useState<string | null>(null);
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [showAtomSuggestion, setShowAtomSuggestion] = useState<Record<string, boolean>>({});
   const [isCanvasLoading, setIsCanvasLoading] = useState(true);
+  const [moleculeToDelete, setMoleculeToDelete] = useState<{moleculeId: string, moleculeTitle: string} | null>(null);
+  const [deleteMoleculeDialogOpen, setDeleteMoleculeDialogOpen] = useState(false);
   const loadingMessages = useMemo(
     () => [
       'Loading project canvas',
@@ -1057,7 +1064,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           if (layoutCards && layoutCards.length > 0 && workflowMolecules && workflowMolecules.length > 0) {
             applyInitialCards(layoutCards, workflowMolecules);
           } else {
-            markLoadingComplete();
+      markLoadingComplete();
           }
         } catch (e) {
           console.error('Failed to parse stored layout or workflow molecules', e);
@@ -1441,6 +1448,7 @@ const handleDropNewCard = async (
   await addNewCardWithAtom(atom.id, moleculeId, position);
 };
 
+
 const handleAddDragEnter = (e: React.DragEvent, targetId: string) => {
   e.preventDefault();
   setAddDragTarget(targetId);
@@ -1449,6 +1457,101 @@ const handleAddDragEnter = (e: React.DragEvent, targetId: string) => {
 const handleAddDragLeave = (e: React.DragEvent) => {
   e.preventDefault();
   setAddDragTarget(null);
+};
+
+// Card reordering handlers
+const handleCardDragStart = (e: React.DragEvent, cardId: string) => {
+  if (!canEdit) return;
+  setDraggedCardId(cardId);
+  e.dataTransfer.setData('text/plain', ''); // Required for drag to work
+  e.dataTransfer.effectAllowed = 'move';
+};
+
+const handleCardDragOver = (e: React.DragEvent, targetCardId: string) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  setDragOverCardId(targetCardId);
+};
+
+const handleCardDragLeave = (e: React.DragEvent) => {
+  e.preventDefault();
+  setDragOverCardId(null);
+};
+
+const handleCardDrop = (e: React.DragEvent, targetCardId: string) => {
+  e.preventDefault();
+  setDragOverCardId(null);
+  
+  if (!draggedCardId || draggedCardId === targetCardId) {
+    setDraggedCardId(null);
+    return;
+  }
+  
+  const arr = Array.isArray(layoutCards) ? layoutCards : [];
+  const draggedIndex = arr.findIndex(card => card.id === draggedCardId);
+  const targetIndex = arr.findIndex(card => card.id === targetCardId);
+  
+  if (draggedIndex === -1 || targetIndex === -1) {
+    setDraggedCardId(null);
+    return;
+  }
+  
+  // Reorder cards
+  const newCards = [...arr];
+  const [draggedCard] = newCards.splice(draggedIndex, 1);
+  newCards.splice(targetIndex, 0, draggedCard);
+  
+  setLayoutCards(newCards);
+  setCards(newCards);
+  setDraggedCardId(null);
+};
+
+// Molecule reordering handlers
+const handleMoleculeDragStart = (e: React.DragEvent, moleculeId: string) => {
+  if (!canEdit) return;
+  setDraggedMoleculeId(moleculeId);
+  e.dataTransfer.setData('text/plain', ''); // Required for drag to work
+  e.dataTransfer.effectAllowed = 'move';
+};
+
+const handleMoleculeDragOver = (e: React.DragEvent, targetMoleculeId: string) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  setDragOverMoleculeId(targetMoleculeId);
+};
+
+const handleMoleculeDragLeave = (e: React.DragEvent) => {
+  e.preventDefault();
+  setDragOverMoleculeId(null);
+};
+
+const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
+  e.preventDefault();
+  setDragOverMoleculeId(null);
+  
+  if (!draggedMoleculeId || draggedMoleculeId === targetMoleculeId) {
+    setDraggedMoleculeId(null);
+    return;
+  }
+  
+  const arr = [...workflowMolecules];
+  const draggedIndex = arr.findIndex(mol => mol.moleculeId === draggedMoleculeId);
+  const targetIndex = arr.findIndex(mol => mol.moleculeId === targetMoleculeId);
+  
+  if (draggedIndex === -1 || targetIndex === -1) {
+    setDraggedMoleculeId(null);
+    return;
+  }
+  
+  // Reorder molecules
+  const newMolecules = [...arr];
+  const [draggedMolecule] = newMolecules.splice(draggedIndex, 1);
+  newMolecules.splice(targetIndex, 0, draggedMolecule);
+  
+  setWorkflowMolecules(newMolecules);
+  // Update localStorage
+  localStorage.setItem('workflow-molecules', JSON.stringify(newMolecules));
+  setDraggedMoleculeId(null);
 };
 
   const removeAtom = (cardId: string, atomId: string) => {
@@ -1599,14 +1702,87 @@ const handleAddDragLeave = (e: React.DragEvent) => {
     setCollapsedMolecules(prev => ({ ...prev, [moleculeId]: !prev[moleculeId] }));
   };
 
+  const requestDeleteMoleculeContainer = (moleculeId: string, moleculeTitle: string) => {
+    setMoleculeToDelete({ moleculeId, moleculeTitle });
+    setDeleteMoleculeDialogOpen(true);
+  };
+
+  const confirmDeleteMoleculeContainer = async () => {
+    if (!moleculeToDelete) return;
+    await deleteMoleculeContainer(moleculeToDelete.moleculeId);
+    setDeleteMoleculeDialogOpen(false);
+    setMoleculeToDelete(null);
+  };
+
+  const cancelDeleteMoleculeContainer = () => {
+    setDeleteMoleculeDialogOpen(false);
+    setMoleculeToDelete(null);
+  };
+
+  const handleDeleteMoleculeDialogOpenChange = (open: boolean) => {
+    if (open) {
+      setDeleteMoleculeDialogOpen(true);
+    } else {
+      cancelDeleteMoleculeContainer();
+    }
+  };
+
   const deleteMoleculeContainer = async (moleculeId: string) => {
-    // Get all cards associated with this molecule
+    // Get all cards associated with this molecule BEFORE updating state
     const arr = Array.isArray(layoutCards) ? layoutCards : [];
     const moleculeCards = arr.filter(card => card.moleculeId === moleculeId);
     
-    // Delete all cards in this molecule
+    // Remove cards from layoutCards state immediately
+    const updatedCards = arr.filter(card => card.moleculeId !== moleculeId);
+    setLayoutCards(updatedCards);
+    setCards(updatedCards);
+    
+    // Handle backend deletion for each card without calling deleteCard (to avoid state conflicts)
     for (const card of moleculeCards) {
-      await deleteCard(card.id);
+      if (card) {
+        // Handle atom-specific backend deletions
+        card.atoms.forEach(atom => {
+          if (atom.atomId === 'text-box') {
+            fetch(`${TEXT_API}/text/${atom.id}`, { method: 'DELETE' }).catch(() => {});
+          } else if (atom.atomId === 'data-upload-validate') {
+            const vid = (atom.settings as DataUploadSettings)?.validatorId;
+            if (vid) {
+              fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
+            }
+          }
+        });
+        
+        // Archive the card
+        fetch(`${CARD_API}/cards/archive`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(card)
+        }).catch(() => {});
+      }
+      
+      // Remove from collapsed cards state
+      setCollapsedCards(prev => {
+        const copy = { ...prev };
+        delete copy[card.id];
+        return copy;
+      });
+    }
+    
+    // Update project state with the new cards list (excluding deleted cards)
+    const current = localStorage.getItem('current-project');
+    if (current) {
+      try {
+        const proj = JSON.parse(current);
+        const sanitized = sanitizeLabConfig({ cards: updatedCards });
+        await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: { laboratory_config: sanitized } }),
+        });
+      } catch {
+        /* ignore */
+      }
     }
     
     // Remove the molecule from workflowMolecules and update localStorage
@@ -1664,7 +1840,21 @@ const handleAddDragLeave = (e: React.DragEvent) => {
 
   if (workflowMolecules.length > 0) {
     return (
-      <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
+      <>
+        <ConfirmationDialog
+          open={deleteMoleculeDialogOpen}
+          onOpenChange={handleDeleteMoleculeDialogOpenChange}
+          onConfirm={confirmDeleteMoleculeContainer}
+          onCancel={cancelDeleteMoleculeContainer}
+          title="Delete molecule container?"
+          description={`Deleting "${moleculeToDelete?.moleculeTitle || ''}" will remove the container and all its associated atoms. This action cannot be undone.`}
+          icon={<Trash2 className="w-6 h-6 text-white" />}
+          iconBgClass="bg-red-500"
+          confirmLabel="Yes, delete"
+          cancelLabel="Cancel"
+          confirmButtonClass="bg-red-500 hover:bg-red-600"
+        />
+        <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
         <div className={canEdit ? '' : 'pointer-events-none'}>
           <div className="p-6 space-y-6">
             {workflowMolecules.map((molecule) => {
@@ -1675,16 +1865,38 @@ const handleAddDragLeave = (e: React.DragEvent) => {
               const atomCount = moleculeCards.reduce((sum, card) => sum + (card.atoms?.length || 0), 0);
 
               return (
-              <Card key={molecule.moleculeId} className="bg-white border-2 border-gray-200 shadow-lg rounded-xl overflow-hidden">
+              <Card 
+                key={molecule.moleculeId} 
+                className={`bg-white border-2 shadow-lg rounded-xl overflow-hidden transition-all duration-200 ${
+                  dragOverMoleculeId === molecule.moleculeId 
+                    ? 'border-blue-500 bg-blue-50' 
+                    : draggedMoleculeId === molecule.moleculeId
+                    ? 'opacity-50'
+                    : 'border-gray-200'
+                }`}
+                draggable={canEdit}
+                onDragStart={(e) => handleMoleculeDragStart(e, molecule.moleculeId)}
+                onDragOver={(e) => handleMoleculeDragOver(e, molecule.moleculeId)}
+                onDragLeave={handleMoleculeDragLeave}
+                onDrop={(e) => handleMoleculeDrop(e, molecule.moleculeId)}
+              >
                 {/* Collapsible Molecule Header */}
                 <div 
-                  className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-gray-200 cursor-pointer hover:from-blue-100 hover:to-indigo-100 transition-all duration-200"
+                  className="flex items-center justify-between p-3 bg-white border-b border-gray-200 cursor-pointer hover:bg-gray-50 transition-all duration-200"
                   onClick={() => toggleMoleculeCollapse(molecule.moleculeId)}
                 >
-                  <div className="flex items-center space-x-4">
+                  <div className="flex items-center space-x-3">
+                    {canEdit && (
+                      <div 
+                        className="cursor-move p-1 hover:bg-gray-100 rounded"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        title="Drag to reorder"
+                      >
+                        <GripVertical className="w-4 h-4 text-gray-400" />
+                      </div>
+                    )}
                     <div className="flex items-center space-x-2">
-                      <div className="w-3 h-8 bg-gradient-to-b from-blue-500 to-indigo-600 rounded-full shadow-sm"></div>
-                      <div className="w-1 h-6 bg-blue-300 rounded-full"></div>
+                      <div className="w-2 h-8 bg-yellow-400 rounded-full shadow-sm"></div>
                     </div>
                     <div>
                       <h3 className="text-lg font-bold text-gray-900 tracking-tight">
@@ -1692,14 +1904,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                       </h3>
                       <div className="flex items-center space-x-3 mt-1">
                         <div className="flex items-center space-x-1">
-                          <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                          <span className="text-xs font-medium text-blue-700">
-                            {moleculeCards.length} card{moleculeCards.length !== 1 ? 's' : ''}
-                          </span>
-                        </div>
-                        <div className="flex items-center space-x-1">
-                          <div className="w-2 h-2 bg-indigo-500 rounded-full"></div>
-                          <span className="text-xs font-medium text-indigo-700">
+                          <span className="text-xs font-medium text-black">
                             {atomCount} atom{atomCount !== 1 ? 's' : ''}
                           </span>
                         </div>
@@ -1710,20 +1915,20 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                     <button 
                       onClick={(e) => {
                         e.stopPropagation();
-                        deleteMoleculeContainer(molecule.moleculeId);
+                        requestDeleteMoleculeContainer(molecule.moleculeId, molecule.moleculeTitle);
                       }}
                       className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 hover:shadow-sm"
                       title="Delete Container"
                     >
                       <Trash2 className="w-4 h-4 text-gray-600 hover:text-red-600" />
                     </button>
-                    <button className="p-2 hover:bg-white/50 rounded-lg transition-all duration-200 hover:shadow-sm">
-                      <ChevronDown 
-                        className={`w-5 h-5 text-gray-700 transition-transform duration-300 ${
-                          isCollapsed ? '-rotate-90' : 'rotate-0'
-                        }`}
-                      />
-                    </button>
+                  <button className="p-2 hover:bg-white/50 rounded-lg transition-all duration-200 hover:shadow-sm">
+                    <ChevronDown 
+                      className={`w-5 h-5 text-gray-700 transition-transform duration-300 ${
+                        isCollapsed ? '-rotate-90' : 'rotate-0'
+                      }`}
+                    />
+                  </button>
                   </div>
                 </div>
 
@@ -1746,16 +1951,40 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                           key={card.id}
                           data-card-id={card.id}
                           className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
-                            dragOver === card.id
+                            dragOverCardId === card.id
+                              ? 'border-blue-500 bg-blue-50 shadow-lg'
+                              : draggedCardId === card.id
+                              ? 'opacity-50'
+                              : dragOver === card.id
                               ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
                               : 'border-gray-200 shadow-sm hover:shadow-md'
                           }`}
-                          onDragOver={e => handleDragOver(e, card.id)}
-                          onDragLeave={handleDragLeave}
-                          onDrop={e => handleDrop(e, card.id)}
+                          draggable={canEdit}
+                          onDragStart={(e) => handleCardDragStart(e, card.id)}
+                          onDragOver={(e) => {
+                            handleCardDragOver(e, card.id);
+                            handleDragOver(e, card.id); // Keep existing functionality
+                          }}
+                          onDragLeave={(e) => {
+                            handleCardDragLeave(e);
+                            handleDragLeave(e); // Keep existing functionality
+                          }}
+                          onDrop={(e) => {
+                            handleCardDrop(e, card.id);
+                            handleDrop(e, card.id); // Keep existing functionality
+                          }}
                         >
                           <div className="flex items-center justify-between p-4 border-b border-gray-100">
                             <div className="flex items-center space-x-2">
+                              {canEdit && (
+                                <div 
+                                  className="cursor-move p-1 hover:bg-gray-100 rounded"
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  title="Drag to reorder"
+                                >
+                                  <GripVertical className="w-3 h-3 text-gray-400" />
+                                </div>
+                              )}
                               <Eye className={`w-4 h-4 ${card.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                               <span className="text-sm font-medium text-gray-700">
                                 {cardTitle}
@@ -1900,18 +2129,250 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         );
                       })}
 
-                    <div className="flex justify-center">
+                </div>
+                )}
+              </Card>
+            );
+            })}
+            
+            {/* Cards without moleculeId (standalone cards) */}
+            {(() => {
+              const standaloneCards = Array.isArray(layoutCards) 
+                ? layoutCards.filter(card => !card.moleculeId)
+                : [];
+              
+              if (standaloneCards.length > 0) {
+                return (
+                  <div className="space-y-6">
+                    <div className="text-center">
+                      <h3 className="text-lg font-semibold text-gray-700 mb-4">Independent Atoms</h3>
+                    </div>
+                    {standaloneCards.map((card) => {
+                      const cardTitle = card.moleculeTitle
+                        ? card.atoms.length > 0
+                          ? `${card.moleculeTitle} - ${card.atoms[0].title}`
+                          : card.moleculeTitle
+                        : card.atoms.length > 0
+                          ? card.atoms[0].title
+                          : 'Card';
+                      return (
+                        <Card
+                          key={card.id}
+                          data-card-id={card.id}
+                          className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
+                            dragOverCardId === card.id
+                              ? 'border-blue-500 bg-blue-50 shadow-lg'
+                              : draggedCardId === card.id
+                              ? 'opacity-50'
+                              : dragOver === card.id
+                              ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
+                              : 'border-gray-200 shadow-sm hover:shadow-md'
+                          }`}
+                          draggable={canEdit}
+                          onDragStart={(e) => handleCardDragStart(e, card.id)}
+                          onDragOver={(e) => {
+                            handleCardDragOver(e, card.id);
+                            handleDragOver(e, card.id); // Keep existing functionality
+                          }}
+                          onDragLeave={(e) => {
+                            handleCardDragLeave(e);
+                            handleDragLeave(e); // Keep existing functionality
+                          }}
+                          onDrop={(e) => {
+                            handleCardDrop(e, card.id);
+                            handleDrop(e, card.id); // Keep existing functionality
+                          }}
+                        >
+                          <div className="flex items-center justify-between p-4 border-b border-gray-100">
+                            <div className="flex items-center space-x-2">
+                              {canEdit && (
+                                <div 
+                                  className="cursor-move p-1 hover:bg-gray-100 rounded"
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  title="Drag to reorder"
+                                >
+                                  <GripVertical className="w-3 h-3 text-gray-400" />
+                                </div>
+                              )}
+                              <Eye className={`w-4 h-4 ${card.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
+                              <span className="text-sm font-medium text-gray-700">
+                                {cardTitle}
+                              </span>
+                              <AIChatBot
+                                cardId={card.id}
+                                cardTitle={cardTitle}
+                                onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                                disabled={card.atoms.length > 0}
+                              />
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <span className="text-xs text-gray-500">Exhibit the Card</span>
+                              <Switch
+                                checked={card.isExhibited || false}
+                                onCheckedChange={checked => handleExhibitionToggle(card.id, checked)}
+                                onClick={e => e.stopPropagation()}
+                                className="data-[state=checked]:bg-[#458EE2]"
+                              />
                       <button
-                        onClick={() => addNewCard(molecule.moleculeId)}
-                        onDragEnter={e => handleAddDragEnter(e, `m-${molecule.moleculeId}`)}
+                                onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
+                                className="p-1 hover:bg-gray-100 rounded"
+                              >
+                                <Trash2 className="w-4 h-4 text-gray-400" />
+                              </button>
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  toggleCardExpand(card.id);
+                                }}
+                                className="p-1 hover:bg-gray-100 rounded"
+                                title="Expand Card"
+                              >
+                                <Maximize2 className="w-4 h-4 text-gray-400" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
+                            {card.atoms.length === 0 ? (
+                              <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mb-4">
+                                <AtomSuggestion
+                                  cardId={card.id}
+                                  isVisible={true}
+                                  onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
+                                  onAddAtom={handleAddAtomFromSuggestion}
+                                />
+                              </div>
+                            ) : (
+                              <div
+                                className={`grid gap-4 w-full ${
+                                  card.atoms.length === 1
+                                    ? 'grid-cols-1'
+                                    : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
+                                }`}
+                              >
+                                {card.atoms.map((atom) => (
+                                  <AtomBox
+                                    key={atom.id}
+                                    className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
+                                    onClick={(e) => handleAtomClick(e, atom.id)}
+                                  >
+                                    {/* Atom Header */}
+                                    <div className="flex items-center justify-between mb-3">
+                                      <div className="flex items-center space-x-1">
+                                        <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                        <AtomAIChatBot
+                                          atomId={atom.id}
+                                          atomType={atom.atomId}
+                                          atomTitle={atom.title}
+                                          disabled={!LLM_MAP[atom.atomId]}
+                                          className="transition-transform hover:scale-110"
+                                        />
+                                        <button
+                                          onClick={e => handleAtomSettingsClick(e, atom.id)}
+                                          className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                                          title="Atom Settings"
+                                        >
+                                          <Settings className="w-4 h-4 text-gray-400" />
+                                        </button>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (onAtomSelect) {
+                                              onAtomSelect(atom.id);
+                                            }
+                                            onToggleHelpPanel?.();
+                                          }}
+                                          className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                                          title="Help"
+                                        >
+                                          <span className="w-4 h-4 text-gray-400 text-base font-bold flex items-center justify-center">?</span>
+                                        </button>
+                                      </div>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          removeAtom(card.id, atom.id);
+                                        }}
+                                        className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                                      >
+                                        <Trash2 className="w-4 h-4 text-gray-400" />
+                                      </button>
+                                    </div>
+                                    
+                                    {/* Atom Content */}
+                                    {atom.atomId === 'text-box' ? (
+                                      <TextBoxEditor textId={atom.id} />
+                                    ) : atom.atomId === 'data-upload-validate' ? (
+                                      <DataUploadValidateAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'feature-overview' ? (
+                                      <FeatureOverviewAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'explore' ? (
+                                      <ExploreAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'chart-maker' ? (
+                                      <ChartMakerAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'concat' ? (
+                                      <ConcatAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'merge' ? (
+                                      <MergeAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'column-classifier' ? (
+                                      <ColumnClassifierAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'dataframe-operations' ? (
+                                      <DataFrameOperationsAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'create-column' ? (
+                                      <CreateColumnAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'groupby-wtg-avg' ? (
+                                      <GroupByAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'build-model-feature-based' ? (
+                                      <BuildModelFeatureBasedAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'select-models-feature' ? (
+                                      <SelectModelsFeatureAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'evaluate-models-feature' ? (
+                                      <EvaluateModelsFeatureAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'scope-selector' ? (
+                                      <ScopeSelectorAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'correlation' ? (
+                                      <CorrelationAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'auto-regressive-models' ? (
+                                      <AutoRegressiveModelsAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'select-models-auto-regressive' ? (
+                                      <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                                      <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                                    ) : (
+                                      <div>
+                                        <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
+                                        <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
+                                        <p className="text-xs text-gray-500">Configure this atom for your application</p>
+                                      </div>
+                                    )}
+                                  </AtomBox>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                );
+              }
+              return null;
+            })()}
+            
+            {/* Add New Card Button - Outside of molecule containers */}
+            <div className="flex justify-center mt-6">
+              <button
+                onClick={() => addNewCard()}
+                onDragEnter={e => handleAddDragEnter(e, 'workflow-outside')}
                         onDragLeave={handleAddDragLeave}
                         onDragOver={e => e.preventDefault()}
                         onDrop={e => {
-                          void handleDropNewCard(e, molecule.moleculeId);
+                  void handleDropNewCard(e);
                         }}
-                        className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `m-${molecule.moleculeId}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
+                className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === 'workflow-outside' ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
+                title="Add new card outside molecule containers"
                       >
-                        <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `m-${molecule.moleculeId}` ? 'scale-125 mb-2' : ''}`} />
+                <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === 'workflow-outside' ? 'scale-125 mb-2' : ''}`} />
                         <span
                           className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                         >
@@ -1919,14 +2380,10 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         </span>
                       </button>
                     </div>
-                </div>
-                )}
-              </Card>
-            );
-            })}
           </div>
         </div>
       </div>
+      </>
     );
   }
 
