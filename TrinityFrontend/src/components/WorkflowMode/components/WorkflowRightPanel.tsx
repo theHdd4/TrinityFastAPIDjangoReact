@@ -20,6 +20,7 @@ interface WorkflowRightPanelProps {
   onAtomAssignToMolecule: (atomId: string, moleculeId: string) => void;
   onMultipleAtomsAssignToMolecule?: (atomIds: string[], moleculeId: string) => void;
   assignedAtoms?: string[];
+  onAtomLibraryVisibilityChange?: (isVisible: boolean) => void;
 }
 
 type PanelType = 'chat' | 'atoms' | 'custom' | null;
@@ -28,7 +29,8 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
   molecules,
   onAtomAssignToMolecule,
   onMultipleAtomsAssignToMolecule,
-  assignedAtoms = []
+  assignedAtoms = [],
+  onAtomLibraryVisibilityChange
 }) => {
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [selectedAtomForAssignment, setSelectedAtomForAssignment] = useState<string | null>(null);
@@ -43,8 +45,21 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
   });
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Notify parent about initial atom library visibility state
+  React.useEffect(() => {
+    if (onAtomLibraryVisibilityChange) {
+      onAtomLibraryVisibilityChange(activePanel === 'atoms');
+    }
+  }, [activePanel, onAtomLibraryVisibilityChange]);
+
   const togglePanel = (panel: PanelType) => {
-    setActivePanel(activePanel === panel ? null : panel);
+    const newActivePanel = activePanel === panel ? null : panel;
+    setActivePanel(newActivePanel);
+    
+    // Notify parent about atom library visibility changes
+    if (onAtomLibraryVisibilityChange) {
+      onAtomLibraryVisibilityChange(newActivePanel === 'atoms');
+    }
   };
 
   const toggleCategoryCollapse = (categoryName: string) => {
@@ -228,10 +243,10 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
                           <ContextMenu key={atom.id}>
                             <ContextMenuTrigger>
                               <AtomTooltip atomId={atom.id}>
-                                <div className="flex flex-col items-center space-y-2">
+                                <div className="flex flex-col items-center space-y-2 p-2 hover:bg-gray-50 rounded-lg cursor-pointer transition-all duration-200">
                                   <div 
                                     className={cn(
-                                      "group relative flex items-center justify-center bg-gray-50 rounded-lg hover:shadow-sm cursor-pointer transition-all duration-200 h-12 w-12",
+                                      "group relative flex items-center justify-center bg-gray-50 rounded-lg hover:shadow-sm transition-all duration-200 h-12 w-12",
                                       borderColor,
                                       "border-2",
                                       isSelected && "bg-blue-50 shadow-sm"
@@ -244,7 +259,7 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
                                       <div className="absolute top-1 right-1 w-2 h-2 bg-blue-500 rounded-full"></div>
                                     )}
                                   </div>
-                                  <span className="text-xs text-gray-600 text-center leading-tight px-1">
+                                  <span className="text-xs text-gray-700 font-medium text-center leading-tight">
                                     {atom.title}
                                   </span>
                                 </div>

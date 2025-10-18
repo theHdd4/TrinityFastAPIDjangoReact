@@ -3,7 +3,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Play, Save, Share2, Upload, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Play, Save, Share2, Upload, ChevronLeft, ChevronRight, Grid3X3 } from 'lucide-react';
 import Header from '@/components/Header';
 import WorkflowCanvas from './components/WorkflowCanvas';
 import MoleculeList from '@/components/MoleculeList/MoleculeList';
@@ -11,6 +11,7 @@ import WorkflowRightPanel from './components/WorkflowRightPanel';
 import CreateMoleculeDialog from './components/CreateMoleculeDialog';
 import { useToast } from '@/hooks/use-toast';
 import { MOLECULES_API } from '@/lib/api';
+import { ReactFlowProvider } from 'reactflow';
 import './WorkflowMode.css';
 
 interface SelectedAtom {
@@ -26,6 +27,8 @@ const WorkflowMode = () => {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [customMolecules, setCustomMolecules] = useState<Array<{ id: string; title: string; atoms: string[] }>>([]);
   const [isLibraryVisible, setIsLibraryVisible] = useState(true);
+  const [isRightPanelVisible, setIsRightPanelVisible] = useState(true);
+  const [isAtomLibraryVisible, setIsAtomLibraryVisible] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -82,9 +85,47 @@ const WorkflowMode = () => {
     setIsLibraryVisible(!isLibraryVisible);
   };
 
+  const toggleRightPanelVisibility = () => {
+    setIsRightPanelVisible(!isRightPanelVisible);
+  };
+
+  const handleAtomLibraryVisibilityChange = (isVisible: boolean) => {
+    setIsAtomLibraryVisible(isVisible);
+  };
+
   const handleCanvasMoleculesUpdate = useCallback((molecules: any[]) => {
       setCanvasMolecules(molecules);
   }, []);
+
+  const handleMoleculeReplace = (oldId: string, newMolecule: any) => {
+    setCanvasMolecules(prev => 
+      prev.map(mol => 
+        mol.id === oldId
+          ? {
+              ...mol,
+              id: newMolecule.id,
+              type: newMolecule.type || 'qm',
+              title: newMolecule.title,
+              subtitle: newMolecule.subtitle || '',
+              tag: newMolecule.tag || '',
+              atoms: newMolecule.atoms || [],
+              selectedAtoms: {},
+              atomOrder: newMolecule.atoms || [],
+              containedMolecules: undefined,
+              position: mol.position // Preserve the existing position
+            }
+          : mol
+      )
+    );
+    
+    console.log(`✅ Replaced molecule "${oldId}" with "${newMolecule.title}" in canvasMolecules`);
+  };
+
+  const handleMoleculeAdd = (moleculeData: any) => {
+    // Add the molecule to canvasMolecules with its position preserved
+    setCanvasMolecules(prev => [...prev, moleculeData]);
+    console.log(`✅ Added molecule "${moleculeData.title}" to canvasMolecules with position:`, moleculeData.position);
+  };
 
   const handleCreateMolecule = () => {
     // Generate numbered name automatically
@@ -101,74 +142,46 @@ const WorkflowMode = () => {
     };
     setCustomMolecules(prev => [...prev, newMolecule]);
     
-    // Find the last created molecule for auto-connection
-    const getLastMolecule = () => {
-      if (canvasMolecules.length === 0) return null;
-      
-      // Sort molecules by creation time (extracted from ID timestamp)
-      const sortedMolecules = [...canvasMolecules].sort((a, b) => {
-        // Extract timestamp from different ID formats
-        const getTimestamp = (id: string) => {
-          if (id.startsWith('molecule-')) {
-            return parseInt(id.split('-')[1]) || 0;
-          } else if (id.startsWith('custom-molecule-')) {
-            return parseInt(id.split('-')[2]) || 0;
-          }
-          return 0;
-        };
-        
-        const aTime = getTimestamp(a.id);
-        const bTime = getTimestamp(b.id);
-        return bTime - aTime; // Most recent first
-      });
-      
-      console.log('Sorted canvas molecules by timestamp:', sortedMolecules.map(m => ({ id: m.id, title: m.title })));
-      return sortedMolecules[0];
-    };
-    
-    const lastMolecule = getLastMolecule();
+      // Created molecules act as containers - no auto-connection needed
     
     // Calculate flexible position for new molecule
     const getFlexiblePosition = () => {
       const moleculesCount = canvasMolecules.length;
-      const moleculesPerRow = 3; // Maximum molecules per row
+      const moleculesPerRow = 4; // Maximum molecules per row
       const moleculeWidth = 280; // Width of each molecule card
-      const moleculeHeight = 200; // Height of each molecule card
-      const padding = 50; // Padding around molecules
+      const moleculeHeight = 220; // Height of each molecule card
+      const padding = 100; // Padding around molecules
       
       const row = Math.floor(moleculesCount / moleculesPerRow);
       const col = moleculesCount % moleculesPerRow;
       
       return {
-        x: padding + (col * (moleculeWidth + 30)), // 30px spacing between molecules
-        y: padding + (row * (moleculeHeight + 30)) // 30px spacing between rows
+        x: padding + (col * moleculeWidth), // No extra spacing, molecules will be closer
+        y: padding + (row * moleculeHeight) // No extra spacing between rows
       };
     };
     
-    // Add molecule to canvas with flexible positioning
+    // Add molecule to canvas as container
     const canvasMolecule = {
       id: newMolecule.id,
-      type: '',
+      type: 'custom',
       title: finalName,
       subtitle: '',
       tag: '',
       atoms: [],
       position: getFlexiblePosition(),
-      connections: lastMolecule ? [lastMolecule.id] : [], // Auto-connect to last molecule
+      connections: [], // No auto-connection - acts as container
       selectedAtoms: {},
-      atomOrder: []
+      atomOrder: [],
+      containedMolecules: [] // NEW: Track molecules inside this container
     };
     setCanvasMolecules(prev => [...prev, canvasMolecule]);
     
-    if (lastMolecule) {
-      console.log(`✅ Auto-connected new molecule "${finalName}" to last molecule "${lastMolecule.title}" (${lastMolecule.id})`);
-    } else {
-      console.log(`ℹ️ No previous molecules found, "${finalName}" is the first molecule`);
-    }
+    console.log(`✅ Created new container molecule "${finalName}" - ready to accept QM and custom molecules`);
     
     toast({
       title: 'Molecule Created',
-      description: `"${finalName}" has been created and added to the canvas${lastMolecule ? ` and connected to "${lastMolecule.title}"` : ''}.`
+      description: `"${finalName}" has been created as a container molecule on the canvas.`
     });
   };
 
@@ -395,10 +408,7 @@ const WorkflowMode = () => {
   };
 
   // Handle molecule addition (for fetched molecules)
-  const handleMoleculeAdd = (molecule: any) => {
-    setCanvasMolecules(prev => [...prev, molecule]);
-    console.log('Added fetched molecule to canvasMolecules:', molecule.title);
-  };
+
 
   // Handle workflow rendering to Laboratory mode
   const handleRenderWorkflow = useCallback(() => {
@@ -723,7 +733,7 @@ const WorkflowMode = () => {
       <Header />
       
       {/* Workflow Header */}
-      <div className="bg-card px-8 py-6 flex-shrink-0">
+      <div className="bg-card border-b border-border px-8 py-6 flex-shrink-0">
         <div className="flex items-center justify-between">
               <div>
             <h1 className="text-3xl font-semibold text-foreground mb-2">Workflow Mode</h1>
@@ -763,29 +773,32 @@ const WorkflowMode = () => {
         {/* Molecule Library - LEFT SIDE */}
         {isLibraryVisible && (
           <div className="w-80 bg-card border-r border-border flex flex-col">
-            <MoleculeList canEdit={true} />
+            <MoleculeList canEdit={true} onToggle={toggleLibraryVisibility} />
           </div>
         )}
 
-        {/* Library Toggle Button */}
-        <div className="absolute left-0 top-1/2 transform -translate-y-1/2 z-20">
-          <Button
-            onClick={toggleLibraryVisibility}
-            className="w-8 h-16 p-0 rounded-r-lg shadow-lg bg-white hover:bg-gray-50 border border-l-0 border-gray-200"
-            title={isLibraryVisible ? "Hide Library" : "Show Library"}
-          >
-            {isLibraryVisible ? (
-              <ChevronLeft className="w-4 h-4" />
-            ) : (
-              <ChevronRight className="w-4 h-4" />
-            )}
-          </Button>
-        </div>
+        {/* Library Toggle Button - Show when library is hidden */}
+        {!isLibraryVisible && (
+          <div className="absolute left-0 top-0 z-20 h-full">
+             <div className="bg-white border-r border-gray-200 transition-all duration-300 flex flex-col w-12" style={{ height: 'calc(100vh - 190px)', marginTop: '190px' }}>
+              <div className="p-3 flex items-center justify-center">
+                <button
+                  onClick={toggleLibraryVisibility}
+                  className="inline-flex items-center justify-center p-1 h-8 w-8 rounded-md hover:bg-accent hover:text-accent-foreground"
+                  title="Open Molecule Library"
+                  data-molecule-sidebar-toggle="true"
+                >
+                  <Grid3X3 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Workflow Canvas - MAIN AREA */}
-        <div className={`flex-1 p-6 relative transition-all duration-300 ${isLibraryVisible ? 'ml-0' : 'ml-0'}`}>
-            <WorkflowCanvas
-              onMoleculeSelect={handleMoleculeSelect}
+        <div className={`flex-1 p-6 relative transition-all duration-300 overflow-hidden ${isLibraryVisible ? 'ml-0' : 'ml-0'}`}>
+          <WorkflowCanvas
+            onMoleculeSelect={handleMoleculeSelect}
             onCreateMolecule={handleCreateMolecule}
             canvasMolecules={canvasMolecules}
             onMoveAtomToMolecule={handleMoveAtomToMolecule}
@@ -793,19 +806,24 @@ const WorkflowMode = () => {
             onMoleculeRemove={handleMoleculeRemove}
             onMoleculeRename={handleRenameMolecule}
             onMoleculeAdd={handleMoleculeAdd}
+            onMoleculeReplace={handleMoleculeReplace}
             isLibraryVisible={isLibraryVisible}
+            isRightPanelVisible={isRightPanelVisible}
+            isAtomLibraryVisible={isAtomLibraryVisible}
           />
         </div>
 
-        {/* Right Side Panel with Icons */}
-        <div className="h-full">
+        {/* Right Side Panel with Icons - Always Visible */}
+        <div className="h-full overflow-hidden">
           <WorkflowRightPanel 
             molecules={allMolecules}
             onAtomAssignToMolecule={handleAtomAssignToMolecule}
             onMultipleAtomsAssignToMolecule={handleMultipleAtomsAssignToMolecule}
             assignedAtoms={assignedAtoms}
+            onAtomLibraryVisibilityChange={handleAtomLibraryVisibilityChange}
           />
         </div>
+
       </div>
 
     </div>

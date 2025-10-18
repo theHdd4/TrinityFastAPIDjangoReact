@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -38,6 +39,64 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
+// Custom Portal Tooltip Component
+interface PortalTooltipProps {
+  children: React.ReactNode;
+  content: string;
+  disabled?: boolean;
+}
+
+const PortalTooltip: React.FC<PortalTooltipProps> = ({ children, content, disabled = false }) => {
+  const [isVisible, setIsVisible] = React.useState(false);
+  const [position, setPosition] = React.useState({ x: 0, y: 0 });
+  const triggerRef = React.useRef<HTMLDivElement>(null);
+
+  const handleMouseEnter = () => {
+    if (disabled) return;
+    
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setPosition({
+        x: rect.left + rect.width / 2,
+        y: rect.top - 8
+      });
+    }
+    setIsVisible(true);
+  };
+
+  const handleMouseLeave = () => {
+    setIsVisible(false);
+  };
+
+  return (
+    <>
+      <div
+        ref={triggerRef}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        {children}
+      </div>
+      {isVisible && createPortal(
+        <div
+          className="fixed z-[9999] pointer-events-none"
+          style={{
+            left: position.x,
+            top: position.y,
+            transform: 'translateX(-50%) translateY(-100%)'
+          }}
+        >
+          <div className="bg-gray-900 text-white text-sm px-2 py-1 rounded shadow-lg whitespace-nowrap">
+            {content}
+            <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  );
+};
+
 export interface MoleculeNodeData {
   id: string;
   type: string;
@@ -47,6 +106,7 @@ export interface MoleculeNodeData {
   atoms: string[];
   selectedAtoms: Record<string, boolean>;
   atomOrder: string[];
+  containedMolecules?: Array<{ id: string; title: string; type: string }>; // NEW: Molecules inside this container
   onAtomToggle: (moleculeId: string, atom: string, checked: boolean) => void;
   onAtomReorder: (moleculeId: string, newOrder: string[]) => void;
   onRemove: (moleculeId: string) => void;
@@ -54,6 +114,7 @@ export interface MoleculeNodeData {
   onMoveAtomToMolecule?: (atomId: string, fromMoleculeId: string, toMoleculeId: string) => void;
   onMoveAtomToAtomList?: (atomId: string, fromMoleculeId: string) => void;
   onRename?: (moleculeId: string, newName: string) => void;
+  onAddToContainer?: (containerId: string, molecule: any) => void; // NEW: Add molecule to container
   availableMolecules?: Array<{ id: string; title: string }>;
 }
 
@@ -99,6 +160,129 @@ const SortableAtomItem: React.FC<SortableAtomItemProps> = ({
       .replace(/[^a-z0-9-]/g, '');
   };
 
+  // Get category color based on atom categories from laboratory mode
+  const getCategoryColor = (atomName: string) => {
+    // Map atom names to their categories based on laboratory mode categories
+    const atomCategoryMap: Record<string, string> = {
+      // Data Sources - Blue
+      'Data Upload Validate': 'blue',
+      'CSV Import': 'blue', 
+      'JSON Import': 'blue',
+      'Database Connect': 'blue',
+      'data-upload-validate': 'blue',
+      'csv-import': 'blue',
+      'json-import': 'blue',
+      'database-connect': 'blue',
+      
+      // Data Processing - Green
+      'Feature Overview': 'green',
+      'GroupBy Weighted Average': 'green',
+      'Merge': 'green',
+      'Concat': 'green',
+      'Scope Selector': 'green',
+      'Row Operations': 'green',
+      'Column Classifier': 'green',
+      'Create Column': 'green',
+      'Create and Transform': 'green',
+      'Dataframe Operations': 'green',
+      'feature-overview': 'green',
+      'groupby-weighted-average': 'green',
+      'merge': 'green',
+      'concat': 'green',
+      'scope-selector': 'green',
+      'row-operations': 'green',
+      'column-classifier': 'green',
+      'create-column': 'green',
+      'create-and-transform': 'green',
+      'dataframe-operations': 'green',
+      'groupby-wtg-avg': 'green',
+      
+      // Analytics - Purple
+      'Correlation': 'purple',
+      'EDA': 'purple',
+      'Descriptive Stats': 'purple',
+      'Trend Analysis': 'purple',
+      'Explore': 'purple',
+      'explore': 'purple',
+      'correlation': 'purple',
+      'eda': 'purple',
+      'descriptive-stats': 'purple',
+      'trend-analysis': 'purple',
+      
+      // Machine Learning - Orange
+      'Auto-regressive models': 'orange',
+      'Model Output - Non CSF': 'orange',
+      'Single Modeling': 'orange',
+      'Bulk Model Output - CSF': 'orange',
+      'Bulk Modeling': 'orange',
+      'Model Performance': 'orange',
+      'Model Selector': 'orange',
+      'Clustering': 'orange',
+      'Scenario Planner': 'orange',
+      'Build model - feature based': 'orange',
+      'Regression - feature based': 'orange',
+      'Select models - feature': 'orange',
+      'Evaluate models - feature': 'orange',
+      'Select models - auto regressive': 'orange',
+      'Evaluate models - auto regressive': 'orange',
+      'auto-regressive-models': 'orange',
+      'model-output-non-csf': 'orange',
+      'single-modeling': 'orange',
+      'bulk-model-output-csf': 'orange',
+      'bulk-modeling': 'orange',
+      'model-performance': 'orange',
+      'model-selector': 'orange',
+      'clustering': 'orange',
+      'scenario-planner': 'orange',
+      'build-model-feature-based': 'orange',
+      'regression-feature-based': 'orange',
+      'select-models-feature': 'orange',
+      'evaluate-models-feature': 'orange',
+      'select-models-auto-regressive': 'orange',
+      'evaluate-models-auto-regressive': 'orange',
+      
+      // Visualization - Pink
+      'Chart Maker': 'pink',
+      'Text Box': 'pink',
+      'Scatter Plot': 'pink',
+      'Histogram': 'pink',
+      'chart-maker': 'pink',
+      'text-box': 'pink',
+      'scatter-plot': 'pink',
+      'histogram': 'pink',
+      
+      // Planning & Optimization - Indigo
+      'Optimizer': 'indigo',
+      'optimizer': 'indigo',
+      
+      // Utilities - Gray
+      'Atom Maker': 'gray',
+      'Read Presentation Summarize': 'gray',
+      'atom-maker': 'gray',
+      'read-presentation-summarize': 'gray',
+      
+      // Business Intelligence - Emerald
+      'Base Price Estimator': 'emerald',
+      'Promo Estimator': 'emerald',
+      'Promo Comparison': 'emerald',
+      'Promotion Intensity Analysis': 'emerald',
+      'base-price-estimator': 'emerald',
+      'promo-estimator': 'emerald',
+      'promo-comparison': 'emerald',
+      'promotion-intensity-analysis': 'emerald',
+    };
+    
+    const exactMatch = atomCategoryMap[atomName];
+    if (exactMatch) return exactMatch;
+    
+    const normalizedName = atomName.toLowerCase().replace(/\s+/g, '-');
+    const normalizedMatch = atomCategoryMap[normalizedName];
+    if (normalizedMatch) return normalizedMatch;
+    
+    console.warn(`Atom "${atomName}" not found in category map, defaulting to blue`);
+    return 'blue';
+  };
+
   // Get the atom icon from the map
   const atomIconKey = getAtomIconKey(atom);
   const AtomIcon = atomIconMap[atomIconKey] || (() => {
@@ -111,9 +295,21 @@ const SortableAtomItem: React.FC<SortableAtomItemProps> = ({
       <ContextMenuTrigger>
         <div className="relative">
           <div className="flex items-center justify-center p-2">
-            <div className="p-2 rounded-md bg-white border border-gray-200 hover:border-blue-300 transition-all duration-200 hover:shadow-md hover:scale-105 bg-gradient-to-br from-white to-gray-50 group relative">
-              <AtomIcon className="h-4 w-4 text-gray-600 hover:text-blue-600 transition-colors duration-200" />
-            </div>
+            <PortalTooltip content={atom}>
+              <div className={`p-2 rounded-md bg-white border-2 transition-all duration-200 hover:shadow-md hover:scale-105 bg-gradient-to-br from-white to-gray-50 group relative ${
+                getCategoryColor(atom) === 'blue' ? 'border-blue-400 hover:border-blue-500' :
+                getCategoryColor(atom) === 'green' ? 'border-green-400 hover:border-green-500' :
+                getCategoryColor(atom) === 'purple' ? 'border-purple-400 hover:border-purple-500' :
+                getCategoryColor(atom) === 'orange' ? 'border-orange-400 hover:border-orange-500' :
+                getCategoryColor(atom) === 'pink' ? 'border-pink-400 hover:border-pink-500' :
+                getCategoryColor(atom) === 'indigo' ? 'border-indigo-400 hover:border-indigo-500' :
+                getCategoryColor(atom) === 'emerald' ? 'border-emerald-400 hover:border-emerald-500' :
+                getCategoryColor(atom) === 'gray' ? 'border-gray-400 hover:border-gray-500' :
+                'border-blue-400 hover:border-blue-500'
+              }`}>
+                <AtomIcon className="h-4 w-4 text-gray-600 hover:text-gray-700 transition-colors duration-200" />
+              </div>
+            </PortalTooltip>
           </div>
         </div>
       </ContextMenuTrigger>
@@ -174,6 +370,10 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
       'CSV Import': 'blue', 
       'JSON Import': 'blue',
       'Database Connect': 'blue',
+      'data-upload-validate': 'blue',
+      'csv-import': 'blue',
+      'json-import': 'blue',
+      'database-connect': 'blue',
       
       // Data Processing - Green
       'Feature Overview': 'green',
@@ -185,12 +385,30 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
       'Column Classifier': 'green',
       'Create Column': 'green',
       'Dataframe Operations': 'green',
+      'feature-overview': 'green',
+      'groupby-weighted-average': 'green',
+      'merge': 'green',
+      'concat': 'green',
+      'scope-selector': 'green',
+      'row-operations': 'green',
+      'column-classifier': 'green',
+      'create-column': 'green',
+      'create-and-transform': 'green',
+      'dataframe-operations': 'green',
+      'GroupBy Weighted Average': 'green',
+      'groupby-wtg-avg': 'green',
       
       // Analytics - Purple
       'Correlation': 'purple',
       'EDA': 'purple',
       'Descriptive Stats': 'purple',
       'Trend Analysis': 'purple',
+      'correlation': 'purple',
+      'eda': 'purple',
+      'descriptive-stats': 'purple',
+      'trend-analysis': 'purple',
+      'Explore': 'purple',
+      'explore': 'purple',
       
       // Machine Learning - Orange
       'Auto-regressive models': 'orange',
@@ -201,64 +419,131 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
       'Model Performance': 'orange',
       'Model Selector': 'orange',
       'Clustering': 'orange',
+      'auto-regressive-models': 'orange',
+      'model-output-non-csf': 'orange',
+      'single-modeling': 'orange',
+      'bulk-model-output-csf': 'orange',
+      'bulk-modeling': 'orange',
+      'model-performance': 'orange',
+      'model-selector': 'orange',
+      'clustering': 'orange',
+      'scenario-planner': 'orange',
+      'Build model - feature based': 'orange',
+      'build-model-feature-based': 'orange',
+      'Regression - feature based': 'orange',
+      'regression-feature-based': 'orange',
+      'Select models - feature': 'orange',
+      'select-models-feature': 'orange',
+      'Evaluate models - feature': 'orange',
+      'evaluate-models-feature': 'orange',
+      'Select models - auto regressive': 'orange',
+      'select-models-auto-regressive': 'orange',
+      'Evaluate models - auto regressive': 'orange',
+      'evaluate-models-auto-regressive': 'orange',
       
       // Visualization - Pink
       'Chart Maker': 'pink',
       'Text Box': 'pink',
       'Scatter Plot': 'pink',
       'Histogram': 'pink',
+      'chart-maker': 'pink',
+      'text-box': 'pink',
+      'scatter-plot': 'pink',
+      'histogram': 'pink',
       
       // Planning & Optimization - Indigo
       'Scenario Planner': 'indigo',
       'Optimizer': 'indigo',
+      'optimizer': 'indigo',
       
       // Utilities - Gray
       'Atom Maker': 'gray',
       'Read Presentation Summarize': 'gray',
+      'atom-maker': 'gray',
+      'read-presentation-summarize': 'gray',
       
       // Business Intelligence - Emerald
       'Base Price Estimator': 'emerald',
       'Promo Estimator': 'emerald',
       'Promo Comparison': 'emerald',
       'Promotion Intensity Analysis': 'emerald',
+      'base-price-estimator': 'emerald',
+      'promo-estimator': 'emerald',
+      'promo-comparison': 'emerald',
+      'promotion-intensity-analysis': 'emerald',
     };
     
-    return atomCategoryMap[atomName] || 'gray';
+    // Try exact match first, then try lowercase with hyphens
+    const exactMatch = atomCategoryMap[atomName];
+    if (exactMatch) return exactMatch;
+    
+    // Try lowercase with spaces replaced by hyphens
+    const normalizedName = atomName.toLowerCase().replace(/\s+/g, '-');
+    const normalizedMatch = atomCategoryMap[normalizedName];
+    if (normalizedMatch) return normalizedMatch;
+    
+    // Default to blue instead of gray for better visual appeal
+    console.warn(`Atom "${atomName}" not found in category map, defaulting to blue`);
+    return 'blue';
   };
 
   const getTypeColor = (type: string) => {
-    // Determine the primary category color based on the first atom in the molecule
-    const primaryAtom = data.atomOrder[0];
-    const categoryColor = primaryAtom ? getCategoryColor(primaryAtom) : 'gray';
+    // Determine the primary category color based on the first available atom in the molecule
+    // If first atom is removed, use the second atom, and so on
+    let categoryColor = 'blue'; // Default to blue for new molecules
+    
+    if (data.atomOrder && data.atomOrder.length > 0) {
+      // Find the first available atom and get its category color
+      for (let i = 0; i < data.atomOrder.length; i++) {
+        const atomColor = getCategoryColor(data.atomOrder[i]);
+        if (atomColor !== 'gray') { // Skip gray atoms, use the first non-gray atom
+          categoryColor = atomColor;
+          break;
+        }
+      }
+      // If all atoms are gray or no atoms found, keep default blue
+    }
     
     switch (categoryColor) {
-      case 'blue': return 'border-blue-300/60 bg-gradient-to-br from-blue-50/90 to-blue-100/50 dark:from-blue-950/40 dark:to-blue-900/20 dark:border-blue-700/40 shadow-blue-200/30 dark:shadow-blue-900/20';
-      case 'green': return 'border-green-300/60 bg-gradient-to-br from-green-50/90 to-green-100/50 dark:from-green-950/40 dark:to-green-900/20 dark:border-green-700/40 shadow-green-200/30 dark:shadow-green-900/20';
-      case 'purple': return 'border-purple-300/60 bg-gradient-to-br from-purple-50/90 to-purple-100/50 dark:from-purple-950/40 dark:to-purple-900/20 dark:border-purple-700/40 shadow-purple-200/30 dark:shadow-purple-900/20';
-      case 'orange': return 'border-orange-300/60 bg-gradient-to-br from-orange-50/90 to-orange-100/50 dark:from-orange-950/40 dark:to-orange-900/20 dark:border-orange-700/40 shadow-orange-200/30 dark:shadow-orange-900/20';
-      case 'pink': return 'border-pink-300/60 bg-gradient-to-br from-pink-50/90 to-pink-100/50 dark:from-pink-950/40 dark:to-pink-900/20 dark:border-pink-700/40 shadow-pink-200/30 dark:shadow-pink-900/20';
-      case 'indigo': return 'border-indigo-300/60 bg-gradient-to-br from-indigo-50/90 to-indigo-100/50 dark:from-indigo-950/40 dark:to-indigo-900/20 dark:border-indigo-700/40 shadow-indigo-200/30 dark:shadow-indigo-900/20';
-      case 'emerald': return 'border-emerald-300/60 bg-gradient-to-br from-emerald-50/90 to-emerald-100/50 dark:from-emerald-950/40 dark:to-emerald-900/20 dark:border-emerald-700/40 shadow-emerald-200/30 dark:shadow-emerald-900/20';
-      case 'gray': return 'border-gray-300/60 bg-gradient-to-br from-gray-50/90 to-gray-100/50 dark:from-gray-950/40 dark:to-gray-900/20 dark:border-gray-700/40 shadow-gray-200/30 dark:shadow-gray-900/20';
-      default: return 'border-border bg-card shadow-muted/20';
+      case 'blue': return 'border-l-4 border-l-blue-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      case 'green': return 'border-l-4 border-l-green-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      case 'purple': return 'border-l-4 border-l-purple-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      case 'orange': return 'border-l-4 border-l-orange-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      case 'pink': return 'border-l-4 border-l-pink-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      case 'indigo': return 'border-l-4 border-l-indigo-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      case 'emerald': return 'border-l-4 border-l-emerald-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      case 'gray': return 'border-l-4 border-l-gray-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      default: return 'border-l-4 border-l-blue-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300'; // Default blue for new molecules
     }
   };
 
   const getBadgeColor = (type: string) => {
-    // Determine the primary category color based on the first atom in the molecule
-    const primaryAtom = data.atomOrder[0];
-    const categoryColor = primaryAtom ? getCategoryColor(primaryAtom) : 'gray';
+    // Determine the primary category color based on the first available atom in the molecule
+    // If first atom is removed, use the second atom, and so on
+    let categoryColor = 'blue'; // Default to blue for new molecules
+    
+    if (data.atomOrder && data.atomOrder.length > 0) {
+      // Find the first available atom and get its category color
+      for (let i = 0; i < data.atomOrder.length; i++) {
+        const atomColor = getCategoryColor(data.atomOrder[i]);
+        if (atomColor !== 'gray') { // Skip gray atoms, use the first non-gray atom
+          categoryColor = atomColor;
+          break;
+        }
+      }
+      // If all atoms are gray or no atoms found, keep default blue
+    }
     
     switch (categoryColor) {
-      case 'blue': return 'bg-blue-100/80 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 border-blue-300/50 dark:border-blue-700/50';
-      case 'green': return 'bg-green-100/80 text-green-700 dark:bg-green-900/50 dark:text-green-300 border-green-300/50 dark:border-green-700/50';
-      case 'purple': return 'bg-purple-100/80 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300 border-purple-300/50 dark:border-purple-700/50';
-      case 'orange': return 'bg-orange-100/80 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300 border-orange-300/50 dark:border-orange-700/50';
-      case 'pink': return 'bg-pink-100/80 text-pink-700 dark:bg-pink-900/50 dark:text-pink-300 border-pink-300/50 dark:border-pink-700/50';
-      case 'indigo': return 'bg-indigo-100/80 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 border-indigo-300/50 dark:border-indigo-700/50';
-      case 'emerald': return 'bg-emerald-100/80 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300 border-emerald-300/50 dark:border-emerald-700/50';
-      case 'gray': return 'bg-gray-100/80 text-gray-700 dark:bg-gray-900/50 dark:text-gray-300 border-gray-300/50 dark:border-gray-700/50';
-      default: return 'bg-muted text-muted-foreground border-border';
+      case 'blue': return 'bg-gradient-to-r from-blue-500 to-purple-600 text-white border-0';
+      case 'green': return 'bg-gradient-to-r from-green-500 to-teal-600 text-white border-0';
+      case 'purple': return 'bg-gradient-to-r from-purple-500 to-pink-600 text-white border-0';
+      case 'orange': return 'bg-gradient-to-r from-orange-500 to-red-600 text-white border-0';
+      case 'pink': return 'bg-gradient-to-r from-pink-500 to-rose-600 text-white border-0';
+      case 'indigo': return 'bg-gradient-to-r from-indigo-500 to-blue-600 text-white border-0';
+      case 'emerald': return 'bg-gradient-to-r from-emerald-500 to-green-600 text-white border-0';
+      case 'gray': return 'bg-gradient-to-r from-gray-500 to-slate-600 text-white border-0';
+      default: return 'bg-gradient-to-r from-blue-500 to-purple-600 text-white border-0'; // Default blue gradient for new molecules
     }
   };
 
@@ -435,21 +720,18 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
         className="w-3.5 h-3.5 !bg-purple-500/70 !border-2 !border-background shadow-md transition-all group-hover:!bg-purple-500 group-hover:scale-125 group-hover:shadow-lg group-hover:shadow-purple-500/30" 
       />
       <Card
-        className={`relative w-56 select-none ${getTypeColor(data.type)} border-2 shadow-lg hover:shadow-xl transition-all duration-300 backdrop-blur-sm rounded-2xl overflow-hidden group hover:scale-105 hover:shadow-2xl hover:shadow-primary/20`}
+        className={`relative w-70 select-none ${getTypeColor(data.type)} rounded-xl overflow-hidden group hover:scale-105 transition-all duration-300`}
         onClick={e => {
           e.stopPropagation();
           data.onClick(id);
         }}
       >
-        {/* Elegant header with gradient accent */}
+        {/* Header */}
         <div className="relative">
-          <div className={`h-1 w-full ${getBadgeColor(data.type).split(' ')[0]} opacity-40`} />
-          
-          {/* Beautiful gradient overlay */}
-          <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-black/5 pointer-events-none" />
           
           <div className="drag-handle cursor-move p-3 pb-2 relative z-10">
             <div className="flex items-center justify-between mb-1">
+              {/* Left-aligned title */}
               <div className="flex-1 min-w-0">
                 {isRenaming ? (
                   <Input
@@ -464,15 +746,16 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                     }}
                     onBlur={handleRename}
                     autoFocus
-                    className="text-base font-bold h-8 px-2 py-1"
+                    className="text-sm font-bold h-8 px-2 py-1"
                     placeholder="Enter molecule name"
                   />
                 ) : (
-                  <h4 className="font-bold text-foreground text-base tracking-tight leading-tight bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent truncate">{data.title}</h4>
+                  <h4 className="font-bold text-foreground text-sm tracking-tight leading-tight bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent break-words">{data.title}</h4>
                 )}
               </div>
               
-              <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+              {/* Right-aligned buttons */}
+              <div className="flex items-center gap-1 flex-shrink-0 ml-2">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
@@ -532,34 +815,89 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
           </div>
         </div>
         
-        {/* Atoms Section with Drag & Drop */}
+        {/* Content Section - Atoms or Contained Molecules */}
         <div className="border-t border-border/50 px-3 py-2 bg-gradient-to-b from-transparent to-muted/5">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide bg-gradient-to-r from-muted-foreground to-muted-foreground/70 bg-clip-text text-transparent">
-              Atoms
-            </p>
-            <span className="text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded-full font-medium">
-              {data.atomOrder.length} atoms
-            </span>
-          </div>
+          {/* Check if molecule has atoms or is a container */}
+          {data.atomOrder.length > 0 ? (
+            // Show atoms section
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide bg-gradient-to-r from-muted-foreground to-muted-foreground/70 bg-clip-text text-transparent">
+                  Atoms
+                </p>
+                <span className={`text-xs px-3 py-1 rounded-full font-medium ${getBadgeColor(data.type)}`}>
+                  {data.atomOrder.length} atoms
+                </span>
+              </div>
+            </>
+          ) : (
+            // Show empty container state (ready to be replaced)
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide bg-gradient-to-r from-muted-foreground to-muted-foreground/70 bg-clip-text text-transparent">
+                  Container
+                </p>
+                <span className={`text-xs px-3 py-1 rounded-full font-medium ${getBadgeColor(data.type)}`}>
+                  Empty
+                </span>
+              </div>
+              <div className="text-center py-2">
+                <p className="text-xs text-muted-foreground mb-1">Drop molecule here to replace</p>
+                <div 
+                  className="border-2 border-dashed border-muted-foreground/30 rounded-lg p-2 transition-colors hover:border-primary/50"
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.classList.add('border-primary/70', 'bg-primary/5');
+                  }}
+                  onDragLeave={(e) => {
+                    e.currentTarget.classList.remove('border-primary/70', 'bg-primary/5');
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation(); // Prevent event from bubbling to canvas
+                    e.currentTarget.classList.remove('border-primary/70', 'bg-primary/5');
+                    
+                    const moleculeData = e.dataTransfer.getData('application/json');
+                    if (!moleculeData) return;
+                    
+                    try {
+                      const molecule = JSON.parse(moleculeData);
+                      
+                      // Replace container with the actual molecule
+                      data.onAddToContainer?.(id, molecule);
+                      
+                      console.log(`✅ Replaced container "${id}" with molecule "${molecule.title}"`);
+                    } catch (error) {
+                      console.error('Error replacing container with molecule:', error);
+                    }
+                  }}
+                >
+                  <p className="text-xs text-muted-foreground/60">Drag QM or custom molecule</p>
+                </div>
+              </div>
+            </>
+          )}
+          {/* Show atoms grid when atoms are assigned */}
+          {data.atomOrder.length > 0 && (
             <div 
-              className="grid grid-cols-4 gap-2 max-h-72 overflow-y-auto pr-1"
+              className="grid grid-cols-5 gap-2 max-h-48 overflow-y-auto pr-1"
               onPointerDownCapture={e => e.stopPropagation()}
-              style={{ scrollbarWidth: 'thin' }}
+              style={{ scrollbarWidth: 'thin', overflowX: 'visible' }}
             >
-            {data.atomOrder.map((atom) => (
-              <SortableAtomItem
-                key={atom}
-                atom={atom}
-                isSelected={data.selectedAtoms[atom] || false}
-                onToggle={() => handleAtomToggle(atom, !data.selectedAtoms[atom])}
-                onMoveAtomToMolecule={data.onMoveAtomToMolecule}
-                onMoveAtomToAtomList={data.onMoveAtomToAtomList}
-                availableMolecules={data.availableMolecules}
-                currentMoleculeId={id}
-              />
-            ))}
-          </div>
+              {data.atomOrder.map((atom) => (
+                <SortableAtomItem
+                  key={atom}
+                  atom={atom}
+                  isSelected={data.selectedAtoms[atom] || false}
+                  onToggle={() => handleAtomToggle(atom, !data.selectedAtoms[atom])}
+                  onMoveAtomToMolecule={data.onMoveAtomToMolecule}
+                  onMoveAtomToAtomList={data.onMoveAtomToAtomList}
+                  availableMolecules={data.availableMolecules}
+                  currentMoleculeId={id}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </Card>
     </div>
@@ -567,3 +905,4 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
 };
 
 export default MoleculeNode;
+
