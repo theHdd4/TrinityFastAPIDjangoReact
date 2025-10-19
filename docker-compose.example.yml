@@ -13,6 +13,7 @@ services:
       - "5432:5432"
     networks:
       - trinity-net
+    restart: always
 
   mongo:
     image: mongo:6
@@ -25,7 +26,7 @@ services:
       - "27017:27017"
     networks:
       - trinity-net
-
+    restart: always
 
   redis:
     image: redis:7
@@ -33,6 +34,7 @@ services:
       - redis_data:/data
     networks:
       - trinity-net
+    restart: always
 
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
@@ -47,6 +49,7 @@ services:
       - minio_data:/data
     networks:
       - trinity-net
+    restart: always
 
   pgadmin:
     image: dpage/pgadmin4
@@ -59,6 +62,7 @@ services:
       - postgres
     networks:
       - trinity-net
+    restart: always
 
   mongo-express:
     image: mongo-express:latest
@@ -74,6 +78,7 @@ services:
       - mongo
     networks:
       - trinity-net
+    restart: always
 
   web:
     build: ./TrinityBackendDjango
@@ -110,6 +115,7 @@ services:
       - "traefik.http.routers.django.middlewares=django-strip@docker"
       - "traefik.http.middlewares.django-strip.stripprefix.prefixes=/admin"
       - "traefik.http.services.django.loadbalancer.server.port=8000"
+    restart: always
 
   celery:
     build: ./TrinityBackendDjango
@@ -130,6 +136,7 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
+    restart: always
 
   fastapi:
     build: ./TrinityBackendDjango
@@ -165,6 +172,7 @@ services:
       - "traefik.http.routers.fastapi.rule=Host(`trinity.quantmatrixai.com`) && PathPrefix(`/api`)"
       - "traefik.http.routers.fastapi.entrypoints=web"
       - "traefik.http.services.fastapi.loadbalancer.server.port=8001"
+    restart: always
 
   flight:
     build:
@@ -179,6 +187,7 @@ services:
       - "8815:8815"
     networks:
       - trinity-net
+    restart: always
 
   trinity-ai:
     build:
@@ -201,6 +210,7 @@ services:
       - "traefik.http.routers.trinity-ai.entrypoints=web"
       - "traefik.http.routers.trinity-ai.priority=100"
       - "traefik.http.services.trinity-ai.loadbalancer.server.port=8002"
+    restart: always
 
   frontend:
     build:
@@ -218,6 +228,8 @@ services:
       - "traefik.http.routers.frontend.rule=Host(`trinity.quantmatrixai.com`)"
       - "traefik.http.routers.frontend.entrypoints=web"
       - "traefik.http.services.frontend.loadbalancer.server.port=80"
+    restart: always
+
   traefik:
     image: traefik:v2.11
     command:
@@ -234,8 +246,7 @@ services:
     depends_on:
       - web
       - fastapi
-
-
+    restart: always
 
 volumes:
   postgres_data:
