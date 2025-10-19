@@ -29,6 +29,7 @@ const WorkflowMode = () => {
   const [isLibraryVisible, setIsLibraryVisible] = useState(true);
   const [isRightPanelVisible, setIsRightPanelVisible] = useState(true);
   const [isAtomLibraryVisible, setIsAtomLibraryVisible] = useState(false);
+  const [isRightPanelToolVisible, setIsRightPanelToolVisible] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -91,6 +92,10 @@ const WorkflowMode = () => {
 
   const handleAtomLibraryVisibilityChange = (isVisible: boolean) => {
     setIsAtomLibraryVisible(isVisible);
+  };
+
+  const handleRightPanelToolVisibilityChange = (isVisible: boolean) => {
+    setIsRightPanelToolVisible(isVisible);
   };
 
   const handleCanvasMoleculesUpdate = useCallback((molecules: any[]) => {
@@ -830,6 +835,7 @@ const WorkflowMode = () => {
             isLibraryVisible={isLibraryVisible}
             isRightPanelVisible={isRightPanelVisible}
             isAtomLibraryVisible={isAtomLibraryVisible}
+            isRightPanelToolVisible={isRightPanelToolVisible}
           />
         </div>
 
@@ -841,6 +847,7 @@ const WorkflowMode = () => {
             onMultipleAtomsAssignToMolecule={handleMultipleAtomsAssignToMolecule}
             assignedAtoms={assignedAtoms}
             onAtomLibraryVisibilityChange={handleAtomLibraryVisibilityChange}
+            onRightPanelToolVisibilityChange={handleRightPanelToolVisibilityChange}
           />
         </div>
 

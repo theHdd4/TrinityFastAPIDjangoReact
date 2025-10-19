@@ -1922,7 +1922,11 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                     >
                       <Trash2 className="w-4 h-4 text-gray-600 hover:text-red-600" />
                     </button>
-                  <button className="p-2 hover:bg-white/50 rounded-lg transition-all duration-200 hover:shadow-sm">
+                  <button 
+                    className="p-2 hover:bg-white/50 rounded-lg transition-all duration-200 hover:shadow-sm"
+                    onClick={() => toggleMoleculeCollapse(molecule.moleculeId)}
+                    title={isCollapsed ? 'Expand molecule' : 'Collapse molecule'}
+                  >
                     <ChevronDown 
                       className={`w-5 h-5 text-gray-700 transition-transform duration-300 ${
                         isCollapsed ? '-rotate-90' : 'rotate-0'
@@ -2020,10 +2024,24 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               >
                                 <Maximize2 className="w-4 h-4 text-gray-400" />
                               </button>
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  toggleCardCollapse(card.id);
+                                }}
+                                className="p-1 hover:bg-gray-100 rounded"
+                                title="Toggle Card"
+                              >
+                                {collapsedCards[card.id] ? (
+                                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                                ) : (
+                                  <Minus className="w-4 h-4 text-gray-400" />
+                                )}
+                              </button>
                             </div>
                           </div>
 
-                          <div className="flex-1 flex flex-col p-4 overflow-y-auto">
+                          <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
                             {card.atoms.length === 0 ? (
                               <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mb-4">
                                 <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">

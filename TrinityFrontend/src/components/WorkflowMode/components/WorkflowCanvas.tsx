@@ -18,7 +18,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import MoleculeNode, { MoleculeNodeData } from './MoleculeNode';
-import { Plus, Minus, ZoomIn, ZoomOut, Grid3X3 } from 'lucide-react';
+import { Plus, Minus, ZoomIn, ZoomOut, Grid3X3, PlusCircle } from 'lucide-react';
 
 interface WorkflowCanvasProps {
   onMoleculeSelect: (moleculeId: string) => void;
@@ -35,6 +35,7 @@ interface WorkflowCanvasProps {
   isLibraryVisible?: boolean;
   isRightPanelVisible?: boolean;
   isAtomLibraryVisible?: boolean;
+  isRightPanelToolVisible?: boolean;
 }
 
 const nodeTypes = { molecule: MoleculeNode };
@@ -62,7 +63,7 @@ const ZoomControls: React.FC<{ zoomLevel: number; onResetPositions: () => void }
         className="w-12 h-12 p-0 rounded-full shadow-xl bg-white hover:bg-gray-50 border-2 border-gray-300 hover:border-blue-400 transition-all"
         title="Zoom In"
       >
-        <Plus className="w-5 h-5 text-gray-700" />
+        <Plus className="w-5 h-5 text-gray-700 font-bold stroke-2" />
       </Button>
       <Button
         onClick={() => {
@@ -114,7 +115,8 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   onMoleculePositionsUpdate,
   isLibraryVisible = true,
   isRightPanelVisible = true,
-  isAtomLibraryVisible = false
+  isAtomLibraryVisible = false,
+  isRightPanelToolVisible = false
 }) => {
   const [nodes, setNodes] = useState<Node<MoleculeNodeData>[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -299,17 +301,16 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
       const getFlexiblePosition = () => {
         const moleculesCount = nodes.length;
         // Calculate molecules per row based on panel visibility
-        // Right panel is always visible now, so we only consider molecule library and atom library visibility
-        // Both libraries visible: 2 columns, Only molecule library visible: 3 columns, Only atom library visible: 3 columns, Both hidden: 4 columns
+        // Consider both left library and right panel tool visibility
         let moleculesPerRow;
-        if (isLibraryVisible && isAtomLibraryVisible) {
-          moleculesPerRow = 2; // Both molecule and atom libraries visible
-        } else if (isLibraryVisible && !isAtomLibraryVisible) {
-          moleculesPerRow = 3; // Only molecule library visible
-        } else if (!isLibraryVisible && isAtomLibraryVisible) {
-          moleculesPerRow = 3; // Only atom library visible (right panel always visible)
+        if (isLibraryVisible && isRightPanelToolVisible) {
+          moleculesPerRow = 2; // Both left library and right panel tool visible
+        } else if (isLibraryVisible && !isRightPanelToolVisible) {
+          moleculesPerRow = 3; // Only left library visible
+        } else if (!isLibraryVisible && isRightPanelToolVisible) {
+          moleculesPerRow = 3; // Only right panel tool visible
         } else {
-          moleculesPerRow = 4; // Both libraries hidden (default case)
+          moleculesPerRow = 4; // Both hidden (default case)
         }
         const padding = 60; // Padding around molecules
         
@@ -380,7 +381,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
     } catch (error) {
       console.error('Error parsing dropped molecule data:', error);
     }
-  }, [reactFlowInstance, onAtomToggle, onAtomReorder, removeNode, onMoleculeSelect, onMoveAtomToMolecule, onMoveAtomToAtomList, canvasMolecules, nodes, isLibraryVisible, isAtomLibraryVisible]);
+  }, [reactFlowInstance, onAtomToggle, onAtomReorder, removeNode, onMoleculeSelect, onMoveAtomToMolecule, onMoveAtomToAtomList, canvasMolecules, nodes, isLibraryVisible, isRightPanelToolVisible]);
 
   const handleCreateMoleculeClick = useCallback(() => {
     if (onCreateMolecule) {
@@ -402,14 +403,14 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
     // Calculate molecules per row based on current panel visibility
     let moleculesPerRow;
-    if (isLibraryVisible && isAtomLibraryVisible) {
-      moleculesPerRow = 2; // Both molecule and atom libraries visible
-    } else if (isLibraryVisible && !isAtomLibraryVisible) {
-      moleculesPerRow = 3; // Only molecule library visible
-    } else if (!isLibraryVisible && isAtomLibraryVisible) {
-      moleculesPerRow = 3; // Only atom library visible
+    if (isLibraryVisible && isRightPanelToolVisible) {
+      moleculesPerRow = 2; // Both left library and right panel tool visible
+    } else if (isLibraryVisible && !isRightPanelToolVisible) {
+      moleculesPerRow = 3; // Only left library visible
+    } else if (!isLibraryVisible && isRightPanelToolVisible) {
+      moleculesPerRow = 3; // Only right panel tool visible
     } else {
-      moleculesPerRow = 4; // Both libraries hidden (default case)
+      moleculesPerRow = 4; // Both hidden (default case)
     }
 
     const startX = 60;
@@ -455,40 +456,39 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
     }, 100);
 
     console.log('✅ Molecules reset to default positions');
-  }, [reactFlowInstance, canvasMolecules.length, isLibraryVisible, isAtomLibraryVisible, onMoleculePositionsUpdate]);
+  }, [reactFlowInstance, canvasMolecules.length, isLibraryVisible, isRightPanelToolVisible, onMoleculePositionsUpdate]);
 
   // Removed localStorage loading - parent WorkflowMode now manages molecules
 
   // Trigger re-render when panel visibility changes (reposition molecules based on new layout)
   useEffect(() => {
     // Clear any cached positions and force recalculation
-    console.log(`📐 Panel visibility changed: Library ${isLibraryVisible ? 'visible' : 'hidden'}, Right Panel ${isRightPanelVisible ? 'visible' : 'hidden'} - molecules will be repositioned`);
+    console.log(`📐 Panel visibility changed: Library ${isLibraryVisible ? 'visible' : 'hidden'}, Right Panel Tool ${isRightPanelToolVisible ? 'visible' : 'hidden'} - molecules will be repositioned`);
     
     // Force a re-render by updating nodes with current visibility state
     if (canvasMolecules.length > 0) {
       // This will trigger the main useEffect to recalculate positions
       setNodes(prevNodes => [...prevNodes]);
     }
-  }, [isLibraryVisible, isAtomLibraryVisible, canvasMolecules.length]);
+  }, [isLibraryVisible, isRightPanelToolVisible, canvasMolecules.length]);
 
   // Update nodes when canvasMolecules change
   useEffect(() => {
     const newNodes: Node<MoleculeNodeData>[] = canvasMolecules.map((molecule, index) => {
       // Always recalculate position based on current panel visibility to ensure proper layout
       // Calculate molecules per row based on panel visibility
-      // Right panel is always visible now, so we only consider molecule library and atom library visibility
-      // Both libraries visible: 2 columns, Only molecule library visible: 3 columns, Only atom library visible: 3 columns, Both hidden: 4 columns
+      // Consider both left library and right panel tool visibility
       let moleculesPerRow;
-      if (isLibraryVisible && isAtomLibraryVisible) {
-        moleculesPerRow = 2; // Both molecule and atom libraries visible
-      } else if (isLibraryVisible && !isAtomLibraryVisible) {
-        moleculesPerRow = 3; // Only molecule library visible
-      } else if (!isLibraryVisible && isAtomLibraryVisible) {
-        moleculesPerRow = 3; // Only atom library visible (right panel always visible)
+      if (isLibraryVisible && isRightPanelToolVisible) {
+        moleculesPerRow = 2; // Both left library and right panel tool visible
+      } else if (isLibraryVisible && !isRightPanelToolVisible) {
+        moleculesPerRow = 3; // Only left library visible
+      } else if (!isLibraryVisible && isRightPanelToolVisible) {
+        moleculesPerRow = 3; // Only right panel tool visible
       } else {
-        moleculesPerRow = 4; // Both libraries hidden (default case)
+        moleculesPerRow = 4; // Both hidden (default case)
       }
-      console.log(`📐 Layout: Library ${isLibraryVisible ? 'visible' : 'hidden'}, Atom Library ${isAtomLibraryVisible ? 'visible' : 'hidden'}, using ${moleculesPerRow} columns`);
+      console.log(`📐 Layout: Library ${isLibraryVisible ? 'visible' : 'hidden'}, Right Panel Tool ${isRightPanelToolVisible ? 'visible' : 'hidden'}, using ${moleculesPerRow} columns`);
       const startX = 60;
       const startY = 60;
       
@@ -534,14 +534,14 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
     const newEdges: Edge[] = [];
     // Use same dynamic logic as node positioning
     let moleculesPerRow;
-    if (isLibraryVisible && isAtomLibraryVisible) {
-      moleculesPerRow = 2; // Both molecule and atom libraries visible
-    } else if (isLibraryVisible && !isAtomLibraryVisible) {
-      moleculesPerRow = 3; // Only molecule library visible
-    } else if (!isLibraryVisible && isAtomLibraryVisible) {
-      moleculesPerRow = 3; // Only atom library visible (right panel always visible)
+    if (isLibraryVisible && isRightPanelToolVisible) {
+      moleculesPerRow = 2; // Both left library and right panel tool visible
+    } else if (isLibraryVisible && !isRightPanelToolVisible) {
+      moleculesPerRow = 3; // Only left library visible
+    } else if (!isLibraryVisible && isRightPanelToolVisible) {
+      moleculesPerRow = 3; // Only right panel tool visible
     } else {
-      moleculesPerRow = 4; // Both libraries hidden (default case)
+      moleculesPerRow = 4; // Both hidden (default case)
     }
     
     console.log(`🔗 Creating edges for ${newNodes.length} nodes with ${moleculesPerRow} columns per row`);
@@ -603,7 +603,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
     setNodes(newNodes);
     setEdges(newEdges);
-  }, [canvasMolecules, onAtomToggle, onAtomReorder, removeNode, onMoleculeSelect, isLibraryVisible, isAtomLibraryVisible]);
+  }, [canvasMolecules, onAtomToggle, onAtomReorder, removeNode, onMoleculeSelect, isLibraryVisible, isRightPanelToolVisible]);
 
 
   // Removed the useEffect that was causing infinite loop
@@ -627,10 +627,11 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         {/* Plus Button for Creating Molecules */}
         {onCreateMolecule && (
           <Button
-            className="absolute top-4 right-4 z-10 rounded-full w-10 h-10 p-0 shadow-lg"
+            className="absolute top-4 right-4 z-10 rounded-lg w-12 h-10 p-0 shadow-lg bg-blue-600 hover:bg-blue-700 border-2 border-blue-500"
           onClick={handleCreateMoleculeClick}
+          title="Create New Molecule"
           >
-            <span className="text-xl">+</span>
+            <PlusCircle className="w-5 h-5 text-white" />
           </Button>
         )}
         

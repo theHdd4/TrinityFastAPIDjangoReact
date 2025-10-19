@@ -21,6 +21,7 @@ interface WorkflowRightPanelProps {
   onMultipleAtomsAssignToMolecule?: (atomIds: string[], moleculeId: string) => void;
   assignedAtoms?: string[];
   onAtomLibraryVisibilityChange?: (isVisible: boolean) => void;
+  onRightPanelToolVisibilityChange?: (isVisible: boolean) => void;
 }
 
 type PanelType = 'chat' | 'atoms' | 'custom' | null;
@@ -30,7 +31,8 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
   onAtomAssignToMolecule,
   onMultipleAtomsAssignToMolecule,
   assignedAtoms = [],
-  onAtomLibraryVisibilityChange
+  onAtomLibraryVisibilityChange,
+  onRightPanelToolVisibilityChange
 }) => {
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [selectedAtomForAssignment, setSelectedAtomForAssignment] = useState<string | null>(null);
@@ -45,12 +47,15 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
   });
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Notify parent about initial atom library visibility state
+  // Notify parent about initial atom library visibility state and any right panel tool visibility
   React.useEffect(() => {
     if (onAtomLibraryVisibilityChange) {
       onAtomLibraryVisibilityChange(activePanel === 'atoms');
     }
-  }, [activePanel, onAtomLibraryVisibilityChange]);
+    if (onRightPanelToolVisibilityChange) {
+      onRightPanelToolVisibilityChange(activePanel !== null);
+    }
+  }, [activePanel, onAtomLibraryVisibilityChange, onRightPanelToolVisibilityChange]);
 
   const togglePanel = (panel: PanelType) => {
     const newActivePanel = activePanel === panel ? null : panel;
@@ -59,6 +64,10 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
     // Notify parent about atom library visibility changes
     if (onAtomLibraryVisibilityChange) {
       onAtomLibraryVisibilityChange(newActivePanel === 'atoms');
+    }
+    // Notify parent about any right panel tool visibility changes
+    if (onRightPanelToolVisibilityChange) {
+      onRightPanelToolVisibilityChange(newActivePanel !== null);
     }
   };
 
