@@ -273,7 +273,7 @@ const Apps = () => {
 
   const featuredApps = filteredApps.filter(app => app.featured);
   const customApps = filteredApps.filter(app => app.custom);
-  const otherApps = filteredApps.filter(app => !app.featured && !app.custom);
+  const otherApps = filteredApps.filter(app => !app.custom);
 
   const animationStyle = (offset: number) => ({
     animationDelay: `${(introBaseDelay + offset).toFixed(1)}s`,
@@ -301,7 +301,7 @@ const Apps = () => {
           <div className="max-w-7xl mx-auto px-6 py-8 pb-20">
             {/* Hero Section */}
             <div className="text-center mb-8 animate-fade-in" style={animationStyle(0.4)}>
-              <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-3 bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text">
+              <h2 className="text-xl md:text-2xl font-bold text-foreground mb-3 bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text">
                 Choose Your Analytics Application
               </h2>
               <p className="text-sm text-muted-foreground max-w-2xl mx-auto mb-6">
@@ -369,46 +369,48 @@ const Apps = () => {
                     return (
                       <Card 
                         key={app.id}
-                        className="group relative bg-card border-2 border-border hover:border-primary/50 hover:shadow-2xl transition-all duration-300 overflow-hidden hover-scale cursor-pointer animate-scale-in"
+                        className="group relative bg-card border border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 overflow-hidden hover-scale cursor-pointer animate-scale-in"
                         style={animationStyle(1.1 + index * 0.1)}
                         onClick={() => handleAppSelect(app.id)}
                       >
                         {/* Gradient Overlay */}
                         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                         
-                        <div className="relative p-4">
-                          <div className="flex items-start justify-between mb-3">
-                            <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg group-hover:scale-110 transition-transform duration-300`}>
+                        <div className="relative p-4 h-full flex flex-col">
+                          <div className="flex items-start gap-3 mb-3">
+                            <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-110 transition-transform duration-300`}>
                               <Icon className="w-5 h-5 text-white" />
                             </div>
-                            <Badge variant="secondary" className="bg-primary/10 text-primary">
-                              Featured
-                            </Badge>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between mb-1">
+                                <h3 className="text-base font-bold text-foreground group-hover:text-primary transition-colors">
+                                  {app.title}
+                                </h3>
+                                <Badge variant="secondary" className="bg-primary/10 text-primary">
+                                  Featured
+                                </Badge>
+                              </div>
+                              <p className="text-muted-foreground text-xs leading-relaxed line-clamp-2">
+                                {app.description}
+                              </p>
+                            </div>
                           </div>
                           
-                          <h3 className="text-lg font-bold text-foreground mb-1 group-hover:text-primary transition-colors">
-                            {app.title}
-                          </h3>
-                          <p className="text-muted-foreground text-xs leading-relaxed mb-3 line-clamp-2">
-                            {app.description}
-                          </p>
-                          
                           {app.modules.length > 0 && (
-                            <div className="mb-4">
-                              <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Includes:</p>
+                            <div className="mb-4 flex-1">
                               <div className="flex flex-wrap gap-1.5">
-                                {app.modules.slice(0, 3).map((module, idx) => (
+                                {app.modules.slice(0, 2).map((module, idx) => (
                                   <Badge 
                                     key={idx}
-                                    variant="outline"
+                                    variant="secondary"
                                     className="text-xs"
                                   >
                                     {module}
                                   </Badge>
                                 ))}
-                                {app.modules.length > 3 && (
-                                  <Badge variant="outline" className="text-xs">
-                                    +{app.modules.length - 3}
+                                {app.modules.length > 2 && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    +{app.modules.length - 2}
                                   </Badge>
                                 )}
                               </div>
@@ -417,7 +419,8 @@ const Apps = () => {
                           
                           <Button 
                             variant="ghost"
-                            className="w-full justify-between group-hover:bg-primary/5 group-hover:text-primary transition-colors"
+                            size="sm"
+                            className="w-full justify-between text-sm group-hover:bg-primary/5 group-hover:text-primary transition-colors mt-auto"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleAppSelect(app.id);
@@ -447,29 +450,33 @@ const Apps = () => {
                     return (
                       <Card 
                         key={app.id}
-                        className="group relative bg-card border-2 border-dashed border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 overflow-hidden hover-scale cursor-pointer animate-scale-in"
+                        className="group relative bg-card border border-dashed border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 overflow-hidden hover-scale cursor-pointer animate-scale-in"
                         style={animationStyle(1.5 + index * 0.1)}
                         onClick={() => handleAppSelect(app.id)}
                       >
                         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                         
-                        <div className="relative p-4">
-                          <div className="flex items-start justify-between mb-3">
-                            <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg group-hover:scale-110 transition-transform duration-300`}>
+                        <div className="relative p-4 h-full flex flex-col">
+                          <div className="flex items-start gap-3 mb-3">
+                            <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-110 transition-transform duration-300`}>
                               <Icon className="w-5 h-5 text-white" />
                             </div>
-        </div>
-
-                          <h3 className="text-lg font-bold text-foreground mb-1 group-hover:text-primary transition-colors">
-                            {app.title}
-                          </h3>
-                          <p className="text-muted-foreground text-xs leading-relaxed mb-3">
-                            {app.description}
-                          </p>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="text-base font-bold text-foreground mb-1 group-hover:text-primary transition-colors">
+                                {app.title}
+                              </h3>
+                              <p className="text-muted-foreground text-xs leading-relaxed line-clamp-2">
+                                {app.description}
+                              </p>
+                            </div>
+                          </div>
+                          
+                          <div className="flex-1"></div>
                           
                           <Button 
                             variant="ghost"
-                            className="w-full justify-between group-hover:bg-primary/5 group-hover:text-primary transition-colors"
+                            size="sm"
+                            className="w-full justify-between text-sm group-hover:bg-primary/5 group-hover:text-primary transition-colors mt-auto"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleAppSelect(app.id);
@@ -496,59 +503,66 @@ const Apps = () => {
             return (
               <Card
                 key={app.id}
-                        className="group bg-card border border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 hover-scale cursor-pointer animate-scale-in"
-                        style={animationStyle(1.7 + index * 0.05)}
+                className="group bg-card border border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 hover-scale cursor-pointer animate-scale-in"
+                style={animationStyle(1.7 + index * 0.05)}
                 onClick={() => handleAppSelect(app.id)}
               >
-                        <div className="p-4">
-                          <div className="flex items-start gap-3 mb-3">
-                            <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-110 transition-transform duration-300`}>
-                              <Icon className="w-5 h-5 text-white" />
+                <div className="p-4 h-full flex flex-col min-h-[200px]">
+                  <div className="flex items-start gap-3 mb-3">
+                    <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-110 transition-transform duration-300`}>
+                      <Icon className="w-5 h-5 text-white" />
                     </div>
 
                     <div className="flex-1 min-w-0">
-                              <h3 className="text-base font-bold text-foreground mb-1 group-hover:text-primary transition-colors">
-                        {app.title}
-                      </h3>
-                              <p className="text-muted-foreground text-xs leading-relaxed line-clamp-2">
-                                {app.description}
-                              </p>
-                            </div>
-                          </div>
-                          
-                          {app.modules.length > 0 && (
-                        <div className="mb-4">
-                              <div className="flex flex-wrap gap-1.5">
-                                {app.modules.slice(0, 2).map((module, idx) => (
-                                  <Badge 
-                                    key={idx}
-                                    variant="secondary"
-                                    className="text-xs"
-                                  >
-                                    {module}
-                                  </Badge>
-                                ))}
-                                {app.modules.length > 2 && (
-                                  <Badge variant="secondary" className="text-xs">
-                                    +{app.modules.length - 2}
-                                  </Badge>
-                                )}
-                          </div>
-                        </div>
-                      )}
-
-                          <Button 
-                            variant="ghost"
-                            size="sm"
-                            className="w-full justify-between text-sm group-hover:bg-primary/5 group-hover:text-primary transition-colors"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAppSelect(app.id);
-                            }}
+                      <div className="flex items-center justify-between mb-1">
+                        <h3 className="text-base font-bold text-foreground group-hover:text-primary transition-colors">
+                          {app.title}
+                        </h3>
+                        {app.featured && (
+                          <Badge variant="secondary" className="bg-primary/10 text-primary text-xs">
+                            Featured
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-muted-foreground text-xs leading-relaxed line-clamp-2">
+                        {app.description}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {app.modules.length > 0 && (
+                    <div className="mb-4 flex-1">
+                      <div className="flex flex-wrap gap-1.5">
+                        {app.modules.slice(0, 2).map((module, idx) => (
+                          <Badge 
+                            key={idx}
+                            variant="secondary"
+                            className="text-xs"
                           >
-                            Select
-                            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                          </Button>
+                            {module}
+                          </Badge>
+                        ))}
+                        {app.modules.length > 2 && (
+                          <Badge variant="secondary" className="text-xs">
+                            +{app.modules.length - 2}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <Button 
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-between text-sm group-hover:bg-primary/5 group-hover:text-primary transition-colors mt-auto"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleAppSelect(app.id);
+                    }}
+                  >
+                    Select
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </Button>
                 </div>
               </Card>
             );

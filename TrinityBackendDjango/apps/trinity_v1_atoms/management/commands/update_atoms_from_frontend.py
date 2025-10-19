@@ -82,8 +82,9 @@ class Command(BaseCommand):
                 'color': 'bg-green-500'
             },
             'create-column': {
-                'description': 'Create new columns from existing data',
-                'tags': ['columns', 'creation', 'transformation'],
+                'name': 'Create and Transform Features',
+                'description': 'Create or Transform new features using arithmetic operations on dataframe columns',
+                'tags': ['feature', 'creation', 'transform'],
                 'color': 'bg-green-500'
             },
             'explore': {
@@ -201,7 +202,7 @@ class Command(BaseCommand):
                 atom, created = TrinityV1Atom.objects.get_or_create(
                     atom_id=atom_id,
                     defaults={
-                        'name': data['description'].split(' ')[0].title(),  # Use first word as name
+                        'name': data.get('name', data['description'].split(' ')[0].title()),  # Use explicit name if available, otherwise first word
                         'description': data['description'],
                         'category': self.get_category_from_color(data['color']),
                         'tags': data['tags'],
@@ -211,6 +212,8 @@ class Command(BaseCommand):
                 
                 if not created:
                     # Update existing atom
+                    if 'name' in data:
+                        atom.name = data['name']
                     atom.description = data['description']
                     atom.tags = data['tags']
                     atom.color = data['color']

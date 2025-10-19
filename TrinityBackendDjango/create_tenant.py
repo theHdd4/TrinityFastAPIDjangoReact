@@ -272,30 +272,29 @@ def main():
     from apps.registry.models import App
     from apps.usecase.models import UseCase
 
-    # Default apps to grant access to new tenants
-    default_app_slugs = [
-        "marketing-mix",
-        "forecasting", 
-        "promo-effectiveness",
-        "blank"
-    ]
-
     print(f"\n→ 4) Granting app access from public.usecase table...")
+    
+    # Get ALL available usecases from public schema instead of hardcoded list
+    try:
+        all_usecases = UseCase.objects.all()
+        print(f"   Found {all_usecases.count()} apps in public.usecase table")
+    except Exception as e:
+        print(f"   ⚠️  Error fetching usecases: {e}")
+        print(f"       Run: python manage.py populate_usecases")
+        all_usecases = []
     
     allowed_app_ids = []
     # Ensure we're operating within the tenant schema when granting access
     with schema_context(tenant_schema):
-        for slug in default_app_slugs:
+        for usecase in all_usecases:
             try:
-                # Get app from public.usecase
-                usecase = UseCase.objects.get(slug=slug)
-                
                 # Create or update tenant's registry.App
+                # Use slug as the lookup field since it's unique and causes the constraint violation
                 obj, created = App.objects.update_or_create(
-                    usecase_id=usecase.id,
+                    slug=usecase.slug,
                     defaults={
+                        "usecase_id": usecase.id,
                         "name": usecase.name,
-                        "slug": usecase.slug,
                         "description": usecase.description,
                         "is_enabled": True,
                         "custom_config": {
@@ -313,10 +312,11 @@ def main():
                     print(f"   ♻️  Updated access: {usecase.name} (UseCase ID: {usecase.id})")
                     print(f"       Molecules: {usecase.molecules}")
                     
-            except UseCase.DoesNotExist:
-                print(f"   ⚠️  App '{slug}' not found in public.usecase - skipping")
-                print(f"       Run: python manage.py populate_usecases")
+            except Exception as e:
+                print(f"   ⚠️  Error processing app '{usecase.slug}': {e}")
                 continue
+        
+        print(f"   📊 Total apps granted access: {len(allowed_app_ids)}")
 
         from apps.roles.models import UserRole
 

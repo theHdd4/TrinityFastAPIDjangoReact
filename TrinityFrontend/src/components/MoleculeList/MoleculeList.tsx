@@ -10,10 +10,12 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { Input } from '@/components/ui/input';
-import { Search } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Search, ChevronLeft } from 'lucide-react';
 
 interface MoleculeListProps {
   canEdit: boolean;
+  onToggle?: () => void;
 }
 
 interface Molecule {
@@ -25,7 +27,7 @@ interface Molecule {
   atoms: string[];
 }
 
-const MoleculeList: React.FC<MoleculeListProps> = ({ canEdit }) => {
+const MoleculeList: React.FC<MoleculeListProps> = ({ canEdit, onToggle }) => {
   const [qmMolecules, setQmMolecules] = useState<Molecule[]>(fallbackMolecules);
   const [clientMolecules, setClientMolecules] = useState<Molecule[]>([]);
   const [loading, setLoading] = useState(false);
@@ -158,15 +160,28 @@ const MoleculeList: React.FC<MoleculeListProps> = ({ canEdit }) => {
           
           {/* Search Input */}
           <div className="px-6 pt-4 pb-2">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                type="text"
-                placeholder="Search molecules..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 pr-4 py-2 text-sm border-gray-200 focus:border-blue-300 focus:ring-1 focus:ring-blue-300"
-              />
+            <div className="flex items-center space-x-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  type="text"
+                  placeholder="Search molecules..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 pr-4 py-2 text-sm border-gray-200 focus:border-blue-300 focus:ring-1 focus:ring-blue-300"
+                />
+              </div>
+              {onToggle && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onToggle}
+                  className="p-1 h-8 w-8"
+                  title="Hide Library"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+              )}
             </div>
           </div>
           

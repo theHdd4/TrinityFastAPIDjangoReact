@@ -163,7 +163,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <DataFrameOperationsProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'groupby-wtg-avg' ? (
             <GroupByProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && (atom?.atomId === 'create-column' || atom?.atomId === 'createcolumn') ? (
+          ) : selectedAtomId && atom?.atomId === 'create-column' ? (
             <CreateColumnProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'correlation' ? (
             <CorrelationProperties atomId={selectedAtomId} />
