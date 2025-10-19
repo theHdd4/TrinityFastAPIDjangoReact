@@ -170,7 +170,6 @@ interface Props {
   initialShowDataLabels?: boolean; // Default state for data labels
   showGrid?: boolean; // External control for grid visibility
   chartsPerRow?: number; // For multi pie chart layouts
-  readOnly?: boolean; // Simplified rendering without editing controls
 }
 
 // Excel-like color themes
@@ -496,8 +495,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   showDataLabels: propShowDataLabels, // External control for data labels visibility
   initialShowDataLabels,
   showGrid: propShowGrid, // External control for grid visibility
-  chartsPerRow,
-  readOnly = false
+  chartsPerRow
 }) => {
 
   // State for color theme - simplified approach
@@ -1104,7 +1102,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   
   // Custom tick formatter for X-axis to show full value
   const xAxisTickFormatter = (value: any) => {
-    return String(value);
+    const strValue = String(value);
+    return strValue.length > 15 ? strValue.substring(0, 15) + '...' : strValue;
   };
   const axisLabelStyle = {
     fontFamily: FONT_FAMILY,
@@ -1134,11 +1133,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   // Handle right-click context menu
   const handleContextMenu = (e: React.MouseEvent) => {
-    if (readOnly) {
-      e.preventDefault();
-      return;
-    }
-
     e.preventDefault();
     e.stopPropagation();
 
@@ -2156,6 +2150,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tickLine={false}
                 allowDuplicatedCategory={false}
                 tickFormatter={xAxisTickFormatter}
+                {...(() => {
+                  const firstValue = pivotedLineData[0]?.[xKeyForBar];
+                  const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+                  return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
+                })()}
               />
               <YAxis
                 tickFormatter={formatLargeNumber}
@@ -2230,6 +2229,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
               tick={xAxisTickStyle}
               tickLine={false}
               tickFormatter={xAxisTickFormatter}
+              {...(() => {
+                const firstValue = transformedChartData[0]?.[xKey];
+                const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+                return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
+              })()}
             />
             {/* Primary Y-Axis (Left) */}
             <YAxis 
@@ -2370,11 +2374,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           const formatDateTickMultiLine = d3.timeFormat('%d-%B-%y');
           
           return (
-            <LineChart
-              data={pivotedLineData}
-              margin={getChartMargins()}
-              className="explore-chart-line"
-            >
+            <LineChart data={pivotedLineData} margin={getChartMargins()}>
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForLine}
@@ -2383,6 +2383,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tickLine={false}
                 allowDuplicatedCategory={false}
                 tickFormatter={isDateAxisMultiLine ? (value) => formatDateTickMultiLine(new Date(value)) : xAxisTickFormatter}
+                {...(() => {
+                  const firstValue = pivotedLineData[0]?.[xKeyForLine];
+                  const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+                  return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
+                })()}
               />
               <YAxis
                 tickFormatter={formatLargeNumber}
@@ -2435,8 +2440,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   name={seriesKey}
                   stroke={palette[idx % palette.length]}
                   strokeWidth={2}
-                  dot={false}
-                  activeDot={false}
+                  dot={{ r: 0 }}
+                  activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }}
                 >
                   {currentShowDataLabels && (
                     <LabelList
@@ -2468,6 +2473,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tick={xAxisTickStyle}
                 tickLine={false}
                 tickFormatter={isDateAxis ? (value) => formatDateTick(new Date(value)) : xAxisTickFormatter}
+                {...(() => {
+                  const firstValue = transformedChartData[0]?.[xKey];
+                  const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+                  return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
+                })()}
               />
               {/* Primary Y-Axis (Left) */}
               <YAxis
@@ -2552,13 +2562,19 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 />
               )}
               {/* Primary Line */}
-              <Line
-                type="monotone"
-                dataKey={yKey}
-                stroke={palette[0]}
+              <Line 
+                type="monotone" 
+                dataKey={yKey} 
+                stroke={palette[0]} 
                 strokeWidth={2}
-                dot={false}
-                activeDot={false}
+                dot={{ fill: palette[0], strokeWidth: 0, r: 0 }}
+                activeDot={{ 
+                  r: 6, 
+                  fill: palette[0], 
+                  stroke: 'white', 
+                  strokeWidth: 3,
+                  style: { cursor: 'pointer' }
+                }}
                 yAxisId={0}
               >
                 {currentShowDataLabels && (
@@ -2573,13 +2589,19 @@ const RechartsChartRenderer: React.FC<Props> = ({
               </Line>
               {/* Secondary Line - only if we have dual Y-axes */}
               {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
-                <Line
-                  type="monotone"
-                  dataKey={yKeys[1] || yFields[1]}
-                  stroke={palette[1]}
+                <Line 
+                  type="monotone" 
+                  dataKey={yKeys[1] || yFields[1]} 
+                  stroke={palette[1]} 
                   strokeWidth={2}
-                  dot={false}
-                  activeDot={false}
+                  dot={{ fill: palette[1], strokeWidth: 0, r: 0 }}
+                  activeDot={{ 
+                    r: 6, 
+                    fill: palette[1], 
+                    stroke: 'white', 
+                    strokeWidth: 3,
+                    style: { cursor: 'pointer' }
+                  }}
                   yAxisId={1}
                 >
                   {currentShowDataLabels && (
@@ -2624,6 +2646,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tickLine={false}
                 allowDuplicatedCategory={false}
                 tickFormatter={isDateAxisArea ? (value) => formatDateTickArea(new Date(value)) : xAxisTickFormatter}
+                {...(() => {
+                  const firstValue = pivotedLineData[0]?.[xKeyForArea];
+                  const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+                  return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
+                })()}
               />
               <YAxis
                 label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
@@ -2690,6 +2717,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
               tick={xAxisTickStyle}
               tickLine={false}
               tickFormatter={xAxisTickFormatter}
+              {...(() => {
+                const firstValue = chartDataForRendering[0]?.[xKey];
+                const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+                return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
+              })()}
             />
             <YAxis
               yAxisId={0}
@@ -2771,6 +2803,11 @@ const RechartsChartRenderer: React.FC<Props> = ({
               tickLine={false}
               allowDuplicatedCategory={false}
               tickFormatter={isDateAxisScatter ? (value) => formatDateTickScatter(new Date(value)) : xAxisTickFormatter}
+              {...(() => {
+                const firstValue = chartDataForRendering[0]?.[xKeyForScatter];
+                const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+                return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
+              })()}
             />
             <YAxis
               yAxisId={0}
@@ -3173,52 +3210,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
 
 
-  if (readOnly) {
-    const trimmedTitle = (resolvedTitle ?? '').trim();
-
-    const chartNode = (() => {
-      try {
-        return renderChart();
-      } catch {
-        return (
-          <div className="flex h-full items-center justify-center text-red-500">
-            <div className="text-center">
-              <svg className="mx-auto mb-2 h-12 w-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"
-                />
-              </svg>
-              <p className="text-sm">Error rendering chart</p>
-              <p className="mt-1 text-xs text-gray-500">Please check the console for details</p>
-            </div>
-          </div>
-        );
-      }
-    })();
-
-    return (
-      <div className="read-only-chart flex h-full w-full flex-col gap-4">
-        {trimmedTitle.length > 0 && (
-          <h3 className="text-center text-2xl font-semibold text-gray-900">{trimmedTitle}</h3>
-        )}
-        <div
-          className="flex-1 min-h-[300px]"
-          style={{ height: height ? `${height}px` : '100%', width: width ? `${width}px` : '100%' }}
-        >
-          <ResponsiveContainer key={chartRenderKey} width="100%" height="100%">
-            {chartNode}
-          </ResponsiveContainer>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="w-full h-full flex flex-col">
-      <div className="mb-6 flex justify-center">
+      {/* <div className="mb-6 flex justify-center">
         <div className="relative w-full max-w-3xl">
           {(((isTitleFocused ? titleEditableRef.current?.textContent : resolvedTitle) ?? '').trim().length === 0) && (
             <span className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-2xl font-semibold text-gray-400">
@@ -3239,7 +3233,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             spellCheck={true}
           />
         </div>
-      </div>
+      </div> */}
 
       <div
         className="w-full h-full relative flex-1 min-w-0"

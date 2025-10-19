@@ -929,7 +929,7 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
         </div>
       )}
       {/* Current Selection (Configuration) */}
-      <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm mb-6 overflow-hidden">
+      {/* <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm mb-6 overflow-hidden">
         <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-1">
           <div className="bg-white rounded-sm">
             <div className="p-6">
@@ -938,7 +938,6 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
                 <h3 className="text-xl font-bold text-gray-900">Current Selection</h3>
               </div>
               <div className="grid grid-cols-3 gap-6">
-                {/* Primary Source */}
                 <div>
                   <div className="flex items-center mb-2">
                     <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
@@ -956,7 +955,6 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
                     className="w-full"
                   />
                 </div>
-                {/* Secondary Source */}
                 <div>
                   <div className="flex items-center mb-2">
                     <div className="w-2 h-2 bg-green-500 rounded-full mr-2"></div>
@@ -974,7 +972,6 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
                     className="w-full"
                   />
                 </div>
-                {/* Strategy */}
                 <div>
                   <div className="flex items-center mb-2">
                     <div className="w-2 h-2 bg-purple-500 rounded-full mr-2"></div>
@@ -996,7 +993,7 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
             </div>
           </div>
         </div>
-      </Card>
+      </Card> */}
 
       {/* Concat Results */}
       {!resultFilePath && !fullCsv ? (

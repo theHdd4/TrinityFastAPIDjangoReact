@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
-import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon, PieChart as PieChartIcon, ArrowUp, ArrowDown, FilterIcon, Plus } from 'lucide-react';
+import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon, PieChart as PieChartIcon, ArrowUp, ArrowDown, FilterIcon, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { ChartData, ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { ChartData, ChartMakerConfig, useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import './ChartMakerCanvas.css';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useResponsiveChartLayout } from '@/hooks/useResponsiveChartLayout';
@@ -90,6 +90,13 @@ interface ChartMakerCanvasProps {
 
 const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, data, onChartTypeChange, onChartFilterChange, onTraceFilterChange, isFullWidthMode = false }) => {
   const typedData = data as ChartDataWithUniqueValues | null;
+  
+  // Get dataSource and settings from store
+  const atom = useLaboratoryStore(state => state.getAtom(atomId));
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const dataSource = (atom?.settings as any)?.dataSource;
+  const numberOfCharts = (atom?.settings as any)?.numberOfCharts || 1;
+  
   const [fullscreenChart, setFullscreenChart] = useState<ChartMakerConfig | null>(null);
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
   const [lastSelectedIdx, setLastSelectedIdx] = useState<number | null>(null);
@@ -112,6 +119,9 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   const [sortColumn, setSortColumn] = useState<string>('unique_count');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  
+  // Filter collapse state for each chart (chartId -> boolean)
+  const [filtersCollapsed, setFiltersCollapsed] = useState<Record<string, boolean>>({});
 
   // Chat bubble state management
   const [chatBubble, setChatBubble] = useState<{
@@ -135,10 +145,11 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   useEffect(() => {
     console.log('ChartMakerCanvas - typedData:', typedData);
     console.log('ChartMakerCanvas - file_id:', typedData?.file_id);
-    if (typedData && typedData.file_id) {
+    console.log('ChartMakerCanvas - dataSource:', dataSource);
+    if (typedData && typedData.file_id && dataSource) {
       fetchCardinalityData();
     }
-  }, [typedData?.file_id]);
+  }, [typedData?.file_id, dataSource]);
 
   // Fetch cardinality data function
   const fetchCardinalityData = async () => {
@@ -148,9 +159,12 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     setCardinalityError(null);
     
     try {
-      const url = `${CHART_MAKER_API}/column_summary?object_name=${encodeURIComponent(typedData.file_id)}`;
+      // Use dataSource (original Arrow filename) if available, otherwise fall back to file_id
+      // This allows the backend to reload from the saved file even if in-memory storage is cleared
+      const objectName = dataSource || typedData.file_id;
+      const url = `${CHART_MAKER_API}/column_summary?object_name=${encodeURIComponent(objectName)}`;
       console.log('Fetching cardinality data from:', url);
-      console.log('file_id being sent:', typedData.file_id);
+      console.log('Using dataSource:', dataSource, 'or file_id:', typedData.file_id);
       const response = await fetch(url);
       console.log('Response status:', response.status);
       if (response.ok) {
@@ -268,8 +282,44 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     });
   };
   
-  // Get responsive layout configuration
-  const { layoutConfig, isCompact } = useResponsiveChartLayout(charts.length, containerRef);
+  // Add new charts based on layout configuration
+  const addChart = () => {
+    const currentCharts = (atom?.settings as any)?.charts || [];
+    const chartsToAdd = numberOfCharts; // 1 or 2 based on layout setting
+    
+    const newCharts = [...currentCharts];
+    for (let i = 0; i < chartsToAdd; i++) {
+      newCharts.push({
+        id: (currentCharts.length + i + 1).toString(),
+        title: `Chart ${currentCharts.length + i + 1}`,
+        type: 'line',
+        xAxis: '',
+        yAxis: '',
+        filters: {},
+        aggregation: 'sum',
+        legendField: 'aggregate',
+        chartRendered: false,
+        chartLoading: false,
+        isAdvancedMode: false,
+        traces: [],
+      });
+    }
+    
+    updateSettings(atomId, { charts: newCharts });
+  };
+  
+  // Get responsive layout configuration based on numberOfCharts (charts per row) setting
+  const getLayoutConfig = () => {
+    const columns = numberOfCharts; // Use numberOfCharts setting to determine columns per row
+    const rows = Math.max(1, Math.ceil(charts.length / columns));
+    const containerClass = columns === 1 ? 'grid-cols-1' : 'grid-cols-2';
+    const layout = columns === 1 ? 'vertical' : 'horizontal';
+    
+    return { layout, containerClass, rows };
+  };
+  
+  const layoutConfig = getLayoutConfig();
+  const { isCompact } = useResponsiveChartLayout(charts.length, containerRef);
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -557,6 +607,7 @@ const renderChart = (
     xAxisLabel: xAxisConfig.label || xAxisConfig.dataKey,
     yAxisLabel: yAxisConfig.label || yAxisConfig.dataKey,
     yAxisLabels: traces.length ? traces.map((t: any) => t.name || t.dataKey) : undefined,
+    legendField: chart.legendField && chart.legendField !== 'aggregate' ? chart.legendField : undefined,
     colors: [colors.primary, colors.secondary, colors.tertiary],
     theme: chart.chartConfig?.theme,
     showLegend: chart.chartConfig?.showLegend,
@@ -621,34 +672,6 @@ const renderChart = (
           </defs>
           <rect width="100%" height="100%" fill="url(#grid)" />
         </svg>
-      </div>
-
-      {/* Header with chart count and AI assistant */}
-      <div className="relative z-10 flex items-center justify-between p-4 border-b border-gray-200 bg-white/90 backdrop-blur-sm">
-        <div className="flex items-center space-x-2">
-          <BarChart3 className="w-5 h-5 text-gray-600" />
-          <span className="text-sm font-medium text-gray-700">
-            {charts.length === 0 ? 'No Charts' : `${charts.length} Chart${charts.length === 1 ? '' : 's'}`}
-          </span>
-        </div>
-        <div className="flex items-center space-x-2">
-          {/* <AtomAIChatBot
-            atomId={atomId}
-            atomType="chart-maker"
-            atomTitle="Chart Maker"
-            className="mr-2"
-          /> */}
-          {/* <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setFullscreenChart(charts[0] || null)}
-            disabled={charts.length === 0}
-            className="text-xs"
-          >
-            <Maximize2 className="w-3 h-3 mr-1" />
-            Fullscreen
-          </Button> */}
-        </div>
       </div>
       
       <div className="relative z-10 p-6 overflow-hidden">
@@ -870,7 +893,7 @@ const renderChart = (
         ) : null}
 
         <div
-          className={`grid gap-6 ${layoutConfig.containerClass} transition-all duration-300 ease-in-out`}
+          className={`grid gap-6 mt-8 ${layoutConfig.containerClass} transition-all duration-300 ease-in-out`}
           style={{
             gridTemplateRows: layoutConfig.rows > 1 ? `repeat(${layoutConfig.rows}, 1fr)` : '1fr'
           }}
@@ -881,9 +904,25 @@ const renderChart = (
             return (
                    <Card
                      key={chart.id}
-                    className="chart-card border border-black shadow-xl bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col group hover:shadow-2xl"
+                    className="chart-card border border-pink-200 bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col group hover:shadow-2xl cursor-pointer"
+                    onClick={() => {
+                      // Set selectedChartIndex to expand this chart's settings
+                      updateSettings(atomId, { selectedChartIndex: index } as any);
+                      
+                      // Scroll to the chart settings section after a brief delay to allow expansion
+                      setTimeout(() => {
+                        const chartSettingsElement = document.querySelector(`[data-chart-settings="${index}"]`);
+                        if (chartSettingsElement) {
+                          chartSettingsElement.scrollIntoView({ 
+                            behavior: 'smooth', 
+                            block: 'start',
+                            inline: 'nearest'
+                          });
+                        }
+                      }, 150);
+                    }}
                    >
-                    <div className="bg-white border-b border-black p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
+                    <div className="bg-white border-b border-pink-200 p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
                       <CardTitle className={`font-bold text-gray-900 flex items-center justify-between ${isCompact ? 'text-base' : 'text-lg'}`}>
                         <div className="flex items-center">
                           <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'} text-gray-900`} />
@@ -907,24 +946,32 @@ const renderChart = (
                               )}
                             </div>
                           )}
-                          {/* Alt+Click expand hint */}
-                          <div className="flex items-center text-xs text-gray-700 bg-yellow-50 border border-yellow-200 rounded-full px-2 py-1">
-                            <span>Alt+Click to expand</span>
-                          </div>
+                          {/* Expand icon */}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 hover:bg-gray-200/60 relative"
+                            style={{ zIndex: 20 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFullscreenChart(chart);
+                              setFullscreenIndex(index);
+                            }}
+                            title="Click to expand"
+                          >
+                            <Maximize2 className="w-3 h-3" />
+                          </Button>
                         </div>
                       </CardTitle>
-                      {/* Transparent overlay for Alt+Click fullscreen and mouse hold for chart type switching */}
+                      {/* Transparent overlay for mouse hold for chart type switching */}
                       <div
                         className="absolute inset-0 cursor-pointer"
                         style={{ background: 'transparent', zIndex: 10 }}
                         onClick={e => {
-                          if (e.altKey) {
-                            setFullscreenChart(chart);
-                            setFullscreenIndex(index);
-                          }
+                          // Alt+Click functionality moved to expand icon button
+                          // Keep this for other interactions if needed
                         }}
                         /* onContextMenu={e => handleContextMenu(e, chart.id)} */
-                        title="Alt+Click to expand"
                       />
                      </div>
                      
@@ -942,7 +989,10 @@ const renderChart = (
                           if (allFilterColumns.size === 0) return null;
                           
                           return (
-                            <div className="bg-gradient-to-r from-white/80 via-gray-50/90 to-white/80 backdrop-blur-sm p-4 border-b border-gray-200/60 shadow-inner relative overflow-hidden">
+                            <div 
+                              className="bg-gradient-to-r from-white/80 via-gray-50/90 to-white/80 backdrop-blur-sm p-4 border-b border-gray-200/60 shadow-inner relative overflow-hidden"
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               {/* Subtle texture overlay */}
                               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
                               
@@ -1183,45 +1233,72 @@ const renderChart = (
                           // Simple mode: Original filter controls
                           if (Object.keys(chart.filters).length === 0) return null;
                           
+                          const isCollapsed = filtersCollapsed[chart.id] || false;
+                          
                           return (
-                            <div className="bg-gradient-to-r from-white/80 via-gray-50/90 to-white/80 backdrop-blur-sm p-4 border-b border-gray-200/60 shadow-inner relative overflow-hidden">
+                            <div 
+                              className="bg-gradient-to-r from-white/80 via-gray-50/90 to-white/80 backdrop-blur-sm p-4 border-b border-gray-200/60 shadow-inner relative overflow-hidden"
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               {/* Subtle texture overlay */}
                               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"></div>
                               
-                              {/* Responsive grid layout for simple filter columns */}
-                              <div className="relative z-10 flex flex-wrap gap-2">
-                                {Object.entries(chart.filters).map(([column, selectedValues]) => {
-                                  const uniqueValues = getUniqueValuesForColumn(column);
-                                  return (
-                                    <div key={column} className="flex flex-col space-y-2 w-auto">
-                                      <Label className={`font-semibold text-gray-800 ${isCompact ? 'text-xs' : 'text-sm'} bg-gradient-to-r from-gray-700 to-gray-600 bg-clip-text text-transparent truncate`}>
-                                        {column}
-                                      </Label>
-                                      <MultiSelectDropdown
-                                        label=""
-                                        selectedValues={selectedValues}
-                                        onSelectionChange={(newSelectedValues) => {
-                                          onChartFilterChange?.(chart.id, column, newSelectedValues);
-                                        }}
-                                        options={uniqueValues.map(value => ({ 
-                                          value, 
-                                          label: value || '(empty)' 
-                                        }))}
-                                        showSelectAll={true}
-                                        showTrigger={true}
-                                        placeholder={`Filter by ${column}`}
-                                        className="w-full"
-                                      />
-                                    </div>
-                                  );
-                                })}
+                              {/* Header with collapse toggle */}
+                              <div className="relative z-10 flex items-center justify-between mb-3">
+                                {/* <Label className="text-sm font-semibold text-gray-700">Filters</Label> */}
+                                <Label className="text-sm font-semibold text-gray-700"> </Label>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 w-6 p-0 hover:bg-gray-200/60"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setFiltersCollapsed(prev => ({ ...prev, [chart.id]: !prev[chart.id] }));
+                                  }}
+                                >
+                                  {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                                </Button>
                               </div>
+                              
+                              {/* Responsive grid layout for simple filter columns */}
+                              {!isCollapsed && (
+                                <div className="relative z-10 flex flex-wrap gap-2">
+                                  {Object.entries(chart.filters).map(([column, selectedValues]) => {
+                                    const uniqueValues = getUniqueValuesForColumn(column);
+                                    return (
+                                      <div key={column} className="flex flex-col space-y-2 w-auto">
+                                        <Label className={`font-semibold text-gray-800 ${isCompact ? 'text-xs' : 'text-sm'} bg-gradient-to-r from-gray-700 to-gray-600 bg-clip-text text-transparent truncate`}>
+                                          {column}
+                                        </Label>
+                                        <MultiSelectDropdown
+                                          label=""
+                                          selectedValues={selectedValues}
+                                          onSelectionChange={(newSelectedValues) => {
+                                            onChartFilterChange?.(chart.id, column, newSelectedValues);
+                                          }}
+                                          options={uniqueValues.map(value => ({ 
+                                            value, 
+                                            label: value || '(empty)' 
+                                          }))}
+                                          showSelectAll={true}
+                                          showTrigger={true}
+                                          placeholder={`Filter by ${column}`}
+                                          className="w-full"
+                                        />
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
                           );
                         }
                       })()}
                      
-                    <CardContent className={`${isCompact ? 'px-2 pb-2 pt-1' : 'px-4 pb-4 pt-1'}`}>
+                    <CardContent 
+                      className={`${isCompact ? 'px-2 pb-2 pt-1' : 'px-4 pb-4 pt-1'}`}
+                      onClick={(e) => e.stopPropagation()}
+                    >
                        <div className="overflow-hidden">
                          {renderChart(chart, index)}
                        </div>
@@ -1229,6 +1306,17 @@ const renderChart = (
                    </Card>
             );
           })}
+        </div>
+        
+        {/* Add Chart Button */}
+        <div className="flex justify-center mt-6">
+          <Button
+            onClick={addChart}
+            className="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 text-black border-0 shadow-sm"
+            size="sm"
+          >
+            <Plus className="w-4 h-4" />
+          </Button>
         </div>
       </div>
 
