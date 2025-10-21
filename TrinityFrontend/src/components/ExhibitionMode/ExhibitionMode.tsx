@@ -99,7 +99,6 @@ const ExhibitionMode = () => {
   const [showGridView, setShowGridView] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'horizontal' | 'vertical'>('horizontal');
-  const [isCatalogueOpen, setIsCatalogueOpen] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [undoAvailable, setUndoAvailable] = useState(false);
   const [operationsPanelState, setOperationsPanelState] = useState<
@@ -1413,29 +1412,18 @@ const ExhibitionMode = () => {
           <div className="flex h-full flex-shrink-0">
             <div className="bg-background border-r border-border transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
               <div className="p-3 border-b border-border flex items-center justify-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowThumbnails(false);
-                    setIsCatalogueOpen(prev => !prev);
-                  }}
-                  className={cn(
-                    'inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted',
-                    isCatalogueOpen ? 'text-foreground' : 'text-muted-foreground'
-                  )}
-                  title={`${isCatalogueOpen ? 'Collapse' : 'Open'} exhibition catalogue`}
-                  aria-label={`${isCatalogueOpen ? 'Collapse' : 'Open'} exhibition catalogue`}
-                  data-exhibition-catalogue-toggle="true"
+                <div
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-muted text-foreground"
+                  aria-hidden="true"
                 >
                   <FileText className="h-4 w-4" />
-                </button>
+                </div>
               </div>
               <div className="p-3 border-b border-border flex items-center justify-center">
                 <button
                   type="button"
                   onClick={() => {
                     setShowGridView(false);
-                    setIsCatalogueOpen(false);
                     setShowThumbnails(true);
                   }}
                   className={cn(
@@ -1451,18 +1439,15 @@ const ExhibitionMode = () => {
               </div>
             </div>
 
-            {isCatalogueOpen && (
-              <ExhibitionCatalogue
-                cards={catalogueCards}
-                currentSlide={currentSlide}
-                onSlideSelect={handleSlideSelection}
-                slideIndexByCardId={slideIndexByCardId}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                enableDragging={canEdit}
-                onCollapse={() => setIsCatalogueOpen(false)}
-              />
-            )}
+            <ExhibitionCatalogue
+              cards={catalogueCards}
+              currentSlide={currentSlide}
+              onSlideSelect={handleSlideSelection}
+              slideIndexByCardId={slideIndexByCardId}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+              enableDragging={canEdit}
+            />
 
             {showThumbnails && (
               <SlideThumbnails
