@@ -1396,14 +1396,27 @@ const addNewCardWithAtom = async (
   const insertIndex =
     position === undefined || position >= arr.length ? arr.length : position;
 
+  const requestUrl = `${LABORATORY_API}/cards`;
+  console.info('🧪 Attempting to create laboratory card via API', {
+    requestUrl,
+    atomId,
+    moleculeId,
+    frontendOrigin: typeof window !== 'undefined' ? window.location.origin : 'server',
+  });
+
   try {
-    const response = await fetch(`${LABORATORY_API}/cards`, {
+    const response = await fetch(requestUrl, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ atomId, moleculeId }),
     });
     if (!response.ok) {
+      console.error('🚫 Laboratory card creation failed', {
+        status: response.status,
+        statusText: response.statusText,
+        requestUrl,
+      });
       throw new Error(`Request failed with status ${response.status}`);
     }
     const payload = (await response.json()) as CardPayload;
@@ -1416,7 +1429,10 @@ const addNewCardWithAtom = async (
     setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
     newCard.atoms.forEach(atom => prefillAtomIfRequired(newCard.id, atom));
   } catch (err) {
-    console.error('⚠️ Failed to create laboratory card via API, using fallback', err);
+    console.error('⚠️ Failed to create laboratory card via API, using fallback', {
+      error: err,
+      requestUrl,
+    });
     toast({
       title: 'Unable to reach laboratory service',
       description: 'Using local defaults for the new card. Please verify your network connection.',

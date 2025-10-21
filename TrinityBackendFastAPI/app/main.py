@@ -1,6 +1,6 @@
 import os
 import socket
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 from urllib.parse import urlparse
 
 from fastapi import FastAPI
@@ -127,9 +127,41 @@ def _load_cors_origins() -> List[str]:
     return _default_cors_origins()
 
 
+def _default_cors_origin_regex() -> Optional[str]:
+    """Allow all RFC1918/localhost origins to simplify container IP changes."""
+
+    private_blocks = [
+        r"10\.\d+\.\d+\.\d+",
+        r"127\.0\.0\.1",
+        r"localhost",
+        r"192\.168\.\d+\.\d+",
+        r"172\.(?:1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+",
+    ]
+
+    if not private_blocks:
+        return None
+
+    return r"^https?://(?:" + "|".join(private_blocks) + r")(?:\:\d+)?$"
+
+
+def _load_cors_origin_regex() -> Optional[str]:
+    """Read an explicit regex or fall back to the private network default."""
+
+    configured = os.getenv("FASTAPI_CORS_ORIGIN_REGEX")
+    if configured:
+        configured = configured.strip()
+        if configured:
+            return configured
+    return _default_cors_origin_regex()
+
+
 app = FastAPI()
 
 allowed_origins = _load_cors_origins()
+allowed_origin_regex: Optional[str] = None
+
+if allowed_origins != ["*"]:
+    allowed_origin_regex = _load_cors_origin_regex()
 
 app.add_middleware(
     CORSMiddleware,
@@ -137,6 +169,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_origin_regex=allowed_origin_regex,
 )
 
 app.include_router(api_router, prefix="/api")
