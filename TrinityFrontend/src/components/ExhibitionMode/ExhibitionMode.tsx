@@ -25,11 +25,8 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  saveExhibitionConfiguration,
   saveExhibitionLayout,
   fetchExhibitionManifest,
-  type ExhibitionAtomPayload,
-  type ExhibitionComponentPayload,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 import { createTextBoxSlideObject } from './components/operationsPalette/textBox/constants';
@@ -729,51 +726,6 @@ const ExhibitionMode = () => {
     }
   }, []);
 
-  const mapAtomToPayload = useCallback((atom: DroppedAtom): ExhibitionComponentPayload => {
-    return {
-      id: atom.id,
-      atomId: atom.atomId,
-      title: atom.title,
-      category: atom.category,
-      color: atom.color,
-      metadata: atom.metadata ?? undefined,
-    };
-  }, []);
-
-  const mapCardToAtomEntry = useCallback(
-    (card: LayoutCard): ExhibitionAtomPayload | null => {
-      const componentsSource = Array.isArray(card.catalogueAtoms) && card.catalogueAtoms.length > 0
-        ? card.catalogueAtoms
-        : card.atoms;
-
-      const exhibitedComponents = Array.isArray(componentsSource)
-        ? componentsSource
-            .map(mapAtomToPayload)
-            .filter(component => typeof component.id === 'string' && component.id.trim().length > 0)
-        : [];
-
-      if (exhibitedComponents.length === 0) {
-        return null;
-      }
-
-      const resolvedName =
-        (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0
-          ? card.moleculeTitle.trim()
-          : undefined) ||
-        (typeof card.moleculeId === 'string' && card.moleculeId.trim().length > 0
-          ? card.moleculeId.trim()
-          : undefined) ||
-        card.id;
-
-      return {
-        id: card.id,
-        atom_name: resolvedName,
-        exhibited_components: exhibitedComponents,
-      };
-    },
-    [mapAtomToPayload],
-  );
-
   const handleSave = useCallback(async () => {
     if (!canEdit) {
       toast({
@@ -802,9 +754,6 @@ const ExhibitionMode = () => {
 
     try {
       const cardsToPersist = JSON.parse(JSON.stringify(cards)) as LayoutCard[];
-      const atomsToPersist = cardsToPersist
-        .map(mapCardToAtomEntry)
-        .filter((entry): entry is ExhibitionAtomPayload => entry !== null);
 
       const slideObjectsToPersist = cards.reduce<Record<string, any[]>>((acc, card) => {
         const objects = slideObjectsByCardId[card.id] ?? [];
@@ -812,12 +761,6 @@ const ExhibitionMode = () => {
         return acc;
       }, {} as Record<string, any[]>);
 
-      await saveExhibitionConfiguration({
-        client_name: context.client_name,
-        app_name: context.app_name,
-        project_name: context.project_name,
-        atoms: atomsToPersist,
-      });
       await saveExhibitionLayout({
         client_name: context.client_name,
         app_name: context.app_name,
@@ -828,17 +771,17 @@ const ExhibitionMode = () => {
       persistCardsLocally(cardsToPersist);
       toast({ title: 'Exhibition saved', description: 'Your exhibition updates have been saved.' });
     } catch (error) {
-      console.error('Failed to save exhibition configuration', error);
+      console.error('Failed to save exhibition layout', error);
       toast({
         title: 'Save failed',
         description:
-          error instanceof Error ? error.message : 'Unable to save your exhibition configuration right now.',
+          error instanceof Error ? error.message : 'Unable to save your exhibition layout right now.',
         variant: 'destructive',
       });
     } finally {
       setIsSaving(false);
     }
-  }, [canEdit, cards, isSaving, mapCardToAtomEntry, persistCardsLocally, toast]);
+  }, [canEdit, cards, isSaving, persistCardsLocally, slideObjectsByCardId, toast]);
 
   const handleShare = useCallback(async () => {
     if (typeof window === 'undefined' || typeof navigator === 'undefined') {
