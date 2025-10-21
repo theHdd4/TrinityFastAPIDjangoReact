@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Optional
+from typing import Iterable, Optional
+from urllib.parse import parse_qs, urlparse
 
 try:  # pragma: no cover - ``pymongo`` should be installed in runtime images
     from pymongo import MongoClient
@@ -81,6 +82,112 @@ DEFAULT_DATABASE = (
 )
 DEFAULT_COLLECTION = os.getenv("EXHIBITION_COLLECTION", "exhibition_catalogue")
 
+_USERNAME_ENV_VARS: tuple[str, ...] = (
+    "EXHIBITION_MONGO_USERNAME",
+    "MONGO_USERNAME",
+    "MONGO_USER",
+    "MONGO_INITDB_ROOT_USERNAME",
+    "MONGO_INITDB_USERNAME",
+    "MONGO_ROOT_USERNAME",
+)
+_PASSWORD_ENV_VARS: tuple[str, ...] = (
+    "EXHIBITION_MONGO_PASSWORD",
+    "MONGO_PASSWORD",
+    "MONGO_PASS",
+    "MONGO_INITDB_ROOT_PASSWORD",
+    "MONGO_INITDB_PASSWORD",
+    "MONGO_ROOT_PASSWORD",
+)
+_AUTH_SOURCE_ENV_VARS: tuple[str, ...] = (
+    "EXHIBITION_MONGO_AUTH_SOURCE",
+    "MONGO_AUTH_SOURCE",
+    "MONGO_AUTH_DB",
+)
+_AUTH_MECHANISM_ENV_VARS: tuple[str, ...] = (
+    "EXHIBITION_MONGO_AUTH_MECHANISM",
+    "MONGO_AUTH_MECHANISM",
+)
+_AUTH_FLAG_ENV_VARS: tuple[str, ...] = (
+    "EXHIBITION_REQUIRE_MONGO_AUTH",
+    "MONGO_REQUIRE_AUTH",
+)
+
+
+def _first_non_empty_env(names: Iterable[str]) -> Optional[str]:
+    for name in names:
+        value = os.getenv(name)
+        if value is None:
+            continue
+        stripped = value.strip()
+        if stripped:
+            return stripped
+    return None
+
+
+def _first_truthy_flag(names: Iterable[str]) -> Optional[bool]:
+    truthy = {"1", "true", "yes", "on"}
+    falsy = {"0", "false", "no", "off"}
+    for name in names:
+        value = os.getenv(name)
+        if value is None:
+            continue
+        lowered = value.strip().lower()
+        if not lowered:
+            continue
+        if lowered in truthy:
+            return True
+        if lowered in falsy:
+            return False
+    return None
+
+
+def _auth_source_from_uri(uri: str) -> Optional[str]:
+    parsed = urlparse(uri)
+    if parsed.query:
+        query = parse_qs(parsed.query)
+        for candidate in query.get("authSource", []):
+            candidate = candidate.strip()
+            if candidate:
+                return candidate
+    return None
+
+
+def _should_require_auth(uri: str) -> bool:
+    flag = _first_truthy_flag(_AUTH_FLAG_ENV_VARS)
+    if flag is not None:
+        return flag
+
+    parsed = urlparse(uri)
+    if parsed.username or parsed.password:
+        return False
+
+    if _first_non_empty_env(_USERNAME_ENV_VARS):
+        return True
+    if _first_non_empty_env(_PASSWORD_ENV_VARS):
+        return True
+    if _first_non_empty_env(_AUTH_SOURCE_ENV_VARS):
+        return True
+    if _auth_source_from_uri(uri):
+        return True
+    return False
+
+
+def _mongo_credentials(uri: str) -> tuple[Optional[str], Optional[str], Optional[str], bool]:
+    username = _first_non_empty_env(_USERNAME_ENV_VARS)
+    password = _first_non_empty_env(_PASSWORD_ENV_VARS)
+    auth_source = _first_non_empty_env(_AUTH_SOURCE_ENV_VARS)
+
+    require_auth = _should_require_auth(uri)
+    if not require_auth:
+        return None, None, None, False
+
+    username = username or "admin_dev"
+    password = password or "pass_dev"
+    if not auth_source:
+        auth_source = _auth_source_from_uri(uri) or "admin"
+
+    return username, password, auth_source, True
+
 _mongo_client: Optional[MongoClient] = None
 _mongo_database: Optional[Database] = None
 _mongo_collection: Optional[Collection] = None
@@ -91,32 +198,24 @@ def _mongo_disabled() -> bool:
 
 
 def _mongo_auth_kwargs(uri: str) -> dict[str, str]:
-    """Build authentication kwargs for :class:`~pymongo.MongoClient`.
-
-    If credentials are embedded in the URI we avoid passing duplicate values,
-    mirroring the behaviour used by other features such as the column
-    classifier module.
-    """
+    """Build authentication kwargs for :class:`~pymongo.MongoClient`."""
 
     if "@" in uri.split("//", 1)[-1]:
         return {}
 
-    username = (os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER") or "").strip()
-    password = (os.getenv("MONGO_PASSWORD") or os.getenv("MONGO_PASS") or "").strip()
-    auth_source = (
-        os.getenv("MONGO_AUTH_SOURCE")
-        or os.getenv("MONGO_AUTH_DB")
-        or "admin"
-    ).strip()
-    auth_mechanism = os.getenv("MONGO_AUTH_MECHANISM", "").strip()
+    username, password, auth_source, require_auth = _mongo_credentials(uri)
+    if not require_auth:
+        return {}
 
     kwargs: dict[str, str] = {}
     if username:
         kwargs["username"] = username
     if password:
         kwargs["password"] = password
-    if (username or password) and auth_source:
+    if auth_source:
         kwargs["authSource"] = auth_source
+
+    auth_mechanism = _first_non_empty_env(_AUTH_MECHANISM_ENV_VARS)
     if auth_mechanism:
         kwargs["authMechanism"] = auth_mechanism
 
@@ -126,24 +225,40 @@ def _mongo_auth_kwargs(uri: str) -> dict[str, str]:
 def _default_mongo_uri() -> str:
     """Construct the default MongoDB URI for the exhibition catalogue."""
 
-    username_env = os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER")
-    password_env = os.getenv("MONGO_PASSWORD") or os.getenv("MONGO_PASS")
+    username, password, auth_source, require_auth = _mongo_credentials("")
 
-    username = username_env.strip() if isinstance(username_env, str) and username_env.strip() else "admin_dev"
-    password = password_env.strip() if isinstance(password_env, str) and password_env.strip() else "pass_dev"
-
-    auth_source_env = (
-        os.getenv("MONGO_AUTH_SOURCE")
-        or os.getenv("MONGO_AUTH_DB")
-    )
-    auth_source = auth_source_env.strip() if isinstance(auth_source_env, str) and auth_source_env.strip() else "admin"
+    if not require_auth:
+        username = ""
+        password = ""
+        auth_source = ""
 
     return build_host_mongo_uri(
-        username=username,
-        password=password,
-        auth_source=auth_source,
+        username=username or "",
+        password=password or "",
+        auth_source=auth_source or "",
         database=DEFAULT_DATABASE,
     )
+
+
+def resolve_mongo_uri() -> str:
+    """Return the Mongo connection string used by the exhibition module."""
+
+    return os.getenv("EXHIBITION_MONGO_URI") or os.getenv("MONGO_URI") or _default_mongo_uri()
+
+
+def resolve_mongo_auth_kwargs(uri: Optional[str] = None) -> dict[str, str]:
+    """Return the authentication keyword arguments for Mongo clients."""
+
+    target_uri = uri or resolve_mongo_uri()
+    return _mongo_auth_kwargs(target_uri)
+
+
+def resolve_mongo_connection() -> tuple[str, dict[str, str]]:
+    """Return the connection URI and auth kwargs for Mongo clients."""
+
+    uri = resolve_mongo_uri()
+    auth_kwargs = _mongo_auth_kwargs(uri)
+    return uri, auth_kwargs
 
 
 def ensure_mongo_connection(*, force: bool = False) -> bool:
@@ -166,8 +281,7 @@ def ensure_mongo_connection(*, force: bool = False) -> bool:
         logging.warning("pymongo not available; exhibition catalogue will rely on file storage")
         return False
 
-    uri = os.getenv("EXHIBITION_MONGO_URI") or os.getenv("MONGO_URI") or _default_mongo_uri()
-    auth_kwargs = _mongo_auth_kwargs(uri)
+    uri, auth_kwargs = resolve_mongo_connection()
 
     client: Optional[MongoClient] = None
     try:
@@ -244,5 +358,8 @@ __all__ = [
     "ensure_mongo_connection",
     "get_mongo_client",
     "get_mongo_collection",
+    "resolve_mongo_auth_kwargs",
+    "resolve_mongo_connection",
+    "resolve_mongo_uri",
 ]
 

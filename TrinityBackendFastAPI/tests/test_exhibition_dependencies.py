@@ -5,15 +5,17 @@ import pathlib
 import sys
 import types
 
+import asyncio
+import pytest
 
-def _load_exhibition_deps():
-    module_name = "exhibition_deps_for_tests"
+
+def _load_exhibition_module(module_filename: str, module_name: str):
     path = (
         pathlib.Path(__file__).resolve().parents[1]
         / "app"
         / "features"
         / "exhibition"
-        / "deps.py"
+        / module_filename
     )
 
     for name in [
@@ -33,11 +35,19 @@ def _load_exhibition_deps():
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
 
-    app_pkg = types.ModuleType("app")
-    app_pkg.__path__ = []  # type: ignore[attr-defined]
-    core_pkg = types.ModuleType("app.core")
-    core_pkg.__path__ = []  # type: ignore[attr-defined]
-    mongo_module = types.ModuleType("app.core.mongo")
+    app_pkg = sys.modules.get("app") or types.ModuleType("app")
+    if not hasattr(app_pkg, "__path__"):
+        app_pkg.__path__ = []  # type: ignore[attr-defined]
+    features_pkg = sys.modules.get("app.features") or types.ModuleType("app.features")
+    if not hasattr(features_pkg, "__path__"):
+        features_pkg.__path__ = []  # type: ignore[attr-defined]
+    exhibition_pkg = sys.modules.get("app.features.exhibition") or types.ModuleType("app.features.exhibition")
+    if not hasattr(exhibition_pkg, "__path__"):
+        exhibition_pkg.__path__ = []  # type: ignore[attr-defined]
+    core_pkg = sys.modules.get("app.core") or types.ModuleType("app.core")
+    if not hasattr(core_pkg, "__path__"):
+        core_pkg.__path__ = []  # type: ignore[attr-defined]
+    mongo_module = sys.modules.get("app.core.mongo") or types.ModuleType("app.core.mongo")
 
     def _build_host_mongo_uri(
         *,
@@ -60,9 +70,13 @@ def _load_exhibition_deps():
 
     mongo_module.build_host_mongo_uri = _build_host_mongo_uri  # type: ignore[attr-defined]
     app_pkg.core = core_pkg  # type: ignore[attr-defined]
+    app_pkg.features = features_pkg  # type: ignore[attr-defined]
+    features_pkg.exhibition = exhibition_pkg  # type: ignore[attr-defined]
     core_pkg.mongo = mongo_module  # type: ignore[attr-defined]
 
     sys.modules["app"] = app_pkg
+    sys.modules["app.features"] = features_pkg
+    sys.modules["app.features.exhibition"] = exhibition_pkg
     sys.modules["app.core"] = core_pkg
     sys.modules["app.core.mongo"] = mongo_module
 
@@ -116,12 +130,15 @@ def _load_exhibition_deps():
 
     spec = importlib.util.spec_from_file_location(module_name, path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    if "." in module_name:
+        module.__package__ = module_name.rsplit(".", 1)[0]
     spec.loader.exec_module(module)
     return module
 
 
 def test_mongo_auth_kwargs_requires_flag(monkeypatch):
-    module = _load_exhibition_deps()
+    module = _load_exhibition_module("mongo.py", "app.features.exhibition.mongo")
 
     for env in [
         "EXHIBITION_REQUIRE_MONGO_AUTH",
@@ -142,7 +159,7 @@ def test_mongo_auth_kwargs_requires_flag(monkeypatch):
 
     monkeypatch.setenv("EXHIBITION_REQUIRE_MONGO_AUTH", "true")
 
-    kwargs = module._mongo_auth_kwargs("mongodb://10.2.3.238:27017/trinity_db")
+    kwargs = module.resolve_mongo_auth_kwargs("mongodb://10.2.3.238:27017/trinity_db")
 
     assert kwargs == {
         "username": "admin_dev",
@@ -152,14 +169,14 @@ def test_mongo_auth_kwargs_requires_flag(monkeypatch):
 
 
 def test_mongo_auth_kwargs_respects_env(monkeypatch):
-    module = _load_exhibition_deps()
+    module = _load_exhibition_module("mongo.py", "app.features.exhibition.mongo")
 
     monkeypatch.setenv("MONGO_USERNAME", "custom_user")
     monkeypatch.setenv("MONGO_PASSWORD", "custom_pass")
     monkeypatch.setenv("MONGO_AUTH_SOURCE", "custom_db")
     monkeypatch.setenv("MONGO_AUTH_MECHANISM", "SCRAM-SHA-256")
 
-    kwargs = module._mongo_auth_kwargs("mongodb://mongo:27017/trinity_db")
+    kwargs = module.resolve_mongo_auth_kwargs("mongodb://mongo:27017/trinity_db")
 
     assert kwargs == {
         "username": "custom_user",
@@ -170,24 +187,24 @@ def test_mongo_auth_kwargs_respects_env(monkeypatch):
 
 
 def test_mongo_auth_kwargs_skips_when_uri_contains_credentials(monkeypatch):
-    module = _load_exhibition_deps()
+    module = _load_exhibition_module("mongo.py", "app.features.exhibition.mongo")
 
     monkeypatch.setenv("MONGO_USERNAME", "custom_user")
     monkeypatch.setenv("MONGO_PASSWORD", "custom_pass")
 
-    kwargs = module._mongo_auth_kwargs("mongodb://user:pass@mongo:27017/trinity_db")
+    kwargs = module.resolve_mongo_auth_kwargs("mongodb://user:pass@mongo:27017/trinity_db")
 
     assert kwargs == {}
 
 
 def test_mongo_auth_kwargs_prefers_initdb_root(monkeypatch):
-    module = _load_exhibition_deps()
+    module = _load_exhibition_module("mongo.py", "app.features.exhibition.mongo")
 
     monkeypatch.delenv("EXHIBITION_REQUIRE_MONGO_AUTH", raising=False)
     monkeypatch.setenv("MONGO_INITDB_ROOT_USERNAME", "root")
     monkeypatch.setenv("MONGO_INITDB_ROOT_PASSWORD", "rootpass")
 
-    kwargs = module._mongo_auth_kwargs("mongodb://mongo:27017/trinity_db?authSource=admin")
+    kwargs = module.resolve_mongo_auth_kwargs("mongodb://mongo:27017/trinity_db?authSource=admin")
 
     assert kwargs["username"] == "root"
     assert kwargs["password"] == "rootpass"
@@ -195,7 +212,7 @@ def test_mongo_auth_kwargs_prefers_initdb_root(monkeypatch):
 
 
 def test_mongo_auth_kwargs_no_hints_returns_empty(monkeypatch):
-    module = _load_exhibition_deps()
+    module = _load_exhibition_module("mongo.py", "app.features.exhibition.mongo")
 
     for env in [
         "EXHIBITION_REQUIRE_MONGO_AUTH",
@@ -212,6 +229,76 @@ def test_mongo_auth_kwargs_no_hints_returns_empty(monkeypatch):
     ]:
         monkeypatch.delenv(env, raising=False)
 
-    kwargs = module._mongo_auth_kwargs("mongodb://mongo:27017/trinity_db")
+    kwargs = module.resolve_mongo_auth_kwargs("mongodb://mongo:27017/trinity_db")
 
     assert kwargs == {}
+
+
+class _StubCollection:
+    def __init__(self) -> None:
+        self.calls: list[tuple[dict, dict, bool]] = []
+
+    async def update_one(self, filter_query, update, *, upsert=False):  # pragma: no cover - exercised in tests
+        self.calls.append((filter_query, update, upsert))
+
+
+def test_save_layout_configuration_persists_metadata(monkeypatch):
+    _load_exhibition_module("mongo.py", "app.features.exhibition.mongo")
+    _load_exhibition_module("deps.py", "app.features.exhibition.deps")
+    _load_exhibition_module("schemas.py", "app.features.exhibition.schemas")
+    _load_exhibition_module("service.py", "app.features.exhibition.service")
+    routes = _load_exhibition_module("routes.py", "app.features.exhibition.routes")
+
+    layout_model = routes.ExhibitionLayoutConfigurationIn(
+        client_name="Acme",
+        app_name="Trinity",
+        project_name="Demo",
+        cards=[
+            {
+                "id": "slide-1",
+                "atoms": [
+                    {
+                        "id": "atom-entry-1",
+                        "atomId": "atom-123",
+                        "title": "Example Atom",
+                        "metadata": {"notes": "Preserve me"},
+                    }
+                ],
+                "catalogueAtoms": [
+                    {
+                        "id": "catalogue-1",
+                        "atomId": "atom-123",
+                        "metadata": {"category": "alpha"},
+                    }
+                ],
+                "presentationSettings": {"layout": "grid"},
+            }
+        ],
+        slide_objects={
+            "slide-1": [
+                {
+                    "id": "object-1",
+                    "type": "text",
+                    "x": 10,
+                    "y": 15,
+                    "props": {"value": "Hello"},
+                }
+            ]
+        },
+    )
+
+    collection = _StubCollection()
+    result = asyncio.run(routes.save_layout_configuration(layout_model, collection))  # type: ignore[arg-type]
+
+    assert result["status"] == "ok"
+    assert result["updated_at"] is not None
+
+    assert len(collection.calls) == 1
+    filter_query, update, upsert = collection.calls[0]
+    assert upsert is True
+    assert filter_query == {"client_name": "Acme", "app_name": "Trinity", "project_name": "Demo"}
+
+    persisted = update["$set"]
+    assert persisted["cards"][0]["atoms"][0]["metadata"] == {"notes": "Preserve me"}
+    assert persisted["cards"][0]["catalogueAtoms"][0]["metadata"] == {"category": "alpha"}
+    assert persisted["slide_objects"]["slide-1"][0]["props"] == {"value": "Hello"}
