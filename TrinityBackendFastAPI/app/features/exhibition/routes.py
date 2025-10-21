@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Dict
 
@@ -15,9 +16,11 @@ from .schemas import (
     ExhibitionManifestOut,
 )
 from .service import ExhibitionStorage
+from app.features.build_model_feature_based.mongodb_saver import save_atom_list_configuration
 
 router = APIRouter(prefix="/exhibition", tags=["Exhibition"])
 storage = ExhibitionStorage()
+logger = logging.getLogger(__name__)
 
 
 @router.get("/configuration", response_model=ExhibitionConfigurationOut)
@@ -124,10 +127,51 @@ async def save_layout_configuration(
         "updated_at": timestamp,
     }
 
+    atom_config_payload = {
+        "mode": "exhibition",
+        "cards": cards,
+    }
+
+    try:
+        atom_config_result = await save_atom_list_configuration(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            atom_config_data=atom_config_payload,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("Failed to persist exhibition configuration to atom_list_configuration: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save exhibition configuration",
+        ) from exc
+
+    if atom_config_result.get("status") != "success":
+        error_message = atom_config_result.get("error", "Unknown error")
+        logger.error(
+            "atom_list_configuration save failed for exhibition layout: %s",
+            error_message,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save exhibition configuration: {error_message}",
+        )
+
     await collection.update_one(
         {"client_name": client_name, "app_name": app_name, "project_name": project_name},
         {"$set": document},
         upsert=True,
     )
 
-    return {"status": "ok", "updated_at": timestamp}
+    response: Dict[str, Any] = {
+        "status": "ok",
+        "updated_at": timestamp,
+    }
+    if atom_config_result:
+        response["atom_configuration"] = {
+            "operation": atom_config_result.get("operation"),
+            "documents_inserted": atom_config_result.get("documents_inserted"),
+            "collection": atom_config_result.get("collection"),
+        }
+
+    return response

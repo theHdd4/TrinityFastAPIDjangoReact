@@ -29,12 +29,12 @@ def _default_mongo_uri() -> str:
     username = (
         username_env.strip()
         if isinstance(username_env, str) and username_env.strip()
-        else "admin_dev"
+        else "root"
     )
     password = (
         password_env.strip()
         if isinstance(password_env, str) and password_env.strip()
-        else "pass_dev"
+        else "rootpass"
     )
 
     auth_source_env = os.getenv("MONGO_AUTH_SOURCE") or os.getenv("MONGO_AUTH_DB")
@@ -48,6 +48,8 @@ def _default_mongo_uri() -> str:
         username=username,
         password=password,
         auth_source=auth_source,
+        default_host="mongo",
+        default_port="27017",
         database=DEFAULT_DATABASE,
     )
 
@@ -62,12 +64,12 @@ def _mongo_auth_kwargs(uri: str) -> dict[str, str]:
     username = (
         os.getenv("MONGO_USERNAME")
         or os.getenv("MONGO_USER")
-        or "admin_dev"
+        or "root"
     ).strip()
     password = (
         os.getenv("MONGO_PASSWORD")
         or os.getenv("MONGO_PASS")
-        or "pass_dev"
+        or "rootpass"
     ).strip()
     auth_source = (
         os.getenv("MONGO_AUTH_SOURCE")

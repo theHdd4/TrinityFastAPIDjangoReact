@@ -14,9 +14,10 @@ Root causes
 Fix implemented
 ---------------
 * ``FRONTEND_URL`` is now parsed and added (with host/port variants) to the default CORS allow list so requests from ``:8080`` style frontends receive the proper headers.
-* The Mongo helper now falls back to the standard ``admin_dev``/``pass_dev`` credentials when username or password variables are absent, aligning with the URI builder defaults and ensuring authenticated writes for development setups that rely on them.
+* The Mongo helper now falls back to the production-aligned ``root``/``rootpass`` credentials (matching ``docker-compose``) when username or password variables are absent, ensuring authenticated writes even when ``EXHIBITION_MONGO_URI`` omits inline credentials.
+* Saving exhibition layouts now reuses the same ``atom_list_configuration`` persistence pipeline as laboratory mode so the payload is authenticated and stored identically across modes before the dedicated exhibition layout document is updated.
 
 Validation
 ----------
 * Confirmed that the updated CORS configuration exposes the origin list including any hostname extracted from ``FRONTEND_URL``.
-* Ensured that saving an exhibition layout uses authenticated Mongo credentials when explicit values are not configured, preventing the prior ``OperationFailure``.
+* Ensured that saving an exhibition layout uses the shared laboratory persistence helper with authenticated Mongo credentials when explicit values are not configured, preventing the prior ``OperationFailure`` and aligning data storage across modes.
