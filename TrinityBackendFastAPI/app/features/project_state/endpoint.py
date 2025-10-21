@@ -7,3 +7,8 @@ router.include_router(
     prefix="/project-state",
     tags=["Project State"],
 )
+router.include_router(
+    state_routes,
+    prefix="/laboratory-project-state",
+    tags=["Laboratory Project State"],
+)

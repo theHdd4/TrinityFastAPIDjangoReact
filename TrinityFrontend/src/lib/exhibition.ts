@@ -1,4 +1,4 @@
-import { EXHIBITION_API } from '@/lib/api';
+import { EXHIBITION_API, EXHIBITION_PROJECT_STATE_API } from '@/lib/api';
 
 export interface ExhibitionComponentPayload {
   id: string;
@@ -121,15 +121,27 @@ export async function fetchExhibitionManifest(
 }
 
 export async function saveExhibitionLayout(payload: ExhibitionLayoutPayload): Promise<void> {
-  const response = await fetch(`${EXHIBITION_API}/layout`, {
+  const requestInit: RequestInit = {
     method: 'POST',
     headers: defaultHeaders,
     credentials: 'include',
     body: JSON.stringify(payload),
-  });
+  };
 
-  if (!response.ok) {
-    const message = await response.text();
+  const primaryResponse = await fetch(`${EXHIBITION_PROJECT_STATE_API}/save`, requestInit);
+
+  if (primaryResponse.ok) {
+    return;
+  }
+
+  if (![404, 405].includes(primaryResponse.status)) {
+    const message = await primaryResponse.text();
+    throw new Error(message || 'Failed to save exhibition layout');
+  }
+
+  const fallbackResponse = await fetch(`${EXHIBITION_API}/layout`, requestInit);
+  if (!fallbackResponse.ok) {
+    const message = await fallbackResponse.text();
     throw new Error(message || 'Failed to save exhibition layout');
   }
 }
@@ -138,19 +150,33 @@ export async function fetchExhibitionLayout(
   params: ExhibitionConfigurationQuery,
 ): Promise<ExhibitionLayoutResponse | null> {
   const search = new URLSearchParams(params as Record<string, string>);
-  const response = await fetch(`${EXHIBITION_API}/layout?${search.toString()}`, {
+  const projectStateResponse = await fetch(`${EXHIBITION_PROJECT_STATE_API}?${search.toString()}`, {
     method: 'GET',
     credentials: 'include',
   });
 
-  if (response.status === 404) {
-    return null;
+  if (projectStateResponse.ok) {
+    return projectStateResponse.json() as Promise<ExhibitionLayoutResponse>;
   }
 
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || 'Failed to fetch exhibition layout');
+  if ([404, 405].includes(projectStateResponse.status)) {
+    const fallbackResponse = await fetch(`${EXHIBITION_API}/layout?${search.toString()}`, {
+      method: 'GET',
+      credentials: 'include',
+    });
+
+    if (fallbackResponse.status === 404) {
+      return null;
+    }
+
+    if (!fallbackResponse.ok) {
+      const message = await fallbackResponse.text();
+      throw new Error(message || 'Failed to fetch exhibition layout');
+    }
+
+    return fallbackResponse.json() as Promise<ExhibitionLayoutResponse>;
   }
 
-  return response.json() as Promise<ExhibitionLayoutResponse>;
+  const message = await projectStateResponse.text();
+  throw new Error(message || 'Failed to fetch exhibition layout');
 }

@@ -15,7 +15,7 @@ import AuxiliaryMenu from './components/AuxiliaryMenu';
 import AuxiliaryMenuLeft from './components/AuxiliaryMenuLeft';
 import FloatingNavigationList from './components/FloatingNavigationList';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
-import { REGISTRY_API, LAB_ACTIONS_API } from '@/lib/api';
+import { REGISTRY_API, LAB_ACTIONS_API, LABORATORY_PROJECT_STATE_API } from '@/lib/api';
 import { useLaboratoryStore } from './store/laboratoryStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { addNavigationItem, logSessionState } from '@/lib/session';
@@ -27,6 +27,7 @@ import {
   LAB_PREP_CLASS,
   LAB_ENTRANCE_PREP_DELAY_MS,
 } from '@/utils/projectTransition';
+import { getActiveProjectContext } from '@/utils/projectEnv';
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 const useIsomorphicInsertionEffect =
@@ -238,6 +239,28 @@ const LaboratoryMode = () => {
         timestamp: new Date().toISOString(),
       };
       const sanitized = sanitizeLabConfig(labConfig);
+
+      const projectContext = getActiveProjectContext();
+      if (projectContext) {
+        try {
+          const response = await fetch(`${LABORATORY_PROJECT_STATE_API}/save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              client_id: projectContext.client_name,
+              app_id: projectContext.app_name,
+              project_id: projectContext.project_name,
+              state: { laboratory_config: sanitized },
+            }),
+          });
+          if (!response.ok && response.status !== 404) {
+            console.warn('Laboratory project state sync failed', response.status);
+          }
+        } catch (stateError) {
+          console.warn('Failed to persist laboratory project state', stateError);
+        }
+      }
 
       const current = localStorage.getItem('current-project');
       if (current) {

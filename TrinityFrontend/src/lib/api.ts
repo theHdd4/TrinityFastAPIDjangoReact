@@ -115,6 +115,14 @@ export const SESSION_API =
   normalizeUrl(import.meta.env.VITE_SESSION_API) ||
   `${backendOrigin}${djangoPrefix}/session`;
 
+export const LABORATORY_PROJECT_STATE_API =
+  normalizeUrl(import.meta.env.VITE_LABORATORY_PROJECT_STATE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/laboratory-project-state`;
+
+export const EXHIBITION_PROJECT_STATE_API =
+  normalizeUrl(import.meta.env.VITE_EXHIBITION_PROJECT_STATE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/exhibition-project-state`;
+
 export const FEATURE_OVERVIEW_API =
   normalizeUrl(import.meta.env.VITE_FEATURE_OVERVIEW_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/feature-overview`;

@@ -16,9 +16,13 @@ from .schemas import (
     ExhibitionManifestOut,
 )
 from .service import ExhibitionStorage
-from app.features.build_model_feature_based.mongodb_saver import save_atom_list_configuration
+from .mongodb_saver import save_exhibition_list_configuration
 
 router = APIRouter(prefix="/exhibition", tags=["Exhibition"])
+project_state_router = APIRouter(
+    prefix="/exhibition-project-state",
+    tags=["Exhibition Project State"],
+)
 storage = ExhibitionStorage()
 logger = logging.getLogger(__name__)
 
@@ -71,12 +75,11 @@ async def get_manifest(
     return ExhibitionManifestOut(**record)
 
 
-@router.get("/layout", response_model=ExhibitionLayoutConfigurationOut)
-async def get_layout_configuration(
-    client_name: str = Query(..., min_length=1),
-    app_name: str = Query(..., min_length=1),
-    project_name: str = Query(..., min_length=1),
-    collection: AsyncIOMotorCollection = Depends(get_exhibition_layout_collection),
+async def _load_layout_configuration(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    collection: AsyncIOMotorCollection,
 ) -> ExhibitionLayoutConfigurationOut:
     filter_query = {
         "client_name": client_name.strip(),
@@ -92,10 +95,9 @@ async def get_layout_configuration(
     return ExhibitionLayoutConfigurationOut(**record)
 
 
-@router.post("/layout", status_code=status.HTTP_200_OK)
-async def save_layout_configuration(
+async def _persist_layout_configuration(
     layout: ExhibitionLayoutConfigurationIn,
-    collection: AsyncIOMotorCollection = Depends(get_exhibition_layout_collection),
+    collection: AsyncIOMotorCollection,
 ) -> Dict[str, Any]:
     payload = layout.dict(by_alias=True)
     client_name = payload.get("client_name", "").strip()
@@ -127,29 +129,33 @@ async def save_layout_configuration(
         "updated_at": timestamp,
     }
 
-    atom_config_payload = {
+    exhibition_config_payload = {
         "mode": "exhibition",
         "cards": cards,
     }
 
     try:
-        atom_config_result = await save_atom_list_configuration(
+        exhibition_config_result = await save_exhibition_list_configuration(
             client_name=client_name,
             app_name=app_name,
             project_name=project_name,
-            atom_config_data=atom_config_payload,
+            exhibition_config_data=exhibition_config_payload,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.exception("Failed to persist exhibition configuration to atom_list_configuration: %s", exc)
+        logger.exception(
+            "Failed to persist exhibition configuration to %s: %s",
+            "exhibition_list_configuration",
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to save exhibition configuration",
         ) from exc
 
-    if atom_config_result.get("status") != "success":
-        error_message = atom_config_result.get("error", "Unknown error")
+    if exhibition_config_result.get("status") != "success":
+        error_message = exhibition_config_result.get("error", "Unknown error")
         logger.error(
-            "atom_list_configuration save failed for exhibition layout: %s",
+            "exhibition_list_configuration save failed for exhibition layout: %s",
             error_message,
         )
         raise HTTPException(
@@ -167,11 +173,47 @@ async def save_layout_configuration(
         "status": "ok",
         "updated_at": timestamp,
     }
-    if atom_config_result:
-        response["atom_configuration"] = {
-            "operation": atom_config_result.get("operation"),
-            "documents_inserted": atom_config_result.get("documents_inserted"),
-            "collection": atom_config_result.get("collection"),
+    if exhibition_config_result:
+        response["exhibition_configuration"] = {
+            "operation": exhibition_config_result.get("operation"),
+            "documents_inserted": exhibition_config_result.get("documents_inserted"),
+            "collection": exhibition_config_result.get("collection"),
         }
 
     return response
+
+
+@router.get("/layout", response_model=ExhibitionLayoutConfigurationOut)
+async def get_layout_configuration(
+    client_name: str = Query(..., min_length=1),
+    app_name: str = Query(..., min_length=1),
+    project_name: str = Query(..., min_length=1),
+    collection: AsyncIOMotorCollection = Depends(get_exhibition_layout_collection),
+) -> ExhibitionLayoutConfigurationOut:
+    return await _load_layout_configuration(client_name, app_name, project_name, collection)
+
+
+@project_state_router.get("", response_model=ExhibitionLayoutConfigurationOut)
+async def get_project_state_layout(
+    client_name: str = Query(..., min_length=1),
+    app_name: str = Query(..., min_length=1),
+    project_name: str = Query(..., min_length=1),
+    collection: AsyncIOMotorCollection = Depends(get_exhibition_layout_collection),
+) -> ExhibitionLayoutConfigurationOut:
+    return await _load_layout_configuration(client_name, app_name, project_name, collection)
+
+
+@router.post("/layout", status_code=status.HTTP_200_OK)
+async def save_layout_configuration(
+    layout: ExhibitionLayoutConfigurationIn,
+    collection: AsyncIOMotorCollection = Depends(get_exhibition_layout_collection),
+) -> Dict[str, Any]:
+    return await _persist_layout_configuration(layout, collection)
+
+
+@project_state_router.post("/save", status_code=status.HTTP_200_OK)
+async def save_project_state_layout(
+    layout: ExhibitionLayoutConfigurationIn,
+    collection: AsyncIOMotorCollection = Depends(get_exhibition_layout_collection),
+) -> Dict[str, Any]:
+    return await _persist_layout_configuration(layout, collection)
