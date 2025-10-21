@@ -1,4 +1,4 @@
-import { EXHIBITION_API } from '@/lib/api';
+import { EXHIBITION_API, EXHIBITION_PROJECT_STATE_API } from '@/lib/api';
 
 const logExhibitionRequest = (action: string, url: string, init: RequestInit) => {
   if (typeof window === 'undefined') return;
@@ -159,12 +159,12 @@ export async function fetchExhibitionManifest(
 }
 
 export async function saveExhibitionLayout(payload: ExhibitionLayoutPayload): Promise<void> {
-  const requestUrl = `${EXHIBITION_API}/layout`;
+  const requestUrl = `${EXHIBITION_PROJECT_STATE_API}/save`;
   const requestInit: RequestInit = {
     method: 'POST',
     headers: defaultHeaders,
     credentials: 'include',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, mode: 'exhibition' }),
   };
 
   logExhibitionRequest('Saving exhibition layout', requestUrl, requestInit);
@@ -175,6 +175,10 @@ export async function saveExhibitionLayout(payload: ExhibitionLayoutPayload): Pr
     const message = await response.text();
     logExhibitionFailure('Saving exhibition layout', message);
     throw new Error(message || 'Failed to save exhibition layout');
+  }
+
+  if (typeof window !== 'undefined') {
+    console.info('[Exhibition API] Layout saved successfully');
   }
 }
 

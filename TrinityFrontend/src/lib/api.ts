@@ -103,6 +103,14 @@ export const EXHIBITION_API =
   normalizeUrl(import.meta.env.VITE_EXHIBITION_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/exhibition`;
 
+export const LABORATORY_PROJECT_STATE_API =
+  normalizeUrl(import.meta.env.VITE_LABORATORY_PROJECT_STATE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/laboratory-project-state`;
+
+export const EXHIBITION_PROJECT_STATE_API =
+  normalizeUrl(import.meta.env.VITE_EXHIBITION_PROJECT_STATE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/exhibition-project-state`;
+
 export const CONCAT_API =
   normalizeUrl(import.meta.env.VITE_CONCAT_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/concat`;

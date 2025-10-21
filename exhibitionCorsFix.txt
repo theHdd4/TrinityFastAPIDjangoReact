@@ -48,3 +48,13 @@ Validation
 * Browser logs surface both the outbound URLs and HTTP status codes for
   exhibition layout saves and laboratory card creation, making CORS triage far
   quicker.
+* Added dedicated ``/api/laboratory-project-state/save`` and
+  ``/api/exhibition-project-state/save`` endpoints that authenticate with the
+  ``root:rootpass`` Mongo credentials (via the shared ``MONGO_URI``) and write
+  into the ``atom_list_configuration``/``exhibition_list_configuration``
+  collections. The exhibition persistence layer now mirrors the laboratory
+  pipeline, creates a layout snapshot document and exposes the updated config
+  via ``/api/exhibition/layout`` without any authentication failures.
+* Frontend save buttons call the new endpoints and log success/failure states
+  (including payload details) so blocked requests can be correlated with the
+  backend logs immediately.

@@ -15,10 +15,11 @@ import AuxiliaryMenu from './components/AuxiliaryMenu';
 import AuxiliaryMenuLeft from './components/AuxiliaryMenuLeft';
 import FloatingNavigationList from './components/FloatingNavigationList';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
-import { REGISTRY_API, LAB_ACTIONS_API } from '@/lib/api';
+import { REGISTRY_API, LAB_ACTIONS_API, LABORATORY_PROJECT_STATE_API } from '@/lib/api';
 import { useLaboratoryStore } from './store/laboratoryStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { addNavigationItem, logSessionState } from '@/lib/session';
+import { getActiveProjectContext } from '@/utils/projectEnv';
 import {
   animateLabElementsIn,
   cleanupProjectTransition,
@@ -238,6 +239,46 @@ const LaboratoryMode = () => {
         timestamp: new Date().toISOString(),
       };
       const sanitized = sanitizeLabConfig(labConfig);
+
+      const projectContext = getActiveProjectContext();
+      if (projectContext) {
+        const requestUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
+        const payload = {
+          client_name: projectContext.client_name,
+          app_name: projectContext.app_name,
+          project_name: projectContext.project_name,
+          cards: sanitized.cards || [],
+          mode: 'laboratory',
+        };
+
+        const requestInit: RequestInit = {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(payload),
+        };
+
+        console.info('[Laboratory API] Saving laboratory configuration', {
+          url: requestUrl,
+          method: requestInit.method,
+          hasCards: Array.isArray(payload.cards) && payload.cards.length > 0,
+          project: payload.project_name,
+        });
+
+        try {
+          const response = await fetch(requestUrl, requestInit);
+          if (!response.ok) {
+            const message = await response.text();
+            console.error('[Laboratory API] Failed to persist configuration', message);
+          } else {
+            console.info('[Laboratory API] Configuration saved successfully');
+          }
+        } catch (apiError) {
+          console.error('[Laboratory API] Error while saving configuration', apiError);
+        }
+      } else {
+        console.warn('[Laboratory API] Skipping save, project context unavailable');
+      }
 
       const current = localStorage.getItem('current-project');
       if (current) {
