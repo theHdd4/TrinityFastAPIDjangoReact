@@ -16,7 +16,7 @@ import AuxiliaryMenuLeft from './components/AuxiliaryMenuLeft';
 import FloatingNavigationList from './components/FloatingNavigationList';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { REGISTRY_API, LAB_ACTIONS_API, LABORATORY_PROJECT_STATE_API } from '@/lib/api';
-import { useLaboratoryStore } from './store/laboratoryStore';
+import { useLaboratoryStore, LayoutCard } from './store/laboratoryStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { addNavigationItem, logSessionState } from '@/lib/session';
 import {
@@ -35,11 +35,33 @@ const useIsomorphicInsertionEffect =
     ? useInsertionEffect
     : useIsomorphicLayoutEffect;
 
+const collectExhibitedCards = (cardList: unknown): LayoutCard[] => {
+  if (!Array.isArray(cardList)) {
+    return [];
+  }
+
+  return cardList.filter((card): card is LayoutCard => {
+    if (!card || typeof card !== 'object') {
+      return false;
+    }
+
+    const candidate = card as { id?: unknown; atoms?: unknown };
+    if (typeof candidate.id !== 'string') {
+      return false;
+    }
+
+    const atoms = Array.isArray(candidate.atoms) ? candidate.atoms : [];
+    return atoms.some((atom: any) => {
+      const selections = atom?.settings?.exhibitionSelections;
+      return Array.isArray(selections) && selections.length > 0;
+    });
+  });
+};
+
 const LaboratoryMode = () => {
   const initialReduceMotion = useMemo(() => prefersReducedMotion(), []);
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
   const [selectedCardId, setSelectedCardId] = useState<string>();
-  const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
   const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'superagent' | null>(null);
   const { toast } = useToast();
@@ -160,7 +182,7 @@ const LaboratoryMode = () => {
           setExhibitionCards(last.state);
           const labConfig = {
             cards: last.state,
-            exhibitedCards: (last.state || []).filter((c: any) => c.isExhibited),
+            exhibitedCards: collectExhibitedCards(last.state || []),
             timestamp: new Date().toISOString(),
           };
           const sanitized = sanitizeLabConfig(labConfig);
@@ -208,11 +230,10 @@ const LaboratoryMode = () => {
     setSelectedCardId(undefined);
   };
 
-  const handleCardSelect = (cardId: string, exhibited: boolean) => {
+  const handleCardSelect = (cardId: string) => {
     if (!canEdit) return;
     setSelectedAtomId(undefined);
     setSelectedCardId(cardId);
-    setCardExhibited(exhibited);
   };
 
   const toggleSettingsPanel = () => {
@@ -228,7 +249,7 @@ const LaboratoryMode = () => {
   const handleSave = async () => {
     if (!canEdit) return;
     try {
-      const exhibitedCards = (cards || []).filter(card => card.isExhibited);
+      const exhibitedCards = collectExhibitedCards(cards);
 
       setExhibitionCards(cards);
 
@@ -421,7 +442,6 @@ const LaboratoryMode = () => {
             <AuxiliaryMenu
               selectedAtomId={selectedAtomId}
               selectedCardId={selectedCardId}
-              cardExhibited={cardExhibited}
               active={auxActive}
               onActiveChange={setAuxActive}
             />

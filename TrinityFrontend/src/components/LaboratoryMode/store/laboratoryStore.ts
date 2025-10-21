@@ -1457,7 +1457,6 @@ export interface DroppedAtom {
 export interface LayoutCard {
   id: string;
   atoms: DroppedAtom[];
-  isExhibited: boolean;
   moleculeId?: string;
   moleculeTitle?: string;
 }

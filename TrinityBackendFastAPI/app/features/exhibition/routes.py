@@ -132,6 +132,7 @@ async def _persist_layout_configuration(
     exhibition_config_payload = {
         "mode": "exhibition",
         "cards": cards,
+        "slide_objects": slide_objects,
     }
 
     try:

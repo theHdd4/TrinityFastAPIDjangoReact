@@ -3,9 +3,8 @@ import { createPortal } from 'react-dom';
 import { safeStringify } from '@/utils/safeStringify';
 import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
-import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon, GripVertical } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon, GripVertical } from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -73,7 +72,7 @@ import { deriveWorkflowMolecules, WorkflowMolecule } from './helpers';
 
 interface CanvasAreaProps {
   onAtomSelect?: (atomId: string) => void;
-  onCardSelect?: (cardId: string, exhibited: boolean) => void;
+  onCardSelect?: (cardId: string) => void;
   selectedCardId?: string;
   onToggleSettingsPanel?: () => void;
   onToggleHelpPanel?: () => void;
@@ -112,7 +111,6 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
     atoms: Array.isArray(card.atoms)
       ? card.atoms.map((atom: any) => hydrateDroppedAtom(atom))
       : [],
-    isExhibited: !!card.isExhibited,
     moleculeId: card.moleculeId,
     moleculeTitle: card.moleculeTitle,
   }));
@@ -864,7 +862,6 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           return {
             id: `card-${atom.atomName}-${Date.now()}-${Math.random()}`,
             atoms: [dropped],
-            isExhibited: false,
             moleculeId: atom.moleculeId,
             moleculeTitle: atom.moleculeTitle,
           } as LayoutCard;
@@ -944,7 +941,6 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
             return {
               id: `card-${atom.atomName}-${Date.now()}-${Math.random()}`,
               atoms: [dropped],
-              isExhibited: false,
               moleculeId: atom.moleculeId,
               moleculeTitle: atom.moleculeTitle,
             } as LayoutCard;
@@ -1251,7 +1247,6 @@ const addNewCard = (moleculeId?: string, position?: number) => {
   const newCard: LayoutCard = {
     id: generateClientId('card'),
     atoms: [],
-    isExhibited: false,
     moleculeId,
     moleculeTitle: info?.title,
   };
@@ -1356,7 +1351,6 @@ const buildCardFromApiPayload = (
   return {
     id: cardId,
     atoms,
-    isExhibited: Boolean(payload?.isExhibited),
     moleculeId,
     moleculeTitle: payload?.moleculeTitle ?? moleculeInfo?.title,
   };
@@ -1381,7 +1375,6 @@ const createFallbackCard = (atomId: string, moleculeId?: string): LayoutCard => 
   return {
     id: generateClientId('card'),
     atoms: [fallbackAtom],
-    isExhibited: false,
     moleculeId,
     moleculeTitle: cardInfo?.title,
   };
@@ -1686,11 +1679,10 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
   const handleCardSettingsClick = (
     e: React.MouseEvent,
     cardId: string,
-    exhibited: boolean
   ) => {
     e.stopPropagation();
     if (onCardSelect) {
-      onCardSelect(cardId, exhibited);
+      onCardSelect(cardId);
     }
     onToggleSettingsPanel?.();
   };
@@ -1698,11 +1690,10 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
   const handleCardClick = (
     e: React.MouseEvent,
     cardId: string,
-    exhibited: boolean
   ) => {
     e.stopPropagation();
     if (onCardSelect) {
-      onCardSelect(cardId, exhibited);
+      onCardSelect(cardId);
     }
   };
 
@@ -1821,15 +1812,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
       delete copy[moleculeId];
       return copy;
     });
-  };
-
-  const handleExhibitionToggle = (cardId: string, isExhibited: boolean) => {
-    const updated = (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
-      card.id === cardId ? { ...card, isExhibited } : card
-    );
-
-    setLayoutCards(updated);
-    setCards(updated);
   };
 
   const refreshCardAtoms = async (cardId: string) => {
@@ -2005,7 +1987,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                   <GripVertical className="w-3 h-3 text-gray-400" />
                                 </div>
                               )}
-                              <Eye className={`w-4 h-4 ${card.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                               <span className="text-sm font-medium text-gray-700">
                                 {cardTitle}
                               </span>
@@ -2017,13 +1998,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               />
                             </div>
                             <div className="flex items-center space-x-2">
-                              <span className="text-xs text-gray-500">Exhibit the Card</span>
-                              <Switch
-                                checked={card.isExhibited || false}
-                                onCheckedChange={checked => handleExhibitionToggle(card.id, checked)}
-                                onClick={e => e.stopPropagation()}
-                                className="data-[state=checked]:bg-[#458EE2]"
-                              />
                               <button
                                 onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
                                 className="p-1 hover:bg-gray-100 rounded"
@@ -2228,7 +2202,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                   <GripVertical className="w-3 h-3 text-gray-400" />
                                 </div>
                               )}
-                              <Eye className={`w-4 h-4 ${card.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                               <span className="text-sm font-medium text-gray-700">
                                 {cardTitle}
                               </span>
@@ -2240,14 +2213,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               />
                             </div>
                             <div className="flex items-center space-x-2">
-                              <span className="text-xs text-gray-500">Exhibit the Card</span>
-                              <Switch
-                                checked={card.isExhibited || false}
-                                onCheckedChange={checked => handleExhibitionToggle(card.id, checked)}
-                                onClick={e => e.stopPropagation()}
-                                className="data-[state=checked]:bg-[#458EE2]"
-                              />
-                      <button
+                              <button
                                 onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
                                 className="p-1 hover:bg-gray-100 rounded"
                               >
@@ -2441,15 +2407,14 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
                 : 'border-gray-200 shadow-sm hover:shadow-md'
             }`}
-            onClick={(e) => handleCardClick(e, card.id, card.isExhibited)}
+            onClick={(e) => handleCardClick(e, card.id)}
             onDragOver={(e) => handleDragOver(e, card.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, card.id)}
           >
-            {/* Card Header with Exhibition Toggle */}
+            {/* Card Header */}
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <div className="flex items-center space-x-2">
-                <Eye className={`w-4 h-4 ${card.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                 <span className="text-sm font-medium text-gray-700">
                   {cardTitle}
                 </span>
@@ -2461,7 +2426,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 />
                 {card.atoms.length > 0 && (
                   <button
-                    onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
+                    onClick={e => handleCardSettingsClick(e, card.id)}
                     className="p-1 hover:bg-gray-100 rounded"
                     title="Card Settings"
                   >
@@ -2480,13 +2445,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 </button>
               </div>
               <div className="flex items-center space-x-2">
-                <span className="text-xs text-gray-500">Exhibit the Card</span>
-                <Switch
-                  checked={card.isExhibited || false}
-                  onCheckedChange={(checked) => handleExhibitionToggle(card.id, checked)}
-                  onClick={e => e.stopPropagation()}
-                  className="data-[state=checked]:bg-[#458EE2]"
-                />
                 <button
                   onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
                   className="p-1 hover:bg-gray-100 rounded"
@@ -2708,7 +2666,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
               {/* Fullscreen Header */}
               <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
                 <div className="flex items-center space-x-2">
-                <Eye className={`w-4 h-4 ${Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard)?.isExhibited : false ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                 <span className="text-lg font-semibold text-gray-900">
                   {(() => {
                     const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
@@ -2722,12 +2679,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 </span>
                 </div>
                 <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-500">Exhibit the Card</span>
-                <Switch
-                  checked={Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard)?.isExhibited || false : false}
-                  onCheckedChange={(checked) => handleExhibitionToggle(expandedCard, checked)}
-                  className="data-[state=checked]:bg-[#458EE2]"
-                />
                 <button
                   onClick={() => setExpandedCard(null)}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"

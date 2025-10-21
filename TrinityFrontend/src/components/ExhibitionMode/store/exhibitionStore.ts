@@ -646,7 +646,7 @@ const withPresentationDefaults = (card: Partial<LayoutCard>): LayoutCard => {
     id,
     atoms,
     catalogueAtoms,
-    isExhibited: typeof card.isExhibited === 'boolean' ? card.isExhibited : true,
+    isExhibited: atoms.length > 0,
     moleculeId,
     moleculeTitle,
     title: resolvedTitle,
@@ -744,7 +744,7 @@ const createBlankSlide = (): LayoutCard =>
     id: `exhibition-slide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     atoms: [],
     catalogueAtoms: [],
-    isExhibited: true,
+    isExhibited: false,
     moleculeTitle: 'Untitled Slide',
   });
 
@@ -766,6 +766,12 @@ const normaliseProjectContext = (context?: ProjectContext | null): ProjectContex
     app_name: app,
     project_name: project,
   };
+};
+
+const slideHasContent = (card: LayoutCard, slideObjects?: SlideObject[] | null): boolean => {
+  const hasAtoms = Array.isArray(card.atoms) && card.atoms.length > 0;
+  const hasObjects = Array.isArray(slideObjects) && slideObjects.length > 0;
+  return hasAtoms || hasObjects;
 };
 
 const computeCatalogueCards = (cards: LayoutCard[]): LayoutCard[] => {
@@ -967,16 +973,18 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         insertedBlankSlide = true;
       }
 
-      const nextExhibitedCards = ensuredCards.filter(card => card.isExhibited);
-      const nextCatalogueCards = shouldUseRemoteCatalogue
-        ? computeCatalogueCards(remoteCards)
-        : computeCatalogueCards(ensuredCards);
-
       const nextSlideObjects: Record<string, SlideObject[]> = {};
       ensuredCards.forEach(card => {
         const savedObjects = layoutSlideObjects[card.id] ?? state.slideObjectsByCardId[card.id];
         nextSlideObjects[card.id] = synchroniseSlideObjects(savedObjects, card);
       });
+
+      const nextExhibitedCards = ensuredCards.filter(card =>
+        slideHasContent(card, nextSlideObjects[card.id])
+      );
+      const nextCatalogueCards = shouldUseRemoteCatalogue
+        ? computeCatalogueCards(remoteCards)
+        : computeCatalogueCards(ensuredCards);
 
       console.info(
         `[Exhibition] Exhibition catalogue ready with ${nextCatalogueCards.length} catalogue card(s)` +
@@ -1068,22 +1076,24 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         return withPresentationDefaults(nextCard);
       });
 
-      if (!updatedCards.find(card => card.id === cardId)) {
-        const fallbackCard: LayoutCard = withPresentationDefaults({
-          id: cardId,
-          atoms: [],
-          isExhibited: true,
-          lastEditedAt: timestamp,
-          ...updatedCard,
-        });
-        updatedCards = [...updatedCards, fallbackCard];
-      }
-
-      const exhibitedCards = updatedCards.filter(card => card.isExhibited);
       const nextSlideObjects: Record<string, SlideObject[]> = {};
       updatedCards.forEach(card => {
         nextSlideObjects[card.id] = synchroniseSlideObjects(state.slideObjectsByCardId[card.id], card);
       });
+      if (!updatedCards.find(card => card.id === cardId)) {
+        const fallbackCard: LayoutCard = withPresentationDefaults({
+          id: cardId,
+          atoms: [],
+          lastEditedAt: timestamp,
+          ...updatedCard,
+        });
+        updatedCards = [...updatedCards, fallbackCard];
+        nextSlideObjects[fallbackCard.id] = synchroniseSlideObjects(state.slideObjectsByCardId[fallbackCard.id], fallbackCard);
+      }
+
+      const exhibitedCards = updatedCards.filter(card =>
+        slideHasContent(card, nextSlideObjects[card.id])
+      );
       return {
         cards: updatedCards,
         exhibitedCards,
@@ -1116,12 +1126,15 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       }
 
       cards.splice(insertPosition, 0, newCard);
-      const exhibitedCards = cards.filter(card => card.isExhibited);
 
       const slideObjectsByCardId = {
         ...state.slideObjectsByCardId,
         [newCard.id]: synchroniseSlideObjects([], newCard),
       };
+
+      const exhibitedCards = cards.filter(card =>
+        slideHasContent(card, slideObjectsByCardId[card.id])
+      );
 
       return {
         cards,
@@ -1140,12 +1153,15 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
     const cardsWithDefaults = safeCards.map(withPresentationDefaults);
 
-    const exhibitedCards = cardsWithDefaults.filter(card => card.isExhibited);
     set(state => {
       const nextSlideObjects: Record<string, SlideObject[]> = {};
       cardsWithDefaults.forEach(card => {
         nextSlideObjects[card.id] = synchroniseSlideObjects(state.slideObjectsByCardId[card.id], card);
       });
+
+      const exhibitedCards = cardsWithDefaults.filter(card =>
+        slideHasContent(card, nextSlideObjects[card.id])
+      );
 
       return {
         cards: cardsWithDefaults,

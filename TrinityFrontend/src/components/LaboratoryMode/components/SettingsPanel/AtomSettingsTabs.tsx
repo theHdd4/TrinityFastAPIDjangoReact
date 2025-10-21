@@ -9,7 +9,6 @@ interface Props {
   tab: string;
   setTab: (t: string) => void;
   selectedAtomId: string;
-  cardExhibited?: boolean;
   settings: TextBoxSettings;
   updateSettings: (id: string, s: Partial<TextBoxSettings>) => void;
 }
@@ -18,7 +17,6 @@ const AtomSettingsTabs: React.FC<Props> = ({
   tab,
   setTab,
   selectedAtomId,
-  cardExhibited,
   settings,
   updateSettings,
 }) => (
@@ -36,8 +34,6 @@ const AtomSettingsTabs: React.FC<Props> = ({
         <TabsTrigger
           value="exhibition"
           className="text-xs mr-2"
-          data-disabled={!cardExhibited}
-          disabled={!cardExhibited}
         >
           <Eye className="w-3 h-3 mr-1" />
           Exhibition
@@ -160,51 +156,49 @@ const AtomSettingsTabs: React.FC<Props> = ({
         </TabsContent>
 
         <TabsContent value="exhibition" className="space-y-4">
-          {cardExhibited && (
-            <Card className="p-4 space-y-3">
-              <h4 className="font-medium text-gray-900 mb-3">Exhibition Settings</h4>
-              <div>
-                <label className="text-sm text-gray-600 block mb-1">Headline</label>
-                <Input
-                  value={settings.headline}
-                  onChange={e => updateSettings(selectedAtomId, { headline: e.target.value })}
-                  className="text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-sm text-gray-600 block mb-1">Slide Layout</label>
-                <select
-                  value={settings.slide_layout}
-                  onChange={e => updateSettings(selectedAtomId, { slide_layout: e.target.value as TextBoxSettings['slide_layout'] })}
-                  className="w-full border rounded p-1 text-sm"
-                >
-                  <option value="full">full</option>
-                  <option value="sidebar">sidebar</option>
-                  <option value="note-callout">note-callout</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-sm text-gray-600 block mb-1">Transition</label>
-                <select
-                  value={settings.transition_effect}
-                  onChange={e => updateSettings(selectedAtomId, { transition_effect: e.target.value as TextBoxSettings['transition_effect'] })}
-                  className="w-full border rounded p-1 text-sm"
-                >
-                  <option value="none">none</option>
-                  <option value="fade">fade</option>
-                  <option value="typewriter">typewriter</option>
-                </select>
-              </div>
-              <div className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={settings.lock_content}
-                  onChange={e => updateSettings(selectedAtomId, { lock_content: e.target.checked })}
-                />
-                <label className="text-sm text-gray-600">Lock content</label>
-              </div>
-            </Card>
-          )}
+          <Card className="p-4 space-y-3">
+            <h4 className="font-medium text-gray-900 mb-3">Exhibition Settings</h4>
+            <div>
+              <label className="text-sm text-gray-600 block mb-1">Headline</label>
+              <Input
+                value={settings.headline}
+                onChange={e => updateSettings(selectedAtomId, { headline: e.target.value })}
+                className="text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-gray-600 block mb-1">Slide Layout</label>
+              <select
+                value={settings.slide_layout}
+                onChange={e => updateSettings(selectedAtomId, { slide_layout: e.target.value as TextBoxSettings['slide_layout'] })}
+                className="w-full border rounded p-1 text-sm"
+              >
+                <option value="full">full</option>
+                <option value="sidebar">sidebar</option>
+                <option value="note-callout">note-callout</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-sm text-gray-600 block mb-1">Transition</label>
+              <select
+                value={settings.transition_effect}
+                onChange={e => updateSettings(selectedAtomId, { transition_effect: e.target.value as TextBoxSettings['transition_effect'] })}
+                className="w-full border rounded p-1 text-sm"
+              >
+                <option value="none">none</option>
+                <option value="fade">fade</option>
+                <option value="typewriter">typewriter</option>
+              </select>
+            </div>
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                checked={settings.lock_content}
+                onChange={e => updateSettings(selectedAtomId, { lock_content: e.target.checked })}
+              />
+              <label className="text-sm text-gray-600">Lock content</label>
+            </div>
+          </Card>
         </TabsContent>
       </div>
     </Tabs>

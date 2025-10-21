@@ -9,7 +9,6 @@ import { Settings, Database, HelpCircle, Sparkles, GalleryHorizontal } from 'luc
 interface Props {
   selectedAtomId?: string;
   selectedCardId?: string;
-  cardExhibited?: boolean;
   active?: 'settings' | 'frames' | 'help' | 'superagent' | 'exhibition' | null;
   onActiveChange?: (
     active: 'settings' | 'frames' | 'help' | 'superagent' | 'exhibition' | null,
@@ -19,7 +18,6 @@ interface Props {
 const AuxiliaryMenu: React.FC<Props> = ({
   selectedAtomId,
   selectedCardId,
-  cardExhibited,
   active: activeProp,
   onActiveChange
 }) => {
@@ -54,7 +52,6 @@ const AuxiliaryMenu: React.FC<Props> = ({
           onToggle={() => setActive(null)}
           selectedAtomId={selectedAtomId}
           selectedCardId={selectedCardId}
-          cardExhibited={cardExhibited}
         />
       )}
       
@@ -68,7 +65,6 @@ const AuxiliaryMenu: React.FC<Props> = ({
           onToggle={() => setActive(null)}
           selectedAtomId={selectedAtomId}
           selectedCardId={selectedCardId}
-          cardExhibited={cardExhibited}
         />
       )}
 

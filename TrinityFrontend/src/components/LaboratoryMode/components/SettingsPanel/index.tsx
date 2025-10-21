@@ -50,7 +50,6 @@ interface SettingsPanelProps {
   onToggle: () => void;
   selectedAtomId?: string;
   selectedCardId?: string;
-  cardExhibited?: boolean;
 }
 
 const SettingsPanel: React.FC<SettingsPanelProps> = ({
@@ -58,7 +57,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onToggle,
   selectedAtomId,
   selectedCardId,
-  cardExhibited,
 }) => {
   const [tab, setTab] = useState<'settings' | 'exhibition'>('settings');
 
@@ -95,12 +93,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       : atom?.atomId === 'select-models-feature'
       ? { ...DEFAULT_SELECT_MODELS_FEATURE_SETTINGS }
       : { ...DEFAULT_TEXTBOX_SETTINGS });
-
-  useEffect(() => {
-    if (!cardExhibited && tab === 'exhibition') {
-      setTab('settings');
-    }
-  }, [cardExhibited]);
 
   useEffect(() => {
     setTab('settings');
@@ -176,7 +168,6 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
               tab={tab}
               setTab={setTab}
               selectedAtomId={selectedAtomId!}
-              cardExhibited={cardExhibited}
               settings={settings as TextBoxSettings}
               updateSettings={updateSettings}
             />

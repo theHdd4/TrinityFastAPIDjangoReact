@@ -112,7 +112,7 @@ class ExhibitionLayoutCard(BaseModel):
     id: str = Field(..., min_length=1)
     atoms: List[ExhibitionLayoutAtom] = Field(default_factory=list)
     catalogueAtoms: List[ExhibitionLayoutAtom] = Field(default_factory=list)
-    isExhibited: bool = Field(default=True)
+    isExhibited: bool = Field(default=False)
     moleculeId: Optional[str] = None
     moleculeTitle: Optional[str] = None
     title: Optional[str] = None

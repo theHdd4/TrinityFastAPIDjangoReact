@@ -52,15 +52,31 @@ async def save_exhibition_list_configuration(
         docs: list[dict[str, Any]] = []
 
         cards = exhibition_config_data.get("cards", [])
+        slide_objects = exhibition_config_data.get("slide_objects") or {}
 
         for canvas_pos, card in enumerate(cards):
-            open_card = "no" if card.get("collapsed") else "yes"
-            exhibition_preview = "yes" if card.get("isExhibited") else "no"
-            scroll_pos = card.get("scroll_position", 0)
+            slide_id = str(card.get("id") or f"slide-{canvas_pos}")
+            slide_title = card.get("title") or card.get("moleculeTitle") or slide_id
+            molecule_id = card.get("moleculeId")
+            molecule_title = card.get("moleculeTitle")
+            presentation_settings = card.get("presentationSettings") or {}
 
-            for atom_pos, atom in enumerate(card.get("atoms", [])):
+            raw_atoms = card.get("atoms") or []
+            raw_catalogue_atoms = card.get("catalogueAtoms") or []
+            raw_slide_objects = slide_objects.get(slide_id) or []
+
+            sanitised_slide_objects: list[dict[str, Any]] = []
+            if isinstance(raw_slide_objects, list):
+                for entry in raw_slide_objects:
+                    if isinstance(entry, dict):
+                        sanitised_slide_objects.append(entry)
+
+            sanitised_atoms: list[dict[str, Any]] = []
+            for atom in raw_atoms:
+                if not isinstance(atom, dict):
+                    continue
+
                 atom_id = atom.get("atomId") or atom.get("title") or "unknown"
-                atom_title = atom.get("title") or atom_id
                 atom_settings = atom.get("settings", {})
 
                 if atom.get("atomId") == "dataframe-operations":
@@ -70,39 +86,59 @@ async def save_exhibition_list_configuration(
                         if key not in {"tableData", "data"}
                     }
 
-                version_hash = hashlib.sha256(
-                    json.dumps(atom_settings, sort_keys=True).encode()
-                ).hexdigest()
+                sanitised_atoms.append(
+                    {
+                        "id": atom.get("id"),
+                        "atomId": atom.get("atomId"),
+                        "title": atom.get("title"),
+                        "category": atom.get("category"),
+                        "color": atom.get("color"),
+                        "settings": atom_settings,
+                    }
+                )
 
-                doc = {
-                    "client_id": client_id,
-                    "app_id": app_id,
-                    "project_id": project_name,
-                    "mode": mode,
-                    "atom_name": atom_id,
-                    "atom_title": atom_title,
-                    "canvas_position": canvas_pos,
-                    "atom_positions": atom_pos,
-                    "atom_configs": atom_settings,
-                    "open_cards": open_card,
-                    "scroll_position": scroll_pos,
-                    "exhibition_previews": exhibition_preview,
-                    "notes": atom_settings.get("notes", ""),
-                    "last_edited": timestamp,
-                    "version_hash": version_hash,
-                    "mode_meta": {
-                        "card_id": card.get("id"),
-                        "atom_id": atom.get("id"),
-                    },
-                    "isDeleted": False,
-                }
+            sanitised_catalogue_atoms: list[dict[str, Any]] = []
+            for atom in raw_catalogue_atoms:
+                if not isinstance(atom, dict):
+                    continue
+                sanitised_catalogue_atoms.append(atom)
 
-                docs.append(doc)
+            version_basis = {
+                "atoms": sanitised_atoms,
+                "catalogueAtoms": sanitised_catalogue_atoms,
+                "slideObjects": sanitised_slide_objects,
+                "presentationSettings": presentation_settings,
+            }
+
+            version_hash = hashlib.sha256(
+                json.dumps(version_basis, sort_keys=True, default=str).encode()
+            ).hexdigest()
+
+            doc = {
+                "client_id": client_id,
+                "app_id": app_id,
+                "project_id": project_name,
+                "mode": mode,
+                "slide_id": slide_id,
+                "slide_title": slide_title,
+                "canvas_position": canvas_pos,
+                "molecule_id": molecule_id,
+                "molecule_title": molecule_title,
+                "atoms": sanitised_atoms,
+                "catalogue_atoms": sanitised_catalogue_atoms,
+                "slide_objects": sanitised_slide_objects,
+                "presentation_settings": presentation_settings,
+                "last_edited": timestamp,
+                "version_hash": version_hash,
+                "isDeleted": False,
+            }
+
+            docs.append(doc)
 
         if docs:
             result = await _collection.insert_many(docs)
             logger.info(
-                "Stored %s exhibition atom configurations in %s",
+                "Stored %s exhibition slide configurations in %s",
                 len(result.inserted_ids),
                 EXHIBITION_COLLECTION,
             )

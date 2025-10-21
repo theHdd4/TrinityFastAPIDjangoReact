@@ -10,7 +10,6 @@ interface HelpPanelProps {
   onToggle: () => void;
   selectedAtomId?: string;
   selectedCardId?: string;
-  cardExhibited?: boolean;
 }
 
 const HelpPanel: React.FC<HelpPanelProps> = ({
@@ -18,7 +17,6 @@ const HelpPanel: React.FC<HelpPanelProps> = ({
   onToggle,
   selectedAtomId,
   selectedCardId,
-  cardExhibited,
 }) => {
   const atom = useLaboratoryStore((state) =>
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined

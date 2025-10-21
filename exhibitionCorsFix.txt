@@ -17,6 +17,8 @@ Fix implemented
 * Added a private-network CORS regex fallback so any RFC1918 host (including dynamically assigned ``10.x.x.x`` and ``192.168.x.x`` addresses referenced in docker compose files) is trusted automatically alongside explicit origin entries.
 * The Mongo helper now falls back to the production-aligned ``root``/``rootpass`` credentials (matching ``docker-compose``) when username or password variables are absent, ensuring authenticated writes even when ``EXHIBITION_MONGO_URI`` omits inline credentials.
 * Saving exhibition layouts now uses a dedicated ``exhibition_list_configuration`` pipeline that mirrors the laboratory logic while targeting the exhibition collection. The Mongo writes authenticate with the ``root``/``rootpass`` defaults before the layout document is updated.
+* Exhibition layout persistence now stores slide-centric documents (``slide_id``, curated atoms, and slide objects) so the ``exhibition_list_configuration`` collection reflects the actual slide composition rather than individual atom rows.
+* Laboratory cards no longer expose an "Exhibit this card" toggle; the exhibition catalogue remains available and renders components exclusively based on staged exhibition selections.
 
 Validation
 ----------
