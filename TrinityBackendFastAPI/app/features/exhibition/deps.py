@@ -59,8 +59,16 @@ def _mongo_auth_kwargs(uri: str) -> dict[str, str]:
     if "@" in uri.split("//", 1)[-1]:
         return {}
 
-    username = (os.getenv("MONGO_USERNAME") or os.getenv("MONGO_USER") or "").strip()
-    password = (os.getenv("MONGO_PASSWORD") or os.getenv("MONGO_PASS") or "").strip()
+    username = (
+        os.getenv("MONGO_USERNAME")
+        or os.getenv("MONGO_USER")
+        or "admin_dev"
+    ).strip()
+    password = (
+        os.getenv("MONGO_PASSWORD")
+        or os.getenv("MONGO_PASS")
+        or "pass_dev"
+    ).strip()
     auth_source = (
         os.getenv("MONGO_AUTH_SOURCE")
         or os.getenv("MONGO_AUTH_DB")
