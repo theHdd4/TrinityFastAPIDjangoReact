@@ -121,6 +121,7 @@ async def save_exhibition_project_state(
             "cards": cards,
             "slide_objects": slide_objects,
         },
+        collection=collection,
     )
 
     if persistence_result.get("status") != "success":
@@ -130,29 +131,12 @@ async def save_exhibition_project_state(
         )
 
     timestamp = persistence_result.get("updated_at", datetime.utcnow())
-
-    document = {
-        "client_name": client_name,
-        "app_name": app_name,
-        "project_name": project_name,
-        "mode": payload.mode or "exhibition",
-        "cards": cards,
-        "slide_objects": slide_objects,
-        "updated_at": timestamp,
-    }
-
-    await collection.update_one(
-        {"client_name": client_name, "app_name": app_name, "project_name": project_name},
-        {"$set": document},
-        upsert=True,
-    )
-
     updated_at = timestamp.isoformat() if isinstance(timestamp, datetime) else str(timestamp)
 
     return {
         "status": "ok",
         "updated_at": updated_at,
-        "documents_inserted": persistence_result.get("documents_inserted", 0),
+        "documents_inserted": persistence_result.get("documents_written", 0),
         "collection": persistence_result.get("collection"),
     }
 

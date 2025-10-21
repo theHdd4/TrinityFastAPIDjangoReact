@@ -100,9 +100,6 @@ def get_mongo_client() -> AsyncIOMotorClient:
 
 
 def get_database(client: AsyncIOMotorClient = Depends(get_mongo_client)) -> AsyncIOMotorDatabase:
-    default_db = client.get_default_database()
-    if default_db is not None:
-        return default_db
     return client[DEFAULT_DATABASE]
 
 
