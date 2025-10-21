@@ -14,7 +14,6 @@ import CanvasArea from './components/CanvasArea';
 import AuxiliaryMenu from './components/AuxiliaryMenu';
 import AuxiliaryMenuLeft from './components/AuxiliaryMenuLeft';
 import FloatingNavigationList from './components/FloatingNavigationList';
-import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { REGISTRY_API, LAB_ACTIONS_API, LABORATORY_PROJECT_STATE_API } from '@/lib/api';
 import { useLaboratoryStore, LayoutCard } from './store/laboratoryStore';
 import { useAuth } from '@/contexts/AuthContext';
@@ -66,7 +65,6 @@ const LaboratoryMode = () => {
   const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'superagent' | null>(null);
   const { toast } = useToast();
   const { cards, setCards: setLabCards } = useLaboratoryStore();
-  const setExhibitionCards = useExhibitionStore(state => state.setCards);
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
   const skipInitialLabCleanupRef = useRef(true);
@@ -179,7 +177,6 @@ const LaboratoryMode = () => {
         const last = Array.isArray(data) ? data[0] : data.results?.[0];
         if (last && last.state) {
           setLabCards(last.state);
-          setExhibitionCards(last.state);
           const labConfig = {
             cards: last.state,
             exhibitedCards: collectExhibitedCards(last.state || []),
@@ -250,8 +247,6 @@ const LaboratoryMode = () => {
     if (!canEdit) return;
     try {
       const exhibitedCards = collectExhibitedCards(cards);
-
-      setExhibitionCards(cards);
 
       // Save the current laboratory configuration
       const labConfig = {

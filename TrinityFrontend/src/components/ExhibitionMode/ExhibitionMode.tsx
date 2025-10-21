@@ -723,7 +723,7 @@ const ExhibitionMode = () => {
     }
 
     try {
-      window.localStorage.setItem('laboratory-layout-cards', JSON.stringify(payloadCards));
+      window.localStorage.setItem('exhibition-layout-cards', JSON.stringify(payloadCards));
     } catch (error) {
       console.warn('Failed to cache exhibition layout locally', error);
     }
@@ -742,15 +742,11 @@ const ExhibitionMode = () => {
 
   const mapCardToAtomEntry = useCallback(
     (card: LayoutCard): ExhibitionAtomPayload | null => {
-      const componentsSource = Array.isArray(card.catalogueAtoms) && card.catalogueAtoms.length > 0
-        ? card.catalogueAtoms
-        : card.atoms;
+      const componentsSource = Array.isArray(card.catalogueAtoms) ? card.catalogueAtoms : [];
 
-      const exhibitedComponents = Array.isArray(componentsSource)
-        ? componentsSource
-            .map(mapAtomToPayload)
-            .filter(component => typeof component.id === 'string' && component.id.trim().length > 0)
-        : [];
+      const exhibitedComponents = componentsSource
+        .map(mapAtomToPayload)
+        .filter(component => typeof component.id === 'string' && component.id.trim().length > 0);
 
       if (exhibitedComponents.length === 0) {
         return null;

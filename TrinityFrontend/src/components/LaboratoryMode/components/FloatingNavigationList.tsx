@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { GripVertical, X, Minimize2, Maximize2 } from 'lucide-react';
-import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
+import { useLaboratoryStore } from '../store/laboratoryStore';
 
 interface FloatingNavigationListProps {
   isVisible: boolean;
@@ -26,8 +26,8 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
   const [isFadingIn, setIsFadingIn] = useState(false);
   const widgetRef = useRef<HTMLDivElement>(null);
   const manualPositionRef = useRef(false);
-  const { cards } = useExhibitionStore();
-  const cardsLength = cards.length;
+  const cards = useLaboratoryStore(state => state.cards);
+  const cardsLength = Array.isArray(cards) ? cards.length : 0;
 
   const clampPositionToViewport = useCallback((x: number, y: number) => {
     if (typeof window === 'undefined' || !widgetRef.current) {
@@ -93,7 +93,7 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
   }, [anchorSelector, clampPositionToViewport]);
 
   // Get all atoms from cards
-  const allAtoms = cards.flatMap(card =>
+  const allAtoms = (Array.isArray(cards) ? cards : []).flatMap(card =>
     card.atoms.map(atom => ({
       id: atom.id,
       title: atom.title,

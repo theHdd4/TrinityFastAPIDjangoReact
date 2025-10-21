@@ -5,7 +5,6 @@ import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStora
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Plus, Grid3X3, Trash2, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon, GripVertical } from 'lucide-react';
-import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
@@ -178,7 +177,6 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     };
   }, [expandedCard]);
 
-  const { updateCard, setCards } = useExhibitionStore();
   const { toast } = useToast();
 
   interface ColumnInfo {
@@ -1135,7 +1133,6 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
 
   // Sync cards with exhibition store
   useEffect(() => {
-    setCards(layoutCards);
   }, [layoutCards, setCards]);
 
   // Persist workflowMolecules to localStorage
@@ -1511,7 +1508,6 @@ const handleCardDrop = (e: React.DragEvent, targetCardId: string) => {
   newCards.splice(targetIndex, 0, draggedCard);
   
   setLayoutCards(newCards);
-  setCards(newCards);
   setDraggedCardId(null);
 };
 
@@ -1619,7 +1615,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     const card = arr.find(c => c.id === cardId);
     const updated = arr.filter(c => c.id !== cardId);
     setLayoutCards(updated);
-    setCards(updated);
     setCollapsedCards(prev => {
       const copy = { ...prev };
       delete copy[cardId];
@@ -1742,7 +1737,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     // Remove cards from layoutCards state immediately
     const updatedCards = arr.filter(card => card.moleculeId !== moleculeId);
     setLayoutCards(updatedCards);
-    setCards(updatedCards);
     
     // Handle backend deletion for each card without calling deleteCard (to avoid state conflicts)
     for (const card of moleculeCards) {

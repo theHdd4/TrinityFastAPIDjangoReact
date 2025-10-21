@@ -739,6 +739,7 @@ const WorkflowMode = () => {
     // Persist selected atoms for Laboratory mode and clear previous layout
     localStorage.setItem('workflow-selected-atoms', safeStringify(selectedAtoms));
     localStorage.removeItem('laboratory-layout-cards');
+    localStorage.removeItem('exhibition-layout-cards');
 
     toast({
       title: 'Workflow Rendered',

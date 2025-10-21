@@ -354,7 +354,7 @@ export const resolveCardTitle = (card: LayoutCard, fallbackAtoms: DroppedAtom[] 
     return card.moleculeTitle.trim();
   }
 
-  const atoms = Array.isArray(card.atoms) && card.atoms.length > 0 ? card.atoms : fallbackAtoms;
+  const atoms = Array.isArray(card.catalogueAtoms) && card.catalogueAtoms.length > 0 ? card.catalogueAtoms : fallbackAtoms;
   if (atoms.length > 0) {
     const firstTitle = atoms[0]?.title;
     if (typeof firstTitle === 'string' && firstTitle.trim().length > 0) {
@@ -369,7 +369,7 @@ const synchroniseSlideObjects = (
   existing: SlideObject[] | undefined,
   card: LayoutCard,
 ): SlideObject[] => {
-  const atoms = Array.isArray(card.atoms) ? card.atoms : [];
+  const atoms = Array.isArray(card.catalogueAtoms) ? card.catalogueAtoms : [];
   const atomMap = new Map(atoms.map(atom => [atom.id, atom]));
   const used = new Set<string>();
   let next: SlideObject[] = [];
@@ -619,8 +619,10 @@ const contextsMatch = (a: ProjectContext | null, b: ProjectContext | null): bool
 };
 
 const withPresentationDefaults = (card: Partial<LayoutCard>): LayoutCard => {
-  const atoms = normaliseAtomList(card.atoms);
-  const catalogueAtoms = mergeCatalogueAtoms(normaliseAtomList(card.catalogueAtoms), atoms);
+  const explicitCatalogueAtoms = normaliseAtomList(card.catalogueAtoms);
+  const fallbackAtoms = explicitCatalogueAtoms.length > 0 ? [] : normaliseAtomList(card.atoms);
+  const catalogueAtoms = mergeCatalogueAtoms(explicitCatalogueAtoms, fallbackAtoms);
+  const atoms = catalogueAtoms;
 
   const id = isNonEmptyString(card.id)
     ? card.id.trim()
@@ -646,7 +648,7 @@ const withPresentationDefaults = (card: Partial<LayoutCard>): LayoutCard => {
     id,
     atoms,
     catalogueAtoms,
-    isExhibited: atoms.length > 0,
+    isExhibited: catalogueAtoms.length > 0,
     moleculeId,
     moleculeTitle,
     title: resolvedTitle,
@@ -769,7 +771,7 @@ const normaliseProjectContext = (context?: ProjectContext | null): ProjectContex
 };
 
 const slideHasContent = (card: LayoutCard, slideObjects?: SlideObject[] | null): boolean => {
-  const hasAtoms = Array.isArray(card.atoms) && card.atoms.length > 0;
+  const hasAtoms = Array.isArray(card.catalogueAtoms) && card.catalogueAtoms.length > 0;
   const hasObjects = Array.isArray(slideObjects) && slideObjects.length > 0;
   return hasAtoms || hasObjects;
 };
@@ -781,10 +783,7 @@ const computeCatalogueCards = (cards: LayoutCard[]): LayoutCard[] => {
 
   return cards
     .map(withPresentationDefaults)
-    .filter(card => {
-      const catalogueCount = card.catalogueAtoms?.length ?? card.atoms.length ?? 0;
-      return catalogueCount > 0;
-    });
+    .filter(card => (card.catalogueAtoms?.length ?? 0) > 0);
 };
 
 const normaliseCatalogueComponent = (component: ExhibitionComponentPayload, atomName: string): DroppedAtom | null => {
@@ -1056,13 +1055,14 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
           nextCard.lastEditedAt = timestamp;
         }
 
-        if (updatedCard.atoms) {
-          nextCard.atoms = updatedCard.atoms;
-          nextCard.catalogueAtoms = mergeCatalogueAtoms(nextCard.catalogueAtoms, updatedCard.atoms);
-        }
-
         if (updatedCard.catalogueAtoms) {
-          nextCard.catalogueAtoms = mergeCatalogueAtoms([], updatedCard.catalogueAtoms);
+          const normalised = normaliseAtomList(updatedCard.catalogueAtoms);
+          nextCard.catalogueAtoms = normalised;
+          nextCard.atoms = normalised;
+        } else if (updatedCard.atoms) {
+          const normalised = normaliseAtomList(updatedCard.atoms);
+          nextCard.atoms = normalised;
+          nextCard.catalogueAtoms = normalised;
         }
 
         if (updatedCard.presentationSettings) {

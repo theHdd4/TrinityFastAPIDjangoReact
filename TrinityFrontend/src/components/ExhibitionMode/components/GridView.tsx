@@ -21,12 +21,13 @@ export const GridView: React.FC<GridViewProps> = ({
     if (typeof card.title === 'string' && card.title.trim().length > 0) {
       return card.title.trim();
     }
+    const atoms = Array.isArray(card.catalogueAtoms) ? card.catalogueAtoms : [];
     if (card.moleculeTitle) {
-      return card.atoms.length > 0
-        ? `${card.moleculeTitle} - ${card.atoms[0].title}`
+      return atoms.length > 0
+        ? `${card.moleculeTitle} - ${atoms[0].title}`
         : card.moleculeTitle;
     }
-    return card.atoms.length > 0 ? card.atoms[0].title : `Slide ${index + 1}`;
+    return atoms.length > 0 ? atoms[0].title : `Slide ${index + 1}`;
   };
 
   return (
@@ -58,7 +59,7 @@ export const GridView: React.FC<GridViewProps> = ({
               >
                 <div className="aspect-video bg-muted/30 p-4">
                   <div className="grid grid-cols-2 gap-2 h-full">
-                    {card.atoms.slice(0, 4).map(atom => (
+                    {(Array.isArray(card.catalogueAtoms) ? card.catalogueAtoms : []).slice(0, 4).map(atom => (
                       <div
                         key={atom.id}
                         className="flex items-center gap-2 p-2 bg-background rounded border border-border"
@@ -89,7 +90,7 @@ export const GridView: React.FC<GridViewProps> = ({
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {card.atoms.length} {card.atoms.length === 1 ? 'atom' : 'atoms'}
+                    {card.catalogueAtoms?.length ?? 0} {(card.catalogueAtoms?.length ?? 0) === 1 ? 'component' : 'components'}
                   </p>
                 </div>
 

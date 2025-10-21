@@ -22,12 +22,13 @@ export const SlideThumbnails: React.FC<SlideThumbnailsProps> = ({
     if (typeof card.title === 'string' && card.title.trim().length > 0) {
       return card.title.trim();
     }
+    const atoms = Array.isArray(card.catalogueAtoms) ? card.catalogueAtoms : [];
     if (card.moleculeTitle) {
-      return card.atoms.length > 0
-        ? `${card.moleculeTitle} - ${card.atoms[0].title}`
+      return atoms.length > 0
+        ? `${card.moleculeTitle} - ${atoms[0].title}`
         : card.moleculeTitle;
     }
-    return card.atoms.length > 0 ? card.atoms[0].title : `Slide ${index + 1}`;
+    return atoms.length > 0 ? atoms[0].title : `Slide ${index + 1}`;
   };
 
   return (
@@ -67,14 +68,14 @@ export const SlideThumbnails: React.FC<SlideThumbnailsProps> = ({
                 <div className="flex-1 min-w-0">
                   <h4 className="font-medium text-sm truncate mb-1">{getSlideTitle(card, index)}</h4>
                   <p className="text-xs text-muted-foreground">
-                    {card.atoms.length} {card.atoms.length === 1 ? 'atom' : 'atoms'}
+                    {card.catalogueAtoms?.length ?? 0} {(card.catalogueAtoms?.length ?? 0) === 1 ? 'component' : 'components'}
                   </p>
                 </div>
               </div>
 
               <div className="mt-2 aspect-video bg-background rounded border border-border overflow-hidden">
                 <div className="p-2 grid grid-cols-2 gap-1">
-                  {card.atoms.slice(0, 4).map(atom => (
+                  {(Array.isArray(card.catalogueAtoms) ? card.catalogueAtoms : []).slice(0, 4).map(atom => (
                     <div key={atom.id} className="flex items-center gap-1 p-1 bg-muted rounded text-[10px]">
                       <div className={`w-2 h-2 ${atom.color} rounded-full flex-shrink-0`} />
                       <span className="truncate">{atom.title}</span>
