@@ -742,11 +742,15 @@ const ExhibitionMode = () => {
 
   const mapCardToAtomEntry = useCallback(
     (card: LayoutCard): ExhibitionAtomPayload | null => {
-      const componentsSource = Array.isArray(card.catalogueAtoms) ? card.catalogueAtoms : [];
+      const componentsSource = Array.isArray(card.catalogueAtoms) && card.catalogueAtoms.length > 0
+        ? card.catalogueAtoms
+        : card.atoms;
 
-      const exhibitedComponents = componentsSource
-        .map(mapAtomToPayload)
-        .filter(component => typeof component.id === 'string' && component.id.trim().length > 0);
+      const exhibitedComponents = Array.isArray(componentsSource)
+        ? componentsSource
+            .map(mapAtomToPayload)
+            .filter(component => typeof component.id === 'string' && component.id.trim().length > 0)
+        : [];
 
       if (exhibitedComponents.length === 0) {
         return null;

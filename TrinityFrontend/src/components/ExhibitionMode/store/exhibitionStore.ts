@@ -555,16 +555,6 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     : FALLBACK_COLOR;
 
   const metadata = parseMetadataRecord(candidate.metadata) ?? {};
-  const originalAtomId = resolvedAtomId ?? resolvedId;
-  const viewTypeCandidate = typeof metadata.viewType === 'string'
-    ? metadata.viewType
-    : typeof metadata['view_type'] === 'string'
-      ? metadata['view_type']
-      : undefined;
-  const manifestViewType = isRecord(metadata.visualizationManifest)
-    ? metadata.visualizationManifest.componentType
-    : undefined;
-  const hasSkuIndicators = Boolean(metadata.skuRow || metadata.skuStatisticsSettings);
   const manifest = parseManifestRecord((candidate as Record<string, unknown>).manifest);
   const manifestIdRaw = (candidate as Record<string, unknown>).manifest_id;
   const manifestId = isNonEmptyString(manifestIdRaw) ? manifestIdRaw.trim() : undefined;
@@ -574,17 +564,11 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
 
   if (
     looksLikeFeatureOverviewMetadata(metadata) &&
-    (typeof viewTypeCandidate === 'string' || typeof manifestViewType === 'string' || hasSkuIndicators) &&
-    atomId !== 'feature-overview'
+    (!resolvedAtomId ||
+      atomId === id ||
+      atomId.toLowerCase().includes('feature-overview') ||
+      category.toLowerCase().includes('feature overview'))
   ) {
-    if (
-      typeof metadata.sourceAtomId !== 'string' &&
-      typeof originalAtomId === 'string' &&
-      originalAtomId.trim().length > 0
-    ) {
-      metadata.sourceAtomId = originalAtomId.trim();
-    }
-
     atomId = 'feature-overview';
   }
 
