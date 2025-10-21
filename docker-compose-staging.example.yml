@@ -1,0 +1,264 @@
+name: trinity-staging
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: trinity_db
+      POSTGRES_USER: trinity_user
+      POSTGRES_PASSWORD: trinity_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    ports:
+      - "5434:5432"  # Different from dev (5433) and prod (5432)
+    networks:
+      - trinity-staging-net
+    restart: always
+
+  mongo:
+    image: mongo:6
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpass
+    volumes:
+      - mongo_data:/data/db
+    ports:
+      - "27018:27017"  # Different from dev (no port exposed) and prod (27017)
+    networks:
+      - trinity-staging-net
+    restart: always
+
+  redis:
+    image: redis:7
+    volumes:
+      - redis_data:/data
+    networks:
+      - trinity-staging-net
+    restart: always
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    command: server /data --console-address ":9001"
+    ports:
+      - "9004:9000"   # Different from dev (9002) and prod (9000)
+      - "9005:9001"   # Different from dev (9003) and prod (9001)
+    volumes:
+      - minio_data:/data
+    networks:
+      - trinity-staging-net
+    restart: always
+
+  pgadmin:
+    image: dpage/pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5052:80"  # Different from dev (5051) and prod (5050)
+    depends_on:
+      - postgres
+    networks:
+      - trinity-staging-net
+    restart: always
+
+  mongo-express:
+    image: mongo-express:latest
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: root
+      ME_CONFIG_MONGODB_ADMINPASSWORD: rootpass
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: admin
+    ports:
+      - "8084:8081"  # Different from dev (8083) and prod (8082)
+    depends_on:
+      - mongo
+    networks:
+      - trinity-staging-net
+    restart: always
+
+  web:
+    build: ./TrinityBackendDjango
+    command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3
+    volumes:
+      - ./TrinityBackendDjango:/code
+      - ./TrinityBackendFastAPI:/code/TrinityBackendFastAPI
+    env_file:
+      - ./TrinityBackendDjango/.env
+    ports:
+      - "8006:8000"  # Different from dev (8003) and prod (8000)
+    environment:
+      HOST_IP: ${HOST_IP:-192.168.31.63}
+      FRONTEND_PORT: "8082"  # Different from dev (8081) and prod (8080)
+      CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8082,http://${HOST_IP:-192.168.31.63}:8082,http://172.17.48.1:8082,http://10.2.4.48:8082,https://trinity-staging.quantmatrixai.com"
+      CSRF_TRUSTED_ORIGINS: "http://127.0.0.1:8082,http://${HOST_IP:-192.168.31.63}:8082,http://172.17.48.1:8082,http://10.2.4.48:8082,https://trinity-staging.quantmatrixai.com"
+      MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_staging?authSource=admin"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minio
+      MINIO_SECRET_KEY: minio123
+    depends_on:
+      - postgres
+      - mongo
+      - redis
+      - minio
+      - flight
+    networks:
+      - trinity-staging-net
+    labels:
+      - "environment=staging"
+      - "traefik.enable=true"
+      - "traefik.http.routers.django-staging.rule=Host(`trinity-staging.quantmatrixai.com`) && PathPrefix(`/admin`)"
+      - "traefik.http.routers.django-staging.entrypoints=web"
+      - "traefik.http.routers.django-staging.middlewares=django-strip-staging@docker"
+      - "traefik.http.middlewares.django-strip-staging.stripprefix.prefixes=/admin"
+      - "traefik.http.services.django-staging.loadbalancer.server.port=8000"
+    restart: always
+
+  celery:
+    build: ./TrinityBackendDjango
+    command: celery -A config.celery worker --loglevel=info
+    volumes:
+      - ./TrinityBackendDjango:/code
+      - ./TrinityBackendFastAPI:/code/TrinityBackendFastAPI
+    env_file:
+      - ./TrinityBackendDjango/.env
+    depends_on:
+      - redis
+      - postgres
+      - mongo
+    networks:
+      - trinity-staging-net
+    environment:
+      MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_staging?authSource=admin"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minio
+      MINIO_SECRET_KEY: minio123
+    restart: always
+
+  fastapi:
+    build: ./TrinityBackendDjango
+    command: uvicorn apps.orchestration.fastapi_app:app --host 0.0.0.0 --port 8001
+    volumes:
+      - ./TrinityBackendDjango:/code
+      - ./TrinityBackendFastAPI:/code/TrinityBackendFastAPI
+    env_file:
+      - ./TrinityBackendDjango/.env
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minio
+      MINIO_SECRET_KEY: minio123
+      FLIGHT_HOST: flight
+      FLIGHT_PORT: 8817  # Different from dev (8816) and prod (8815)
+      HOST_IP: ${HOST_IP:-192.168.31.63}
+      FASTAPI_CORS_ORIGINS: "http://127.0.0.1:8082,http://${HOST_IP:-192.168.31.63}:8082,http://172.17.48.1:8082,http://10.2.4.48:8082,https://trinity-staging.quantmatrixai.com,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com"
+      MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_staging?authSource=admin"
+      CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
+    ports:
+      - "8007:8001"  # Different from dev (8004) and prod (8001)
+    depends_on:
+      - postgres
+      - mongo
+      - redis
+      - minio
+      - flight
+    networks:
+      - trinity-staging-net
+    labels:
+      - "environment=staging"
+      - "traefik.enable=true"
+      - "traefik.http.routers.fastapi-staging.rule=Host(`trinity-staging.quantmatrixai.com`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.fastapi-staging.entrypoints=web"
+      - "traefik.http.services.fastapi-staging.loadbalancer.server.port=8001"
+    restart: always
+
+  flight:
+    build:
+      context: ./TrinityBackendFastAPI
+      dockerfile: Dockerfile
+    command: python app/flight_server.py
+    env_file:
+      - ./TrinityBackendDjango/.env
+    labels:
+      - "environment=staging"
+    environment:
+      FLIGHT_PORT: 8817  # Different from dev (8816) and prod (8815)
+    ports:
+      - "8817:8817"  # Different from dev (8816) and prod (8815)
+    networks:
+      - trinity-staging-net
+    restart: always
+
+  trinity-ai:
+    build:
+      context: ./TrinityAI
+      dockerfile: Dockerfile
+    env_file:
+      - ./TrinityBackendDjango/.env
+    environment:
+      OLLAMA_IP: 10.2.4.48
+      MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_staging?authSource=admin"
+      CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
+    volumes:
+      - ./TrinityBackendFastAPI/app/DataStorageRetrieval:/app/DataStorageRetrieval:ro
+    ports:
+      - "8008:8002"  # Different from dev (8005) and prod (8002)
+    networks:
+      - trinity-staging-net
+    labels:
+      - "environment=staging"
+      - "traefik.enable=true"
+      - "traefik.http.routers.trinity-ai-staging.rule=Host(`trinity-staging.quantmatrixai.com`) && PathPrefix(`/trinityai`)"
+      - "traefik.http.routers.trinity-ai-staging.entrypoints=web"
+      - "traefik.http.routers.trinity-ai-staging.priority=100"
+      - "traefik.http.services.trinity-ai-staging.loadbalancer.server.port=8002"
+    restart: always
+
+  frontend:
+    build:
+      context: ./TrinityFrontend
+      dockerfile: Dockerfile
+    ports:
+      - "8082:80"  # Different from dev (8081) and prod (8080)
+    networks:
+      - trinity-staging-net
+    depends_on:
+      - web
+    labels:
+      - "environment=staging"
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend-staging.rule=Host(`trinity-staging.quantmatrixai.com`)"
+      - "traefik.http.routers.frontend-staging.entrypoints=web"
+      - "traefik.http.routers.frontend-staging.priority=1"
+      - "traefik.http.services.frontend-staging.loadbalancer.server.port=80"
+    restart: always
+
+  traefik:
+    image: traefik:v2.11
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --providers.docker.constraints=Label(`environment`,`staging`)
+    ports:
+      - "9082:80"  # Different from dev (9081) and prod (9080)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - trinity-staging-net
+    depends_on:
+      - web
+      - fastapi
+    restart: always
+
+volumes:
+  postgres_data:
+  mongo_data:
+  redis_data:
+  minio_data:
+
+networks:
+  trinity-staging-net:
+    name: trinity-staging-net

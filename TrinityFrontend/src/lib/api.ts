@@ -1,18 +1,29 @@
 const hostIp = import.meta.env.VITE_HOST_IP;
-const isDevStack =
-  (typeof window !== 'undefined' && window.location.port === '8081') ; //||
-  // import.meta.env.VITE_FRONTEND_PORT === '8081' ||
-  // (typeof window !== 'undefined' && window.location.hostname === '172.19.128.1') ||
-  // (typeof window !== 'undefined' && window.location.port === '8080') ||
-  // import.meta.env.VITE_ENVIRONMENT === 'development';
 
-const djangoPort =
-  import.meta.env.VITE_DJANGO_PORT || (isDevStack ? '8003' : '8000');
-const fastapiPort =
-  import.meta.env.VITE_FASTAPI_PORT || (isDevStack ? '8004' : '8001');
-const aiPort = import.meta.env.VITE_AI_PORT || (isDevStack ? '8005' : '8002');
-const frontendPort =
-  import.meta.env.VITE_FRONTEND_PORT || (isDevStack ? '8081' : '8080');
+// Environment detection based on frontend port
+const isDevStack = (typeof window !== 'undefined' && window.location.port === '8081');
+const isStagingStack = (typeof window !== 'undefined' && window.location.port === '8082');
+
+// Port configuration for different environments
+const djangoPort = import.meta.env.VITE_DJANGO_PORT || (
+  isDevStack ? '8003' :
+  isStagingStack ? '8006' : '8000'
+);
+
+const fastapiPort = import.meta.env.VITE_FASTAPI_PORT || (
+  isDevStack ? '8004' :
+  isStagingStack ? '8007' : '8001'
+);
+
+const aiPort = import.meta.env.VITE_AI_PORT || (
+  isDevStack ? '8005' :
+  isStagingStack ? '8008' : '8002'
+);
+
+const frontendPort = import.meta.env.VITE_FRONTEND_PORT || (
+  isDevStack ? '8081' :
+  isStagingStack ? '8082' : '8080'
+);
 let backendOrigin = import.meta.env.VITE_BACKEND_ORIGIN;
 
 if (!backendOrigin) {
@@ -24,7 +35,7 @@ if (!backendOrigin) {
   } else {
     backendOrigin = `http://localhost:${djangoPort}`;
   }
-} else if (isDevStack && backendOrigin.endsWith(`:${frontendPort}`)) {
+} else if ((isDevStack || isStagingStack) && backendOrigin.endsWith(`:${frontendPort}`)) {
   backendOrigin = backendOrigin.replace(
     new RegExp(`:${frontendPort}$`),
     `:${djangoPort}`,
