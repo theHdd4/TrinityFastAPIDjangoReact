@@ -1,0 +1,50 @@
+Exhibition & Laboratory CORS Diagnostics
+=======================================
+
+Summary
+-------
+The exhibition layout save request and laboratory card creation were both failing
+in browsers hosted on port 8080/8081. The FastAPI service only whitelisted a
+static list of origins, so any new host/IP combinations (for example
+192.168.1.7:8080) were rejected before they reached the application layer. The
+layout save failure also surfaced a MongoDB authentication error once the
+request bypassed the browser, while laboratory card creation returned a
+Pydantic validation error because alias configuration was still written for
+pydantic v1.
+
+Key Findings
+------------
+1. ``app/main.py`` built ``allow_origins`` once at startup and never permitted
+   dynamic :8080/:8081 hosts discovered at runtime. Browsers therefore dropped
+   the preflight response with the "No 'Access-Control-Allow-Origin' header"
+   error for /api/exhibition/layout and downstream laboratory calls.
+2. The laboratory models still relied on ``allow_population_by_field_name``
+   (a pydantic v1 setting). In pydantic v2 this flag is ignored, so the JSON
+   response emitted snake_case keys and FastAPI raised
+   ``LaboratoryAtomResponse.atomId field required`` during response validation.
+3. Front-end logs only reported "Failed to fetch" making it difficult to match
+   failed requests with their backend counterparts.
+
+Fixes Applied
+-------------
+* Added ``FASTAPI_CORS_ORIGIN_REGEX`` support with a default
+  ``https?://[^/]+:(8080|8081)$`` pattern so any :8080/:8081 origin authorised
+  by docker-compose (or the HOST_IP override) is automatically accepted by the
+  CORS middleware. The configuration is now emitted to the ``uvicorn.error``
+  logger for easier runtime inspection.
+* Migrated laboratory and exhibition pydantic models to the v2 ``ConfigDict``
+  API and replaced deprecated ``.dict`` calls with ``model_dump``. This aligns
+  request/response aliases with the field definitions so ``atomId`` is returned
+  correctly.
+* Instrumented the React helpers so the browser console logs every exhibition
+  and laboratory API request (including URL, method and origin) and reports the
+  exact HTTP status whenever the backend rejects a call. The global API helper
+  also prints the resolved backend origins on start-up to simplify debugging
+  future CORS mismatches.
+
+Validation
+----------
+* FastAPI now prints the configured origins/regex at boot.
+* Browser logs surface both the outbound URLs and HTTP status codes for
+  exhibition layout saves and laboratory card creation, making CORS triage far
+  quicker.

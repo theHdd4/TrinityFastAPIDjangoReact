@@ -198,6 +198,25 @@ export const CUSTOM_MOLECULES_API =
   normalizeUrl(import.meta.env.VITE_CUSTOM_MOLECULES_API) ||
   `${backendOrigin}${djangoPrefix}/custom-molecules`;
 
+const shouldLogApiConfig =
+  typeof window !== 'undefined' &&
+  (import.meta.env.DEV || import.meta.env.VITE_SHOW_API_DEBUG === 'true');
+
+if (shouldLogApiConfig) {
+  const fastapiOrigin = backendOrigin.replace(
+    new RegExp(`:${djangoPort}$`),
+    `:${fastapiPort}`,
+  );
+
+  console.info('[Trinity API] Resolved backend endpoints', {
+    windowOrigin: window.location.origin,
+    backendOrigin,
+    fastapiOrigin,
+    exhibitionApi: EXHIBITION_API,
+    laboratoryApi: LABORATORY_API,
+  });
+}
+
 // Signup API function
 export const submitSignup = async (data: {
   first_name: string;

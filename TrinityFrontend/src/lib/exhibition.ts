@@ -1,5 +1,25 @@
 import { EXHIBITION_API } from '@/lib/api';
 
+const logExhibitionRequest = (action: string, url: string, init: RequestInit) => {
+  if (typeof window === 'undefined') return;
+
+  const { method = 'GET', credentials } = init;
+  const hasBody = Boolean(init.body);
+
+  console.info(`[Exhibition API] ${action}`, {
+    url,
+    method,
+    credentials,
+    hasBody,
+    origin: window.location.origin,
+  });
+};
+
+const logExhibitionFailure = (action: string, error: unknown) => {
+  if (typeof window === 'undefined') return;
+  console.error(`[Exhibition API] ${action} failed`, error);
+};
+
 export interface ExhibitionComponentPayload {
   id: string;
   atomId?: string;
@@ -59,15 +79,21 @@ const defaultHeaders = {
 };
 
 export async function saveExhibitionConfiguration(payload: ExhibitionConfigurationPayload): Promise<void> {
-  const response = await fetch(`${EXHIBITION_API}/configuration`, {
+  const requestUrl = `${EXHIBITION_API}/configuration`;
+  const requestInit: RequestInit = {
     method: 'POST',
     headers: defaultHeaders,
     credentials: 'include',
     body: JSON.stringify(payload),
-  });
+  };
+
+  logExhibitionRequest('Saving exhibition configuration', requestUrl, requestInit);
+
+  const response = await fetch(requestUrl, requestInit);
 
   if (!response.ok) {
     const message = await response.text();
+    logExhibitionFailure('Saving exhibition configuration', message);
     throw new Error(message || 'Failed to save exhibition configuration');
   }
 }
@@ -82,10 +108,15 @@ export async function fetchExhibitionConfiguration(
   params: ExhibitionConfigurationQuery,
 ): Promise<ExhibitionConfigurationResponse | null> {
   const search = new URLSearchParams(params as Record<string, string>);
-  const response = await fetch(`${EXHIBITION_API}/configuration?${search.toString()}`, {
+  const requestUrl = `${EXHIBITION_API}/configuration?${search.toString()}`;
+  const requestInit: RequestInit = {
     method: 'GET',
     credentials: 'include',
-  });
+  };
+
+  logExhibitionRequest('Fetching exhibition configuration', requestUrl, requestInit);
+
+  const response = await fetch(requestUrl, requestInit);
 
   if (response.status === 404) {
     return null;
@@ -93,6 +124,7 @@ export async function fetchExhibitionConfiguration(
 
   if (!response.ok) {
     const message = await response.text();
+    logExhibitionFailure('Fetching exhibition configuration', message);
     throw new Error(message || 'Failed to fetch exhibition configuration');
   }
 
@@ -103,10 +135,15 @@ export async function fetchExhibitionManifest(
   params: ExhibitionManifestQuery,
 ): Promise<ExhibitionManifestResponse | null> {
   const search = new URLSearchParams(params as Record<string, string>);
-  const response = await fetch(`${EXHIBITION_API}/manifest?${search.toString()}`, {
+  const requestUrl = `${EXHIBITION_API}/manifest?${search.toString()}`;
+  const requestInit: RequestInit = {
     method: 'GET',
     credentials: 'include',
-  });
+  };
+
+  logExhibitionRequest('Fetching exhibition manifest', requestUrl, requestInit);
+
+  const response = await fetch(requestUrl, requestInit);
 
   if (response.status === 404) {
     return null;
@@ -114,6 +151,7 @@ export async function fetchExhibitionManifest(
 
   if (!response.ok) {
     const message = await response.text();
+    logExhibitionFailure('Fetching exhibition manifest', message);
     throw new Error(message || 'Failed to fetch exhibition manifest');
   }
 
@@ -121,15 +159,21 @@ export async function fetchExhibitionManifest(
 }
 
 export async function saveExhibitionLayout(payload: ExhibitionLayoutPayload): Promise<void> {
-  const response = await fetch(`${EXHIBITION_API}/layout`, {
+  const requestUrl = `${EXHIBITION_API}/layout`;
+  const requestInit: RequestInit = {
     method: 'POST',
     headers: defaultHeaders,
     credentials: 'include',
     body: JSON.stringify(payload),
-  });
+  };
+
+  logExhibitionRequest('Saving exhibition layout', requestUrl, requestInit);
+
+  const response = await fetch(requestUrl, requestInit);
 
   if (!response.ok) {
     const message = await response.text();
+    logExhibitionFailure('Saving exhibition layout', message);
     throw new Error(message || 'Failed to save exhibition layout');
   }
 }
@@ -138,10 +182,15 @@ export async function fetchExhibitionLayout(
   params: ExhibitionConfigurationQuery,
 ): Promise<ExhibitionLayoutResponse | null> {
   const search = new URLSearchParams(params as Record<string, string>);
-  const response = await fetch(`${EXHIBITION_API}/layout?${search.toString()}`, {
+  const requestUrl = `${EXHIBITION_API}/layout?${search.toString()}`;
+  const requestInit: RequestInit = {
     method: 'GET',
     credentials: 'include',
-  });
+  };
+
+  logExhibitionRequest('Fetching exhibition layout', requestUrl, requestInit);
+
+  const response = await fetch(requestUrl, requestInit);
 
   if (response.status === 404) {
     return null;
@@ -149,6 +198,7 @@ export async function fetchExhibitionLayout(
 
   if (!response.ok) {
     const message = await response.text();
+    logExhibitionFailure('Fetching exhibition layout', message);
     throw new Error(message || 'Failed to fetch exhibition layout');
   }
 

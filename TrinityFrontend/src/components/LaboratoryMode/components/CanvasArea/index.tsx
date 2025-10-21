@@ -1397,6 +1397,14 @@ const addNewCardWithAtom = async (
     position === undefined || position >= arr.length ? arr.length : position;
 
   try {
+    if (typeof window !== 'undefined') {
+      console.info('[Laboratory API] Creating card', {
+        endpoint: `${LABORATORY_API}/cards`,
+        origin: window.location.origin,
+        payload: { atomId, moleculeId },
+      });
+    }
+
     const response = await fetch(`${LABORATORY_API}/cards`, {
       method: 'POST',
       credentials: 'include',
@@ -1404,6 +1412,13 @@ const addNewCardWithAtom = async (
       body: JSON.stringify({ atomId, moleculeId }),
     });
     if (!response.ok) {
+      if (typeof window !== 'undefined') {
+        console.error('[Laboratory API] Create card request failed', {
+          endpoint: `${LABORATORY_API}/cards`,
+          status: response.status,
+          statusText: response.statusText,
+        });
+      }
       throw new Error(`Request failed with status ${response.status}`);
     }
     const payload = (await response.json()) as CardPayload;

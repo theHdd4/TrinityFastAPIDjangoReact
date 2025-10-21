@@ -94,7 +94,7 @@ async def save_layout_configuration(
     layout: ExhibitionLayoutConfigurationIn,
     collection: AsyncIOMotorCollection = Depends(get_exhibition_layout_collection),
 ) -> Dict[str, Any]:
-    payload = layout.dict(by_alias=True)
+    payload = layout.model_dump(by_alias=True)
     client_name = payload.get("client_name", "").strip()
     app_name = payload.get("app_name", "").strip()
     project_name = payload.get("project_name", "").strip()
