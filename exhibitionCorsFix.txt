@@ -1,0 +1,32 @@
+Exhibition CORS diagnosis
+=========================
+
+Summary of the failure
+----------------------
+Saving the exhibition layout triggered a MongoDB `OperationFailure` (the
+deployment requires authentication) which bubbled out of the FastAPI route.
+FastAPI’s default exception handling returns a bare "Internal Server Error"
+response without CORS headers when an unexpected exception escapes a request.
+The browser interpreted the missing `Access-Control-Allow-Origin` header as a
+CORS violation and blocked `/api/exhibition/layout` (and the related exhibition
+endpoints) even though the request was reaching the backend.
+
+Changes made
+------------
+* Augmented the FastAPI application to guarantee that CORS headers are applied
+  to every response whose origin matches the configured allow-list/regex.
+  Requests from `http://<host>:8080` now receive the `Access-Control-Allow-Origin`
+  header even if the handler fails.
+* Added an exception handler that mirrors the default 500 response while still
+  emitting the appropriate CORS headers and logging the failure for diagnostics.
+* Introduced regression tests that exercise the OPTIONS pre-flight and an
+  erroring POST against `/api/exhibition/layout` to confirm the headers are
+  emitted and that disallowed origins are not echoed.
+
+Impact
+------
+Browser clients at `:8080` no longer see spurious CORS failures when an
+unexpected backend error occurs. The exhibition save operation can now surface
+real backend errors to the UI (while still logging them server-side) and the
+Mongo authentication issue can be addressed without the browser masking it as a
+CORS problem.

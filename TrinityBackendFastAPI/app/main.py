@@ -1,10 +1,12 @@
+import logging
 import os
 import re
 import socket
-from typing import Iterable, List, Optional, Sequence
+from typing import Iterable, List, MutableMapping, Optional, Sequence
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 
 from app.api.router import api_router, text_router
 from DataStorageRetrieval.arrow_client import load_env_from_redis
@@ -164,6 +166,8 @@ def _load_cors_origin_regex() -> Optional[str]:
     return _default_cors_origin_regex()
 
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI()
 
 allowed_origins = _load_cors_origins()
@@ -177,6 +181,76 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_ALLOW_ALL_ORIGINS = "*" in allowed_origins
+_ALLOWED_ORIGIN_SET = {origin for origin in allowed_origins if origin != "*"}
+_ORIGIN_PATTERN = re.compile(origin_regex) if origin_regex else None
+_DEFAULT_ALLOWED_METHODS = "DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT"
+
+
+def _origin_is_allowed(origin: Optional[str]) -> bool:
+    if not origin:
+        return False
+    if _ALLOW_ALL_ORIGINS:
+        return True
+    if origin in _ALLOWED_ORIGIN_SET:
+        return True
+    if _ORIGIN_PATTERN and _ORIGIN_PATTERN.fullmatch(origin):
+        return True
+    return False
+
+
+def _ensure_vary_origin(response_headers: MutableMapping[str, str]) -> None:
+    vary_header = response_headers.get("vary")
+    if not vary_header:
+        response_headers["vary"] = "Origin"
+        return
+
+    entries = {entry.strip().lower() for entry in vary_header.split(",") if entry.strip()}
+    if "origin" not in entries:
+        response_headers["vary"] = f"{vary_header}, Origin"
+
+
+def _apply_cors_fallback_headers(response, request: Request, origin: Optional[str]) -> None:
+    if not _origin_is_allowed(origin):
+        return
+
+    response.headers.setdefault("access-control-allow-origin", origin)
+    response.headers.setdefault("access-control-allow-credentials", "true")
+    _ensure_vary_origin(response.headers)
+
+    if request.method.upper() == "OPTIONS":
+        requested_methods = request.headers.get("access-control-request-method")
+        if requested_methods:
+            response.headers.setdefault("access-control-allow-methods", requested_methods)
+        else:
+            response.headers.setdefault("access-control-allow-methods", _DEFAULT_ALLOWED_METHODS)
+
+        requested_headers = request.headers.get("access-control-request-headers")
+        if requested_headers:
+            response.headers.setdefault("access-control-allow-headers", requested_headers)
+        else:
+            response.headers.setdefault("access-control-allow-headers", "*")
+
+
+@app.middleware("http")
+async def _guarantee_cors_headers(request: Request, call_next):
+    response = await call_next(request)
+    origin = request.headers.get("origin")
+    _apply_cors_fallback_headers(response, request, origin)
+    return response
+
+
+@app.exception_handler(Exception)
+async def _cors_exception_handler(request: Request, exc: Exception):
+    if app.debug:
+        raise exc
+
+    logger.exception("Unhandled exception while processing %s %s", request.method, request.url, exc_info=exc)
+
+    response = PlainTextResponse("Internal Server Error", status_code=500)
+    _apply_cors_fallback_headers(response, request, request.headers.get("origin"))
+    return response
 
 app.include_router(api_router, prefix="/api")
 # Include the text router under /api/text
