@@ -1131,10 +1131,6 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
   }, [layoutCards, workflowMolecules]);
 
-  // Sync cards with exhibition store
-  useEffect(() => {
-  }, [layoutCards, setCards]);
-
   // Persist workflowMolecules to localStorage
   useEffect(() => {
     if (workflowMolecules.length > 0) {
