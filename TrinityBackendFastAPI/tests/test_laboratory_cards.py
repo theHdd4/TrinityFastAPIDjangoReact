@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
+import re
 import sys
 import types
 
@@ -121,3 +122,13 @@ def test_configured_cors_includes_detected_hosts(monkeypatch):
 
     assert origins[0] == "http://frontend.local:8080"
     assert "http://10.2.3.238:9090" in origins
+
+
+def test_default_cors_origin_regex_allows_ipv4(monkeypatch):
+    module = _load_main_module(monkeypatch)
+
+    regex = module._load_cors_origin_regex()
+
+    assert regex is not None
+    assert re.fullmatch(regex, "http://192.168.1.7:8080")
+    assert re.fullmatch(regex, "https://10.2.4.48")

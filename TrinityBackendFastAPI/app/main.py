@@ -1,7 +1,7 @@
 import os
 import re
 import socket
-from typing import Iterable, List, Sequence
+from typing import Iterable, List, Optional, Sequence
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -149,13 +149,30 @@ def _load_cors_origins() -> List[str]:
     return defaults
 
 
+def _default_cors_origin_regex() -> str:
+    """Allow requests from any direct IPv4 address with optional port."""
+
+    return r"https?://(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?$"
+
+
+def _load_cors_origin_regex() -> Optional[str]:
+    """Return the configured CORS origin regex or the IPv4 fallback."""
+
+    configured = os.getenv("FASTAPI_CORS_ORIGIN_REGEX", "").strip()
+    if configured:
+        return configured
+    return _default_cors_origin_regex()
+
+
 app = FastAPI()
 
 allowed_origins = _load_cors_origins()
+origin_regex = None if allowed_origins == ["*"] else _load_cors_origin_regex()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

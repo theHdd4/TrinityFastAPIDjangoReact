@@ -211,7 +211,7 @@ def test_mongo_auth_kwargs_prefers_initdb_root(monkeypatch):
     assert kwargs["authSource"] == "admin"
 
 
-def test_mongo_auth_kwargs_no_hints_returns_empty(monkeypatch):
+def test_mongo_auth_kwargs_no_hints_use_defaults(monkeypatch):
     module = _load_exhibition_module("mongo.py", "app.features.exhibition.mongo")
 
     for env in [
@@ -228,6 +228,20 @@ def test_mongo_auth_kwargs_no_hints_returns_empty(monkeypatch):
         "MONGO_AUTH_DB",
     ]:
         monkeypatch.delenv(env, raising=False)
+
+    kwargs = module.resolve_mongo_auth_kwargs("mongodb://mongo:27017/trinity_db")
+
+    assert kwargs == {
+        "username": "admin_dev",
+        "password": "pass_dev",
+        "authSource": "admin",
+    }
+
+
+def test_mongo_auth_kwargs_disable_flag(monkeypatch):
+    module = _load_exhibition_module("mongo.py", "app.features.exhibition.mongo")
+
+    monkeypatch.setenv("EXHIBITION_REQUIRE_MONGO_AUTH", "false")
 
     kwargs = module.resolve_mongo_auth_kwargs("mongodb://mongo:27017/trinity_db")
 

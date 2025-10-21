@@ -25,10 +25,24 @@ def get_mongo_client() -> AsyncIOMotorClient:
 
 
 def get_database(client: AsyncIOMotorClient = Depends(get_mongo_client)) -> AsyncIOMotorDatabase:
+    desired_database = DEFAULT_DATABASE
     default_db = client.get_default_database()
+
+    if desired_database:
+        if default_db is not None and default_db.name != desired_database:
+            logging.info(
+                "Exhibition dependency overriding Mongo default database %s with %s",
+                default_db.name,
+                desired_database,
+            )
+        return client[desired_database]
+
     if default_db is not None:
         return default_db
-    return client[DEFAULT_DATABASE]
+
+    # Fallback for misconfigured URIs without a default database and no
+    # ``EXHIBITION_MONGO_DB`` override.
+    return client["trinity_db"]
 
 
 async def get_exhibition_collection(

@@ -112,6 +112,10 @@ _AUTH_FLAG_ENV_VARS: tuple[str, ...] = (
     "MONGO_REQUIRE_AUTH",
 )
 
+_DEFAULT_USERNAME = "admin_dev"
+_DEFAULT_PASSWORD = "pass_dev"
+_DEFAULT_AUTH_SOURCE = "admin"
+
 
 def _first_non_empty_env(names: Iterable[str]) -> Optional[str]:
     for name in names:
@@ -169,7 +173,11 @@ def _should_require_auth(uri: str) -> bool:
         return True
     if _auth_source_from_uri(uri):
         return True
-    return False
+
+    # Default to requiring authentication so deployments that rely on the
+    # historical ``admin_dev``/``pass_dev`` credentials keep working unless the
+    # environment explicitly disables auth.
+    return True
 
 
 def _mongo_credentials(uri: str) -> tuple[Optional[str], Optional[str], Optional[str], bool]:
@@ -181,10 +189,10 @@ def _mongo_credentials(uri: str) -> tuple[Optional[str], Optional[str], Optional
     if not require_auth:
         return None, None, None, False
 
-    username = username or "admin_dev"
-    password = password or "pass_dev"
+    username = username or _DEFAULT_USERNAME
+    password = password or _DEFAULT_PASSWORD
     if not auth_source:
-        auth_source = _auth_source_from_uri(uri) or "admin"
+        auth_source = _auth_source_from_uri(uri) or _DEFAULT_AUTH_SOURCE
 
     return username, password, auth_source, True
 
