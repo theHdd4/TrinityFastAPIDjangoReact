@@ -33,6 +33,7 @@ const EXHIBITION_LOCAL_STORAGE_KEYS: readonly string[] = [
 ];
 
 const EXHIBITION_LOCAL_STORAGE_PREFIXES: readonly string[] = ['exhibition::'];
+const CATALOGUE_STORAGE_NAMESPACE = 'exhibition::catalogue::';
 
 const PERSISTENT_EXHIBITION_KEYS = new Set<string>(['exhibition-notes']);
 
@@ -62,6 +63,62 @@ const purgeLegacyExhibitionCache = (): void => {
     }
   } catch (error) {
     console.warn('[Exhibition] Unable to purge legacy exhibition cache entries', error);
+  }
+};
+
+const normaliseStorageSegment = (value: string): string => {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 120);
+};
+
+const buildCatalogueStorageKey = (context: ProjectContext | null): string => {
+  if (!context) {
+    return `${CATALOGUE_STORAGE_NAMESPACE}local-cache`;
+  }
+
+  const parts = [context.client_name, context.app_name, context.project_name]
+    .map(part => (typeof part === 'string' ? normaliseStorageSegment(part) : ''))
+    .filter(Boolean);
+
+  if (parts.length === 0) {
+    return `${CATALOGUE_STORAGE_NAMESPACE}local-cache`;
+  }
+
+  return `${CATALOGUE_STORAGE_NAMESPACE}${parts.join('::')}`;
+};
+
+const refreshCatalogueLocalCache = (
+  context: ProjectContext | null,
+  entries: ExhibitionAtomPayload[],
+  contextLabel: string,
+): void => {
+  if (typeof window === 'undefined' || !window?.localStorage) {
+    return;
+  }
+
+  const storageKey = buildCatalogueStorageKey(context);
+
+  try {
+    if (!entries || entries.length === 0) {
+      if (window.localStorage.getItem(storageKey) !== null) {
+        window.localStorage.removeItem(storageKey);
+        console.info(
+          `[Exhibition] Cleared cached exhibition catalogue for ${contextLabel}`,
+        );
+      }
+      return;
+    }
+
+    window.localStorage.setItem(storageKey, JSON.stringify(entries));
+    console.info(
+      `[Exhibition] Cached ${entries.length} exhibition catalogue entr${entries.length === 1 ? 'y' : 'ies'} for ${contextLabel}`,
+    );
+  } catch (error) {
+    console.warn('[Exhibition] Unable to refresh exhibition catalogue local cache', error);
   }
 };
 
@@ -928,6 +985,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         remoteCatalogueResolved = true;
         const remoteAtoms = remote && Array.isArray(remote.atoms) ? remote.atoms : [];
         catalogueEntries = remoteAtoms;
+        refreshCatalogueLocalCache(resolvedContext, remoteAtoms, contextLabel);
 
         if (remoteAtoms.length === 0) {
           console.info(
@@ -978,11 +1036,13 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
           `[Exhibition] Failed to fetch exhibition catalogue for ${contextLabel} from trinity_db.exhibition_catalogue`,
           error,
         );
+        refreshCatalogueLocalCache(resolvedContext, [], contextLabel);
       }
     } else {
       console.info(
         '[Exhibition] Skipping exhibition catalogue fetch because no active project context was resolved',
       );
+      refreshCatalogueLocalCache(null, [], contextLabel);
     }
 
     set(state => {
