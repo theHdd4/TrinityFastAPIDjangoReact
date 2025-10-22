@@ -34,8 +34,19 @@ class FakeCollection:
 
     def find(self, query):
         pattern = query.get("_id", {}).get("$regex")
-        regex = re.compile(pattern)
-        return [doc.copy() for key, doc in list(self.docs.items()) if regex.match(key)]
+        if pattern:
+            regex = re.compile(pattern)
+            return [doc.copy() for key, doc in list(self.docs.items()) if regex.match(key)]
+
+        def matches(doc):
+            for key, value in query.items():
+                if key == "_id":
+                    continue
+                if doc.get(key) != value:
+                    return False
+            return True
+
+        return [doc.copy() for doc in self.docs.values() if matches(doc)]
 
     def replace_one(self, _filter, document, upsert=False):
         self.docs[document["_id"]] = document
@@ -116,11 +127,60 @@ def test_rename_updates_mongo_documents(monkeypatch):
             "project_name": "Old Project",
         }
     ]
+    exhibition_catalogue_docs = [
+        {
+            "_id": "catalogue-1",
+            "client_name": "Tenant",
+            "app_name": "app",
+            "project_name": "Old Project",
+            "project_id": "Old Project_1",
+            "atoms": [
+                {
+                    "id": "card-1",
+                    "metadata": {
+                        "asset_path": "Tenant/app/Old Project/assets/preview.png",
+                        "env": {
+                            "PROJECT_NAME": "Old Project",
+                            "PROJECT_ID": "Old Project_1",
+                        },
+                    },
+                }
+            ],
+            "env": {
+                "PROJECT_NAME": "Old Project",
+                "PROJECT_ID": "Old Project_1",
+            },
+            "updated_at": datetime(2024, 1, 1, tzinfo=timezone.utc),
+        }
+    ]
+    exhibition_layout_docs = [
+        {
+            "_id": "layout-1",
+            "client_name": "Tenant",
+            "app_name": "app",
+            "project_name": "Old Project",
+            "slide_objects": {
+                "card-1": [
+                    {
+                        "type": "text",
+                        "text": "Tenant/app/Old Project::card-1",
+                    }
+                ]
+            },
+            "env": {
+                "PROJECT_NAME": "Old Project",
+                "PROJECT_ID": "Old Project_1",
+            },
+            "updated_at": datetime(2024, 1, 1, tzinfo=timezone.utc),
+        }
+    ]
 
     db = FakeDB(
         {
             "column_classifier_config": FakeCollection(column_docs),
             "scopeselector_configs": FakeCollection(scope_docs),
+            "exhibition_catalogue": FakeCollection(exhibition_catalogue_docs),
+            "exhibition_list_configuration": FakeCollection(exhibition_layout_docs),
             "other_collection": FakeCollection(
                 [{"_id": "Tenant/app/unrelated", "value": 1}]
             ),
@@ -165,6 +225,32 @@ def test_rename_updates_mongo_documents(monkeypatch):
 
     other_docs = db["other_collection"].list_documents()
     assert other_docs == [{"_id": "Tenant/app/unrelated", "value": 1}]
+
+    catalogue_docs = db["exhibition_catalogue"].list_documents()
+    assert len(catalogue_docs) == 1
+    catalogue_doc = catalogue_docs[0]
+    assert catalogue_doc["project_name"] == "New Project"
+    assert catalogue_doc["project_id"] == "New Project_1"
+    assert catalogue_doc["env"]["PROJECT_NAME"] == "New Project"
+    assert catalogue_doc["env"]["PROJECT_ID"] == "New Project_1"
+    metadata_env = catalogue_doc["atoms"][0]["metadata"]["env"]
+    assert metadata_env["PROJECT_NAME"] == "New Project"
+    assert metadata_env["PROJECT_ID"] == "New Project_1"
+    assert catalogue_doc["atoms"][0]["metadata"]["asset_path"].startswith(
+        "Tenant/app/New Project"
+    )
+    assert isinstance(catalogue_doc["updated_at"], datetime)
+
+    layout_docs = db["exhibition_list_configuration"].list_documents()
+    assert len(layout_docs) == 1
+    layout_doc = layout_docs[0]
+    assert layout_doc["project_name"] == "New Project"
+    assert layout_doc["env"]["PROJECT_NAME"] == "New Project"
+    assert layout_doc["env"]["PROJECT_ID"] == "New Project_1"
+    assert layout_doc["slide_objects"]["card-1"][0]["text"].startswith(
+        "Tenant/app/New Project"
+    )
+    assert isinstance(layout_doc["updated_at"], datetime)
 
     assert set(fake_redis.deleted_keys) == {
         "env:Tenant:app:Old Project",

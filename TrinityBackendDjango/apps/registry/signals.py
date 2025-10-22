@@ -16,6 +16,7 @@ from redis_store.env_cache import invalidate_env, set_current_env
 from urllib.parse import quote
 
 TRINITY_DB_NAME = "trinity_db"
+EXHIBITION_COLLECTIONS = {"exhibition_catalogue", "exhibition_list_configuration"}
 
 
 def _current_tenant_name() -> str:
@@ -422,9 +423,6 @@ def _rename_project_documents_in_mongo(
                     )
                     continue
 
-                if not matched_docs:
-                    continue
-
                 moved = 0
                 for doc in matched_docs:
                     old_id = doc.get("_id")
@@ -478,6 +476,77 @@ def _rename_project_documents_in_mongo(
                     print(
                         f"🍃 Mongo rename updated {moved} docs in {db_name}.{coll_name}"
                     )
+
+                if coll_name in EXHIBITION_COLLECTIONS:
+                    try:
+                        exhibition_docs = list(
+                            collection.find(
+                                {
+                                    "client_name": client_name,
+                                    "app_name": app_name,
+                                    "project_name": old_project,
+                                }
+                            )
+                        )
+                    except PyMongoError as exc:  # pragma: no cover - permissions dependent
+                        print(
+                            f"⚠️ Unable to scan {db_name}.{coll_name} for exhibition rename: {exc}"
+                        )
+                        continue
+
+                    refreshed = 0
+                    for doc in exhibition_docs:
+                        doc_id = doc.get("_id")
+                        body = {
+                            key: value
+                            for key, value in doc.items()
+                            if key != "_id"
+                        }
+                        body = _replace_project_tokens(
+                            body,
+                            client_name=client_name,
+                            app_name=app_name,
+                            old_project=old_project,
+                            new_project=new_project,
+                            old_pid=old_pid,
+                            new_pid=new_pid,
+                            old_prefix=old_prefix,
+                            new_prefix=new_prefix,
+                        )
+                        if body.get("project_name") == old_project:
+                            body["project_name"] = new_project
+                        project_identifier = body.get("project_id")
+                        if isinstance(project_identifier, str) and project_identifier == old_pid:
+                            body["project_id"] = new_pid
+                        if "env" in body and isinstance(body["env"], dict):
+                            env_map = body["env"]
+                            if env_map.get("PROJECT_NAME") == old_project:
+                                env_map["PROJECT_NAME"] = new_project
+                            if env_map.get("PROJECT_ID") == old_pid:
+                                env_map["PROJECT_ID"] = new_pid
+                        body["updated_at"] = datetime.now(UTC)
+
+                        replacement = dict(body)
+                        if doc_id is not None:
+                            replacement["_id"] = doc_id
+                            collection.replace_one({"_id": doc_id}, replacement, upsert=True)
+                        else:
+                            collection.replace_one(
+                                {
+                                    "client_name": client_name,
+                                    "app_name": app_name,
+                                    "project_name": old_project,
+                                },
+                                replacement,
+                                upsert=True,
+                            )
+                        refreshed += 1
+
+                    if refreshed:
+                        modified_total += refreshed
+                        print(
+                            f"🍃 Mongo rename refreshed {refreshed} docs in {db_name}.{coll_name}"
+                        )
     finally:
         mc.close()
 

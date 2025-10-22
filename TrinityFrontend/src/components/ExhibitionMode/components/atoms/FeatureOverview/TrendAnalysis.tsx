@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { cn } from '@/lib/utils';
 import TrendAnalysisChart from './TrendAnalysisChart';
 import { deriveChartConfig, ChartRendererConfig } from './shared';
 import { FeatureOverviewComponentProps } from './types';
@@ -9,8 +10,13 @@ const TrendAnalysis: React.FC<FeatureOverviewComponentProps> = ({ metadata, vari
     [metadata, variant],
   );
 
+  const containerClass = cn(
+    'rounded-2xl border border-border p-6 shadow-sm',
+    variant === 'full' ? 'bg-transparent' : 'bg-background/80',
+  );
+
   return (
-    <div className="rounded-2xl border border-border bg-background/80 p-6 shadow-sm">
+    <div className={containerClass}>
       {chartConfig ? (
         <TrendAnalysisChart config={chartConfig} />
       ) : (
