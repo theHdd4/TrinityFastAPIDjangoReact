@@ -1,6 +1,6 @@
 import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Download, FileText, Grid3x3, Save, Share2, Undo2 } from 'lucide-react';
+import { ChevronRight, Download, FileText, Grid3x3, Save, Share2, Undo2 } from 'lucide-react';
 import Header from '@/components/Header';
 import {
   useExhibitionStore,
@@ -103,6 +103,7 @@ const ExhibitionMode = () => {
   const [viewMode, setViewMode] = useState<'horizontal' | 'vertical'>('horizontal');
   const [isSaving, setIsSaving] = useState(false);
   const [undoAvailable, setUndoAvailable] = useState(false);
+  const [isCatalogueCollapsed, setIsCatalogueCollapsed] = useState(false);
   const [operationsPanelState, setOperationsPanelState] = useState<
     | { type: 'custom'; node: ReactNode }
     | { type: 'notes' }
@@ -1406,19 +1407,31 @@ const ExhibitionMode = () => {
           <div className="flex h-full flex-shrink-0">
             <div className="bg-background border-r border-border transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
               <div className="p-3 border-b border-border flex items-center justify-center">
-                <div
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-muted text-foreground"
-                  aria-hidden="true"
-                >
-                  <FileText className="h-4 w-4" />
-                </div>
+                {isCatalogueCollapsed ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsCatalogueCollapsed(false)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
+                    title="Expand catalogue"
+                    aria-label="Expand catalogue"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <div
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-muted text-foreground"
+                    aria-hidden="true"
+                  >
+                    <FileText className="h-4 w-4" />
+                  </div>
+                )}
               </div>
               <div className="p-3 border-b border-border flex items-center justify-center">
                 <button
                   type="button"
                   onClick={() => {
                     setShowGridView(false);
-                    setShowThumbnails(true);
+                    setShowThumbnails(current => !current);
                   }}
                   className={cn(
                     'inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted',
@@ -1433,15 +1446,18 @@ const ExhibitionMode = () => {
               </div>
             </div>
 
-            <ExhibitionCatalogue
-              cards={catalogueCards}
-              currentSlide={currentSlide}
-              onSlideSelect={handleSlideSelection}
-              slideIndexByCardId={slideIndexByCardId}
-              onDragStart={handleDragStart}
-              onDragEnd={handleDragEnd}
-              enableDragging={canEdit}
-            />
+            {!isCatalogueCollapsed && !showThumbnails && (
+              <ExhibitionCatalogue
+                cards={catalogueCards}
+                currentSlide={currentSlide}
+                onSlideSelect={handleSlideSelection}
+                slideIndexByCardId={slideIndexByCardId}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                enableDragging={canEdit}
+                onCollapse={() => setIsCatalogueCollapsed(true)}
+              />
+            )}
 
             {showThumbnails && (
               <SlideThumbnails
