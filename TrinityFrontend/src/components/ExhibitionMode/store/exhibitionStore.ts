@@ -22,6 +22,49 @@ const CARD_WIDTHS: readonly CardWidth[] = ['M', 'L'] as const;
 const CONTENT_ALIGNMENTS: readonly ContentAlignment[] = ['top', 'center', 'bottom'] as const;
 const SLIDESHOW_TRANSITIONS: readonly SlideshowTransition[] = ['fade', 'slide', 'zoom'] as const;
 
+const EXHIBITION_LOCAL_STORAGE_KEYS: readonly string[] = [
+  'exhibition-layout-cache',
+  'exhibition-layout',
+  'exhibition-layout-cards',
+  'exhibition-catalogue',
+  'exhibition_catalogue',
+  'exhibition-catalogue-cache',
+  'exhibitionCatalogue',
+];
+
+const EXHIBITION_LOCAL_STORAGE_PREFIXES: readonly string[] = ['exhibition::'];
+
+const PERSISTENT_EXHIBITION_KEYS = new Set<string>(['exhibition-notes']);
+
+const purgeLegacyExhibitionCache = (): void => {
+  if (typeof window === 'undefined' || !window?.localStorage) {
+    return;
+  }
+
+  try {
+    const { localStorage } = window;
+
+    EXHIBITION_LOCAL_STORAGE_KEYS.forEach(key => {
+      if (localStorage.getItem(key) !== null) {
+        localStorage.removeItem(key);
+      }
+    });
+
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (!key || PERSISTENT_EXHIBITION_KEYS.has(key)) {
+        continue;
+      }
+
+      if (EXHIBITION_LOCAL_STORAGE_PREFIXES.some(prefix => key.startsWith(prefix))) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch (error) {
+    console.warn('[Exhibition] Unable to purge legacy exhibition cache entries', error);
+  }
+};
+
 const LEGACY_CARD_LAYOUTS: Record<string, CardLayout> = {
   blank: 'none',
   'horizontal-split': 'top',
@@ -874,6 +917,8 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       ? `${resolvedContext.client_name}/${resolvedContext.app_name}/${resolvedContext.project_name}`
       : 'local-cache';
 
+    purgeLegacyExhibitionCache();
+
     if (resolvedContext) {
       console.info(
         `[Exhibition] Fetching exhibition catalogue from trinity_db.exhibition_catalogue for ${contextLabel}`,
@@ -1022,7 +1067,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         cards: ensuredCards,
         exhibitedCards: nextExhibitedCards,
         catalogueCards: nextCatalogueCards,
-        catalogueEntries: shouldUseRemoteCatalogue ? catalogueEntries : state.catalogueEntries,
+        catalogueEntries: shouldUseRemoteCatalogue ? catalogueEntries : [],
         lastLoadedContext: resolvedContext,
         slideObjectsByCardId: nextSlideObjects,
       };
