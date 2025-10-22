@@ -1,6 +1,6 @@
 import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Download, FileText, Grid3x3, Presentation, Save, Share2, Undo2 } from 'lucide-react';
+import { Download, FileText, Grid3x3, Save, Share2, Undo2 } from 'lucide-react';
 import Header from '@/components/Header';
 import {
   useExhibitionStore,
@@ -40,6 +40,8 @@ import {
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
 const SLIDESHOW_ANIMATION_MS = 450;
+const EXHIBITION_STORAGE_KEY = 'exhibition-layout-cache';
+const LAB_STORAGE_KEY = 'laboratory-layout-cards';
 
 const contextsEqual = (a: ProjectContext | null, b: ProjectContext | null): boolean => {
   if (!a && !b) {
@@ -719,7 +721,25 @@ const ExhibitionMode = () => {
     }
 
     try {
-      window.localStorage.setItem('laboratory-layout-cards', JSON.stringify(payloadCards));
+      const serializedPayload = JSON.stringify(payloadCards);
+
+      const possibleLabCache = window.localStorage.getItem(LAB_STORAGE_KEY);
+      if (possibleLabCache) {
+        try {
+          const parsed = JSON.parse(possibleLabCache);
+          const containsExhibitionFields = Array.isArray(parsed)
+            && parsed.some(card => card && typeof card === 'object'
+              && ('presentationSettings' in card || 'catalogueAtoms' in card));
+
+          if (containsExhibitionFields) {
+            window.localStorage.removeItem(LAB_STORAGE_KEY);
+          }
+        } catch (parseError) {
+          console.warn('Failed to inspect laboratory cache before saving exhibition layout', parseError);
+        }
+      }
+
+      window.localStorage.setItem(EXHIBITION_STORAGE_KEY, serializedPayload);
     } catch (error) {
       console.warn('Failed to cache exhibition layout locally', error);
     }
@@ -1369,32 +1389,6 @@ const ExhibitionMode = () => {
       </div>
     </div>
   );
-
-  if (exhibitedCards.length === 0 && catalogueCards.length === 0) {
-    return (
-      <div className="h-screen bg-background flex flex-col">
-        <Header />
-        {renderHeaderSection()}
-
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center max-w-md">
-            <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mb-6 mx-auto">
-              <Presentation className="w-10 h-10 text-muted-foreground" />
-            </div>
-            <h3 className="text-2xl font-semibold text-foreground mb-3">No Slides to Present</h3>
-            <p className="text-muted-foreground mb-6">
-              Go to Laboratory mode, exhibit the components you want to showcase so they appear in the catalogue, then click Save.
-            </p>
-            <div className="p-4 bg-muted/50 rounded-lg border border-border">
-              <p className="text-sm text-muted-foreground">
-                💡 Exhibition mode transforms your cards into professional presentation slides
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div

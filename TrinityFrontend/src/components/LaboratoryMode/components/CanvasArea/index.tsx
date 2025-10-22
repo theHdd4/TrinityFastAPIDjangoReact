@@ -3,9 +3,8 @@ import { createPortal } from 'react-dom';
 import { safeStringify } from '@/utils/safeStringify';
 import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon, GripVertical } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon, GripVertical } from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -1995,7 +1994,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                   <GripVertical className="w-3 h-3 text-gray-400" />
                                 </div>
                               )}
-                              <Eye className={`w-4 h-4 ${card.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                               <span className="text-sm font-medium text-gray-700">
                                 {cardTitle}
                               </span>
@@ -2007,13 +2005,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               />
                             </div>
                             <div className="flex items-center space-x-2">
-                              <span className="text-xs text-gray-500">Exhibition status</span>
-                              <Badge
-                                variant={card.isExhibited ? 'outline' : 'secondary'}
-                                className={card.isExhibited ? 'bg-[#458EE2]/10 text-[#458EE2] border-[#458EE2]/30' : 'bg-gray-100 text-gray-600'}
-                              >
-                                {card.isExhibited ? 'Exhibited' : 'Not exhibited'}
-                              </Badge>
                               <button
                                 onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
                                 className="p-1 hover:bg-gray-100 rounded"
@@ -2218,7 +2209,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                   <GripVertical className="w-3 h-3 text-gray-400" />
                                 </div>
                               )}
-                              <Eye className={`w-4 h-4 ${card.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                               <span className="text-sm font-medium text-gray-700">
                                 {cardTitle}
                               </span>
@@ -2230,14 +2220,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               />
                             </div>
                             <div className="flex items-center space-x-2">
-                              <span className="text-xs text-gray-500">Exhibition status</span>
-                              <Badge
-                                variant={card.isExhibited ? 'outline' : 'secondary'}
-                                className={card.isExhibited ? 'bg-[#458EE2]/10 text-[#458EE2] border-[#458EE2]/30' : 'bg-gray-100 text-gray-600'}
-                              >
-                                {card.isExhibited ? 'Exhibited' : 'Not exhibited'}
-                              </Badge>
-                      <button
+                              <button
                                 onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
                                 className="p-1 hover:bg-gray-100 rounded"
                               >
@@ -2436,10 +2419,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, card.id)}
           >
-            {/* Card Header with Exhibition Status */}
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <div className="flex items-center space-x-2">
-                <Eye className={`w-4 h-4 ${card.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                 <span className="text-sm font-medium text-gray-700">
                   {cardTitle}
                 </span>
@@ -2470,13 +2451,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 </button>
               </div>
               <div className="flex items-center space-x-2">
-                <span className="text-xs text-gray-500">Exhibition status</span>
-                <Badge
-                  variant={card.isExhibited ? 'outline' : 'secondary'}
-                  className={card.isExhibited ? 'bg-[#458EE2]/10 text-[#458EE2] border-[#458EE2]/30' : 'bg-gray-100 text-gray-600'}
-                >
-                  {card.isExhibited ? 'Exhibited' : 'Not exhibited'}
-                </Badge>
                 <button
                   onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
                   className="p-1 hover:bg-gray-100 rounded"
@@ -2695,10 +2669,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
               onClick={() => setExpandedCard(null)}
             />
             <div className="relative flex h-full w-full flex-col bg-gray-50 shadow-2xl pointer-events-auto">
-              {/* Fullscreen Header */}
               <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
                 <div className="flex items-center space-x-2">
-                <Eye className={`w-4 h-4 ${Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard)?.isExhibited : false ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                 <span className="text-lg font-semibold text-gray-900">
                   {(() => {
                     const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
@@ -2712,13 +2684,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 </span>
                 </div>
                 <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-500">Exhibition status</span>
-                <Badge
-                  variant={Array.isArray(layoutCards) && layoutCards.find(c => c.id === expandedCard)?.isExhibited ? 'outline' : 'secondary'}
-                  className={(Array.isArray(layoutCards) && layoutCards.find(c => c.id === expandedCard)?.isExhibited) ? 'bg-[#458EE2]/10 text-[#458EE2] border-[#458EE2]/30' : 'bg-gray-100 text-gray-600'}
-                >
-                  {Array.isArray(layoutCards) && layoutCards.find(c => c.id === expandedCard)?.isExhibited ? 'Exhibited' : 'Not exhibited'}
-                </Badge>
                 <button
                   onClick={() => setExpandedCard(null)}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
