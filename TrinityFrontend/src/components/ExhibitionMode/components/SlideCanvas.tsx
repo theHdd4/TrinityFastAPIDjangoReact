@@ -112,7 +112,7 @@ const parseBooleanish = (value: unknown): boolean | null => {
 };
 
 const slideBackgroundClassNames: Record<SlideBackgroundColor, string> = {
-  default: 'bg-muted/20',
+  default: 'bg-card',
   ivory: 'bg-amber-100',
   slate: 'bg-slate-200',
   charcoal: 'bg-neutral-300',
@@ -859,14 +859,14 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     };
   }, [onPositionPanelChange]);
 
-  const slideBackgroundClass = slideBackgroundClassNames[settings.backgroundColor] ?? slideBackgroundClassNames.default;
+  const slideBackgroundClass =
+    slideBackgroundClassNames[settings.backgroundColor] ?? slideBackgroundClassNames.default;
 
   const containerClasses =
     viewMode === 'horizontal'
-      ? cn('flex-1 h-full overflow-auto', slideBackgroundClass)
+      ? 'flex-1 h-full overflow-auto bg-muted/20'
       : cn(
-          'w-full overflow-hidden border rounded-3xl transition-all duration-300 shadow-sm',
-          slideBackgroundClass,
+          'w-full overflow-hidden border rounded-3xl transition-all duration-300 shadow-sm bg-muted/20',
           isActive
             ? 'border-primary shadow-elegant ring-1 ring-primary/30'
             : 'border-border hover:border-primary/40'
@@ -917,7 +917,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
               <div
                 className={cn(
-                  'relative h-[520px] w-full overflow-hidden bg-card shadow-2xl transition-all duration-300',
+                  'relative h-[520px] w-full overflow-hidden shadow-2xl transition-all duration-300',
+                  slideBackgroundClass,
                   settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border',
                   isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
                   !canEdit && 'opacity-90'
@@ -2234,7 +2235,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               {isSelected && (
                 <div
                   className={cn(
-                    'pointer-events-none absolute -inset-3 border-2 border-yellow-400/80 shadow-[0_0_0_8px_rgba(250,204,21,0.35)] transition-all duration-200',
+                    'pointer-events-none absolute inset-0 border border-yellow-400 transition-all duration-200',
                     suppressCardChrome || isShapeObject || isTextBoxObject || isTableObject
                       ? 'rounded-[22px]'
                       : 'rounded-[32px]'
@@ -2263,9 +2264,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       return 'border-transparent';
                     }
 
-                    return isSelected
-                      ? 'border-yellow-400/80 shadow-[0_24px_45px_-18px_rgba(250,204,21,0.45)]'
-                      : 'border-border/70 hover:border-primary/40';
+                    return 'border-border/70 hover:border-primary/40';
                   })(),
                 )}
                 style={{

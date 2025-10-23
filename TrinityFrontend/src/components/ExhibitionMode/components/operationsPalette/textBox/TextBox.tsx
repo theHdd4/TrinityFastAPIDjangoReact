@@ -459,7 +459,6 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
       className={cn(
         'h-full w-full overflow-hidden rounded-2xl border border-transparent bg-transparent p-3 transition-colors focus-within:border-primary focus-within:shadow-lg',
         canEdit && !isEditing && 'hover:border-border/70',
-        isSelected && !isEditing && 'border-yellow-300/80 shadow-[0_0_0_4px_rgba(250,204,21,0.2)]',
         isEditing && 'border-primary shadow-lg',
       )}
       onDoubleClick={handleDoubleClick}
