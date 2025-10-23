@@ -920,7 +920,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
               <div
                 className={cn(
-                  'relative h-[520px] w-full overflow-hidden shadow-2xl transition-all duration-300',
+                  'relative w-full overflow-hidden shadow-2xl transition-all duration-300',
                   slideBackgroundClass,
                   settings.fullBleed
                     ? 'rounded-none border-0'
@@ -928,6 +928,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
                   !canEdit && 'opacity-90'
                 )}
+                style={{ height: CANVAS_STAGE_HEIGHT }}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
@@ -1077,6 +1078,12 @@ const layoutOverlayBackgrounds: Record<CardColor, string> = {
   orange: 'from-orange-500 via-amber-500 to-yellow-400',
 };
 
+const CANVAS_STAGE_HEIGHT = 520;
+const TOP_LAYOUT_MIN_HEIGHT = 210;
+const BOTTOM_LAYOUT_MIN_HEIGHT = 220;
+const SIDE_LAYOUT_MIN_WIDTH = 280;
+const SIDE_LAYOUT_RATIO = 0.34;
+
 const LayoutOverlay: React.FC<{
   layout: CardLayout;
   color: CardColor;
@@ -1089,9 +1096,10 @@ const LayoutOverlay: React.FC<{
   }
 
   const gradient = layoutOverlayBackgrounds[color] ?? layoutOverlayBackgrounds.default;
-  const sharedClass = cn(
-    'pointer-events-none absolute overflow-hidden transition-all duration-300 ease-out',
+  const wrapperClass = cn(
+    'pointer-events-none absolute inset-0 overflow-hidden transition-all duration-300 ease-out',
     'shadow-[0_32px_72px_-32px_rgba(76,29,149,0.45)]',
+    fullBleed ? 'rounded-none' : 'rounded-[28px]'
   );
 
   const content = accentImage ? (
@@ -1104,62 +1112,58 @@ const LayoutOverlay: React.FC<{
     <div className={cn('h-full w-full bg-gradient-to-br', gradient)} />
   );
 
+  if (layout === 'full') {
+    return <div className={wrapperClass}>{content}</div>;
+  }
+
+  const renderVerticalOverlay = (position: 'top' | 'bottom') => {
+    const minHeight = position === 'top' ? TOP_LAYOUT_MIN_HEIGHT : BOTTOM_LAYOUT_MIN_HEIGHT;
+    const ratio = minHeight / CANVAS_STAGE_HEIGHT;
+
+    return (
+      <div className={wrapperClass}>
+        <div className="flex h-full w-full flex-col">
+          {position === 'bottom' && <div className="flex-1 min-h-0" />}
+          <div
+            className="relative flex-shrink-0 overflow-hidden"
+            style={{ flexBasis: `${ratio * 100}%`, minHeight }}
+          >
+            {content}
+          </div>
+          {position === 'top' && <div className="flex-1 min-h-0" />}
+        </div>
+      </div>
+    );
+  };
+
+  const renderHorizontalOverlay = (position: 'left' | 'right') => {
+    return (
+      <div className={wrapperClass}>
+        <div className="flex h-full w-full flex-row">
+          {position === 'right' && <div className="flex-1 min-w-0" />}
+          <div
+            className="relative flex-shrink-0 overflow-hidden"
+            style={{ flexBasis: `${SIDE_LAYOUT_RATIO * 100}%`, minWidth: SIDE_LAYOUT_MIN_WIDTH }}
+          >
+            {content}
+          </div>
+          {position === 'left' && <div className="flex-1 min-w-0" />}
+        </div>
+      </div>
+    );
+  };
+
   switch (layout) {
     case 'top':
-      return (
-        <div
-          className={cn(
-            sharedClass,
-            'left-0 right-0 top-0 h-[210px]',
-            fullBleed ? 'rounded-none' : 'rounded-t-[28px]'
-          )}
-        >
-          {content}
-        </div>
-      );
+      return renderVerticalOverlay('top');
     case 'bottom':
-      return (
-        <div
-          className={cn(
-            sharedClass,
-            'bottom-0 left-0 right-0 h-[220px]',
-            fullBleed ? 'rounded-none' : 'rounded-b-[28px]'
-          )}
-        >
-          {content}
-        </div>
-      );
+      return renderVerticalOverlay('bottom');
     case 'left':
-      return (
-        <div
-          className={cn(
-            sharedClass,
-            'bottom-0 left-0 top-0 w-[34%] min-w-[280px]',
-            fullBleed ? 'rounded-none' : 'rounded-l-[28px]'
-          )}
-        >
-          {content}
-        </div>
-      );
+      return renderHorizontalOverlay('left');
     case 'right':
-      return (
-        <div
-          className={cn(
-            sharedClass,
-            'bottom-0 right-0 top-0 w-[34%] min-w-[280px]',
-            fullBleed ? 'rounded-none' : 'rounded-r-[28px]'
-          )}
-        >
-          {content}
-        </div>
-      );
-    case 'full':
+      return renderHorizontalOverlay('right');
     default:
-      return (
-        <div className={cn(sharedClass, 'inset-0', fullBleed ? 'rounded-none' : 'rounded-[28px]')}>
-          {content}
-        </div>
-      );
+      return <div className={wrapperClass}>{content}</div>;
   }
 };
 
