@@ -10,6 +10,7 @@ import {
   DroppedAtom,
   PresentationSettings,
   DEFAULT_PRESENTATION_SETTINGS,
+  type SlideBackgroundColor,
   type SlideObject,
   DEFAULT_CANVAS_OBJECT_WIDTH,
   DEFAULT_CANVAS_OBJECT_HEIGHT,
@@ -108,6 +109,16 @@ const parseBooleanish = (value: unknown): boolean | null => {
     }
   }
   return null;
+};
+
+const slideBackgroundClassNames: Record<SlideBackgroundColor, string> = {
+  default: 'bg-muted/20',
+  ivory: 'bg-amber-100',
+  slate: 'bg-slate-200',
+  charcoal: 'bg-neutral-300',
+  indigo: 'bg-indigo-100',
+  emerald: 'bg-emerald-100',
+  rose: 'bg-rose-100',
 };
 
 const resolveFeatureOverviewTransparency = (
@@ -848,11 +859,14 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     };
   }, [onPositionPanelChange]);
 
+  const slideBackgroundClass = slideBackgroundClassNames[settings.backgroundColor] ?? slideBackgroundClassNames.default;
+
   const containerClasses =
     viewMode === 'horizontal'
-      ? 'flex-1 h-full bg-muted/20 overflow-auto'
+      ? cn('flex-1 h-full overflow-auto', slideBackgroundClass)
       : cn(
-          'w-full bg-muted/20 overflow-hidden border rounded-3xl transition-all duration-300 shadow-sm',
+          'w-full overflow-hidden border rounded-3xl transition-all duration-300 shadow-sm',
+          slideBackgroundClass,
           isActive
             ? 'border-primary shadow-elegant ring-1 ring-primary/30'
             : 'border-border hover:border-primary/40'
@@ -2217,6 +2231,17 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
               onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
             >
+              {isSelected && (
+                <div
+                  className={cn(
+                    'pointer-events-none absolute -inset-3 border-2 border-yellow-400/80 shadow-[0_0_0_8px_rgba(250,204,21,0.35)] transition-all duration-200',
+                    suppressCardChrome || isShapeObject || isTextBoxObject || isTableObject
+                      ? 'rounded-[22px]'
+                      : 'rounded-[32px]'
+                  )}
+                  aria-hidden="true"
+                />
+              )}
               <div
                 className={cn(
                   'relative flex h-full w-full flex-col overflow-hidden rounded-3xl border-2 transition-all',
@@ -2227,15 +2252,21 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   isShapeObject && 'border-none bg-transparent shadow-none overflow-visible',
                   (isTextBoxObject || isTableObject) &&
                     'overflow-visible border-transparent bg-transparent shadow-none',
-                  isFeatureOverviewAtom
-                    ? isSelected
-                      ? 'border-primary shadow-2xl'
-                      : 'border-transparent'
-                    : !isShapeObject &&
-                      !(isTextBoxObject || isTableObject) &&
-                      (isSelected
-                        ? 'border-primary shadow-2xl'
-                        : 'border-border/70 hover-border-primary/40'),
+                  (() => {
+                    const shouldShowCardChrome =
+                      !suppressCardChrome &&
+                      !isAccentImageObject &&
+                      !isShapeObject &&
+                      !(isTextBoxObject || isTableObject);
+
+                    if (!shouldShowCardChrome) {
+                      return 'border-transparent';
+                    }
+
+                    return isSelected
+                      ? 'border-yellow-400/80 shadow-[0_24px_45px_-18px_rgba(250,204,21,0.45)]'
+                      : 'border-border/70 hover:border-primary/40';
+                  })(),
                 )}
                 style={{
                   transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,

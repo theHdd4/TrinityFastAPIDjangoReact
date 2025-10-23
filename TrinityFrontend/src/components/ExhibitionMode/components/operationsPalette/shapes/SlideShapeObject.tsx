@@ -178,7 +178,7 @@ export const SlideShapeObject: React.FC<SlideShapeObjectProps> = ({
       className={cn(
         'h-full w-full rounded-2xl border border-transparent bg-transparent transition-colors',
         canEdit && 'hover:border-border/70',
-        isSelected && 'border-border/80 shadow-sm',
+        isSelected && 'border-yellow-300/80 shadow-[0_0_0_4px_rgba(250,204,21,0.2)]',
       )}
     >
       <ShapeRenderer

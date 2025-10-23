@@ -1138,7 +1138,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
           className={cn(
             'h-full w-full overflow-hidden rounded-2xl border border-transparent bg-transparent p-3 transition-colors',
             canEdit && !locked && 'hover:border-border/70',
-            isSelected && 'border-border/80 shadow-sm',
+            isSelected && 'border-yellow-300/80 shadow-[0_0_0_4px_rgba(250,204,21,0.2)]',
             className,
           )}
         >

@@ -21,7 +21,27 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { cn } from '@/lib/utils';
 import type { PresentationSettings } from '../../store/exhibitionStore';
+
+const backgroundColorOptions: Array<{
+  value: PresentationSettings['backgroundColor'];
+  label: string;
+  swatchClass: string;
+}> = [
+  { value: 'default', label: 'Default', swatchClass: 'bg-muted/40' },
+  { value: 'ivory', label: 'Ivory', swatchClass: 'bg-amber-100' },
+  { value: 'slate', label: 'Soft Slate', swatchClass: 'bg-slate-200' },
+  { value: 'charcoal', label: 'Charcoal Mist', swatchClass: 'bg-neutral-300' },
+  { value: 'indigo', label: 'Indigo Haze', swatchClass: 'bg-indigo-100' },
+  { value: 'emerald', label: 'Emerald Veil', swatchClass: 'bg-emerald-100' },
+  { value: 'rose', label: 'Rose Quartz', swatchClass: 'bg-rose-100' },
+];
+
+const backgroundColorLabels = backgroundColorOptions.reduce<Record<string, string>>((acc, option) => {
+  acc[option.value] = option.label;
+  return acc;
+}, {});
 
 interface CardFormattingPanelProps {
   settings: PresentationSettings;
@@ -235,6 +255,40 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                 <DropdownMenuItem onClick={() => onUpdateSettings({ cardColor: 'purple' })}>Purple</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onUpdateSettings({ cardColor: 'green' })}>Green</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => onUpdateSettings({ cardColor: 'orange' })}>Orange</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Maximize2 className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm">Background color</span>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  disabled={!canEdit}
+                >
+                  {backgroundColorLabels[settings.backgroundColor] ?? 'Default'}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="bg-background">
+                {backgroundColorOptions.map(option => (
+                  <DropdownMenuItem
+                    key={option.value}
+                    onClick={() => onUpdateSettings({ backgroundColor: option.value })}
+                  >
+                    <span
+                      className={cn('mr-2 inline-flex h-3 w-3 rounded-full border border-border/40', option.swatchClass)}
+                    />
+                    {option.label}
+                  </DropdownMenuItem>
+                ))}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
