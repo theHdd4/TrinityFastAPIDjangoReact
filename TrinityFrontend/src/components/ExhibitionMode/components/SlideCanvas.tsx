@@ -583,12 +583,15 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       let nextHeight =
         typeof rawHeight === 'number' && Number.isFinite(rawHeight) ? rawHeight : target.height;
 
-      nextWidth = Math.max(MIN_OBJECT_WIDTH, nextWidth);
-      nextHeight = Math.max(MIN_OBJECT_HEIGHT, nextHeight);
+      const minWidth = MIN_TEXT_OBJECT_WIDTH;
+      const minHeight = MIN_TEXT_OBJECT_HEIGHT;
+
+      nextWidth = Math.max(minWidth, nextWidth);
+      nextHeight = Math.max(minHeight, nextHeight);
 
       if (canvas) {
-        nextWidth = Math.min(nextWidth, canvas.clientWidth);
-        nextHeight = Math.min(nextHeight, canvas.clientHeight);
+        nextWidth = Math.max(minWidth, Math.min(nextWidth, canvas.clientWidth));
+        nextHeight = Math.max(minHeight, Math.min(nextHeight, canvas.clientHeight));
       }
 
       const rawX = updates.x;
@@ -1060,6 +1063,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
 
 const MIN_OBJECT_WIDTH = 220;
 const MIN_OBJECT_HEIGHT = 120;
+const MIN_TEXT_OBJECT_WIDTH = 140;
+const MIN_TEXT_OBJECT_HEIGHT = 60;
 
 const layoutOverlayBackgrounds: Record<CardColor, string> = {
   default: 'from-purple-500 via-pink-500 to-orange-400',
@@ -2029,6 +2034,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             return;
           }
 
+          const { minWidth, minHeight } =
+            target.type === 'text-box'
+              ? { minWidth: MIN_TEXT_OBJECT_WIDTH, minHeight: MIN_TEXT_OBJECT_HEIGHT }
+              : { minWidth: MIN_OBJECT_WIDTH, minHeight: MIN_OBJECT_HEIGHT };
+
           const deltaX = event.clientX - activeInteraction.startClientX;
           const deltaY = event.clientY - activeInteraction.startClientY;
 
@@ -2058,25 +2068,25 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             nextHeight = Math.min(nextHeight, canvas.clientHeight);
           }
 
-          if (nextWidth < MIN_OBJECT_WIDTH) {
+          if (nextWidth < minWidth) {
             if (handle === 'nw' || handle === 'sw') {
-              nextX -= MIN_OBJECT_WIDTH - nextWidth;
+              nextX -= minWidth - nextWidth;
             }
-            nextWidth = MIN_OBJECT_WIDTH;
+            nextWidth = minWidth;
           }
 
-          if (nextHeight < MIN_OBJECT_HEIGHT) {
+          if (nextHeight < minHeight) {
             if (handle === 'nw' || handle === 'ne') {
-              nextY -= MIN_OBJECT_HEIGHT - nextHeight;
+              nextY -= minHeight - nextHeight;
             }
-            nextHeight = MIN_OBJECT_HEIGHT;
+            nextHeight = minHeight;
           }
 
           const { x, y } = clampAndSnapPosition(nextX, nextY, nextWidth, nextHeight);
-          const snappedWidth = Math.max(MIN_OBJECT_WIDTH, snapToGrid(nextWidth));
-          const snappedHeight = Math.max(MIN_OBJECT_HEIGHT, snapToGrid(nextHeight));
-          const widthLimit = canvas ? Math.max(MIN_OBJECT_WIDTH, Math.min(snappedWidth, canvas.clientWidth)) : snappedWidth;
-          const heightLimit = canvas ? Math.max(MIN_OBJECT_HEIGHT, Math.min(snappedHeight, canvas.clientHeight)) : snappedHeight;
+          const snappedWidth = Math.max(minWidth, snapToGrid(nextWidth));
+          const snappedHeight = Math.max(minHeight, snapToGrid(nextHeight));
+          const widthLimit = canvas ? Math.max(minWidth, Math.min(snappedWidth, canvas.clientWidth)) : snappedWidth;
+          const heightLimit = canvas ? Math.max(minHeight, Math.min(snappedHeight, canvas.clientHeight)) : snappedHeight;
 
           onBulkUpdate({
             [objectId]: {

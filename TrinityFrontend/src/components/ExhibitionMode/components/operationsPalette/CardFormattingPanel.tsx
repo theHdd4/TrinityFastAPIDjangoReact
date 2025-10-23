@@ -24,6 +24,14 @@ import {
 import { cn } from '@/lib/utils';
 import type { PresentationSettings } from '../../store/exhibitionStore';
 
+const layoutColorLabels: Record<PresentationSettings['cardColor'], string> = {
+  default: 'Default',
+  blue: 'Blue',
+  purple: 'Purple',
+  green: 'Green',
+  orange: 'Orange',
+};
+
 const backgroundColorOptions: Array<{
   value: PresentationSettings['backgroundColor'];
   label: string;
@@ -236,17 +244,17 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Palette className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm">Card color</span>
+              <span className="text-sm">Layout color</span>
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-7 text-xs capitalize"
+                  className="h-7 text-xs"
                   disabled={!canEdit || hasAccentImage}
                 >
-                  {settings.cardColor}
+                  {layoutColorLabels[settings.cardColor] ?? 'Default'}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="bg-background">
@@ -264,7 +272,7 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Maximize2 className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm">Background color</span>
+              <span className="text-sm">Background (Card Color)</span>
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
