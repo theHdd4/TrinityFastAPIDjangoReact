@@ -247,6 +247,7 @@ interface ExhibitionStore {
   addSlideObject: (cardId: string, object: SlideObject) => void;
   bulkUpdateSlideObjects: (cardId: string, updates: Record<string, Partial<SlideObject>>) => void;
   removeSlideObject: (cardId: string, objectId: string) => void;
+  removeSlide: (cardId: string) => void;
   bringSlideObjectsToFront: (cardId: string, objectIds: string[]) => void;
   bringSlideObjectsForward: (cardId: string, objectIds: string[]) => void;
   sendSlideObjectsToBack: (cardId: string, objectIds: string[]) => void;
@@ -1321,6 +1322,21 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
           ...state.slideObjectsByCardId,
           [cardId]: filtered,
         },
+      };
+    });
+  },
+  removeSlide: (cardId: string) => {
+    set(state => {
+      const cards = state.cards.filter(card => card.id !== cardId);
+      const exhibitedCards = cards.filter(card => card.isExhibited);
+      const { [cardId]: _removed, ...remainingObjects } = state.slideObjectsByCardId;
+
+      return {
+        cards,
+        exhibitedCards,
+        catalogueCards: state.catalogueCards,
+        catalogueEntries: state.catalogueEntries,
+        slideObjectsByCardId: remainingObjects,
       };
     });
   },

@@ -10,6 +10,7 @@ import {
   ArrowUpDown,
   ArrowLeftRight,
   MonitorPlay,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -18,6 +19,17 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import {
   Select,
   SelectContent,
@@ -42,6 +54,7 @@ interface SlideNavigationProps {
   onToggleViewMode: () => void;
   viewMode: 'horizontal' | 'vertical';
   canEdit?: boolean;
+  onDeleteSlide: () => void;
   onSlideshowStart: () => void;
   onSlideshowStop: () => void;
   isSlideshowActive: boolean;
@@ -68,6 +81,7 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
   onToggleViewMode,
   viewMode,
   canEdit = true,
+  onDeleteSlide,
   onSlideshowStart,
   onSlideshowStop,
   isSlideshowActive,
@@ -75,6 +89,7 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
   onSlideshowSettingsChange,
 }) => {
   const [slideshowControlsOpen, setSlideshowControlsOpen] = React.useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
 
   const hasSlides = totalSlides > 0;
   const displayIndex = hasSlides ? currentSlide + 1 : 0;
@@ -119,6 +134,41 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
       >
         <Plus className="h-4 w-4" />
       </Button>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-full h-9 w-9"
+            title="Delete current slide"
+            disabled={!canEdit || !hasSlides || isSlideshowActive}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete slide {displayIndex}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action will permanently remove this slide from your presentation. You cannot undo this
+              deletion.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                onDeleteSlide();
+                setDeleteDialogOpen(false);
+              }}
+            >
+              Delete slide
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Button
         variant="ghost"

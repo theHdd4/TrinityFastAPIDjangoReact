@@ -1,6 +1,6 @@
 import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ChevronRight, Download, FileText, Grid3x3, Save, Share2, Undo2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, FileText, Grid3x3, Save, Share2, Undo2, X } from 'lucide-react';
 import Header from '@/components/Header';
 import {
   useExhibitionStore,
@@ -70,6 +70,7 @@ const ExhibitionMode = () => {
     lastLoadedContext,
     addSlideObject,
     removeSlideObject,
+    removeSlide,
     slideObjectsByCardId,
   } = useExhibitionStore();
   const { toast } = useToast();
@@ -127,7 +128,8 @@ const ExhibitionMode = () => {
   const [slideshowTransform, setSlideshowTransform] = useState('translateX(0px) scale(1)');
   const [slideshowOpacity, setSlideshowOpacity] = useState(1);
 
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const fullscreenTargetRef = useRef<HTMLDivElement | null>(null);
   const verticalSlideRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const undoStackRef = useRef<LayoutCard[][]>([]);
   const isRestoringSnapshotRef = useRef(false);
@@ -654,13 +656,13 @@ const ExhibitionMode = () => {
   }, [clearSlideshowTimers]);
 
   useEffect(() => {
-    const element = containerRef.current;
+    const element = fullscreenTargetRef.current;
     if (!element || typeof element.requestFullscreen !== 'function') {
       return;
     }
 
     if (isFullscreen) {
-      if (!document.fullscreenElement) {
+      if (document.fullscreenElement !== element) {
         element.requestFullscreen().catch(() => {
           setIsFullscreen(false);
         });
@@ -674,7 +676,8 @@ const ExhibitionMode = () => {
 
   useEffect(() => {
     const handleFullscreenChange = () => {
-      if (!document.fullscreenElement) {
+      const element = fullscreenTargetRef.current;
+      if (!document.fullscreenElement || (element && document.fullscreenElement !== element)) {
         setIsFullscreen(false);
         handleStopSlideshow();
       }
@@ -1138,6 +1141,32 @@ const ExhibitionMode = () => {
     });
   }, [addBlankSlide, canEdit, currentSlide, exhibitedCards.length, toast]);
 
+  const handleDeleteSlide = useCallback(() => {
+    if (!canEdit) {
+      return;
+    }
+
+    const targetCard = exhibitedCards[currentSlide];
+    if (!targetCard) {
+      return;
+    }
+
+    const nextLength = exhibitedCards.length - 1;
+    removeSlide(targetCard.id);
+    setOperationsPanelState(null);
+    setCurrentSlide(previous => {
+      if (nextLength <= 0) {
+        return 0;
+      }
+      return Math.min(previous, nextLength - 1);
+    });
+
+    toast({
+      title: 'Slide deleted',
+      description: 'The current slide has been removed from your presentation.',
+    });
+  }, [canEdit, currentSlide, exhibitedCards, removeSlide, setOperationsPanelState, toast]);
+
   const handleOperationsPalettePanelChange = useCallback((panel: ReactNode | null) => {
     if (panel) {
       setOperationsPanelState({ type: 'custom', node: panel });
@@ -1391,18 +1420,21 @@ const ExhibitionMode = () => {
     </div>
   );
 
+  const canNavigateBackward = currentSlide > 0;
+  const canNavigateForward = currentSlide < exhibitedCards.length - 1;
+
   return (
     <div
-      ref={containerRef}
+      ref={rootRef}
       className={cn(
-        'flex flex-col bg-background transition-all duration-300',
+        'relative flex flex-col bg-background transition-all duration-300',
         isFullscreen ? 'fixed inset-0 z-50' : 'h-screen'
       )}
     >
       {!isFullscreen && <Header />}
       {!isFullscreen && renderHeaderSection()}
 
-      <div className="flex-1 flex overflow-hidden">
+      <div ref={fullscreenTargetRef} className="flex-1 flex overflow-hidden">
         {!isFullscreen && (
           <div className="flex h-full flex-shrink-0">
             <div className="bg-background border-r border-border transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
@@ -1547,6 +1579,50 @@ const ExhibitionMode = () => {
         )}
       </div>
 
+      {isFullscreen && isSlideshowActive && (
+        <>
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-between px-8">
+            <Button
+              variant="secondary"
+              size="icon"
+              className="pointer-events-auto h-12 w-12 rounded-full bg-background/90 text-foreground shadow-lg hover:bg-background"
+              onClick={() => goToSlide(currentSlide - 1, 'backward')}
+              disabled={!canNavigateBackward}
+              aria-label="Previous slide"
+            >
+              <ChevronLeft className="h-6 w-6" />
+            </Button>
+            <Button
+              variant="secondary"
+              size="icon"
+              className="pointer-events-auto h-12 w-12 rounded-full bg-background/90 text-foreground shadow-lg hover:bg-background"
+              onClick={() => goToSlide(currentSlide + 1, 'forward')}
+              disabled={!canNavigateForward}
+              aria-label="Next slide"
+            >
+              <ChevronRight className="h-6 w-6" />
+            </Button>
+          </div>
+
+          <div className="pointer-events-none absolute bottom-12 left-1/2 flex -translate-x-1/2 flex-col items-center gap-3">
+            <div className="rounded-full bg-background/90 px-4 py-2 text-sm text-foreground shadow-lg">
+              Use ← and → keys to navigate
+            </div>
+            <Button
+              variant="secondary"
+              className="pointer-events-auto flex items-center gap-2 rounded-full bg-background/90 px-5 py-2 text-foreground shadow-lg hover:bg-background"
+              onClick={() => {
+                handleStopSlideshow();
+                setIsFullscreen(false);
+              }}
+            >
+              <X className="h-4 w-4" />
+              Exit slideshow
+            </Button>
+          </div>
+        </>
+      )}
+
       <SlideNavigation
         currentSlide={currentSlide}
         totalSlides={exhibitedCards.length}
@@ -1570,6 +1646,7 @@ const ExhibitionMode = () => {
         onToggleViewMode={handleToggleViewMode}
         viewMode={viewMode}
         canEdit={canEdit}
+        onDeleteSlide={handleDeleteSlide}
         onSlideshowStart={handleStartSlideshow}
         onSlideshowStop={handleStopSlideshow}
         isSlideshowActive={isSlideshowActive}
