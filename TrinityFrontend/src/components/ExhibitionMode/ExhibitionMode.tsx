@@ -1737,14 +1737,12 @@ const ExhibitionMode = () => {
           }
           setShowGridView(true);
         }}
-        onFullscreen={toggleFullscreen}
         onExport={() => {
           if (isSlideshowActive) {
             handleStopSlideshow();
           }
           setIsExportOpen(true);
         }}
-        isFullscreen={isFullscreen}
         onAddSlide={handleAddSlide}
         onToggleViewMode={handleToggleViewMode}
         viewMode={viewMode}

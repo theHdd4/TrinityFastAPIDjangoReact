@@ -9,7 +9,6 @@ import {
   Plus,
   ArrowUpDown,
   ArrowLeftRight,
-  MonitorPlay,
   Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -47,9 +46,7 @@ interface SlideNavigationProps {
   onPrevious: () => void;
   onNext: () => void;
   onGridView: () => void;
-  onFullscreen: () => void;
   onExport: () => void;
-  isFullscreen: boolean;
   onAddSlide: () => void;
   onToggleViewMode: () => void;
   viewMode: 'horizontal' | 'vertical';
@@ -74,9 +71,7 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
   onPrevious,
   onNext,
   onGridView,
-  onFullscreen,
   onExport,
-  isFullscreen,
   onAddSlide,
   onToggleViewMode,
   viewMode,
@@ -222,17 +217,6 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
         <Grid3x3 className="h-4 w-4" />
       </Button>
 
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onFullscreen}
-        className="rounded-full h-9 w-9"
-        title={isFullscreen ? 'Exit slideshow' : 'Start slideshow'}
-        disabled={(!hasSlides && !isFullscreen) || isSlideshowActive}
-      >
-        {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <MonitorPlay className="h-4 w-4" />}
-      </Button>
-
       <Popover
         open={isSlideshowActive && slideshowControlsOpen}
         onOpenChange={handlePopoverChange}
@@ -243,7 +227,7 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
             size="icon"
             onClick={handleSlideshowButtonClick}
             className="rounded-full h-9 w-9"
-            title={isSlideshowActive ? 'Adjust fullscreen canvas' : 'Enter fullscreen canvas'}
+            title={isSlideshowActive ? 'Adjust slideshow playback' : 'Start slideshow'}
             disabled={!hasSlides}
           >
             {isSlideshowActive ? (
