@@ -1,0 +1,9 @@
+# Configuration for the staging Cloudflare tunnel.
+tunnel: 49ff57dd-0fdb-4b7b-924e-a47517702352
+credentials-file: /etc/cloudflared/49ff57dd-0fdb-4b7b-924e-a47517702352.json
+
+ingress:
+  - hostname: trinity-stag.quantmatrixai.com
+    service: http://traefik:80
+  - service: http_status:404
+
