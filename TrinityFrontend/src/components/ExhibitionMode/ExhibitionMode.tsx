@@ -127,12 +127,8 @@ const ExhibitionMode = () => {
   const [isSlideshowActive, setIsSlideshowActive] = useState(false);
   const [slideshowTransform, setSlideshowTransform] = useState('translateX(0px) scale(1)');
   const [slideshowOpacity, setSlideshowOpacity] = useState(1);
-  const [slideshowScale, setSlideshowScale] = useState(1);
-
   const rootRef = useRef<HTMLDivElement | null>(null);
   const fullscreenTargetRef = useRef<HTMLDivElement | null>(null);
-  const slideshowViewportRef = useRef<HTMLDivElement | null>(null);
-  const slideshowContentRef = useRef<HTMLDivElement | null>(null);
   const verticalSlideRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const undoStackRef = useRef<LayoutCard[][]>([]);
   const isRestoringSnapshotRef = useRef(false);
@@ -270,6 +266,7 @@ const ExhibitionMode = () => {
 
   const handleStopSlideshow = useCallback(() => {
     setIsSlideshowActive(false);
+    setIsFullscreen(false);
     clearSlideshowTimers();
     setSlideshowTransform('translateX(0px) scale(1)');
     setSlideshowOpacity(1);
@@ -1207,36 +1204,6 @@ const ExhibitionMode = () => {
     setViewMode(prev => (prev === 'horizontal' ? 'vertical' : 'horizontal'));
   }, [handleStopSlideshow, isSlideshowActive]);
 
-  const updateSlideshowScale = useCallback(() => {
-    if (!isSlideshowActive) {
-      return;
-    }
-
-    const viewport = slideshowViewportRef.current;
-    const content = slideshowContentRef.current;
-
-    if (!viewport || !content) {
-      return;
-    }
-
-    const viewportRect = viewport.getBoundingClientRect();
-    const contentWidth = content.offsetWidth;
-    const contentHeight = content.offsetHeight;
-
-    if (contentWidth === 0 || contentHeight === 0) {
-      setSlideshowScale(1);
-      return;
-    }
-
-    const availableWidth = Math.max(viewportRect.width, 0);
-    const availableHeight = Math.max(viewportRect.height, 0);
-    const widthScale = availableWidth / contentWidth;
-    const heightScale = availableHeight / contentHeight;
-    const nextScale = Math.max(0.1, Math.min(widthScale, heightScale));
-
-    setSlideshowScale(Number.isFinite(nextScale) && nextScale > 0 ? nextScale : 1);
-  }, [isSlideshowActive]);
-
   useEffect(() => {
     if (viewMode !== 'vertical') {
       return;
@@ -1252,36 +1219,6 @@ const ExhibitionMode = () => {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [currentSlide, exhibitedCards, viewMode]);
-
-  useEffect(() => {
-    if (!isSlideshowActive) {
-      setSlideshowScale(1);
-      return;
-    }
-
-    updateSlideshowScale();
-
-    const handleResize = () => {
-      updateSlideshowScale();
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [isSlideshowActive, updateSlideshowScale]);
-
-  useEffect(() => {
-    if (!isSlideshowActive) {
-      return;
-    }
-
-    const frame = window.requestAnimationFrame(() => {
-      updateSlideshowScale();
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [isSlideshowActive, currentSlide, exhibitedCards, updateSlideshowScale]);
 
   useEffect(() => {
     if (canEdit) {
@@ -1497,188 +1434,149 @@ const ExhibitionMode = () => {
       {!isFullscreen && <Header />}
       {!isFullscreen && renderHeaderSection()}
 
-      <div
-        ref={fullscreenTargetRef}
-        className={cn('flex-1 flex overflow-hidden', isSlideshowActive ? 'bg-black' : undefined)}
-      >
-        {isSlideshowActive ? (
-          <div
-            ref={slideshowViewportRef}
-            className="relative flex w-full flex-1 items-center justify-center bg-black"
-          >
-            {currentCard ? (
-              <div className="flex w-full items-center justify-center" style={slideWrapperStyle}>
-                <div
-                  className="origin-center"
-                  style={{ transform: `scale(${slideshowScale})` }}
-                >
-                  <div ref={slideshowContentRef} className="inline-flex justify-center">
-                    <SlideCanvas
-                      card={currentCard}
-                      slideNumber={currentSlide + 1}
-                      totalSlides={exhibitedCards.length}
-                      onDrop={handleDrop}
-                      draggedAtom={draggedAtom}
-                      canEdit={false}
-                      onPresentationChange={handlePresentationChange}
-                      onRemoveAtom={handleRemoveAtom}
-                      viewMode="horizontal"
-                      isActive
-                      presenterName={presenterDisplayName}
-                      mode="presentation"
-                      presentationVariant="cover"
-                    />
+      <div ref={fullscreenTargetRef} className="flex-1 flex overflow-hidden">
+        {!isFullscreen && (
+          <div className="flex h-full flex-shrink-0">
+            <div className="bg-background border-r border-border transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
+              <div className="p-3 border-b border-border flex items-center justify-center">
+                {isCatalogueCollapsed ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsCatalogueCollapsed(false)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
+                    title="Expand catalogue"
+                    aria-label="Expand catalogue"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <div
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-muted text-foreground"
+                    aria-hidden="true"
+                  >
+                    <FileText className="h-4 w-4" />
                   </div>
-                </div>
+                )}
               </div>
-            ) : (
-              <div className="px-6 text-center text-lg font-semibold text-white/70">
-                No slides to display.
+              <div className="p-3 border-b border-border flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowGridView(false);
+                    setShowThumbnails(current => !current);
+                  }}
+                  className={cn(
+                    'inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted',
+                    showThumbnails ? 'text-foreground' : 'text-muted-foreground'
+                  )}
+                  title="Open slides view"
+                  aria-label="Open slides view"
+                  data-exhibition-slides-toggle="true"
+                >
+                  <Grid3x3 className="h-4 w-4" />
+                </button>
               </div>
+            </div>
+
+            {!isCatalogueCollapsed && !showThumbnails && (
+              <ExhibitionCatalogue
+                cards={catalogueCards}
+                currentSlide={currentSlide}
+                onSlideSelect={handleSlideSelection}
+                slideIndexByCardId={slideIndexByCardId}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                enableDragging={canEdit}
+                onCollapse={() => setIsCatalogueCollapsed(true)}
+              />
+            )}
+
+            {showThumbnails && (
+              <SlideThumbnails
+                cards={exhibitedCards}
+                currentSlide={currentSlide}
+                onSlideSelect={index => {
+                  handleSlideSelection(index);
+                  setShowThumbnails(false);
+                }}
+                onClose={() => setShowThumbnails(false)}
+              />
             )}
           </div>
-        ) : (
-          <>
-            {!isSlideshowActive && (
-              <div className="flex h-full flex-shrink-0">
-                <div className="bg-background border-r border-border transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
-                  <div className="p-3 border-b border-border flex items-center justify-center">
-                    {isCatalogueCollapsed ? (
-                      <button
-                        type="button"
-                        onClick={() => setIsCatalogueCollapsed(false)}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
-                        title="Expand catalogue"
-                        aria-label="Expand catalogue"
-                      >
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
-                    ) : (
-                      <div
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-muted text-foreground"
-                        aria-hidden="true"
-                      >
-                        <FileText className="h-4 w-4" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="p-3 border-b border-border flex items-center justify-center">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowGridView(false);
-                        setShowThumbnails(current => !current);
-                      }}
-                      className={cn(
-                        'inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted',
-                        showThumbnails ? 'text-foreground' : 'text-muted-foreground'
-                      )}
-                      title="Open slides view"
-                      aria-label="Open slides view"
-                      data-exhibition-slides-toggle="true"
-                    >
-                      <Grid3x3 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
+        )}
 
-                {!isCatalogueCollapsed && !showThumbnails && (
-                  <ExhibitionCatalogue
-                    cards={catalogueCards}
-                    currentSlide={currentSlide}
-                    onSlideSelect={handleSlideSelection}
-                    slideIndexByCardId={slideIndexByCardId}
-                    onDragStart={handleDragStart}
-                    onDragEnd={handleDragEnd}
-                    enableDragging={canEdit}
-                    onCollapse={() => setIsCatalogueCollapsed(true)}
-                  />
-                )}
-
-                {showThumbnails && (
-                  <SlideThumbnails
-                    cards={exhibitedCards}
-                    currentSlide={currentSlide}
-                    onSlideSelect={index => {
-                      handleSlideSelection(index);
-                      setShowThumbnails(false);
-                    }}
-                    onClose={() => setShowThumbnails(false)}
-                  />
-                )}
-              </div>
-            )}
-
-            <div className="flex-1 flex flex-col overflow-hidden">
-              {viewMode === 'horizontal' ? (
-                <div className="flex-1 flex flex-col" style={slideWrapperStyle}>
-                  {currentCard ? (
-                    <SlideCanvas
-                      card={currentCard}
-                      slideNumber={currentSlide + 1}
-                      totalSlides={exhibitedCards.length}
-                      onDrop={handleDrop}
-                      draggedAtom={draggedAtom}
-                      canEdit={canEdit}
-                      onPresentationChange={handlePresentationChange}
-                      onRemoveAtom={handleRemoveAtom}
-                      onShowNotes={handleShowNotesPanel}
-                      viewMode="horizontal"
-                      isActive
-                      onTitleChange={handleTitleChange}
-                      presenterName={presenterDisplayName}
-                      onPositionPanelChange={handleOperationsPalettePanelChange}
-                    />
-                  ) : (
-                    emptyCanvas
-                  )}
-                </div>
-              ) : exhibitedCards.length > 0 ? (
-                <div className="flex-1 overflow-y-auto bg-muted/10 px-6 py-6 space-y-6">
-                  {exhibitedCards.map((card, index) => (
-                    <div
-                      key={card.id}
-                      ref={element => {
-                        verticalSlideRefs.current[card.id] = element;
-                      }}
-                    >
-                      <SlideCanvas
-                        card={card}
-                        slideNumber={index + 1}
-                        totalSlides={exhibitedCards.length}
-                        onDrop={handleDrop}
-                        draggedAtom={draggedAtom}
-                        canEdit={canEdit}
-                        onPresentationChange={handlePresentationChange}
-                        onRemoveAtom={handleRemoveAtom}
-                        onShowNotes={handleShowNotesPanel}
-                        viewMode="vertical"
-                        isActive={currentSlide === index}
-                        onTitleChange={handleTitleChange}
-                        presenterName={presenterDisplayName}
-                        onPositionPanelChange={handleOperationsPalettePanelChange}
-                      />
-                    </div>
-                  ))}
-                </div>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {viewMode === 'horizontal' ? (
+            <div
+              className={cn('flex-1 flex flex-col', isSlideshowActive && 'justify-center')}
+              style={slideWrapperStyle}
+            >
+              {currentCard ? (
+                <SlideCanvas
+                  card={currentCard}
+                  slideNumber={currentSlide + 1}
+                  totalSlides={exhibitedCards.length}
+                  onDrop={handleDrop}
+                  draggedAtom={draggedAtom}
+                  canEdit={isSlideshowActive ? false : canEdit}
+                  onPresentationChange={handlePresentationChange}
+                  onRemoveAtom={handleRemoveAtom}
+                  onShowNotes={!isSlideshowActive ? handleShowNotesPanel : undefined}
+                  viewMode="horizontal"
+                  isActive
+                  onTitleChange={handleTitleChange}
+                  presenterName={presenterDisplayName}
+                  onPositionPanelChange={!isSlideshowActive ? handleOperationsPalettePanelChange : undefined}
+                  mode={isSlideshowActive ? 'presentation' : 'editor'}
+                />
               ) : (
                 emptyCanvas
               )}
             </div>
+          ) : exhibitedCards.length > 0 ? (
+            <div className="flex-1 overflow-y-auto bg-muted/10 px-6 py-6 space-y-6">
+              {exhibitedCards.map((card, index) => (
+                <div
+                  key={card.id}
+                  ref={element => {
+                    verticalSlideRefs.current[card.id] = element;
+                  }}
+                >
+                  <SlideCanvas
+                    card={card}
+                    slideNumber={index + 1}
+                    totalSlides={exhibitedCards.length}
+                    onDrop={handleDrop}
+                    draggedAtom={draggedAtom}
+                    canEdit={canEdit}
+                    onPresentationChange={handlePresentationChange}
+                    onRemoveAtom={handleRemoveAtom}
+                    onShowNotes={handleShowNotesPanel}
+                    viewMode="vertical"
+                    isActive={currentSlide === index}
+                    onTitleChange={handleTitleChange}
+                    presenterName={presenterDisplayName}
+                    onPositionPanelChange={handleOperationsPalettePanelChange}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            emptyCanvas
+          )}
+        </div>
 
-            {!isSlideshowActive && (
-              <OperationsPalette
-                onFullscreen={toggleFullscreen}
-                onExport={() => setIsExportOpen(true)}
-                onGridView={() => setShowGridView(true)}
-                onCreateTextBox={handleCreateTextBox}
-                onCreateTable={handleCreateTable}
-                onOpenShapesPanel={handleOpenShapesPanel}
-                canEdit={canEdit}
-                positionPanel={operationsPalettePanel}
-              />
-            )}
-          </>
+        {!isFullscreen && !isSlideshowActive && (
+          <OperationsPalette
+            onFullscreen={toggleFullscreen}
+            onExport={() => setIsExportOpen(true)}
+            onGridView={() => setShowGridView(true)}
+            onCreateTextBox={handleCreateTextBox}
+            onCreateTable={handleCreateTable}
+            onOpenShapesPanel={handleOpenShapesPanel}
+            canEdit={canEdit}
+            positionPanel={operationsPalettePanel}
+          />
         )}
       </div>
 
@@ -1716,7 +1614,6 @@ const ExhibitionMode = () => {
               className="pointer-events-auto flex items-center gap-2 rounded-full bg-background/90 px-5 py-2 text-foreground shadow-lg hover:bg-background"
               onClick={() => {
                 handleStopSlideshow();
-                setIsFullscreen(false);
               }}
             >
               <X className="h-4 w-4" />
