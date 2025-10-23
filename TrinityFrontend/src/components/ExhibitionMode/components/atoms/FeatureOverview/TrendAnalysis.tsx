@@ -25,7 +25,10 @@ const TrendAnalysis: React.FC<FeatureOverviewComponentProps> = ({ metadata, vari
   return (
     <div className={containerClass}>
       {chartConfig ? (
-        <TrendAnalysisChart config={chartConfig} />
+        <TrendAnalysisChart
+          config={chartConfig}
+          transparentBackground={shouldUseTransparentBackground}
+        />
       ) : (
         <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
           Trend analysis data will appear here after exporting from laboratory mode.
