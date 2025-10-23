@@ -1228,8 +1228,8 @@ const ExhibitionMode = () => {
       return;
     }
 
-    const availableWidth = Math.max(viewportRect.width - 96, 0);
-    const availableHeight = Math.max(viewportRect.height - 96, 0);
+    const availableWidth = Math.max(viewportRect.width, 0);
+    const availableHeight = Math.max(viewportRect.height, 0);
     const widthScale = availableWidth / contentWidth;
     const heightScale = availableHeight / contentHeight;
     const nextScale = Math.max(0.1, Math.min(widthScale, heightScale));
@@ -1526,6 +1526,7 @@ const ExhibitionMode = () => {
                       isActive
                       presenterName={presenterDisplayName}
                       mode="presentation"
+                      presentationVariant="cover"
                     />
                   </div>
                 </div>

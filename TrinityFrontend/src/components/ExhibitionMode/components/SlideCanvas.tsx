@@ -183,6 +183,7 @@ interface SlideCanvasProps {
   presenterName?: string | null;
   onPositionPanelChange?: (panel: ReactNode | null) => void;
   mode?: 'editor' | 'presentation';
+  presentationVariant?: 'default' | 'cover';
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -201,6 +202,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   presenterName,
   onPositionPanelChange,
   mode = 'editor',
+  presentationVariant = 'default',
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -787,14 +789,20 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   if (mode === 'presentation') {
     const noop = () => {};
 
+    const presentationWrapperClasses = cn(
+      'mx-auto transition-all duration-300',
+      presentationVariant === 'cover' ? 'p-0' : 'p-8',
+      cardWidthClass,
+    );
+
+    const stageClasses = cn(
+      'relative h-[520px] w-full overflow-hidden bg-card shadow-2xl transition-all duration-300',
+      settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border',
+    );
+
     return (
-      <div className={cn('mx-auto transition-all duration-300 p-8', cardWidthClass)} data-exhibition-slide-mode="presentation">
-        <div
-          className={cn(
-            'relative h-[520px] w-full overflow-hidden bg-card shadow-2xl transition-all duration-300',
-            settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border'
-          )}
-        >
+      <div className={presentationWrapperClasses} data-exhibition-slide-mode="presentation">
+        <div className={stageClasses}>
           <CanvasStage
             ref={canvasRef}
             canEdit={false}
