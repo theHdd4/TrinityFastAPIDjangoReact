@@ -91,10 +91,10 @@ services:
     ports:
       - "8006:8000"  # Different from dev (8003) and prod (8000)
     environment:
-      HOST_IP: ${HOST_IP:-192.168.31.63}
-      FRONTEND_PORT: "8082"  # Different from dev (8081) and prod (8080)
-      CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8082,http://${HOST_IP:-192.168.31.63}:8082,http://172.17.48.1:8082,http://10.2.4.48:8082,https://trinity-staging.quantmatrixai.com"
-      CSRF_TRUSTED_ORIGINS: "http://127.0.0.1:8082,http://${HOST_IP:-192.168.31.63}:8082,http://172.17.48.1:8082,http://10.2.4.48:8082,https://trinity-staging.quantmatrixai.com"
+      HOST_IP: ${HOST_IP:-10.2.3.55}
+      FRONTEND_PORT: "8085"  # Different from dev (8081) and prod (8080)
+      CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8085,http://${HOST_IP:-10.2.3.55}:8085,http://172.17.48.1:8085,http://10.2.4.48:8085,https://trinity-staging.quantmatrixai.com"
+      CSRF_TRUSTED_ORIGINS: "http://127.0.0.1:8085,http://${HOST_IP:-10.2.3.55}:8085,http://172.17.48.1:8085,http://10.2.4.48:8085,https://trinity-staging.quantmatrixai.com"
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_staging?authSource=admin"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
@@ -152,8 +152,8 @@ services:
       MINIO_SECRET_KEY: minio123
       FLIGHT_HOST: flight
       FLIGHT_PORT: 8817  # Different from dev (8816) and prod (8815)
-      HOST_IP: ${HOST_IP:-192.168.31.63}
-      FASTAPI_CORS_ORIGINS: "http://127.0.0.1:8082,http://${HOST_IP:-192.168.31.63}:8082,http://172.17.48.1:8082,http://10.2.4.48:8082,https://trinity-staging.quantmatrixai.com,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com"
+      HOST_IP: ${HOST_IP:-10.2.3.55}
+      FASTAPI_CORS_ORIGINS: "http://127.0.0.1:8085,http://${HOST_IP:-10.2.3.55}:8085,http://172.17.48.1:8085,http://10.2.4.48:8085,https://trinity-staging.quantmatrixai.com,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com"
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_staging?authSource=admin"
       CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
     ports:
@@ -221,7 +221,7 @@ services:
       context: ./TrinityFrontend
       dockerfile: Dockerfile
     ports:
-      - "8082:80"  # Different from dev (8081) and prod (8080)
+      - "8085:80"  # Different from dev (8081) and prod (8080)
     networks:
       - trinity-staging-net
     depends_on:
