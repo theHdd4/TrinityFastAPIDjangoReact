@@ -47,11 +47,12 @@ interface FeatureOverviewExhibitionProps {
   onRenameSelection?: (key: string, name: string) => void;
 }
 
-type VisibilityToggleKey = 'componentTitle' | 'allowEdit';
+type VisibilityToggleKey = 'componentTitle' | 'allowEdit' | 'transparentBackground';
 
 const DEFAULT_VISIBILITY: Record<VisibilityToggleKey, boolean> = {
   componentTitle: true,
   allowEdit: false,
+  transparentBackground: true,
 };
 
 const VISIBILITY_TOGGLES: Array<{ key: VisibilityToggleKey; label: string; description?: string }> = [
@@ -64,6 +65,11 @@ const VISIBILITY_TOGGLES: Array<{ key: VisibilityToggleKey; label: string; descr
     key: 'allowEdit',
     label: 'Allow edit in exhibition',
     description: 'Permit collaborators to adjust this component while in exhibition mode.',
+  },
+  {
+    key: 'transparentBackground',
+    label: 'Make background transparent',
+    description: 'Show only the chart content on exhibition slides. Disable to keep the card styling.',
   },
 ];
 
@@ -168,6 +174,7 @@ const normaliseSelectionForExhibition = ({
     exhibitionControls: {
       enableComponentTitle: visibility.componentTitle,
       allowEditInExhibition: visibility.allowEdit,
+      transparentBackground: visibility.transparentBackground,
     },
     viewType: componentType === 'trend_analysis' ? 'trend_analysis' : 'statistical_summary',
   };

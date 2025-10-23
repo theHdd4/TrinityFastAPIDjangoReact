@@ -11,9 +11,16 @@ const StatisticalSummary: React.FC<FeatureOverviewComponentProps> = ({ metadata,
 
   const summaryContent = useMemo(() => renderSummaryEntries(summaryEntries), [summaryEntries]);
 
+  const shouldUseTransparentBackground =
+    variant === 'full' && (metadata.exhibitionControls?.transparentBackground ?? true);
+
+  const defaultPadding = variant === 'compact' ? 'p-3' : 'p-4';
+
   const containerClass = cn(
-    'rounded-2xl border border-border p-4 shadow-sm',
-    variant === 'full' ? 'bg-transparent' : 'bg-background/80',
+    'rounded-2xl',
+    shouldUseTransparentBackground
+      ? 'bg-transparent p-0 shadow-none border-none'
+      : cn('border border-border shadow-sm bg-background/80', defaultPadding),
   );
 
   return (
