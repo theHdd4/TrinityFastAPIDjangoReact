@@ -14,11 +14,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -29,17 +24,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
-import { Slider } from '@/components/ui/slider';
-import type { SlideshowTransition } from '../store/exhibitionStore';
-
 interface SlideNavigationProps {
   currentSlide: number;
   totalSlides: number;
@@ -52,17 +36,9 @@ interface SlideNavigationProps {
   viewMode: 'horizontal' | 'vertical';
   canEdit?: boolean;
   onDeleteSlide: () => void;
-  onSlideshowStart: () => void;
-  onSlideshowStop: () => void;
+  onToggleFullscreen: () => void;
+  isFullscreen: boolean;
   isSlideshowActive: boolean;
-  slideshowSettings: {
-    slideshowDuration: number;
-    slideshowTransition: SlideshowTransition;
-  };
-  onSlideshowSettingsChange: (settings: {
-    slideshowDuration?: number;
-    slideshowTransition?: SlideshowTransition;
-  }) => void;
 }
 
 export const SlideNavigation: React.FC<SlideNavigationProps> = ({
@@ -77,45 +53,14 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
   viewMode,
   canEdit = true,
   onDeleteSlide,
-  onSlideshowStart,
-  onSlideshowStop,
+  onToggleFullscreen,
+  isFullscreen,
   isSlideshowActive,
-  slideshowSettings,
-  onSlideshowSettingsChange,
 }) => {
-  const [slideshowControlsOpen, setSlideshowControlsOpen] = React.useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
 
   const hasSlides = totalSlides > 0;
   const displayIndex = hasSlides ? currentSlide + 1 : 0;
-
-  React.useEffect(() => {
-    if (!isSlideshowActive) {
-      setSlideshowControlsOpen(false);
-    }
-  }, [isSlideshowActive]);
-
-  const handleSlideshowButtonClick = () => {
-    if (!isSlideshowActive) {
-      onSlideshowStart();
-      setSlideshowControlsOpen(true);
-      return;
-    }
-    setSlideshowControlsOpen(previous => !previous);
-  };
-
-  const handlePopoverChange = (open: boolean) => {
-    if (open) {
-      if (!isSlideshowActive) {
-        onSlideshowStart();
-      }
-      setSlideshowControlsOpen(true);
-    } else {
-      setSlideshowControlsOpen(false);
-    }
-  };
-
-  const durationSeconds = Math.max(1, Math.round(slideshowSettings.slideshowDuration));
 
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-background/95 backdrop-blur-lg border border-border rounded-full px-4 py-2 shadow-elegant">
@@ -217,85 +162,20 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
         <Grid3x3 className="h-4 w-4" />
       </Button>
 
-      <Popover
-        open={isSlideshowActive && slideshowControlsOpen}
-        onOpenChange={handlePopoverChange}
+      <Button
+        variant={isFullscreen ? 'default' : 'ghost'}
+        size="icon"
+        onClick={onToggleFullscreen}
+        className="rounded-full h-9 w-9"
+        title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+        disabled={!hasSlides || isSlideshowActive}
       >
-        <PopoverTrigger asChild>
-          <Button
-            variant={isSlideshowActive ? 'default' : 'ghost'}
-            size="icon"
-            onClick={handleSlideshowButtonClick}
-            className="rounded-full h-9 w-9"
-            title={isSlideshowActive ? 'Adjust slideshow playback' : 'Start slideshow'}
-            disabled={!hasSlides}
-          >
-            {isSlideshowActive ? (
-              <Minimize2 className="h-4 w-4" />
-            ) : (
-              <Maximize2 className="h-4 w-4" />
-            )}
-          </Button>
-        </PopoverTrigger>
-
-        <PopoverContent className="w-64 space-y-4" align="end" sideOffset={12}>
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold">Slideshow</span>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                if (isSlideshowActive) {
-                  onSlideshowStop();
-                  setSlideshowControlsOpen(false);
-                } else {
-                  onSlideshowStart();
-                }
-              }}
-            >
-              {isSlideshowActive ? 'Stop' : 'Start'}
-            </Button>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-              Transition
-            </Label>
-            <Select
-              value={slideshowSettings.slideshowTransition}
-              onValueChange={value =>
-                onSlideshowSettingsChange({
-                  slideshowTransition: value as SlideshowTransition,
-                })
-              }
-            >
-              <SelectTrigger className="h-9">
-                <SelectValue placeholder="Transition" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fade">Fade</SelectItem>
-                <SelectItem value="slide">Slide</SelectItem>
-                <SelectItem value="zoom">Zoom</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-              Duration ({durationSeconds}s)
-            </Label>
-            <Slider
-              min={3}
-              max={30}
-              step={1}
-              value={[durationSeconds]}
-              onValueChange={([value]) =>
-                onSlideshowSettingsChange({ slideshowDuration: value })
-              }
-            />
-          </div>
-        </PopoverContent>
-      </Popover>
+        {isFullscreen ? (
+          <Minimize2 className="h-4 w-4" />
+        ) : (
+          <Maximize2 className="h-4 w-4" />
+        )}
+      </Button>
 
       <Button
         variant="ghost"

@@ -398,41 +398,6 @@ const ExhibitionMode = () => {
     [updateCard],
   );
 
-  const handleSlideshowSettingsChange = useCallback(
-    (partial: { slideshowDuration?: number; slideshowTransition?: SlideshowTransition }) => {
-      const targetCard = exhibitedCards[currentSlide];
-      if (!targetCard) {
-        return;
-      }
-
-      const merged: PresentationSettings = {
-        ...DEFAULT_PRESENTATION_SETTINGS,
-        ...targetCard.presentationSettings,
-      };
-
-      if (partial.slideshowDuration !== undefined) {
-        merged.slideshowDuration = Math.max(1, partial.slideshowDuration);
-      }
-
-      if (partial.slideshowTransition) {
-        merged.slideshowTransition = partial.slideshowTransition;
-      }
-
-      handlePresentationChange(merged, targetCard.id);
-
-      if (isSlideshowActive) {
-        clearAutoAdvanceTimer();
-      }
-    },
-    [
-      clearAutoAdvanceTimer,
-      currentSlide,
-      exhibitedCards,
-      handlePresentationChange,
-      isSlideshowActive,
-    ],
-  );
-
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -1645,14 +1610,9 @@ const ExhibitionMode = () => {
         viewMode={viewMode}
         canEdit={canEdit}
         onDeleteSlide={handleDeleteSlide}
-        onSlideshowStart={handleStartSlideshow}
-        onSlideshowStop={handleStopSlideshow}
+        onToggleFullscreen={toggleFullscreen}
+        isFullscreen={isFullscreen}
         isSlideshowActive={isSlideshowActive}
-        slideshowSettings={{
-          slideshowDuration: currentPresentationSettings.slideshowDuration,
-          slideshowTransition: currentPresentationSettings.slideshowTransition,
-        }}
-        onSlideshowSettingsChange={handleSlideshowSettingsChange}
       />
 
       {showGridView && (
