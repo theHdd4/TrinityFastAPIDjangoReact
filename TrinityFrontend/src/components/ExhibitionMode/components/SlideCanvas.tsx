@@ -90,6 +90,42 @@ const isAtomObject = (
   return Boolean(candidate && typeof candidate.id === 'string');
 };
 
+const parseBooleanish = (value: unknown): boolean | null => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  if (typeof value === 'string') {
+    const lowered = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'y', 'on'].includes(lowered)) {
+      return true;
+    }
+    if (['false', '0', 'no', 'n', 'off'].includes(lowered)) {
+      return false;
+    }
+  }
+  return null;
+};
+
+const resolveFeatureOverviewTransparency = (
+  metadata: Record<string, any> | undefined,
+): boolean => {
+  if (!metadata || typeof metadata !== 'object') {
+    return true;
+  }
+
+  const controls = metadata.exhibitionControls;
+  if (!controls || typeof controls !== 'object') {
+    return true;
+  }
+
+  const preference = parseBooleanish((controls as Record<string, unknown>).transparentBackground);
+  return preference ?? true;
+};
+
 const UNTITLED_SLIDE_TEXT = 'Untitled Slide';
 
 type TableState = {
@@ -2155,6 +2191,17 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 ? object.props.atom.atomId
                 : null;
             const isFeatureOverviewAtom = featureOverviewAtomId === 'feature-overview';
+            const featureOverviewMetadata =
+              isFeatureOverviewAtom && object.props.atom.metadata && typeof object.props.atom.metadata === 'object'
+                ? (object.props.atom.metadata as Record<string, any>)
+                : undefined;
+            const featureOverviewTransparentBackground =
+              isFeatureOverviewAtom && resolveFeatureOverviewTransparency(featureOverviewMetadata);
+            const suppressCardChrome =
+              isShapeObject ||
+              isTextBoxObject ||
+              isTableObject ||
+              (isFeatureOverviewAtom && featureOverviewTransparentBackground);
 
           return (
             <div
@@ -2172,22 +2219,23 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             >
               <div
                 className={cn(
-                  'relative flex h-full w-full flex-col overflow-hidden rounded-3xl border-2 shadow-xl transition-all',
-                  isShapeObject
-                    ? 'border-none bg-transparent shadow-none overflow-visible'
-                    : isAccentImageObject
-                    ? 'bg-muted/30'
-                    : 'bg-background/95',
+                  'relative flex h-full w-full flex-col overflow-hidden rounded-3xl border-2 transition-all',
+                  suppressCardChrome
+                    ? 'border-transparent bg-transparent shadow-none'
+                    : 'bg-background/95 shadow-xl',
+                  isAccentImageObject && 'bg-muted/30 shadow-none border-transparent',
+                  isShapeObject && 'border-none bg-transparent shadow-none overflow-visible',
+                  (isTextBoxObject || isTableObject) &&
+                    'overflow-visible border-transparent bg-transparent shadow-none',
                   isFeatureOverviewAtom
                     ? isSelected
                       ? 'border-primary shadow-2xl'
                       : 'border-transparent'
                     : !isShapeObject &&
+                      !(isTextBoxObject || isTableObject) &&
                       (isSelected
                         ? 'border-primary shadow-2xl'
                         : 'border-border/70 hover-border-primary/40'),
-                  (isTextBoxObject || isTableObject) &&
-                    'overflow-visible border-transparent bg-transparent shadow-none',
                 )}
                 style={{
                   transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
