@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LaboratoryCardRequest(BaseModel):
@@ -27,8 +27,7 @@ class LaboratoryCardRequest(BaseModel):
         description="Optional settings object to initialize the atom with.",
     )
 
-    class Config:
-        allow_population_by_field_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class LaboratoryAtomResponse(BaseModel):
@@ -49,8 +48,7 @@ class LaboratoryAtomResponse(BaseModel):
         description="Settings payload to bootstrap the atom in the UI.",
     )
 
-    class Config:
-        allow_population_by_field_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class LaboratoryCardResponse(BaseModel):
@@ -74,5 +72,4 @@ class LaboratoryCardResponse(BaseModel):
         description="Human readable molecule title when available.",
     )
 
-    class Config:
-        allow_population_by_field_name = True
+    model_config = ConfigDict(populate_by_name=True)
