@@ -1539,7 +1539,7 @@ const ExhibitionMode = () => {
           </div>
         ) : (
           <>
-            {!isFullscreen && (
+            {!isSlideshowActive && (
               <div className="flex h-full flex-shrink-0">
                 <div className="bg-background border-r border-border transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
                   <div className="p-3 border-b border-border flex items-center justify-center">
@@ -1666,7 +1666,7 @@ const ExhibitionMode = () => {
               )}
             </div>
 
-            {!isFullscreen && (
+            {!isSlideshowActive && (
               <OperationsPalette
                 onFullscreen={toggleFullscreen}
                 onExport={() => setIsExportOpen(true)}
