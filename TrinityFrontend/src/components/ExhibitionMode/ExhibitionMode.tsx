@@ -1493,6 +1493,7 @@ const ExhibitionMode = () => {
                   presenterName={presenterDisplayName}
                   onPositionPanelChange={!isSlideshowActive ? handleOperationsPalettePanelChange : undefined}
                   mode={isSlideshowActive ? 'presentation' : 'editor'}
+                  isFullscreen={isFullscreen}
                 />
               ) : (
                 emptyCanvas

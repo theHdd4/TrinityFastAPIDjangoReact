@@ -184,6 +184,7 @@ interface SlideCanvasProps {
   onPositionPanelChange?: (panel: ReactNode | null) => void;
   mode?: 'editor' | 'presentation';
   presentationVariant?: 'default' | 'cover';
+  isFullscreen?: boolean;
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -203,6 +204,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   onPositionPanelChange,
   mode = 'editor',
   presentationVariant = 'default',
+  isFullscreen = false,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -776,9 +778,14 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     };
   }, [onPositionPanelChange]);
 
+  const isFullscreenEditor = isFullscreen && mode === 'editor' && viewMode === 'horizontal';
+
   const containerClasses =
     viewMode === 'horizontal'
-      ? 'flex-1 h-full bg-muted/20 overflow-auto'
+      ? cn(
+          'flex-1 h-full bg-muted/20 overflow-auto',
+          isFullscreenEditor && 'flex items-center justify-center bg-background'
+        )
       : cn(
           'w-full bg-muted/20 overflow-hidden border rounded-3xl transition-all duration-300 shadow-sm',
           isActive
@@ -836,10 +843,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   return (
     <div className={containerClasses}>
       <div
-        className={cn(
-          'mx-auto transition-all duration-300 p-8',
-          cardWidthClass,
-        )}
+        className={
+          isFullscreenEditor
+            ? 'flex h-full w-full items-center justify-center p-4 sm:p-8 lg:p-12 transition-all duration-300'
+            : cn('mx-auto transition-all duration-300 p-8', cardWidthClass)
+        }
       >
         {viewMode === 'vertical' && (
           <div className="mb-4 flex items-center justify-between">
@@ -854,7 +862,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           </div>
         )}
 
-        <div className="space-y-4">
+        <div className={cn('space-y-4', isFullscreenEditor && 'w-full')}>
           {canEdit && activeTextToolbar && (
             <div className="relative mb-4 flex w-full justify-center">
               <div className="z-30 drop-shadow-xl">{activeTextToolbar}</div>
@@ -875,17 +883,33 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           </div>
 
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+            <div
+              className={cn(
+                'flex flex-col gap-6 lg:flex-row lg:items-start',
+                isFullscreenEditor && 'w-full'
+              )}
+            >
               <div
                 className={cn(
-                  'relative h-[520px] w-full overflow-hidden bg-card shadow-2xl transition-all duration-300',
+                  'relative w-full overflow-hidden bg-card shadow-2xl transition-all duration-300',
                   settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border',
                   isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
-                  !canEdit && 'opacity-90'
+                  !canEdit && 'opacity-90',
+                  isFullscreenEditor ? 'h-auto max-h-full' : 'h-[520px]'
                 )}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
+                style={
+                  isFullscreenEditor
+                    ? {
+                        aspectRatio: '16 / 9',
+                        width: '100%',
+                        maxWidth: 'min(100vw, calc(100vh * 16 / 9))',
+                        maxHeight: 'min(100vh, calc(100vw * 9 / 16))',
+                      }
+                    : undefined
+                }
               >
                 <CanvasStage
                   ref={canvasRef}
