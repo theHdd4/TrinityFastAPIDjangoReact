@@ -922,7 +922,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                 className={cn(
                   'relative h-[520px] w-full overflow-hidden shadow-2xl transition-all duration-300',
                   slideBackgroundClass,
-                  settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border',
+                  settings.fullBleed
+                    ? 'rounded-none border-0'
+                    : 'rounded-[28px] border border-border/60',
                   isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
                   !canEdit && 'opacity-90'
                 )}
@@ -941,6 +943,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   accentImage={settings.accentImage ?? null}
                   accentImageName={settings.accentImageName ?? null}
                   titleObjectId={titleObjectId}
+                  fullBleed={settings.fullBleed}
                   onCanvasDragLeave={handleDragLeave}
                   onCanvasDragOver={handleDragOver}
                   onCanvasDrop={handleDrop}
@@ -1079,7 +1082,8 @@ const LayoutOverlay: React.FC<{
   color: CardColor;
   accentImage?: string | null;
   accentImageName?: string | null;
-}> = ({ layout, color, accentImage, accentImageName }) => {
+  fullBleed: boolean;
+}> = ({ layout, color, accentImage, accentImageName, fullBleed }) => {
   if (layout === 'none') {
     return null;
   }
@@ -1103,36 +1107,86 @@ const LayoutOverlay: React.FC<{
   switch (layout) {
     case 'top':
       return (
-        <div className={cn(sharedClass, 'left-0 right-0 top-0 h-[210px] rounded-t-[28px]')}>
+        <div
+          className={cn(
+            sharedClass,
+            'left-0 right-0 top-0 h-[210px]',
+            fullBleed ? 'rounded-none' : 'rounded-t-[28px]'
+          )}
+        >
           {content}
         </div>
       );
     case 'bottom':
       return (
-        <div className={cn(sharedClass, 'bottom-0 left-0 right-0 h-[220px] rounded-b-[28px]')}>
+        <div
+          className={cn(
+            sharedClass,
+            'bottom-0 left-0 right-0 h-[220px]',
+            fullBleed ? 'rounded-none' : 'rounded-b-[28px]'
+          )}
+        >
           {content}
         </div>
       );
     case 'left':
       return (
-        <div className={cn(sharedClass, 'bottom-0 left-0 top-0 w-[34%] min-w-[280px] rounded-l-[28px]')}>
+        <div
+          className={cn(
+            sharedClass,
+            'bottom-0 left-0 top-0 w-[34%] min-w-[280px]',
+            fullBleed ? 'rounded-none' : 'rounded-l-[28px]'
+          )}
+        >
           {content}
         </div>
       );
     case 'right':
       return (
-        <div className={cn(sharedClass, 'bottom-0 right-0 top-0 w-[34%] min-w-[280px] rounded-r-[28px]')}>
+        <div
+          className={cn(
+            sharedClass,
+            'bottom-0 right-0 top-0 w-[34%] min-w-[280px]',
+            fullBleed ? 'rounded-none' : 'rounded-r-[28px]'
+          )}
+        >
           {content}
         </div>
       );
     case 'full':
     default:
       return (
-        <div className={cn(sharedClass, 'inset-0 rounded-[28px]')}>
+        <div className={cn(sharedClass, 'inset-0', fullBleed ? 'rounded-none' : 'rounded-[28px]')}>
           {content}
         </div>
       );
   }
+};
+
+type CanvasStageProps = {
+  canEdit: boolean;
+  objects: SlideObject[];
+  isDragOver: boolean;
+  showEmptyState: boolean;
+  layout: CardLayout;
+  cardColor: CardColor;
+  accentImage?: string | null;
+  accentImageName?: string | null;
+  titleObjectId: string | null;
+  onCanvasDragOver?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onCanvasDragLeave?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onCanvasDrop?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onInteract: () => void;
+  onRemoveAtom?: (atomId: string) => void;
+  onBringToFront: (objectIds: string[]) => void;
+  onSendToBack: (objectIds: string[]) => void;
+  onBulkUpdate: (updates: Record<string, Partial<SlideObject>>) => void;
+  onGroupObjects: (objectIds: string[], groupId: string | null) => void;
+  onTitleCommit: (nextTitle: string) => void;
+  onRemoveObject?: (objectId: string) => void;
+  onTextToolbarChange?: (node: ReactNode | null) => void;
+  onRequestPositionPanel?: (objectId: string) => void;
+  fullBleed: boolean;
 };
 
 const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
@@ -1160,6 +1214,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       onRemoveObject,
       onTextToolbarChange,
       onRequestPositionPanel,
+      fullBleed,
     },
     forwardedRef,
   ) => {
@@ -2163,13 +2218,27 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       );
     };
 
+    const canvasCornerClass = fullBleed ? 'rounded-none' : 'rounded-[28px]';
+
+    const canvasBorderClass = (() => {
+      if (isDragOver) {
+        return 'border-2 border-primary/60 ring-2 ring-primary/20 shadow-xl scale-[0.99]';
+      }
+
+      if (showEmptyState) {
+        return 'border-2 border-dashed border-border/70';
+      }
+
+      return fullBleed ? 'border-0' : 'border-2 border-border/60';
+    })();
+
     return (
       <div
         ref={setRef}
         className={cn(
-          'relative h-full w-full overflow-hidden rounded-3xl border-2 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 bg-transparent',
-          showEmptyState ? 'border-dashed border-border/70' : 'border-border/60',
-          isDragOver ? 'border-primary/60 ring-2 ring-primary/20 shadow-xl scale-[0.99]' : undefined,
+          'relative h-full w-full overflow-hidden transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 bg-transparent',
+          canvasCornerClass,
+          canvasBorderClass,
         )}
         tabIndex={canEdit ? 0 : -1}
         onPointerDown={handleBackgroundPointerDown}
@@ -2184,11 +2253,17 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             color={cardColor}
             accentImage={accentImage}
             accentImageName={accentImageName}
+            fullBleed={fullBleed}
           />
         </div>
 
         {showEmptyState && (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-3xl border-2 border-dashed border-border/60 bg-muted/20 px-6 text-center text-sm text-muted-foreground">
+          <div
+            className={cn(
+              'pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-border/60 bg-muted/20 px-6 text-center text-sm text-muted-foreground',
+              canvasCornerClass,
+            )}
+          >
             Add components from the catalogue to build your presentation slide.
           </div>
         )}
@@ -2447,7 +2522,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         </div>
 
         {isDragOver && canEdit && (
-          <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center rounded-3xl border-2 border-dashed border-primary/60 bg-primary/10 text-xs font-semibold uppercase tracking-wide text-primary">
+          <div
+            className={cn(
+              'pointer-events-none absolute inset-0 z-50 flex items-center justify-center border-2 border-dashed border-primary/60 bg-primary/10 text-xs font-semibold uppercase tracking-wide text-primary',
+              canvasCornerClass,
+            )}
+          >
             Drop to add component
           </div>
         )}
