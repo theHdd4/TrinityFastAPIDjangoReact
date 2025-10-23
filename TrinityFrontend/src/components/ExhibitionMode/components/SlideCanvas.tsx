@@ -182,6 +182,7 @@ interface SlideCanvasProps {
   onTitleChange?: (title: string, cardId: string) => void;
   presenterName?: string | null;
   onPositionPanelChange?: (panel: ReactNode | null) => void;
+  mode?: 'editor' | 'presentation';
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -199,6 +200,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   onTitleChange,
   presenterName,
   onPositionPanelChange,
+  mode = 'editor',
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -781,6 +783,47 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             ? 'border-primary shadow-elegant ring-1 ring-primary/30'
             : 'border-border hover:border-primary/40'
         );
+
+  if (mode === 'presentation') {
+    const noop = () => {};
+
+    return (
+      <div className={cn('mx-auto transition-all duration-300 p-8', cardWidthClass)} data-exhibition-slide-mode="presentation">
+        <div
+          className={cn(
+            'relative h-[520px] w-full overflow-hidden bg-card shadow-2xl transition-all duration-300',
+            settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border'
+          )}
+        >
+          <CanvasStage
+            ref={canvasRef}
+            canEdit={false}
+            isDragOver={false}
+            showEmptyState={false}
+            objects={slideObjects}
+            layout={settings.cardLayout}
+            cardColor={settings.cardColor}
+            accentImage={settings.accentImage ?? null}
+            accentImageName={settings.accentImageName ?? null}
+            titleObjectId={titleObjectId}
+            onCanvasDragLeave={noop}
+            onCanvasDragOver={noop}
+            onCanvasDrop={noop}
+            onInteract={handleCanvasInteraction}
+            onRemoveAtom={noop}
+            onBringToFront={noop}
+            onSendToBack={noop}
+            onBulkUpdate={noop}
+            onGroupObjects={noop}
+            onTitleCommit={noop}
+            onRemoveObject={noop}
+            onTextToolbarChange={noop}
+            onRequestPositionPanel={noop}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={containerClasses}>

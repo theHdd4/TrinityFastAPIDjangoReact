@@ -227,8 +227,8 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
         size="icon"
         onClick={onFullscreen}
         className="rounded-full h-9 w-9"
-        title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen Presentation'}
-        disabled={!hasSlides && !isFullscreen}
+        title={isFullscreen ? 'Exit canvas fullscreen' : 'Fullscreen canvas'}
+        disabled={(!hasSlides && !isFullscreen) || isSlideshowActive}
       >
         {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
       </Button>
