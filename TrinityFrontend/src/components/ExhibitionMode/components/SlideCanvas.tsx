@@ -378,46 +378,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     onPresentationChange?.(defaults, card.id);
   }, [canEdit, card.id, onPresentationChange]);
 
-  const layoutConfig = useMemo(() => {
-    const shared = {
-      showOverview: true,
-      gridClass: 'grid-cols-1 md:grid-cols-2',
-      wrapper: '',
-      contentClass: '',
-      overviewOuterClass: '',
-      overviewContainerClass: '',
-    } as const;
-
-    switch (settings.cardLayout) {
-      case 'none':
-        return {
-          ...shared,
-        };
-      case 'top':
-      case 'bottom':
-        return {
-          ...shared,
-        };
-      case 'left':
-      case 'right':
-        return {
-          ...shared,
-          wrapper: 'lg:flex-row lg:items-stretch',
-          contentClass: 'lg:w-[35%] lg:pr-8',
-          overviewOuterClass: 'lg:flex-1 lg:pl-8 min-h-0',
-          overviewContainerClass: 'h-full',
-        };
-      case 'full':
-      default:
-        return {
-          ...shared,
-          gridClass: 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3',
-        };
-    }
-  }, [settings.cardLayout]);
-
-  const showOverview = layoutConfig.showOverview && atomObjects.length > 1;
-
   const resolvedTitle = useMemo(() => resolveCardTitle(card), [card]);
 
   const presenterLabel = useMemo(() => {
@@ -943,56 +903,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
 
             </div>
           </div>
-
-          {showOverview && (
-            <div className={cn('px-8 pb-8 flex flex-col flex-1 min-h-0 overflow-hidden', layoutConfig.overviewOuterClass)}>
-              <div
-                className={cn(
-                  'bg-muted/30 rounded-xl border border-border p-6 flex-1 overflow-y-auto',
-                  layoutConfig.overviewContainerClass
-                )}
-              >
-                <h2 className="text-2xl font-bold text-foreground mb-6">Components Overview</h2>
-
-                <div className={cn('grid gap-4', layoutConfig.gridClass)}>
-                  {atomObjects.map(object => {
-                    const atom = object.props.atom;
-                    return (
-                      <div
-                        key={object.id}
-                        className="relative group p-6 border-2 border-border bg-card rounded-xl hover:shadow-lg hover:border-primary/50 transition-all duration-300"
-                      >
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
-                          <h3 className="font-semibold text-foreground text-lg group-hover:text-primary transition-colors">
-                            {atom.title}
-                          </h3>
-                        </div>
-                        <div className="inline-block px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full mb-3">
-                          {atom.category}
-                        </div>
-                        <div className="text-sm text-muted-foreground space-y-3">
-                          <ExhibitedAtomRenderer atom={atom} variant="compact" />
-                        </div>
-
-                        {canEdit && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="absolute top-3 right-3 h-8 w-8 text-muted-foreground hover:text-destructive"
-                            onClick={() => handleAtomRemove(atom.id)}
-                            type="button"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
 
           {viewMode === 'horizontal' && (
             <div className="mt-6 text-center">

@@ -113,10 +113,10 @@ const AuxiliaryMenu: React.FC<Props> = ({
             className={`inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground rounded-md p-1 h-8 w-8 ${
               active === 'superagent' ? 'bg-accent text-accent-foreground' : ''
             }`}
-            title="Super Agent AI"
+            title="Trinity AI"
             data-superagent-ai="true"
           >
-            <Sparkles className="w-4 h-4 text-[#666666]" />
+            <Sparkles className="w-4 h-4 text-purple-500" />
           </button>
         </div>
         <div className="p-3 border-b border-gray-200 flex items-center justify-between">

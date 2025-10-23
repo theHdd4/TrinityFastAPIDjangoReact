@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { MessageSquare, Atom, FileQuestion, X, Sparkles, ChevronDown, Search } from 'lucide-react';
+import { Atom, FileQuestion, X, Sparkles, ChevronDown, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -123,7 +123,7 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
       {activePanel === 'chat' && (
         <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
           <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-            <h3 className="font-semibold text-gray-900">AI Agent Chat</h3>
+            <h3 className="font-semibold text-gray-900">Trinity AI</h3>
             <button
               className="w-6 h-6 flex items-center justify-center hover:bg-gray-100 rounded"
               onClick={() => setActivePanel(null)}
@@ -333,12 +333,12 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
           <button 
             onClick={() => togglePanel('chat')} 
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-gray-100 ${
-              activePanel === 'chat' ? 'bg-yellow-100 text-yellow-600' : 'text-gray-600'
+            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-purple-50 ${
+              activePanel === 'chat' ? 'bg-purple-100 text-purple-600' : 'text-purple-500'
             }`}
-            title="AI Agent Chat"
+            title="Trinity AI"
           >
-            <MessageSquare className="w-4 h-4" />
+            <Sparkles className="w-4 h-4" />
           </button>
         </div>
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
