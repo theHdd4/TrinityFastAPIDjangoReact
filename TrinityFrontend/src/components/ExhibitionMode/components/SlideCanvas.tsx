@@ -2167,8 +2167,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       <div
         ref={setRef}
         className={cn(
-          'relative h-full w-full overflow-hidden rounded-3xl border-2 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-          canEdit ? 'bg-background/95' : 'bg-background/80',
+          'relative h-full w-full overflow-hidden rounded-3xl border-2 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 bg-transparent',
           showEmptyState ? 'border-dashed border-border/70' : 'border-border/60',
           isDragOver ? 'border-primary/60 ring-2 ring-primary/20 shadow-xl scale-[0.99]' : undefined,
         )}
