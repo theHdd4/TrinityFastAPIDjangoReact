@@ -258,9 +258,8 @@ const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({ config, transpa
     }
 
     const svg = d3.select(svgRef.current);
-    svg
-      .style('background', transparentBackground ? 'none' : null)
-      .style('background-color', transparentBackground ? 'transparent' : null);
+    const backgroundColor = transparentBackground ? 'transparent' : '#ffffff';
+    svg.style('background', backgroundColor).style('background-color', backgroundColor);
     svg.selectAll('*').remove();
 
     const height = Math.max(config.height ?? 320, 240);
@@ -418,17 +417,21 @@ const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({ config, transpa
   }
 
   return (
-    <div className={cn('space-y-4', transparentBackground && 'bg-transparent')}>
+    <div
+      className={cn('space-y-4', transparentBackground && 'bg-transparent')}
+      style={{ backgroundColor: transparentBackground ? 'transparent' : '#ffffff' }}
+    >
       <div
         ref={containerRef}
         className={cn('w-full overflow-hidden', transparentBackground && 'bg-transparent')}
-        style={transparentBackground ? { backgroundColor: 'transparent' } : undefined}
+        style={{ backgroundColor: transparentBackground ? 'transparent' : '#ffffff' }}
       >
         <svg
           ref={svgRef}
           role="img"
           aria-label={config.title ?? 'Trend analysis chart'}
           className={cn(transparentBackground && 'bg-transparent')}
+          style={{ backgroundColor: transparentBackground ? 'transparent' : '#ffffff' }}
         />
       </div>
       {config.showLegend !== false && series.length > 1 && (
