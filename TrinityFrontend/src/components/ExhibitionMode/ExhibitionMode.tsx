@@ -42,6 +42,7 @@ const NOTES_STORAGE_KEY = 'exhibition-notes';
 const SLIDESHOW_ANIMATION_MS = 450;
 const EXHIBITION_STORAGE_KEY = 'exhibition-layout-cache';
 const LAB_STORAGE_KEY = 'laboratory-layout-cards';
+const SLIDESHOW_VIEWPORT_PADDING = 160;
 
 const contextsEqual = (a: ProjectContext | null, b: ProjectContext | null): boolean => {
   if (!a && !b) {
@@ -70,6 +71,7 @@ const ExhibitionMode = () => {
     lastLoadedContext,
     addSlideObject,
     removeSlideObject,
+    removeSlide,
     slideObjectsByCardId,
   } = useExhibitionStore();
   const { toast } = useToast();
@@ -126,8 +128,10 @@ const ExhibitionMode = () => {
   const [isSlideshowActive, setIsSlideshowActive] = useState(false);
   const [slideshowTransform, setSlideshowTransform] = useState('translateX(0px) scale(1)');
   const [slideshowOpacity, setSlideshowOpacity] = useState(1);
+  const [slideshowScale, setSlideshowScale] = useState(1);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const slideCanvasRef = useRef<HTMLDivElement | null>(null);
   const verticalSlideRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const undoStackRef = useRef<LayoutCard[][]>([]);
   const isRestoringSnapshotRef = useRef(false);
@@ -175,6 +179,32 @@ const ExhibitionMode = () => {
     clearAutoAdvanceTimer();
     clearTransitionTimer();
   }, [clearAutoAdvanceTimer, clearTransitionTimer]);
+
+  const updateSlideshowScale = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const element = slideCanvasRef.current;
+    if (!element) {
+      setSlideshowScale(1);
+      return;
+    }
+
+    const naturalWidth = element.offsetWidth;
+    const naturalHeight = element.offsetHeight;
+
+    if (naturalWidth <= 0 || naturalHeight <= 0) {
+      setSlideshowScale(1);
+      return;
+    }
+
+    const availableWidth = Math.max(1, window.innerWidth - SLIDESHOW_VIEWPORT_PADDING);
+    const availableHeight = Math.max(1, window.innerHeight - SLIDESHOW_VIEWPORT_PADDING);
+    const scale = Math.min(availableWidth / naturalWidth, availableHeight / naturalHeight);
+
+    setSlideshowScale(scale > 0 ? scale : 1);
+  }, []);
 
 
   const getTransitionStates = useCallback(
@@ -1138,6 +1168,66 @@ const ExhibitionMode = () => {
     });
   }, [addBlankSlide, canEdit, currentSlide, exhibitedCards.length, toast]);
 
+  const handleDeleteCurrentSlide = useCallback(() => {
+    if (!canEdit) {
+      toast({
+        title: 'Insufficient permissions',
+        description: 'You need edit access to delete slides.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const targetCard = exhibitedCards[currentSlide];
+    if (!targetCard) {
+      return;
+    }
+
+    if (isSlideshowActive) {
+      handleStopSlideshow();
+    }
+
+    const nextLength = Math.max(0, exhibitedCards.length - 1);
+
+    removeSlide(targetCard.id);
+
+    setNotes(prev => {
+      const next: Record<number, string> = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        const index = Number(key);
+        if (!Number.isFinite(index)) {
+          return;
+        }
+        if (index === currentSlide) {
+          return;
+        }
+        if (index > currentSlide) {
+          next[index - 1] = value;
+          return;
+        }
+        next[index] = value;
+      });
+      return next;
+    });
+
+    const nextIndex = nextLength === 0 ? 0 : Math.min(currentSlide, nextLength - 1);
+    setCurrentSlide(nextIndex);
+
+    toast({
+      title: 'Slide deleted',
+      description: 'The slide and its contents have been removed from your exhibition.',
+    });
+  }, [
+    canEdit,
+    currentSlide,
+    exhibitedCards,
+    handleStopSlideshow,
+    isSlideshowActive,
+    removeSlide,
+    setNotes,
+    toast,
+  ]);
+
   const handleOperationsPalettePanelChange = useCallback((panel: ReactNode | null) => {
     if (panel) {
       setOperationsPanelState({ type: 'custom', node: panel });
@@ -1263,6 +1353,36 @@ const ExhibitionMode = () => {
     ...currentCard?.presentationSettings,
   };
 
+  useEffect(() => {
+    if (!(isFullscreen && isSlideshowActive)) {
+      setSlideshowScale(1);
+      return;
+    }
+
+    const handleResize = () => {
+      updateSlideshowScale();
+    };
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      updateSlideshowScale();
+    });
+
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [
+    currentCard?.id,
+    currentCard?.presentationSettings?.cardWidth,
+    currentSlide,
+    isFullscreen,
+    isSlideshowActive,
+    updateSlideshowScale,
+    viewMode,
+  ]);
+
   const handleCreateTextBox = useCallback(() => {
     const targetCard = exhibitedCards[currentSlide];
     if (!targetCard) {
@@ -1374,8 +1494,10 @@ const ExhibitionMode = () => {
   const slideWrapperStyle: React.CSSProperties | undefined = isSlideshowActive
     ? {
         opacity: slideshowOpacity,
-        transform: slideshowTransform,
+        transform: `${slideshowTransform} scale(${slideshowScale})`,
+        transformOrigin: 'center center',
         transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
+        willChange: 'transform, opacity',
       }
     : undefined;
 
@@ -1476,26 +1598,35 @@ const ExhibitionMode = () => {
         <div className="flex-1 flex flex-col overflow-hidden">
           {viewMode === 'horizontal' ? (
             <div
-              className={cn('flex-1 flex flex-col', isSlideshowActive && 'justify-center')}
-              style={slideWrapperStyle}
+              className={cn(
+                'flex-1 flex flex-col',
+                isSlideshowActive ? 'items-center justify-center' : undefined,
+              )}
+              style={isSlideshowActive ? { padding: '3.5rem 3rem' } : undefined}
             >
               {currentCard ? (
-                <SlideCanvas
-                  card={currentCard}
-                  slideNumber={currentSlide + 1}
-                  totalSlides={exhibitedCards.length}
-                  onDrop={handleDrop}
-                  draggedAtom={draggedAtom}
-                  canEdit={canEdit}
-                  onPresentationChange={handlePresentationChange}
-                  onRemoveAtom={handleRemoveAtom}
-                  onShowNotes={handleShowNotesPanel}
-                  viewMode="horizontal"
-                  isActive
-                  onTitleChange={handleTitleChange}
-                  presenterName={presenterDisplayName}
-                  onPositionPanelChange={handleOperationsPalettePanelChange}
-                />
+                <div
+                  className={cn('w-full flex flex-col', isSlideshowActive ? 'items-center' : undefined)}
+                  style={slideWrapperStyle}
+                >
+                  <SlideCanvas
+                    ref={slideCanvasRef}
+                    card={currentCard}
+                    slideNumber={currentSlide + 1}
+                    totalSlides={exhibitedCards.length}
+                    onDrop={handleDrop}
+                    draggedAtom={draggedAtom}
+                    canEdit={canEdit}
+                    onPresentationChange={handlePresentationChange}
+                    onRemoveAtom={handleRemoveAtom}
+                    onShowNotes={handleShowNotesPanel}
+                    viewMode="horizontal"
+                    isActive
+                    onTitleChange={handleTitleChange}
+                    presenterName={presenterDisplayName}
+                    onPositionPanelChange={handleOperationsPalettePanelChange}
+                  />
+                </div>
               ) : (
                 emptyCanvas
               )}
@@ -1558,15 +1689,14 @@ const ExhibitionMode = () => {
           }
           setShowGridView(true);
         }}
-        onFullscreen={toggleFullscreen}
         onExport={() => {
           if (isSlideshowActive) {
             handleStopSlideshow();
           }
           setIsExportOpen(true);
         }}
-        isFullscreen={isFullscreen}
         onAddSlide={handleAddSlide}
+        onDeleteSlide={handleDeleteCurrentSlide}
         onToggleViewMode={handleToggleViewMode}
         viewMode={viewMode}
         canEdit={canEdit}

@@ -270,7 +270,7 @@ interface SlideCanvasProps {
   onPositionPanelChange?: (panel: ReactNode | null) => void;
 }
 
-export const SlideCanvas: React.FC<SlideCanvasProps> = ({
+const SlideCanvasBase = React.forwardRef<HTMLDivElement, SlideCanvasProps>(({ 
   card,
   slideNumber,
   totalSlides,
@@ -285,7 +285,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   onTitleChange,
   presenterName,
   onPositionPanelChange,
-}) => {
+}, ref) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
   const [settings, setSettings] = useState<PresentationSettings>(() => ({
@@ -917,7 +917,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         );
 
   return (
-    <div className={containerClasses}>
+    <div ref={ref} className={containerClasses}>
       <div
         className={cn(
           'mx-auto transition-all duration-300 p-8',
@@ -1104,7 +1104,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       </div>
     </div>
   );
-};
+});
+
+SlideCanvasBase.displayName = 'SlideCanvas';
+
+export const SlideCanvas = React.memo(SlideCanvasBase);
 
 const MIN_OBJECT_WIDTH = 220;
 const MIN_OBJECT_HEIGHT = 120;

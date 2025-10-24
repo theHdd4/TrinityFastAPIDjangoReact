@@ -3,13 +3,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Grid3x3,
-  Maximize2,
-  Minimize2,
   Download,
   Plus,
   ArrowUpDown,
   ArrowLeftRight,
   MonitorPlay,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -28,6 +27,17 @@ import {
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import type { SlideshowTransition } from '../store/exhibitionStore';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 
 interface SlideNavigationProps {
   currentSlide: number;
@@ -35,9 +45,7 @@ interface SlideNavigationProps {
   onPrevious: () => void;
   onNext: () => void;
   onGridView: () => void;
-  onFullscreen: () => void;
   onExport: () => void;
-  isFullscreen: boolean;
   onAddSlide: () => void;
   onToggleViewMode: () => void;
   viewMode: 'horizontal' | 'vertical';
@@ -53,6 +61,7 @@ interface SlideNavigationProps {
     slideshowDuration?: number;
     slideshowTransition?: SlideshowTransition;
   }) => void;
+  onDeleteSlide: () => void;
 }
 
 export const SlideNavigation: React.FC<SlideNavigationProps> = ({
@@ -61,9 +70,7 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
   onPrevious,
   onNext,
   onGridView,
-  onFullscreen,
   onExport,
-  isFullscreen,
   onAddSlide,
   onToggleViewMode,
   viewMode,
@@ -73,6 +80,7 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
   isSlideshowActive,
   slideshowSettings,
   onSlideshowSettingsChange,
+  onDeleteSlide,
 }) => {
   const [slideshowControlsOpen, setSlideshowControlsOpen] = React.useState(false);
 
@@ -119,6 +127,35 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
       >
         <Plus className="h-4 w-4" />
       </Button>
+
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="rounded-full h-9 w-9"
+            title="Delete current slide"
+            disabled={!canEdit || !hasSlides || isSlideshowActive}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this slide?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action will permanently remove the current slide and all of its contents. You can't undo this
+              action.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={onDeleteSlide} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Button
         variant="ghost"
@@ -170,17 +207,6 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
         title="Grid View"
       >
         <Grid3x3 className="h-4 w-4" />
-      </Button>
-
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onFullscreen}
-        className="rounded-full h-9 w-9"
-        title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen Presentation'}
-        disabled={!hasSlides && !isFullscreen}
-      >
-        {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
       </Button>
 
       <Popover

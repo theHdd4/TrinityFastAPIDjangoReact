@@ -331,36 +331,45 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
       {/* Icons Column - Always visible and stays on the right */}
       <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
-          <button 
-            onClick={() => togglePanel('chat')} 
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-gray-100 ${
+          <button
+            onClick={() => togglePanel('chat')}
+            className={`group relative w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-gray-100 ${
               activePanel === 'chat' ? 'bg-yellow-100 text-yellow-600' : 'text-gray-600'
             }`}
             title="AI Agent Chat"
           >
             <MessageSquare className="w-4 h-4" />
+            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 shadow-lg border border-border">
+              AI Agent Chat
+            </span>
           </button>
         </div>
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
-          <button 
-            onClick={() => togglePanel('atoms')} 
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-gray-100 ${
+          <button
+            onClick={() => togglePanel('atoms')}
+            className={`group relative w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-gray-100 ${
               activePanel === 'atoms' ? 'bg-yellow-100 text-yellow-600' : 'text-gray-600'
             }`}
             title="Atom Library"
           >
             <Atom className="w-4 h-4" />
+            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 shadow-lg border border-border">
+              Atom Library
+            </span>
           </button>
         </div>
         <div className="p-3 flex items-center justify-center">
-          <button 
-            onClick={() => togglePanel('custom')} 
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-gray-100 ${
+          <button
+            onClick={() => togglePanel('custom')}
+            className={`group relative w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-gray-100 ${
               activePanel === 'custom' ? 'bg-yellow-100 text-yellow-600' : 'text-gray-600'
             }`}
             title="Custom Section"
           >
             <FileQuestion className="w-4 h-4" />
+            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 shadow-lg border border-border">
+              Custom Section
+            </span>
           </button>
         </div>
       </div>

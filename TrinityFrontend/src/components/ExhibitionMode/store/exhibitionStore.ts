@@ -272,6 +272,7 @@ interface ExhibitionStore {
   loadSavedConfiguration: (context?: ProjectContext | null) => Promise<void>;
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => void;
   addBlankSlide: (afterSlideIndex?: number) => LayoutCard | null;
+  removeSlide: (cardId: string) => void;
   setCards: (cards: LayoutCard[] | unknown) => void;
   addSlideObject: (cardId: string, object: SlideObject) => void;
   bulkUpdateSlideObjects: (cardId: string, updates: Record<string, Partial<SlideObject>>) => void;
@@ -1304,6 +1305,27 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     });
 
     return createdCard;
+  },
+
+  removeSlide: (cardId: string) => {
+    set(state => {
+      const cards = state.cards.filter(card => card.id !== cardId);
+      if (cards.length === state.cards.length) {
+        return {};
+      }
+
+      const exhibitedCards = cards.filter(card => card.isExhibited);
+      const catalogueCards = state.catalogueCards.filter(card => card.id !== cardId);
+      const { [cardId]: _removed, ...remainingSlideObjects } = state.slideObjectsByCardId;
+
+      return {
+        cards,
+        exhibitedCards,
+        catalogueCards,
+        catalogueEntries: state.catalogueEntries,
+        slideObjectsByCardId: remainingSlideObjects,
+      };
+    });
   },
 
   setCards: (cards: LayoutCard[] | unknown) => {

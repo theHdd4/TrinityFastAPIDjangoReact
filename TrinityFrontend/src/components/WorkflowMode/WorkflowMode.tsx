@@ -808,11 +808,14 @@ const WorkflowMode = () => {
               <div className="p-3 flex items-center justify-center">
                 <button
                   onClick={toggleLibraryVisibility}
-                  className="inline-flex items-center justify-center p-1 h-8 w-8 rounded-md hover:bg-accent hover:text-accent-foreground"
+                  className="group relative inline-flex items-center justify-center p-1 h-8 w-8 rounded-md hover:bg-accent hover:text-accent-foreground"
                   title="Open Molecule Library"
                   data-molecule-sidebar-toggle="true"
                 >
                   <Grid3X3 className="w-4 h-4" />
+                  <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 shadow-lg border border-border">
+                    Open Molecule Library
+                  </span>
                 </button>
               </div>
             </div>
