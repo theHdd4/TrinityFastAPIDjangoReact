@@ -128,6 +128,26 @@ const isAtomObject = (
   return Boolean(candidate && typeof candidate.id === 'string');
 };
 
+const parseBooleanish = (value: unknown): boolean | null => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  if (typeof value === 'string') {
+    const lowered = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'y', 'on'].includes(lowered)) {
+      return true;
+    }
+    if (['false', '0', 'no', 'n', 'off'].includes(lowered)) {
+      return false;
+    }
+  }
+  return null;
+};
+
 const UNTITLED_SLIDE_TEXT = 'Untitled Slide';
 
 const FULLSCREEN_VIEWPORT_PADDING = 64;
@@ -195,6 +215,22 @@ const resolveCardOverlayStyle = (color: CardColor): React.CSSProperties => {
     backgroundImage:
       'linear-gradient(135deg, rgba(59,130,246,0.35) 0%, rgba(147,51,234,0.35) 100%)',
   };
+};
+
+const resolveFeatureOverviewTransparency = (
+  metadata: Record<string, any> | undefined,
+): boolean => {
+  if (!metadata || typeof metadata !== 'object') {
+    return true;
+  }
+
+  const controls = metadata.exhibitionControls;
+  if (!controls || typeof controls !== 'object') {
+    return true;
+  }
+
+  const preference = parseBooleanish((controls as Record<string, unknown>).transparentBackground);
+  return preference ?? true;
 };
 
 type TableState = {
@@ -2477,6 +2513,17 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 ? object.props.atom.atomId
                 : null;
             const isFeatureOverviewAtom = featureOverviewAtomId === 'feature-overview';
+            const featureOverviewMetadata =
+              isFeatureOverviewAtom && object.props.atom.metadata && typeof object.props.atom.metadata === 'object'
+                ? (object.props.atom.metadata as Record<string, any>)
+                : undefined;
+            const featureOverviewTransparentBackground =
+              isFeatureOverviewAtom && resolveFeatureOverviewTransparency(featureOverviewMetadata);
+            const suppressCardChrome =
+              isShapeObject ||
+              isTextBoxObject ||
+              isTableObject ||
+              (isFeatureOverviewAtom && featureOverviewTransparentBackground);
 
           return (
             <div
@@ -2492,6 +2539,17 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
               onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
             >
+              {isSelected && (
+                <div
+                  className={cn(
+                    'pointer-events-none absolute inset-0 border border-yellow-400 transition-all duration-200',
+                    suppressCardChrome || isShapeObject || isTextBoxObject || isTableObject
+                      ? 'rounded-[22px]'
+                      : 'rounded-[32px]'
+                  )}
+                  aria-hidden="true"
+                />
+              )}
               <div
                 className={cn(
                   'relative flex h-full w-full flex-col overflow-hidden rounded-3xl border-2 shadow-xl transition-all',
@@ -2500,14 +2558,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     : isAccentImageObject
                     ? 'bg-muted/30'
                     : 'bg-background/95',
-                  isFeatureOverviewAtom
+                  suppressCardChrome && 'border-transparent bg-transparent shadow-none',
+                  isFeatureOverviewAtom && !suppressCardChrome
                     ? isSelected
                       ? 'border-primary shadow-2xl'
                       : 'border-transparent'
                     : !isShapeObject &&
-                      (isSelected
-                        ? 'border-primary shadow-2xl'
-                        : 'border-border/70 hover:border-primary/40'),
+                        !suppressCardChrome &&
+                        (isSelected
+                          ? 'border-primary shadow-2xl'
+                          : 'border-border/70 hover:border-primary/40'),
                   (isTextBoxObject || isTableObject) &&
                     'overflow-visible border-transparent bg-transparent shadow-none',
                 )}
