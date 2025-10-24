@@ -71,6 +71,32 @@ type ActiveInteraction =
       scale: number;
     };
 
+type CanvasStageProps = {
+  canEdit: boolean;
+  objects: SlideObject[];
+  isDragOver: boolean;
+  showEmptyState: boolean;
+  layout: CardLayout;
+  cardColor: CardColor;
+  accentImage: string | null;
+  accentImageName: string | null;
+  titleObjectId: string;
+  onCanvasDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
+  onCanvasDragLeave: () => void;
+  onCanvasDrop: (event: React.DragEvent<HTMLDivElement>) => void;
+  onInteract: () => void;
+  onRemoveAtom?: (atomId: string) => void;
+  onBringToFront: (objectIds: string[]) => void;
+  onSendToBack: (objectIds: string[]) => void;
+  onBulkUpdate: (updates: Record<string, Partial<SlideObject>>) => void;
+  onGroupObjects: (objectIds: string[], groupId: string | null) => void;
+  onTitleCommit?: (nextTitle: string) => void;
+  onRemoveObject?: (objectId: string) => void;
+  onTextToolbarChange?: (node: ReactNode | null) => void;
+  onRequestPositionPanel?: (objectId: string) => void;
+  canvasScale: number;
+};
+
 interface EditingTextState {
   id: string;
   type: 'text-box';
@@ -951,6 +977,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             onRemoveObject={noop}
             onTextToolbarChange={noop}
             onRequestPositionPanel={noop}
+            canvasScale={canvasScale}
           />
         </div>
       </div>
@@ -1068,13 +1095,14 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                       onSendToBack={handleSendToBack}
                       onBulkUpdate={handleBulkUpdate}
                       onGroupObjects={handleGroupObjects}
-                      onTitleCommit={handleTitleCommit}
-                      onRemoveObject={objectId => removeSlideObject(card.id, objectId)}
-                      onTextToolbarChange={setActiveTextToolbar}
-                      onRequestPositionPanel={handleRequestPositionPanel}
-                    />
-                  </div>
-                ) : (
+                    onTitleCommit={handleTitleCommit}
+                    onRemoveObject={objectId => removeSlideObject(card.id, objectId)}
+                    onTextToolbarChange={setActiveTextToolbar}
+                    onRequestPositionPanel={handleRequestPositionPanel}
+                    canvasScale={canvasScale}
+                  />
+                </div>
+              ) : (
                   <CanvasStage
                     ref={canvasRef}
                     canEdit={canEdit}
@@ -1099,6 +1127,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                     onRemoveObject={objectId => removeSlideObject(card.id, objectId)}
                     onTextToolbarChange={setActiveTextToolbar}
                     onRequestPositionPanel={handleRequestPositionPanel}
+                    canvasScale={canvasScale}
                   />
                 )}
 
@@ -1254,6 +1283,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       onRemoveObject,
       onTextToolbarChange,
       onRequestPositionPanel,
+      canvasScale = 1,
     },
     forwardedRef,
   ) => {
