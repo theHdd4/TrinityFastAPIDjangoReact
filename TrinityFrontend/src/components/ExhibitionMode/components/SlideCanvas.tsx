@@ -313,6 +313,12 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     width: DEFAULT_PRESENTATION_WIDTH,
     height: CANVAS_STAGE_HEIGHT,
   });
+  const latestCanvasDimensionsRef = useRef(canvasDimensions);
+  const presentationModeRef = useRef(presentationMode);
+  const presentationBaseDimensionsRef = useRef<{
+    width: number;
+    height: number;
+  } | null>(null);
   const [presentationScale, setPresentationScale] = useState(1);
 
   const slideObjects = useExhibitionStore(
@@ -362,6 +368,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
         setCanvasDimensions(prev => {
+          if (presentationModeRef.current) {
+            return prev;
+          }
           const nextWidth = width > 0 ? width : prev.width;
           const nextHeight = height > 0 ? height : prev.height;
           if (Math.abs(prev.width - nextWidth) < 0.5 && Math.abs(prev.height - nextHeight) < 0.5) {
@@ -383,6 +392,25 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   }, [card.id]);
 
   useEffect(() => {
+    latestCanvasDimensionsRef.current = canvasDimensions;
+  }, [canvasDimensions]);
+
+  useEffect(() => {
+    presentationModeRef.current = presentationMode;
+    if (presentationMode) {
+      if (!presentationBaseDimensionsRef.current) {
+        const { width, height } = latestCanvasDimensionsRef.current;
+        presentationBaseDimensionsRef.current = {
+          width: width > 0 ? width : DEFAULT_PRESENTATION_WIDTH,
+          height: height > 0 ? height : CANVAS_STAGE_HEIGHT,
+        };
+      }
+    } else {
+      presentationBaseDimensionsRef.current = null;
+    }
+  }, [presentationMode]);
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
@@ -398,8 +426,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         return;
       }
 
-      const baseWidth = canvasDimensions.width || DEFAULT_PRESENTATION_WIDTH;
-      const baseHeight = canvasDimensions.height || CANVAS_STAGE_HEIGHT;
+      const baseDimensions = presentationBaseDimensionsRef.current ?? latestCanvasDimensionsRef.current;
+      const baseWidth = baseDimensions.width || DEFAULT_PRESENTATION_WIDTH;
+      const baseHeight = baseDimensions.height || CANVAS_STAGE_HEIGHT;
       if (baseWidth === 0 || baseHeight === 0) {
         return;
       }
@@ -1081,8 +1110,12 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   presentationMode
                     ? {
                         ...slideBackgroundStyle,
-                        height: canvasDimensions.height || CANVAS_STAGE_HEIGHT,
-                        width: canvasDimensions.width || DEFAULT_PRESENTATION_WIDTH,
+                        height:
+                          (presentationBaseDimensionsRef.current?.height ?? canvasDimensions.height) ||
+                          CANVAS_STAGE_HEIGHT,
+                        width:
+                          (presentationBaseDimensionsRef.current?.width ?? canvasDimensions.width) ||
+                          DEFAULT_PRESENTATION_WIDTH,
                         transform: `scale(${presentationScale})`,
                         transformOrigin: 'center center',
                         margin: '0 auto',
