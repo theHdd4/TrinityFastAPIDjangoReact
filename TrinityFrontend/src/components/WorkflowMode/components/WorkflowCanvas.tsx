@@ -610,9 +610,9 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   // The parent WorkflowMode now manages molecules directly
 
   return (
-    <div className="h-full w-full relative bg-gradient-to-br from-background via-card/50 to-muted/20 rounded-lg border-2 border-border/50 shadow-elegant backdrop-blur-sm">
-      <div 
-        ref={reactFlowWrapper} 
+    <div className="h-full w-full relative z-0 bg-gradient-to-br from-background via-card/50 to-muted/20 rounded-lg border-2 border-border/50 shadow-elegant backdrop-blur-sm">
+      <div
+        ref={reactFlowWrapper}
         className="w-full h-full custom-scrollbar workflow-canvas-container"
         style={{
           scrollbarWidth: 'thin',
@@ -621,7 +621,8 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           width: '100%',
           minHeight: '100%',
           position: 'relative',
-          overflow: 'auto' // Enable scrolling for large content
+          overflow: 'auto', // Enable scrolling for large content
+          zIndex: 0
         }}
       >
         {/* Plus Button for Creating Molecules */}
@@ -682,14 +683,15 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
             nodesDraggable={true}
             nodesConnectable={false}
             elementsSelectable={true}
-            style={{ 
-              width: '100%', 
+            style={{
+              width: '100%',
               height: '100%',
               minHeight: '100%',
               maxHeight: '100%',
               position: 'absolute',
               top: 0,
-              left: 0
+              left: 0,
+              zIndex: 0
             }}
           >
             <Background gap={24} color="hsl(var(--border) / 0.3)" className="opacity-50" />

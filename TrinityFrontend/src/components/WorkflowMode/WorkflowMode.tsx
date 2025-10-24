@@ -793,7 +793,7 @@ const WorkflowMode = () => {
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden" style={{ minHeight: 0 }}>
+      <div className="flex-1 flex overflow-visible" style={{ minHeight: 0 }}>
         {/* Molecule Library - LEFT SIDE */}
         {isLibraryVisible && (
           <div className="w-80 bg-card border-r border-border flex flex-col">
@@ -820,7 +820,10 @@ const WorkflowMode = () => {
         )}
 
         {/* Workflow Canvas - MAIN AREA */}
-        <div className={`flex-1 p-6 relative transition-all duration-300 ${isLibraryVisible ? 'ml-0' : 'ml-0'}`}>
+        <div
+          className={`flex-1 p-6 relative transition-all duration-300 ${isLibraryVisible ? 'ml-0' : 'ml-0'}`}
+          style={{ zIndex: 0 }}
+        >
           <WorkflowCanvas
             onMoleculeSelect={handleMoleculeSelect}
             onCreateMolecule={handleCreateMolecule}
@@ -840,7 +843,7 @@ const WorkflowMode = () => {
         </div>
 
         {/* Right Side Panel with Icons - Always Visible */}
-        <div className="h-full overflow-hidden">
+        <div className="h-full overflow-visible relative z-20">
           <WorkflowRightPanel 
             molecules={allMolecules}
             onAtomAssignToMolecule={handleAtomAssignToMolecule}
