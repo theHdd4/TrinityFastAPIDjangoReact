@@ -1,9 +1,24 @@
-# Configuration for the staging Cloudflare tunnel.
+# # Configuration for the staging Cloudflare tunnel.
+# tunnel: 49ff57dd-0fdb-4b7b-924e-a47517702352
+# credentials-file: /etc/cloudflared/49ff57dd-0fdb-4b7b-924e-a47517702352.json
+
+# ingress:
+#   - hostname: trinity-stag.quantmatrixai.com
+#     service: http://traefik:80
+#   - service: http_status:404
+
 tunnel: 49ff57dd-0fdb-4b7b-924e-a47517702352
 credentials-file: /etc/cloudflared/49ff57dd-0fdb-4b7b-924e-a47517702352.json
+
+# Use HTTP/2 transport for better reliability on Windows/Docker
+protocol: http2
+
+# Optional reliability and stability parameters
+retries: 5
+grace-period: 10s
+no-autoupdate: true
 
 ingress:
   - hostname: trinity-stag.quantmatrixai.com
     service: http://traefik:80
   - service: http_status:404
-
