@@ -457,9 +457,8 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   const content = (
     <div
       className={cn(
-        'h-full w-full overflow-hidden rounded-2xl border border-transparent bg-transparent px-3 py-2 transition-colors focus-within:border-primary focus-within:shadow-lg',
-        canEdit && !isEditing && 'hover:border-border/70',
-        isEditing && 'border-primary shadow-lg',
+        'h-full w-full overflow-hidden rounded-[22px] border border-transparent bg-transparent px-3 py-2 transition-colors',
+        isEditing ? 'border-yellow-400 shadow-lg' : 'focus-within:border-yellow-400 focus-within:shadow-lg',
       )}
       onDoubleClick={handleDoubleClick}
       onPointerDown={event => {
@@ -498,6 +497,8 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
           textAlign: localFormatting.align,
           color: localFormatting.color,
           whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          overflowWrap: 'anywhere',
         }}
       />
       {!canEdit && localFormatting.text.trim().length === 0 && (

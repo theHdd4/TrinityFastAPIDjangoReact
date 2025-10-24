@@ -2398,7 +2398,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
               onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
             >
-              {isSelected && (
+              {isSelected && !(isTextBoxObject && isEditingTextBox) && (
                 <div
                   className={cn(
                     'pointer-events-none absolute inset-0 border border-yellow-400 transition-all duration-200',
@@ -2418,7 +2418,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   isAccentImageObject && 'bg-muted/30 shadow-none border-transparent',
                   isShapeObject && 'border-none bg-transparent shadow-none overflow-visible',
                   (isTextBoxObject || isTableObject) &&
-                    'overflow-visible border-transparent bg-transparent shadow-none',
+                    'overflow-hidden border-transparent bg-transparent shadow-none',
                   (() => {
                     const shouldShowCardChrome =
                       !suppressCardChrome &&
