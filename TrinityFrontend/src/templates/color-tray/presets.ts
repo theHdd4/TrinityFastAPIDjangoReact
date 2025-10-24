@@ -153,7 +153,11 @@ const buildSolidPalette = (): readonly ColorTrayOption[] => {
 
   for (let hueIndex = 0; hueIndex < SOLID_HUES.length; hueIndex += 1) {
     const hue = SOLID_HUES[hueIndex];
-    for (let lightnessIndex = 0; lightnessIndex < SOLID_LIGHTNESS_LEVELS.length; lightnessIndex += 1) {
+    for (
+      let lightnessIndex = SOLID_LIGHTNESS_LEVELS.length - 1;
+      lightnessIndex >= 0;
+      lightnessIndex -= 1
+    ) {
       const lightness = SOLID_LIGHTNESS_LEVELS[lightnessIndex];
       const hex = hslToHex(hue, SOLID_SATURATION, lightness);
       const token = createSolidToken(hex);
@@ -177,7 +181,7 @@ const buildSolidPalette = (): readonly ColorTrayOption[] => {
     }
   }
 
-  for (let index = 0; index < NEUTRAL_HEXES.length; index += 1) {
+  for (let index = NEUTRAL_HEXES.length - 1; index >= 0; index -= 1) {
     const neutral = NEUTRAL_HEXES[index];
     const token = createSolidToken(neutral);
     if (seen.has(token)) {

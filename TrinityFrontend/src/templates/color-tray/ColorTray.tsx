@@ -226,21 +226,20 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
             const tooltip = option.tooltip ?? ariaLabel;
 
             return (
-            <button
-              key={option.id}
-              type="button"
-              aria-label={ariaLabel}
-              title={tooltip}
-              onClick={() => {
-                if (!isDisabled) {
-                  onSelect?.(option);
-                }
-              }}
+              <button
+                key={option.id}
+                type="button"
+                aria-label={ariaLabel}
+                title={tooltip}
+                onClick={() => {
+                  if (!isDisabled) {
+                    onSelect?.(option);
+                  }
+                }}
               className={cn(
-                'group relative flex min-h-[4.5rem] flex-col items-center justify-start gap-1 rounded-2xl border border-border/60 bg-background/95 p-2 text-[11px] font-medium text-muted-foreground transition-colors',
-                'hover:border-primary/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                isSelected && 'border-primary text-foreground shadow-sm ring-2 ring-primary/30',
-                isDisabled && 'cursor-not-allowed opacity-60 hover:border-border/60 hover:text-muted-foreground',
+                'group relative inline-flex items-center justify-center rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                isSelected && 'ring-2 ring-primary/40',
+                isDisabled && 'cursor-not-allowed opacity-60',
                 optionClassName,
               )}
               disabled={isDisabled}
