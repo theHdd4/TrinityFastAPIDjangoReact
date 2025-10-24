@@ -70,6 +70,7 @@ const ExhibitionMode = () => {
     lastLoadedContext,
     addSlideObject,
     removeSlideObject,
+    removeSlide,
     slideObjectsByCardId,
   } = useExhibitionStore();
   const { toast } = useToast();
@@ -92,7 +93,7 @@ const ExhibitionMode = () => {
   }, [user]);
 
   const [currentSlide, setCurrentSlide] = useState(0);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isPresentationView, setIsPresentationView] = useState(false);
   const [draggedAtom, setDraggedAtom] = useState<
     { atom: DroppedAtom; cardId: string; origin: 'catalogue' | 'slide' }
     | null
@@ -213,10 +214,10 @@ const ExhibitionMode = () => {
   }, [exhibitedCards]);
 
   useEffect(() => {
-    if (isFullscreen) {
+    if (isPresentationView) {
       setOperationsPanelState(null);
     }
-  }, [isFullscreen]);
+  }, [isPresentationView]);
 
   useEffect(() => {
     if (!canEdit) {
@@ -268,7 +269,8 @@ const ExhibitionMode = () => {
     clearSlideshowTimers();
     setSlideshowTransform('translateX(0px) scale(1)');
     setSlideshowOpacity(1);
-  }, [clearSlideshowTimers]);
+    setIsPresentationView(false);
+  }, [clearSlideshowTimers, setIsPresentationView]);
 
   const goToSlide = useCallback(
     (targetIndex: number, direction: 'forward' | 'backward' = 'forward') => {
@@ -302,15 +304,6 @@ const ExhibitionMode = () => {
     [currentSlide, goToSlide, handleStopSlideshow, isSlideshowActive],
   );
 
-  const toggleFullscreen = useCallback(() => {
-    setIsFullscreen(prev => {
-      if (prev && isSlideshowActive) {
-        handleStopSlideshow();
-      }
-      return !prev;
-    });
-  }, [handleStopSlideshow, isSlideshowActive]);
-
   const handleStartSlideshow = useCallback(() => {
     if (exhibitedCards.length === 0) {
       return;
@@ -324,8 +317,8 @@ const ExhibitionMode = () => {
     setShowGridView(false);
     setOperationsPanelState(null);
 
-    if (!isFullscreen) {
-      setIsFullscreen(true);
+    if (!isPresentationView) {
+      setIsPresentationView(true);
     }
 
     if (viewMode !== 'horizontal') {
@@ -334,7 +327,7 @@ const ExhibitionMode = () => {
   }, [
     currentSlide,
     exhibitedCards,
-    isFullscreen,
+    isPresentationView,
     clearSlideshowTimers,
     setShowGridView,
     setShowThumbnails,
@@ -611,18 +604,8 @@ const ExhibitionMode = () => {
           break;
         }
         case 'Escape':
-          if (isFullscreen) {
-            setIsFullscreen(false);
-          }
-          if (isSlideshowActive) {
+          if (isPresentationView || isSlideshowActive) {
             handleStopSlideshow();
-          }
-          break;
-        case 'f':
-        case 'F':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            toggleFullscreen();
           }
           break;
       }
@@ -634,10 +617,9 @@ const ExhibitionMode = () => {
     currentSlide,
     exhibitedCards.length,
     goToSlide,
-    isFullscreen,
+    isPresentationView,
     isSlideshowActive,
     handleStopSlideshow,
-    toggleFullscreen,
   ]);
 
   useEffect(() => {
@@ -654,41 +636,10 @@ const ExhibitionMode = () => {
   }, [clearSlideshowTimers]);
 
   useEffect(() => {
-    const element = containerRef.current;
-    if (!element || typeof element.requestFullscreen !== 'function') {
-      return;
-    }
-
-    if (isFullscreen) {
-      if (!document.fullscreenElement) {
-        element.requestFullscreen().catch(() => {
-          setIsFullscreen(false);
-        });
-      }
-    } else if (document.fullscreenElement === element && typeof document.exitFullscreen === 'function') {
-      document.exitFullscreen().catch(() => {
-        /* ignore */
-      });
-    }
-  }, [isFullscreen]);
-
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      if (!document.fullscreenElement) {
-        setIsFullscreen(false);
-        handleStopSlideshow();
-      }
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, [handleStopSlideshow]);
-
-  useEffect(() => {
-    if (!isFullscreen && isSlideshowActive) {
+    if (!isPresentationView && isSlideshowActive) {
       handleStopSlideshow();
     }
-  }, [handleStopSlideshow, isFullscreen, isSlideshowActive]);
+  }, [handleStopSlideshow, isPresentationView, isSlideshowActive]);
 
   const handleUndo = useCallback(() => {
     if (!canEdit) {
@@ -1138,6 +1089,57 @@ const ExhibitionMode = () => {
     });
   }, [addBlankSlide, canEdit, currentSlide, exhibitedCards.length, toast]);
 
+  const handleDeleteSlide = useCallback(() => {
+    const targetCard = exhibitedCards[currentSlide];
+    if (!targetCard) {
+      return;
+    }
+
+    if (isSlideshowActive) {
+      handleStopSlideshow();
+    }
+
+    const nextIndex = currentSlide >= exhibitedCards.length - 1 ? Math.max(0, currentSlide - 1) : currentSlide;
+
+    setNotes(prev => {
+      if (!prev || Object.keys(prev).length === 0) {
+        return prev;
+      }
+
+      const updated: Record<number, string> = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        const numericKey = Number(key);
+        if (!Number.isFinite(numericKey)) {
+          return;
+        }
+
+        if (numericKey === currentSlide) {
+          return;
+        }
+
+        const adjustedIndex = numericKey > currentSlide ? numericKey - 1 : numericKey;
+        updated[adjustedIndex] = value as string;
+      });
+
+      return updated;
+    });
+
+    removeSlide(targetCard.id);
+    setCurrentSlide(nextIndex);
+    toast({
+      title: 'Slide deleted',
+      description: 'The slide and its contents have been removed from your presentation.',
+    });
+  }, [
+    currentSlide,
+    exhibitedCards,
+    handleStopSlideshow,
+    isSlideshowActive,
+    removeSlide,
+    setNotes,
+    toast,
+  ]);
+
   const handleOperationsPalettePanelChange = useCallback((panel: ReactNode | null) => {
     if (panel) {
       setOperationsPanelState({ type: 'custom', node: panel });
@@ -1396,14 +1398,14 @@ const ExhibitionMode = () => {
       ref={containerRef}
       className={cn(
         'flex flex-col bg-background transition-all duration-300',
-        isFullscreen ? 'fixed inset-0 z-50' : 'h-screen'
+        isPresentationView ? 'fixed inset-0 z-50' : 'h-screen'
       )}
     >
-      {!isFullscreen && <Header />}
-      {!isFullscreen && renderHeaderSection()}
+      {!isPresentationView && <Header />}
+      {!isPresentationView && renderHeaderSection()}
 
       <div className="flex-1 flex overflow-hidden">
-        {!isFullscreen && (
+        {!isPresentationView && (
           <div className="flex h-full flex-shrink-0">
             <div className="bg-background border-r border-border transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
               <div className="p-3 border-b border-border flex items-center justify-center">
@@ -1486,7 +1488,7 @@ const ExhibitionMode = () => {
                   totalSlides={exhibitedCards.length}
                   onDrop={handleDrop}
                   draggedAtom={draggedAtom}
-                  canEdit={canEdit}
+                  canEdit={canEdit && !isPresentationView}
                   onPresentationChange={handlePresentationChange}
                   onRemoveAtom={handleRemoveAtom}
                   onShowNotes={handleShowNotesPanel}
@@ -1496,6 +1498,7 @@ const ExhibitionMode = () => {
                   presenterName={presenterDisplayName}
                   onPositionPanelChange={handleOperationsPalettePanelChange}
                   onUndo={handleUndo}
+                  presentationMode={isPresentationView}
                 />
               ) : (
                 emptyCanvas
@@ -1535,9 +1538,8 @@ const ExhibitionMode = () => {
           )}
         </div>
 
-        {!isFullscreen && (
+        {!isPresentationView && (
           <OperationsPalette
-            onFullscreen={toggleFullscreen}
             onExport={() => setIsExportOpen(true)}
             onGridView={() => setShowGridView(true)}
             onCreateTextBox={handleCreateTextBox}
@@ -1560,18 +1562,17 @@ const ExhibitionMode = () => {
           }
           setShowGridView(true);
         }}
-        onFullscreen={toggleFullscreen}
         onExport={() => {
           if (isSlideshowActive) {
             handleStopSlideshow();
           }
           setIsExportOpen(true);
         }}
-        isFullscreen={isFullscreen}
         onAddSlide={handleAddSlide}
         onToggleViewMode={handleToggleViewMode}
         viewMode={viewMode}
         canEdit={canEdit}
+        onDeleteSlide={handleDeleteSlide}
         onSlideshowStart={handleStartSlideshow}
         onSlideshowStop={handleStopSlideshow}
         isSlideshowActive={isSlideshowActive}

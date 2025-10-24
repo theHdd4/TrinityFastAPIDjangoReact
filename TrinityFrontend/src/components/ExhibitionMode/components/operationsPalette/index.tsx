@@ -1,5 +1,5 @@
 import React, { ReactNode, useMemo } from 'react';
-import { Layers, Download, Maximize2 } from 'lucide-react';
+import { Layers, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
@@ -17,7 +17,6 @@ import { createSettingsTool } from './tools/settings';
 export const POSITION_PANEL_WIDTH = '22rem';
 
 interface OperationsPaletteProps {
-  onFullscreen: () => void;
   onExport?: () => void;
   onGridView?: () => void;
   onCreateTextBox?: () => void;
@@ -28,7 +27,6 @@ interface OperationsPaletteProps {
 }
 
 export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
-  onFullscreen,
   onExport,
   onGridView,
   onCreateTextBox,
@@ -162,19 +160,6 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
             <Download className="h-4 w-4 text-black dark:text-white" />
             <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
               Export
-            </span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg"
-            onClick={onFullscreen}
-            title="Fullscreen"
-            type="button"
-          >
-            <Maximize2 className="h-4 w-4 text-foreground" />
-            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-              Fullscreen
             </span>
           </Button>
         </div>
