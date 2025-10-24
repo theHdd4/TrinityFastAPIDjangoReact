@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Check, Droplet, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import type { ColorTrayOption, ColorTraySection, ColorTraySwatchSize } from './types';
 
@@ -20,9 +21,9 @@ export interface ColorTrayProps {
 }
 
 const swatchSizeMap: Record<ColorTraySwatchSize, string> = {
-  sm: 'h-8 w-8 rounded-lg',
-  md: 'h-10 w-10 rounded-xl',
-  lg: 'h-12 w-12 rounded-2xl',
+  sm: 'h-7 w-7 rounded-lg',
+  md: 'h-8 w-8 rounded-xl',
+  lg: 'h-10 w-10 rounded-2xl',
 };
 
 export const ColorTray: React.FC<ColorTrayProps> = ({
@@ -189,20 +190,95 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
     return undefined;
   }, [selectedOption]);
 
+  const renderSwatch = (option: ColorTrayOption) => {
+    const optionId = option.id.toLowerCase();
+    const isSelected = resolvedSelectedId === optionId;
+    const isDisabled = disabled || option.disabled;
+    const ariaLabel = option.ariaLabel ?? option.label ?? option.value ?? option.id;
+    const tooltip = option.tooltip ?? ariaLabel;
+
+    return (
+      <button
+        key={option.id}
+        type="button"
+        aria-label={ariaLabel}
+        title={tooltip}
+        onClick={() => {
+          if (!isDisabled) {
+            onSelect?.(option);
+          }
+        }}
+        className={cn(
+          'group relative inline-flex items-center justify-center rounded-xl transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+          'before:absolute before:-inset-1 before:-z-10 before:rounded-[inherit] before:bg-gradient-to-br before:from-primary/10 before:via-primary/0 before:to-primary/30 before:opacity-0 before:transition-opacity before:duration-300 hover:before:opacity-100',
+          isSelected
+            ? 'z-10 scale-110 ring-2 ring-primary/70 shadow-2xl rotate-3'
+            : 'hover:z-20 hover:scale-125 hover:rotate-6 hover:shadow-2xl',
+          isDisabled && 'cursor-not-allowed opacity-60 hover:scale-100 hover:rotate-0 hover:shadow-none before:opacity-0',
+          optionClassName,
+        )}
+        disabled={isDisabled}
+      >
+        <span
+          className={cn(
+            'relative flex items-center justify-center overflow-hidden rounded-[inherit] border border-border/40 bg-background/90 shadow-md transition-all duration-300',
+            swatchSizeMap[swatchSize],
+            option.swatchClassName,
+          )}
+          style={option.swatchStyle}
+        >
+          {option.preview ?? null}
+          {isSelected && (
+            <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[inherit] border-2 border-background/80 bg-black/10">
+              <Check className="h-4 w-4 text-white drop-shadow" />
+            </span>
+          )}
+        </span>
+      </button>
+    );
+  };
+
+  const renderOptionsGrid = (optionsToRender: readonly ColorTrayOption[]) => (
+    <div
+      className={cn('grid gap-2 pr-1', gridClassName)}
+      style={effectiveColumns ? { gridTemplateColumns: `repeat(${effectiveColumns}, minmax(0, 1fr))` } : gridTemplate}
+    >
+      {optionsToRender.map(renderSwatch)}
+      {optionsToRender.length === 0 &&
+        (emptyState ?? (
+          <div className="col-span-full flex h-24 flex-col items-center justify-center rounded-2xl border border-dashed border-border/50 bg-gradient-to-br from-muted/20 via-transparent to-muted/10 text-[10px] font-semibold uppercase tracking-[0.35em] text-muted-foreground">
+            No options available
+          </div>
+        ))}
+    </div>
+  );
+
+  const renderSearch = () => (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        value={searchQuery}
+        onChange={event => setSearchQuery(event.target.value)}
+        placeholder="Search colors or hex codes"
+        className="h-10 rounded-xl border border-border/40 bg-gradient-to-r from-background/90 via-background/70 to-background/90 pl-11 text-xs font-semibold uppercase tracking-[0.2em] text-foreground/80 shadow-inner transition-all focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-primary/60"
+      />
+    </div>
+  );
+
   return (
     <div
       className={cn(
-        'w-full max-w-md rounded-3xl border border-border/50 bg-gradient-to-br from-background via-background/95 to-card p-4 shadow-2xl backdrop-blur-xl',
+        'w-full max-w-[360px] rounded-2xl border border-border/50 bg-gradient-to-br from-background via-background/95 to-card shadow-2xl backdrop-blur-xl',
         className,
       )}
     >
-      <div className="relative overflow-hidden rounded-2xl border border-border/30 bg-gradient-to-br from-primary/5 via-transparent to-primary/10 px-5 py-4 shadow-inner">
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-primary/10 to-transparent opacity-70" />
+      <div className="relative overflow-hidden border-b border-border/30 bg-gradient-to-br from-primary/5 via-transparent to-primary/5 px-5 py-4">
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-primary/5 to-transparent" />
         <div className="relative flex items-center gap-3">
-          <div className="relative flex h-10 w-10 items-center justify-center">
-            <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-primary/20 to-primary/40 opacity-70 blur-sm" />
+          <div className="relative group">
+            <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-primary/20 to-primary/40 opacity-75 blur-sm transition-opacity group-hover:opacity-100" />
             <div
-              className="relative flex h-9 w-9 items-center justify-center rounded-xl border-2 border-primary/30 shadow-lg ring-2 ring-background"
+              className="relative flex h-9 w-9 items-center justify-center rounded-full border-2 border-primary/30 shadow-lg ring-2 ring-background"
               style={selectedSwatchStyle}
             >
               {selectedOption?.preview ? (
@@ -224,125 +300,68 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
               <span className="text-sm font-semibold text-foreground/80">Choose a color</span>
             )}
           </div>
-          <Droplet className="h-4 w-4 text-primary/70" />
+          <Droplet className="h-4 w-4 text-primary/60" />
         </div>
       </div>
 
-      <div className="mt-4 space-y-4">
-        {resolvedSections ? (
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="flex flex-1 flex-wrap gap-2 rounded-2xl border border-border/30 bg-gradient-to-br from-muted/60 via-muted/40 to-muted/50 p-1.5 shadow-lg">
-                {resolvedSections.map(section => {
-                  const isActive = section.id === activeSectionId;
-                  return (
-                    <button
-                      key={section.id}
-                      type="button"
-                      className={cn(
-                        'relative flex flex-1 items-center justify-center rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-all duration-300',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-                        isActive
-                          ? 'bg-gradient-to-br from-background via-card to-background text-foreground shadow-lg'
-                          : 'text-muted-foreground hover:text-foreground',
-                      )}
-                      onClick={() => setActiveSectionId(section.id)}
-                      aria-pressed={isActive}
-                      style={{ minWidth: '6.5rem' }}
-                    >
-                      {section.label}
-                    </button>
-                  );
-                })}
-              </div>
-              {activeSection?.description ? (
-                <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-muted-foreground/80">
-                  {activeSection.description}
-                </span>
-              ) : null}
-            </div>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={searchQuery}
-                onChange={event => setSearchQuery(event.target.value)}
-                placeholder="Search colors or hex codes"
-                className="h-10 rounded-2xl border border-border/50 bg-gradient-to-r from-background/90 via-background/70 to-background/90 pl-11 text-sm shadow-inner transition-all focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-primary/60"
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={searchQuery}
-              onChange={event => setSearchQuery(event.target.value)}
-              placeholder="Search colors or hex codes"
-              className="h-10 rounded-2xl border border-border/50 bg-gradient-to-r from-background/90 via-background/70 to-background/90 pl-11 text-sm shadow-inner transition-all focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-primary/60"
-            />
-          </div>
-        )}
-
-        <ScrollArea className="max-h-[22rem] pr-2">
-          <div
-            className={cn('grid gap-3 pr-1', gridClassName)}
-            style={effectiveColumns ? { gridTemplateColumns: `repeat(${effectiveColumns}, minmax(0, 1fr))` } : gridTemplate}
-          >
-            {filteredOptions.map(option => {
-              const optionId = option.id.toLowerCase();
-              const isSelected = resolvedSelectedId === optionId;
-              const isDisabled = disabled || option.disabled;
-              const ariaLabel = option.ariaLabel ?? option.label ?? option.value ?? option.id;
-              const tooltip = option.tooltip ?? ariaLabel;
-
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  aria-label={ariaLabel}
-                  title={tooltip}
-                  onClick={() => {
-                    if (!isDisabled) {
-                      onSelect?.(option);
-                    }
-                  }}
-                  className={cn(
-                    'group relative inline-flex items-center justify-center rounded-2xl transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-                    'before:absolute before:-inset-1 before:-z-10 before:rounded-[1.25rem] before:bg-gradient-to-br before:from-primary/10 before:via-primary/0 before:to-primary/20 before:opacity-0 before:transition-opacity before:duration-300 hover:before:opacity-100',
-                    isSelected
-                      ? 'z-10 scale-105 ring-2 ring-primary/50 shadow-2xl'
-                      : 'hover:z-10 hover:scale-105 hover:-rotate-1 hover:shadow-xl',
-                    isDisabled && 'cursor-not-allowed opacity-60 hover:scale-100 hover:shadow-none before:opacity-0',
-                    optionClassName,
-                  )}
-                  disabled={isDisabled}
+      {resolvedSections ? (
+        <Tabs
+          value={activeSectionId ?? resolvedSections[0]?.id ?? ''}
+          onValueChange={setActiveSectionId}
+          className="w-full"
+        >
+          <div className="px-4 pt-4">
+            <TabsList className="grid w-full grid-cols-1 gap-2 bg-gradient-to-br from-muted/60 via-muted/40 to-muted/60 p-1.5 rounded-xl backdrop-blur-sm border border-border/30 shadow-lg">
+              {resolvedSections.map(section => (
+                <TabsTrigger
+                  key={section.id}
+                  value={section.id}
+                  className="relative data-[state=active]:bg-gradient-to-br data-[state=active]:from-background data-[state=active]:to-card data-[state=active]:shadow-lg data-[state=active]:border data-[state=active]:border-primary/20 transition-all duration-300 data-[state=active]:scale-[0.98] rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-muted-foreground data-[state=active]:text-foreground"
                 >
-                  <span
-                    className={cn(
-                      'relative flex items-center justify-center rounded-[inherit] border border-border/40 bg-background shadow-inner transition-all duration-300',
-                      swatchSizeMap[swatchSize],
-                      option.swatchClassName,
-                    )}
-                    style={option.swatchStyle}
-                  >
-                    {option.preview ?? null}
-                    {isSelected && (
-                      <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[inherit] bg-black/25 backdrop-blur-sm">
-                        <Check className="h-4 w-4 text-white drop-shadow" />
-                      </span>
-                    )}
-                  </span>
-                </button>
-              );
-            })}
-            {filteredOptions.length === 0 && (emptyState ?? (
-              <div className="col-span-full flex h-28 flex-col items-center justify-center rounded-2xl border border-dashed border-border/60 bg-gradient-to-br from-muted/20 via-transparent to-muted/10 text-xs font-semibold uppercase tracking-[0.4em] text-muted-foreground">
-                No options available
-              </div>
-            ))}
+                  {section.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
           </div>
-        </ScrollArea>
-      </div>
+
+          {resolvedSections.map(section => (
+            <TabsContent key={section.id} value={section.id} className="mt-0 p-4">
+              <div className="space-y-4">
+                <div className="flex flex-col gap-3 rounded-xl bg-gradient-to-br from-muted/20 to-transparent p-3 border border-border/20">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted-foreground/80">{section.label}</span>
+                    <div className="h-px flex-1 bg-gradient-to-r from-border/40 via-border/20 to-transparent" />
+                  </div>
+                  {section.description ? (
+                    <p className="text-[10px] font-medium text-muted-foreground/70 uppercase tracking-[0.2em]">{section.description}</p>
+                  ) : null}
+                  {renderSearch()}
+                </div>
+
+                <ScrollArea className="h-[320px] pr-2">
+                  {renderOptionsGrid(
+                    section.id === activeSectionId ? filteredOptions : section.options ?? [],
+                  )}
+                </ScrollArea>
+              </div>
+            </TabsContent>
+          ))}
+        </Tabs>
+      ) : (
+        <div className="p-4 space-y-4">
+          <div className="rounded-xl bg-gradient-to-br from-muted/20 to-transparent p-3 border border-border/20 space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted-foreground/80">Palette</span>
+              <div className="h-px flex-1 bg-gradient-to-r from-border/40 via-border/20 to-transparent" />
+            </div>
+            {renderSearch()}
+          </div>
+
+          <ScrollArea className="h-[320px] pr-2">
+            {renderOptionsGrid(filteredOptions)}
+          </ScrollArea>
+        </div>
+      )}
     </div>
   );
 };
