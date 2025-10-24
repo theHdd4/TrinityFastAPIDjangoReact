@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { MessageSquare, Atom, FileQuestion, X, Sparkles, ChevronDown, Search } from 'lucide-react';
+import { Sparkles, Atom, FileQuestion, X, ChevronDown, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -24,7 +24,7 @@ interface WorkflowRightPanelProps {
   onRightPanelToolVisibilityChange?: (isVisible: boolean) => void;
 }
 
-type PanelType = 'chat' | 'atoms' | 'custom' | null;
+type PanelType = 'trinityAI' | 'atoms' | 'custom' | null;
 
 const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({ 
   molecules,
@@ -120,10 +120,10 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
   return (
     <div className="flex h-full">
       {/* Panel Area - Shows when active */}
-      {activePanel === 'chat' && (
+      {activePanel === 'trinityAI' && (
         <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
           <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-            <h3 className="font-semibold text-gray-900">AI Agent Chat</h3>
+            <h3 className="font-semibold text-gray-900">Trinity AI</h3>
             <button
               className="w-6 h-6 flex items-center justify-center hover:bg-gray-100 rounded"
               onClick={() => setActivePanel(null)}
@@ -134,7 +134,7 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
           <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
             <div className="p-4">
               <p className="text-sm text-gray-600 mb-4">
-                AI Chat functionality will be integrated here.
+                Trinity AI chat functionality will be integrated here.
               </p>
               <div className="h-96 bg-gray-50 rounded-lg flex items-center justify-center border border-gray-200">
                 <p className="text-sm text-gray-500">Chat interface coming soon</p>
@@ -331,14 +331,17 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
       {/* Icons Column - Always visible and stays on the right */}
       <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
-          <button 
-            onClick={() => togglePanel('chat')} 
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-gray-100 ${
-              activePanel === 'chat' ? 'bg-yellow-100 text-yellow-600' : 'text-gray-600'
+          <button
+            onClick={() => togglePanel('trinityAI')}
+            className={`group relative w-9 h-9 rounded-lg hover:bg-muted transition-all hover:scale-105 hover:shadow-lg flex items-center justify-center ${
+              activePanel === 'trinityAI' ? 'bg-muted text-foreground' : 'text-gray-600'
             }`}
-            title="AI Agent Chat"
+            title="Trinity AI"
           >
-            <MessageSquare className="w-4 h-4" />
+            <Sparkles className="w-4 h-4 text-purple-500" />
+            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-[9999] shadow-lg border border-border">
+              Trinity AI
+            </span>
           </button>
         </div>
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
