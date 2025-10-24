@@ -5,10 +5,12 @@ export interface ColorTrayOption {
   value?: string;
   label?: string;
   ariaLabel?: string;
+  tooltip?: string;
   swatchClassName?: string;
   swatchStyle?: React.CSSProperties;
   preview?: React.ReactNode;
   disabled?: boolean;
+  keywords?: readonly string[];
 }
 
 export interface ColorTraySection {

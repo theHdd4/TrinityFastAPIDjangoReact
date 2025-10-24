@@ -33,7 +33,36 @@ const hslToHex = (hue: number, saturation: number, lightness: number): string =>
 };
 
 const SOLID_HUES: readonly number[] = [260, 240, 220, 200, 190, 170, 150, 130, 110, 90, 70, 50, 30, 10, 350];
+const SOLID_HUE_NAMES: readonly string[] = [
+  'Violet',
+  'Indigo',
+  'Azure',
+  'Cerulean',
+  'Cyan',
+  'Teal',
+  'Emerald',
+  'Jade',
+  'Chartreuse',
+  'Lime',
+  'Amber',
+  'Golden',
+  'Coral',
+  'Rose',
+  'Magenta',
+];
 const SOLID_LIGHTNESS_LEVELS: readonly number[] = [18, 26, 34, 42, 50, 58, 66, 74, 82, 90];
+const SOLID_LIGHTNESS_DESCRIPTORS: readonly string[] = [
+  'Deep',
+  'Bold',
+  'Rich',
+  'Vibrant',
+  'Radiant',
+  'Bright',
+  'Soft',
+  'Pastel',
+  'Airy',
+  'Feather',
+];
 const SOLID_SATURATION = 85;
 
 const NEUTRAL_HEXES: readonly string[] = [
@@ -48,6 +77,19 @@ const NEUTRAL_HEXES: readonly string[] = [
   '#e5e7eb',
   '#f3f4f6',
   '#ffffff',
+];
+const NEUTRAL_LABELS: readonly string[] = [
+  'Absolute Black',
+  'Midnight Slate',
+  'Graphite',
+  'Iron Slate',
+  'Lead Grey',
+  'Misty Smoke',
+  'Soft Silver',
+  'Pale Frost',
+  'Morning Mist',
+  'Cloud Veil',
+  'Pure White',
 ];
 
 const normaliseHex = (value: string): string => {
@@ -109,50 +151,67 @@ const buildSolidPalette = (): readonly ColorTrayOption[] => {
   const options: ColorTrayOption[] = [];
   const seen = new Set<string>();
 
-  for (const hue of SOLID_HUES) {
-    for (const lightness of SOLID_LIGHTNESS_LEVELS) {
+  SOLID_HUES.forEach((hue, hueIndex) => {
+    SOLID_LIGHTNESS_LEVELS.forEach((lightness, lightnessIndex) => {
       const hex = hslToHex(hue, SOLID_SATURATION, lightness);
       const token = createSolidToken(hex);
       if (seen.has(token)) {
         continue;
       }
       seen.add(token);
+      const hueName = SOLID_HUE_NAMES[hueIndex] ?? 'Spectrum';
+      const toneName = SOLID_LIGHTNESS_DESCRIPTORS[lightnessIndex] ?? 'Tone';
+      const label = `${toneName} ${hueName}`;
+      const tooltip = `${label} (${hex.toUpperCase()})`;
       options.push({
         id: token,
         value: hex,
-        label: hex.toUpperCase(),
+        label,
+        tooltip,
         swatchStyle: { backgroundColor: hex },
-        ariaLabel: `Select ${hex.toUpperCase()}`,
+        ariaLabel: `Select ${tooltip}`,
+        keywords: [label, hex.toUpperCase(), hex.toLowerCase()],
       });
-    }
-  }
+    });
+  });
 
-  for (const neutral of NEUTRAL_HEXES) {
+  NEUTRAL_HEXES.forEach((neutral, index) => {
     const token = createSolidToken(neutral);
     if (seen.has(token)) {
       continue;
     }
     seen.add(token);
+    const label = NEUTRAL_LABELS[index] ?? `Neutral ${index + 1}`;
+    const tooltip = `${label} (${neutral.toUpperCase()})`;
     options.push({
       id: token,
       value: neutral,
-      label: neutral.toUpperCase(),
+      label,
+      tooltip,
       swatchStyle: { backgroundColor: neutral },
-      ariaLabel: `Select ${neutral.toUpperCase()}`,
+      ariaLabel: `Select ${tooltip}`,
+      keywords: [label, neutral.toUpperCase(), neutral.toLowerCase()],
     });
-  }
+  });
 
   return options;
 };
 
 const buildGradientOptions = (): readonly ColorTrayOption[] => {
-  return GRADIENT_PRESETS.map(preset => ({
-    id: preset.id,
-    value: preset.id,
-    label: preset.label,
-    swatchStyle: { backgroundImage: buildGradientString(preset) },
-    ariaLabel: `Select ${preset.label} gradient`,
-  }));
+  return GRADIENT_PRESETS.map(preset => {
+    const gradientStyle = buildGradientString(preset);
+    const stopsLabel = preset.stops.map(stop => stop.toUpperCase()).join(', ');
+    const tooltip = `${preset.label} (${stopsLabel})`;
+    return {
+      id: preset.id,
+      value: preset.id,
+      label: preset.label,
+      tooltip,
+      swatchStyle: { backgroundImage: gradientStyle },
+      ariaLabel: `Select ${preset.label} gradient`,
+      keywords: [preset.label, ...preset.stops],
+    } satisfies ColorTrayOption;
+  });
 };
 
 export const DEFAULT_SOLID_COLOR_OPTIONS = buildSolidPalette();

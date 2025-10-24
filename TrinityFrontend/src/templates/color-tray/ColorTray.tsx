@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check } from 'lucide-react';
+import { Check, Search } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import type { ColorTrayOption, ColorTraySection, ColorTraySwatchSize } from './types';
 
@@ -11,7 +12,6 @@ export interface ColorTrayProps {
   columns?: number;
   className?: string;
   optionClassName?: string;
-  showLabels?: boolean;
   disabled?: boolean;
   swatchSize?: ColorTraySwatchSize;
   defaultSectionId?: string;
@@ -32,7 +32,6 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
   columns,
   className,
   optionClassName,
-  showLabels = true,
   disabled = false,
   swatchSize = 'md',
   defaultSectionId,
@@ -40,6 +39,8 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
 }) => {
   const gridTemplate = columns ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } : undefined;
   const resolvedSelectedId = selectedId?.toLowerCase() ?? null;
+
+  const [searchQuery, setSearchQuery] = useState('');
 
   const resolvedSections = useMemo(() => {
     if (!sections || sections.length === 0) {
@@ -77,23 +78,29 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
 
     const normalizedDefault = defaultSectionId?.toLowerCase() ?? '';
     const fallbackId = resolvedSections[0]?.id ?? null;
+    const hasActiveSelection =
+      !!activeSectionId && resolvedSections.some(section => section.id === activeSectionId);
 
-    if (normalizedDefault) {
-      const match = resolvedSections.find(
-        section => section.id.toLowerCase() === normalizedDefault,
-      );
-      if (match && match.id !== activeSectionId) {
-        setActiveSectionId(match.id);
-        return;
+    if (!hasActiveSelection) {
+      if (normalizedDefault) {
+        const match = resolvedSections.find(
+          section => section.id.toLowerCase() === normalizedDefault,
+        );
+        if (match && match.id !== activeSectionId) {
+          setActiveSectionId(match.id);
+          return;
+        }
       }
-    }
 
-    if (!activeSectionId || !resolvedSections.some(section => section.id === activeSectionId)) {
-      if (fallbackId !== activeSectionId) {
+      if (fallbackId && fallbackId !== activeSectionId) {
         setActiveSectionId(fallbackId);
       }
     }
   }, [activeSectionId, defaultSectionId, resolvedSections]);
+
+  useEffect(() => {
+    setSearchQuery('');
+  }, [activeSectionId]);
 
   const activeSection = useMemo(() => {
     if (!resolvedSections || !activeSectionId) {
@@ -112,6 +119,25 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
     }
     return legacyOptions ?? [];
   }, [activeSection?.options, legacyOptions, resolvedSections]);
+
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+
+  const filteredOptions = useMemo(() => {
+    if (!normalizedQuery) {
+      return resolvedOptions;
+    }
+
+    return resolvedOptions.filter(option => {
+      const sources: readonly (string | undefined)[] = [
+        option.label,
+        option.value,
+        option.id,
+        ...(option.keywords ?? []),
+      ];
+
+      return sources.some(source => source?.toLowerCase().includes(normalizedQuery));
+    });
+  }, [normalizedQuery, resolvedOptions]);
 
   const effectiveColumns = useMemo(() => {
     if (columns) {
@@ -136,52 +162,75 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
   return (
     <div className={cn('flex flex-col gap-2', className)}>
       {resolvedSections ? (
-        <div className="flex items-center justify-between gap-2">
-          <div className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/60 p-1 shadow-sm">
-            {resolvedSections.map(section => {
-              const isActive = section.id === activeSectionId;
-              return (
-                <button
-                  key={section.id}
-                  type="button"
-                  className={cn(
-                    'rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-all duration-150',
-                    isActive
-                      ? 'bg-background text-foreground shadow'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                  onClick={() => setActiveSectionId(section.id)}
-                  aria-pressed={isActive}
-                >
-                  {section.label}
-                </button>
-              );
-            })}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/60 p-1 shadow-sm">
+              {resolvedSections.map(section => {
+                const isActive = section.id === activeSectionId;
+                return (
+                  <button
+                    key={section.id}
+                    type="button"
+                    className={cn(
+                      'rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-all duration-150',
+                      isActive
+                        ? 'bg-background text-foreground shadow'
+                        : 'text-muted-foreground hover:text-foreground',
+                    )}
+                    onClick={() => setActiveSectionId(section.id)}
+                    aria-pressed={isActive}
+                  >
+                    {section.label}
+                  </button>
+                );
+              })}
+            </div>
+            {activeSection?.description ? (
+              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                {activeSection.description}
+              </span>
+            ) : null}
           </div>
-          {activeSection?.description ? (
-            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              {activeSection.description}
-            </span>
-          ) : null}
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchQuery}
+              onChange={event => setSearchQuery(event.target.value)}
+              placeholder="Search colors or hex codes"
+              className="h-9 rounded-full border border-border/60 bg-background pl-9 text-sm shadow-sm focus-visible:ring-0"
+            />
+          </div>
         </div>
-      ) : null}
+      ) : (
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={event => setSearchQuery(event.target.value)}
+            placeholder="Search colors or hex codes"
+            className="h-9 rounded-full border border-border/60 bg-background pl-9 text-sm shadow-sm focus-visible:ring-0"
+          />
+        </div>
+      )}
 
       <div className="max-h-[22rem] overflow-y-auto pr-1">
         <div
           className={cn('grid gap-2', gridClassName)}
           style={effectiveColumns ? { gridTemplateColumns: `repeat(${effectiveColumns}, minmax(0, 1fr))` } : gridTemplate}
         >
-          {resolvedOptions.map(option => {
+          {filteredOptions.map(option => {
             const optionId = option.id.toLowerCase();
             const isSelected = resolvedSelectedId === optionId;
             const isDisabled = disabled || option.disabled;
             const ariaLabel = option.ariaLabel ?? option.label ?? option.value ?? option.id;
+            const tooltip = option.tooltip ?? ariaLabel;
 
             return (
             <button
               key={option.id}
               type="button"
               aria-label={ariaLabel}
+              title={tooltip}
               onClick={() => {
                 if (!isDisabled) {
                   onSelect?.(option);
@@ -211,13 +260,10 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
                   </span>
                 )}
               </span>
-              {showLabels && option.label ? (
-                <span className="text-center leading-tight">{option.label}</span>
-              ) : null}
             </button>
           );
         })}
-          {resolvedOptions.length === 0 && (emptyState ?? (
+          {filteredOptions.length === 0 && (emptyState ?? (
             <div className="col-span-full flex h-24 items-center justify-center rounded-xl border border-dashed border-border/60 text-xs font-medium uppercase tracking-wide text-muted-foreground">
               No options available
             </div>
