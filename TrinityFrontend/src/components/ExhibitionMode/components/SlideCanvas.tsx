@@ -227,7 +227,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     scale: number;
   } | null>(null);
   const isFullscreenEditor = isFullscreen && mode === 'editor' && viewMode === 'horizontal';
-  const stageScale = isFullscreenEditor && fullscreenMetrics ? fullscreenMetrics.scale : 1;
+  const canvasScale = useMemo(
+    () => (isFullscreenEditor && fullscreenMetrics ? fullscreenMetrics.scale : 1),
+    [fullscreenMetrics, isFullscreenEditor],
+  );
   const fullscreenWidthConstraint = `min(100vw - ${FULLSCREEN_VIEWPORT_PADDING * 2}px, (100vh - ${FULLSCREEN_VIEWPORT_PADDING * 2}px) * 16 / 9)`;
   const fullscreenHeightConstraint = `min(100vh - ${FULLSCREEN_VIEWPORT_PADDING * 2}px, (100vw - ${FULLSCREEN_VIEWPORT_PADDING * 2}px) * 9 / 16)`;
 
@@ -785,7 +788,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
 
     if (canvas) {
       const rect = canvas.getBoundingClientRect();
-      const effectiveScale = stageScale === 0 ? 1 : stageScale;
+      const effectiveScale = canvasScale === 0 ? 1 : canvasScale;
       const relativeX = (e.clientX - rect.left) / effectiveScale;
       const relativeY = (e.clientY - rect.top) / effectiveScale;
       dropX = relativeX - width / 2;
@@ -1039,7 +1042,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                         ? {
                             width: baseCanvasSize.width,
                             height: baseCanvasSize.height,
-                            transform: `scale(${stageScale})`,
+                            transform: `scale(${canvasScale})`,
                             transformOrigin: 'top left',
                           }
                         : undefined
@@ -1943,7 +1946,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           startClientX: event.clientX,
           startClientY: event.clientY,
           initialPositions,
-          scale: stageScale,
+          scale: canvasScale,
         });
       },
       [
@@ -1955,7 +1958,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         objectsMap,
         onBringToFront,
         selectedIds,
-        stageScale,
+        canvasScale,
       ],
     );
 
@@ -1986,10 +1989,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             width: target.width,
             height: target.height,
           },
-          scale: stageScale,
+          scale: canvasScale,
         });
       },
-      [canEdit, focusCanvas, onInteract, objectsMap, onBringToFront, stageScale],
+      [canEdit, focusCanvas, onInteract, objectsMap, onBringToFront, canvasScale],
     );
 
     const handleKeyDown = useCallback(
