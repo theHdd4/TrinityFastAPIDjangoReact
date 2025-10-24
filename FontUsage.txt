@@ -1,0 +1,68 @@
+Font loading guide for Exhibition Mode
+=====================================
+
+This document describes how the exhibition text toolbar loads the available fonts
+without storing binary font files in the repository, and how to extend or update
+the list of fonts.
+
+Overview
+--------
+1. The toolbar presents the display names defined in
+   `TrinityFrontend/src/components/ExhibitionMode/components/operationsPalette/textBox/constants.ts`.
+2. Each display name is mapped to an actual CSS font-family and a set of external
+   stylesheets inside `fontLoading.ts`.  When a font is requested we inject the
+   corresponding Google Fonts stylesheet (or rely on built-in system fonts) and
+   ask the browser to load the family via the FontFace API.
+3. The formatted text always stores the display name, while the rendering logic
+   converts it to the mapped CSS font-family so that aliases such as “Canva Sans”
+   (rendered with DM Sans) continue to work.
+
+Using the existing fonts
+------------------------
+1. Run the development server as usual (`npm install && npm run dev`).
+2. Open Exhibition Mode and insert a text box.
+3. Pick any font from the dropdown.  The first time a font is chosen the browser
+   downloads the stylesheet declared in `fontLoading.ts`.  Subsequent selections
+   reuse the cached font without extra network requests.
+4. The font remains available offline for the duration of the session because it
+   is cached by the browser; no repository-stored binaries are required.
+
+Adding or updating a font
+-------------------------
+1. Add the font name to the appropriate section in `constants.ts` if it should be
+   visible in the UI.
+2. Open `fontLoading.ts` and add (or update) an entry inside the `FONT_RESOURCES`
+   map:
+   a. Set `cssFamily` to the actual CSS font-family that should be used for
+      rendering.
+   b. Provide a `stylesheets` array with one or more external stylesheet URLs
+      (for example, a Google Fonts `css2` URL).  Leave the array empty if the
+      font should resolve to a built-in system family.
+   c. Optionally set `fontFace` if the family you want to preload differs from
+      `cssFamily` (e.g. aliases such as “Times New Roman MT” → “Times New Roman”).
+3. If the new font is an alias for an existing one, keep the original display
+   name in the constants file but point its `cssFamily` and `fontFace` to the
+   font you want to use.
+4. Save the changes and restart the dev server if it is running.  The dropdown
+   will immediately load the new external stylesheet the first time the font is
+   selected.
+
+Deploying the fonts
+-------------------
+* No additional deployment steps are required because the browser retrieves the
+  fonts directly from their public CDN sources.
+* If your production environment restricts outbound network access, mirror the
+  Google Fonts CSS responses to an internal CDN and replace the URLs in
+  `fontLoading.ts` with the mirrored locations.  The loading helper does not
+  require the files to live in the repository; it only needs an accessible
+  stylesheet URL.
+
+Troubleshooting
+---------------
+* If a font does not appear to change, verify that its display name has an entry
+  in `FONT_RESOURCES` and that the referenced stylesheet is reachable.
+* For system fonts (Times New Roman, Arial, Comic Sans) make sure the
+  `cssFamily` string includes suitable fallbacks, because the helper intentionally
+  avoids bundling binaries for them.
+* When replacing a Google Fonts URL, include the weights you need (regular and
+  bold at minimum) so bold/italic toggles in the toolbar continue to work.

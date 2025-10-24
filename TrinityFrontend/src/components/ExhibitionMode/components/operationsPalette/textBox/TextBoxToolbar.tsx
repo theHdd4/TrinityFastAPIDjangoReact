@@ -1,25 +1,41 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlignCenter,
   AlignLeft,
   AlignRight,
   Bold,
+  Check,
+  ChevronDown,
+  FileText,
+  Flame,
+  History,
   Italic,
   List,
   ListOrdered,
   Minus,
   Move,
   Plus,
+  Search,
   Sparkles,
   Strikethrough,
   Trash2,
   Underline,
+  type LucideIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import type { TextAlignOption } from './types';
-import { FONT_OPTIONS } from './constants';
+import {
+  FONT_CATEGORY_LOOKUP,
+  FONT_FILTER_CHIPS,
+  FONT_MENU_SECTIONS,
+  FONT_OPTIONS,
+  type FontFilterChipId,
+  type FontMenuSection,
+} from './constants';
+import { ensureFontLoaded, resolveFontFamily } from './fontLoading';
 import {
   ColorTray,
   DEFAULT_SOLID_COLOR_OPTIONS,
@@ -45,6 +61,20 @@ const TEXT_COLOR_SECTIONS: readonly ColorTraySection[] = [
     options: TEXT_GRADIENT_OPTIONS,
   },
 ];
+
+const FONT_SECTION_ICONS: Record<FontMenuSection['id'], LucideIcon> = {
+  document: FileText,
+  recommended: Sparkles,
+  recent: History,
+  popular: Flame,
+};
+
+const FONT_SECTION_OPTION_SUBTITLE: Record<FontMenuSection['id'], string> = {
+  document: 'Document font',
+  recommended: 'Recommended',
+  recent: 'Recently used',
+  popular: 'Popular',
+};
 
 interface TextBoxToolbarProps {
   fontFamily: string;
@@ -97,6 +127,17 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
   onRequestPosition,
   onDelete,
 }) => {
+  const [activeFilter, setActiveFilter] = useState<FontFilterChipId | null>(null);
+  const cssFontFamily = useMemo(() => resolveFontFamily(fontFamily), [fontFamily]);
+
+  useEffect(() => {
+    FONT_OPTIONS.forEach(ensureFontLoaded);
+  }, []);
+
+  useEffect(() => {
+    ensureFontLoaded(fontFamily);
+  }, [fontFamily]);
+
   const handleToolbarMouseDown = (event: React.MouseEvent) => {
     event.preventDefault();
   };
@@ -116,6 +157,34 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
       ? `solid-${color.slice(1).toLowerCase()}`
       : color?.toLowerCase?.() ?? '';
 
+  const filteredSections = useMemo(() => {
+    return FONT_MENU_SECTIONS.map(section => {
+      const filterId = activeFilter;
+      const filteredFonts =
+        filterId === null
+          ? section.fonts
+          : section.fonts.filter(font => (FONT_CATEGORY_LOOKUP[font] ?? []).includes(filterId));
+
+      const shouldAppendSelectedFont =
+        section.fonts.includes(fontFamily) && !filteredFonts.includes(fontFamily);
+
+      const nextFonts = shouldAppendSelectedFont
+        ? [...filteredFonts, fontFamily]
+        : filteredFonts;
+
+      return {
+        ...section,
+        fonts: Array.from(new Set(nextFonts)),
+      } satisfies FontMenuSection;
+    }).filter(section => section.fonts.length > 0);
+  }, [activeFilter, fontFamily]);
+
+  useEffect(() => {
+    filteredSections.forEach(section => {
+      section.fonts.forEach(ensureFontLoaded);
+    });
+  }, [filteredSections]);
+
   return (
     <div
       className="relative flex w-full max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-border/70 bg-background/95 px-2.5 py-2.5 text-sm shadow-[0_24px_48px_-22px_rgba(124,58,237,0.45)] backdrop-blur-lg"
@@ -128,36 +197,142 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
             variant="ghost"
             size="sm"
             type="button"
-            className="relative h-8 min-w-[112px] justify-between rounded-full border border-border/50 px-3 text-[11px] font-medium text-foreground hover:bg-muted/40"
+            className="relative h-8 min-w-[132px] justify-between rounded-full border border-border/50 px-3 text-[11px] font-medium text-foreground hover:bg-muted/40"
             onMouseDown={handleToolbarMouseDown}
           >
-            <span className="truncate" style={{ fontFamily }}>
+            <span className="truncate" style={{ fontFamily: cssFontFamily }}>
               {fontFamily}
             </span>
-            <span className="ml-2 text-[10px] text-muted-foreground">▼</span>
+            <ChevronDown className="ml-2 h-3.5 w-3.5 text-muted-foreground" />
           </Button>
         </PopoverTrigger>
         <PopoverContent
           side="bottom"
           align="start"
-          className="z-[4000] w-52 max-h-64 overflow-y-auto rounded-xl border border-border/70 bg-background/95 p-2 shadow-2xl"
+          className="z-[4000] w-[272px] rounded-2xl border border-border/60 bg-background/95 p-0 shadow-[0_24px_60px_-28px_rgba(15,23,42,0.55)] backdrop-blur-xl"
           data-text-toolbar-root
         >
-          <div className="space-y-1">
-            {FONT_OPTIONS.map(option => (
-              <Button
-                key={option}
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start rounded-lg px-3 text-sm text-foreground hover:bg-muted/50"
-                onClick={() => onFontFamilyChange(option)}
-                style={{ fontFamily: option }}
-                type="button"
-                onMouseDown={handleToolbarMouseDown}
-              >
-                {option}
-              </Button>
-            ))}
+          <div className="flex flex-col">
+            <div className="border-b border-border/70 px-4 pb-4 pt-5">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-full bg-foreground px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-background shadow-sm"
+                  onMouseDown={handleToolbarMouseDown}
+                >
+                  Font
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground hover:bg-muted/40"
+                  onMouseDown={handleToolbarMouseDown}
+                >
+                  Text styles
+                </button>
+              </div>
+              <div className="relative mt-4">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder={'Try "Calligraphy" or "Open Sans"'}
+                  className="h-9 w-full rounded-full border border-border/70 bg-muted/40 pl-9 pr-4 text-xs font-medium text-foreground placeholder:text-muted-foreground/70 focus-visible:ring-0"
+                />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {FONT_FILTER_CHIPS.map(chip => {
+                  const isActive = activeFilter === chip.id;
+
+                  return (
+                    <button
+                      key={chip.id}
+                      type="button"
+                      className={cn(
+                        'rounded-full border border-border/60 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.1em] transition-colors',
+                        isActive
+                          ? 'border-transparent bg-emerald-500 text-white shadow-sm'
+                          : 'bg-transparent text-muted-foreground hover:bg-muted/40 hover:text-foreground',
+                      )}
+                      onMouseDown={handleToolbarMouseDown}
+                      onClick={() =>
+                        setActiveFilter(previous => (previous === chip.id ? null : chip.id))
+                      }
+                    >
+                      {chip.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="max-h-80 space-y-5 overflow-y-auto px-4 py-4">
+              {filteredSections.map(section => {
+                const Icon = FONT_SECTION_ICONS[section.id];
+                return (
+                  <div key={section.id} className="space-y-2">
+                    <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                      <Icon className="h-3.5 w-3.5 text-muted-foreground/70" />
+                      {section.label}
+                    </div>
+                    <div className="space-y-1.5">
+                      {section.fonts.map(option => {
+                        const isActive = fontFamily === option;
+                        return (
+                          <button
+                            key={option}
+                            type="button"
+                            className={cn(
+                              'flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition-colors',
+                              isActive
+                                ? 'bg-emerald-500/10 text-emerald-600 ring-1 ring-emerald-500/40'
+                                : 'bg-transparent text-foreground hover:bg-muted/40',
+                            )}
+                            onClick={() => onFontFamilyChange(option)}
+                            onMouseDown={handleToolbarMouseDown}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div
+                                className="flex h-9 w-9 items-center justify-center rounded-lg border border-border/70 bg-background text-xs font-semibold uppercase text-muted-foreground"
+                                style={{ fontFamily: resolveFontFamily(option) }}
+                              >
+                                Aa
+                              </div>
+                              <div className="flex min-w-0 flex-col leading-tight">
+                                <span
+                                  className="truncate text-sm font-semibold"
+                                  style={{ fontFamily: resolveFontFamily(option) }}
+                                >
+                                  {option}
+                                </span>
+                                <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground/80">
+                                  {FONT_SECTION_OPTION_SUBTITLE[section.id]}
+                                </span>
+                              </div>
+                            </div>
+                            {isActive ? <Check className="h-4 w-4 text-emerald-500" /> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {section.id === 'recent' ? (
+                      <div className="rounded-xl border border-dashed border-border/70 bg-muted/20 px-4 py-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-foreground">Brand Kit</p>
+                            <p className="text-xs text-muted-foreground">Add your brand fonts in Brand Kit</p>
+                          </div>
+                          <button
+                            type="button"
+                            className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-500 transition-colors hover:text-emerald-600"
+                            onMouseDown={handleToolbarMouseDown}
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </PopoverContent>
       </Popover>

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils';
 import TextBoxToolbar from './TextBoxToolbar';
 import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from './constants';
+import { resolveFontFamily } from './fontLoading';
 import type { TextBoxFormatting } from './types';
 
 interface SlideTextBoxObjectProps {
@@ -387,6 +388,11 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     }
   };
 
+  const cssFontFamily = useMemo(
+    () => resolveFontFamily(localFormatting.fontFamily),
+    [localFormatting.fontFamily],
+  );
+
   const toolbar = useMemo(
     () => (
       <TextBoxToolbar
@@ -457,9 +463,8 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   const content = (
     <div
       className={cn(
-        'h-full w-full overflow-hidden rounded-2xl border border-transparent bg-transparent px-3 py-2 transition-colors focus-within:border-primary focus-within:shadow-lg',
-        canEdit && !isEditing && 'hover:border-border/70',
-        isEditing && 'border-primary shadow-lg',
+        'h-full w-full overflow-hidden rounded-[22px] border border-transparent bg-transparent px-3 py-2 transition-colors',
+        isEditing ? 'border-yellow-400 shadow-lg' : 'focus-within:border-yellow-400 focus-within:shadow-lg',
       )}
       onDoubleClick={handleDoubleClick}
       onPointerDown={event => {
@@ -489,7 +494,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         data-textbox-editable={canEdit && isEditing ? 'true' : undefined}
         style={{
           fontSize: `${localFormatting.fontSize}px`,
-          fontFamily: localFormatting.fontFamily,
+          fontFamily: cssFontFamily,
           fontWeight: localFormatting.bold ? 'bold' : 'normal',
           fontStyle: localFormatting.italic ? 'italic' : 'normal',
           textDecoration: `${localFormatting.underline ? 'underline' : ''} ${
@@ -498,6 +503,8 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
           textAlign: localFormatting.align,
           color: localFormatting.color,
           whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          overflowWrap: 'anywhere',
         }}
       />
       {!canEdit && localFormatting.text.trim().length === 0 && (

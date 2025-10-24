@@ -268,6 +268,7 @@ interface SlideCanvasProps {
   onTitleChange?: (title: string, cardId: string) => void;
   presenterName?: string | null;
   onPositionPanelChange?: (panel: ReactNode | null) => void;
+  onUndo?: () => void;
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -285,6 +286,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   onTitleChange,
   presenterName,
   onPositionPanelChange,
+  onUndo,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -999,6 +1001,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   onRemoveObject={objectId => removeSlideObject(card.id, objectId)}
                   onTextToolbarChange={setActiveTextToolbar}
                   onRequestPositionPanel={handleRequestPositionPanel}
+                  onUndo={onUndo}
                 />
 
                 <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
@@ -1249,6 +1252,7 @@ type CanvasStageProps = {
   onRemoveObject?: (objectId: string) => void;
   onTextToolbarChange?: (node: ReactNode | null) => void;
   onRequestPositionPanel?: (objectId: string) => void;
+  onUndo?: () => void;
   fullBleed: boolean;
 };
 
@@ -1277,6 +1281,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       onRemoveObject,
       onTextToolbarChange,
       onRequestPositionPanel,
+      onUndo,
       fullBleed,
     },
     forwardedRef,
@@ -2022,11 +2027,24 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           return;
         }
 
+        if ((event.key === 'z' || event.key === 'Z') && (event.metaKey || event.ctrlKey)) {
+          if (editingTextState) {
+            return;
+          }
+          event.preventDefault();
+          onUndo?.();
+          return;
+        }
+
         if (event.key === 'Escape') {
           setSelectedIds([]);
           if (editingTextState) {
             cancelEditingText();
           }
+          return;
+        }
+
+        if (editingTextState) {
           return;
         }
 
@@ -2107,6 +2125,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         cancelEditingText,
         clampAndSnapPosition,
         editingTextState,
+        onUndo,
         onBulkUpdate,
         onRemoveAtom,
         onRemoveObject,
@@ -2379,7 +2398,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
               onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
             >
-              {isSelected && (
+              {isSelected && !(isTextBoxObject && isEditingTextBox) && (
                 <div
                   className={cn(
                     'pointer-events-none absolute inset-0 border border-yellow-400 transition-all duration-200',
@@ -2399,7 +2418,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   isAccentImageObject && 'bg-muted/30 shadow-none border-transparent',
                   isShapeObject && 'border-none bg-transparent shadow-none overflow-visible',
                   (isTextBoxObject || isTableObject) &&
-                    'overflow-visible border-transparent bg-transparent shadow-none',
+                    'overflow-hidden border-transparent bg-transparent shadow-none',
                   (() => {
                     const shouldShowCardChrome =
                       !suppressCardChrome &&
