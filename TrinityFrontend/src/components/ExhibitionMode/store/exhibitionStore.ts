@@ -550,7 +550,7 @@ const synchroniseSlideObjects = (
     nextProps.fontFamily =
       typeof nextProps.fontFamily === 'string' && nextProps.fontFamily.trim().length > 0
         ? nextProps.fontFamily
-        : 'Times New Roman';
+        : 'Comic Sans';
     nextProps.bold = typeof nextProps.bold === 'boolean' ? nextProps.bold : true;
     nextProps.italic = Boolean(nextProps.italic);
     nextProps.underline = Boolean(nextProps.underline);
