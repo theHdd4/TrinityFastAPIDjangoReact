@@ -337,33 +337,42 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
               activePanel === 'trinityAI' ? 'bg-muted text-foreground' : 'text-gray-600'
             }`}
             title="Trinity AI"
+            type="button"
           >
             <Sparkles className="w-4 h-4 text-purple-500" />
-            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-[9999] shadow-lg border border-border">
+            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
               Trinity AI
             </span>
           </button>
         </div>
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
-          <button 
-            onClick={() => togglePanel('atoms')} 
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-gray-100 ${
-              activePanel === 'atoms' ? 'bg-yellow-100 text-yellow-600' : 'text-gray-600'
+          <button
+            onClick={() => togglePanel('atoms')}
+            className={`group relative w-9 h-9 rounded-lg hover:bg-muted transition-all hover:scale-105 hover:shadow-lg flex items-center justify-center ${
+              activePanel === 'atoms' ? 'bg-muted text-foreground' : 'text-gray-600'
             }`}
             title="Atom Library"
+            type="button"
           >
             <Atom className="w-4 h-4" />
+            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+              Atom Library
+            </span>
           </button>
         </div>
         <div className="p-3 flex items-center justify-center">
-          <button 
-            onClick={() => togglePanel('custom')} 
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-gray-100 ${
-              activePanel === 'custom' ? 'bg-yellow-100 text-yellow-600' : 'text-gray-600'
+          <button
+            onClick={() => togglePanel('custom')}
+            className={`group relative w-9 h-9 rounded-lg hover:bg-muted transition-all hover:scale-105 hover:shadow-lg flex items-center justify-center ${
+              activePanel === 'custom' ? 'bg-muted text-foreground' : 'text-gray-600'
             }`}
             title="Custom Section"
+            type="button"
           >
             <FileQuestion className="w-4 h-4" />
+            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+              Custom Section
+            </span>
           </button>
         </div>
       </div>
