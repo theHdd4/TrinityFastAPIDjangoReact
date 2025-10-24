@@ -43,6 +43,76 @@ const SLIDESHOW_ANIMATION_MS = 450;
 const EXHIBITION_STORAGE_KEY = 'exhibition-layout-cache';
 const LAB_STORAGE_KEY = 'laboratory-layout-cards';
 
+type TransitionPhase = 'prepare' | 'active';
+
+type PresentationTransitionState = {
+  fromIndex: number;
+  toIndex: number;
+  direction: 'forward' | 'backward';
+  transition: SlideshowTransition;
+  phase: TransitionPhase;
+};
+
+type TransitionFrames = {
+  outgoing: { initial: React.CSSProperties; final: React.CSSProperties };
+  incoming: { initial: React.CSSProperties; final: React.CSSProperties };
+};
+
+const TRANSITION_LAYER_BASE_STYLE: React.CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
+  willChange: 'opacity, transform',
+};
+
+const getTransitionFrames = (
+  transition: SlideshowTransition,
+  direction: 'forward' | 'backward',
+): TransitionFrames => {
+  switch (transition) {
+    case 'slide': {
+      const offset = direction === 'forward' ? -48 : 48;
+      const enteringOffset = -offset;
+      return {
+        outgoing: {
+          initial: { opacity: 1, transform: 'translateX(0px) scale(1)' },
+          final: { opacity: 0, transform: `translateX(${offset}px) scale(1)` },
+        },
+        incoming: {
+          initial: { opacity: 0, transform: `translateX(${enteringOffset}px) scale(1)` },
+          final: { opacity: 1, transform: 'translateX(0px) scale(1)' },
+        },
+      };
+    }
+    case 'zoom':
+      return {
+        outgoing: {
+          initial: { opacity: 1, transform: 'scale(1)' },
+          final: { opacity: 0, transform: 'scale(0.96)' },
+        },
+        incoming: {
+          initial: { opacity: 0, transform: 'scale(1.04)' },
+          final: { opacity: 1, transform: 'scale(1)' },
+        },
+      };
+    case 'fade':
+    default:
+      return {
+        outgoing: {
+          initial: { opacity: 1, transform: 'translateX(0px) scale(1)' },
+          final: { opacity: 0, transform: 'translateX(0px) scale(1)' },
+        },
+        incoming: {
+          initial: { opacity: 0, transform: 'translateX(0px) scale(1)' },
+          final: { opacity: 1, transform: 'translateX(0px) scale(1)' },
+        },
+      };
+  }
+};
+
 const contextsEqual = (a: ProjectContext | null, b: ProjectContext | null): boolean => {
   if (!a && !b) {
     return true;
@@ -125,8 +195,10 @@ const ExhibitionMode = () => {
   });
 
   const [isSlideshowActive, setIsSlideshowActive] = useState(false);
-  const [slideshowTransform, setSlideshowTransform] = useState('translateX(0px) scale(1)');
-  const [slideshowOpacity, setSlideshowOpacity] = useState(1);
+  const [presentationTransition, setPresentationTransition] =
+    useState<PresentationTransitionState | null>(null);
+
+  const presentationTransitionRef = useRef<PresentationTransitionState | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const verticalSlideRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -134,7 +206,6 @@ const ExhibitionMode = () => {
   const isRestoringSnapshotRef = useRef(false);
   const lastSerializedCardsRef = useRef<string | null>(null);
   const autoAdvanceTimerRef = useRef<number | null>(null);
-  const transitionTimerRef = useRef<number | null>(null);
   const hasRequestedInitialLoadRef = useRef(false);
 
   const generateTextBoxId = useCallback(() => {
@@ -165,45 +236,10 @@ const ExhibitionMode = () => {
     }
   }, []);
 
-  const clearTransitionTimer = useCallback(() => {
-    if (transitionTimerRef.current !== null) {
-      window.clearTimeout(transitionTimerRef.current);
-      transitionTimerRef.current = null;
-    }
-  }, []);
-
   const clearSlideshowTimers = useCallback(() => {
     clearAutoAdvanceTimer();
-    clearTransitionTimer();
-  }, [clearAutoAdvanceTimer, clearTransitionTimer]);
+  }, [clearAutoAdvanceTimer]);
 
-
-  const getTransitionStates = useCallback(
-    (transition: SlideshowTransition, direction: 'forward' | 'backward') => {
-      switch (transition) {
-        case 'slide': {
-          const exitOffset = direction === 'forward' ? -48 : 48;
-          const enterOffset = -exitOffset;
-          return {
-            exit: { opacity: 0, transform: `translateX(${exitOffset}px) scale(1)` },
-            enter: { opacity: 0, transform: `translateX(${enterOffset}px) scale(1)` },
-          };
-        }
-        case 'zoom':
-          return {
-            exit: { opacity: 0, transform: 'scale(0.96)' },
-            enter: { opacity: 0, transform: 'scale(1.04)' },
-          };
-        case 'fade':
-        default:
-          return {
-            exit: { opacity: 0, transform: 'translateX(0px) scale(1)' },
-            enter: { opacity: 0, transform: 'translateX(0px) scale(1)' },
-          };
-      }
-    },
-    [],
-  );
 
   const slideIndexByCardId = useMemo(() => {
     const lookup: Record<string, number> = {};
@@ -214,10 +250,36 @@ const ExhibitionMode = () => {
   }, [exhibitedCards]);
 
   useEffect(() => {
+    presentationTransitionRef.current = presentationTransition;
+  }, [presentationTransition]);
+
+  useEffect(() => {
     if (isPresentationView) {
       setOperationsPanelState(null);
     }
   }, [isPresentationView]);
+
+  useEffect(() => {
+    if (!presentationTransition) {
+      return;
+    }
+
+    if (presentationTransition.phase === 'prepare') {
+      const frame = window.requestAnimationFrame(() => {
+        setPresentationTransition(state =>
+          state ? { ...state, phase: 'active' } : null,
+        );
+      });
+
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    const timeout = window.setTimeout(() => {
+      setPresentationTransition(null);
+    }, SLIDESHOW_ANIMATION_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [presentationTransition]);
 
   useEffect(() => {
     if (!canEdit) {
@@ -227,48 +289,42 @@ const ExhibitionMode = () => {
 
   const runSlideTransition = useCallback(
     (targetIndex: number, direction: 'forward' | 'backward' = 'forward') => {
-      if (targetIndex === currentSlide || targetIndex < 0 || targetIndex >= exhibitedCards.length) {
+      if (
+        targetIndex === currentSlide ||
+        targetIndex < 0 ||
+        targetIndex >= exhibitedCards.length ||
+        presentationTransitionRef.current
+      ) {
         return;
       }
 
-      const nextCard = exhibitedCards[targetIndex];
       const transitionType =
-        nextCard?.presentationSettings?.slideshowTransition ??
+        exhibitedCards[targetIndex]?.presentationSettings?.slideshowTransition ??
         DEFAULT_PRESENTATION_SETTINGS.slideshowTransition;
 
-      const { exit, enter } = getTransitionStates(transitionType, direction);
       clearSlideshowTimers();
-      setSlideshowTransform(exit.transform);
-      setSlideshowOpacity(exit.opacity);
 
-      transitionTimerRef.current = window.setTimeout(() => {
-        setCurrentSlide(targetIndex);
-        requestAnimationFrame(() => {
-          setSlideshowTransform(enter.transform);
-          setSlideshowOpacity(enter.opacity);
+      setPresentationTransition({
+        fromIndex: currentSlide,
+        toIndex: targetIndex,
+        direction,
+        transition: transitionType,
+        phase: 'prepare',
+      });
 
-          requestAnimationFrame(() => {
-            setSlideshowTransform('translateX(0px) scale(1)');
-            setSlideshowOpacity(1);
-          });
-        });
-
-        transitionTimerRef.current = null;
-      }, SLIDESHOW_ANIMATION_MS);
+      setCurrentSlide(targetIndex);
     },
     [
       clearSlideshowTimers,
       currentSlide,
       exhibitedCards,
-      getTransitionStates,
     ],
   );
 
   const handleStopSlideshow = useCallback(() => {
     setIsSlideshowActive(false);
     clearSlideshowTimers();
-    setSlideshowTransform('translateX(0px) scale(1)');
-    setSlideshowOpacity(1);
+    setPresentationTransition(null);
     setIsPresentationView(false);
   }, [clearSlideshowTimers, setIsPresentationView]);
 
@@ -310,8 +366,7 @@ const ExhibitionMode = () => {
     }
 
     clearSlideshowTimers();
-    setSlideshowTransform('translateX(0px) scale(1)');
-    setSlideshowOpacity(1);
+    setPresentationTransition(null);
     setIsSlideshowActive(true);
     setShowThumbnails(false);
     setShowGridView(false);
@@ -335,7 +390,7 @@ const ExhibitionMode = () => {
   ]);
 
   const scheduleAutoAdvance = useCallback(() => {
-    if (!isSlideshowActive || exhibitedCards.length <= 1) {
+    if (!isSlideshowActive || exhibitedCards.length <= 1 || presentationTransition) {
       clearAutoAdvanceTimer();
       return;
     }
@@ -361,6 +416,7 @@ const ExhibitionMode = () => {
     currentSlide,
     exhibitedCards,
     isSlideshowActive,
+    presentationTransition,
     runSlideTransition,
   ]);
 
@@ -520,13 +576,6 @@ const ExhibitionMode = () => {
       setCurrentSlide(exhibitedCards.length > 0 ? exhibitedCards.length - 1 : 0);
     }
   }, [currentSlide, exhibitedCards.length]);
-
-  useEffect(() => {
-    if (!isSlideshowActive) {
-      setSlideshowTransform('translateX(0px) scale(1)');
-      setSlideshowOpacity(1);
-    }
-  }, [currentSlide, isSlideshowActive]);
 
   useEffect(() => {
     const isEditableKeyboardEvent = (event: KeyboardEvent): boolean => {
@@ -1265,6 +1314,37 @@ const ExhibitionMode = () => {
     ...currentCard?.presentationSettings,
   };
 
+  const transitionFrames = presentationTransition
+    ? getTransitionFrames(presentationTransition.transition, presentationTransition.direction)
+    : null;
+
+  const outgoingCard =
+    presentationTransition && presentationTransition.fromIndex >= 0
+      ? exhibitedCards[presentationTransition.fromIndex] ?? null
+      : null;
+
+  const incomingCard =
+    presentationTransition && presentationTransition.toIndex >= 0
+      ? exhibitedCards[presentationTransition.toIndex] ?? null
+      : null;
+
+  const renderPresentationSlide = (card: LayoutCard, index: number, keySuffix: string) => (
+    <SlideCanvas
+      key={`${card.id}-${keySuffix}`}
+      card={card}
+      slideNumber={index + 1}
+      totalSlides={exhibitedCards.length}
+      onDrop={handleDrop}
+      canEdit={false}
+      onPresentationChange={handlePresentationChange}
+      onRemoveAtom={handleRemoveAtom}
+      onTitleChange={handleTitleChange}
+      presenterName={presenterDisplayName}
+      viewMode="horizontal"
+      presentationMode
+    />
+  );
+
   const handleCreateTextBox = useCallback(() => {
     const targetCard = exhibitedCards[currentSlide];
     if (!targetCard) {
@@ -1373,15 +1453,6 @@ const ExhibitionMode = () => {
     notes,
     operationsPanelState,
   ]);
-  const slideWrapperStyle: React.CSSProperties | undefined = isSlideshowActive
-    ? {
-        opacity: slideshowOpacity,
-        transform: slideshowTransform,
-        transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
-        willChange: 'opacity, transform',
-      }
-    : undefined;
-
   const emptyCanvas = (
     <div className="flex-1 flex items-center justify-center bg-muted/10">
       <div className="max-w-md text-center space-y-3 px-6">
@@ -1483,29 +1554,75 @@ const ExhibitionMode = () => {
           )}
         >
           {viewMode === 'horizontal' ? (
-            <div
-              className={cn('flex-1 flex flex-col', isSlideshowActive && 'justify-center')}
-              style={slideWrapperStyle}
-            >
+            <div className={cn('flex-1 flex flex-col', isSlideshowActive && 'justify-center')}>
               {currentCard ? (
-                <SlideCanvas
-                  card={currentCard}
-                  slideNumber={currentSlide + 1}
-                  totalSlides={exhibitedCards.length}
-                  onDrop={handleDrop}
-                  draggedAtom={draggedAtom}
-                  canEdit={canEdit && !isPresentationView}
-                  onPresentationChange={handlePresentationChange}
-                  onRemoveAtom={handleRemoveAtom}
-                  onShowNotes={handleShowNotesPanel}
-                  viewMode="horizontal"
-                  isActive
-                  onTitleChange={handleTitleChange}
-                  presenterName={presenterDisplayName}
-                  onPositionPanelChange={handleOperationsPalettePanelChange}
-                  onUndo={handleUndo}
-                  presentationMode={isPresentationView}
-                />
+                isPresentationView ? (
+                  <div className="relative flex-1">
+                    {presentationTransition && transitionFrames && outgoingCard && incomingCard ? (
+                      <>
+                        <div
+                          style={{
+                            ...TRANSITION_LAYER_BASE_STYLE,
+                            ...(presentationTransition.phase === 'prepare'
+                              ? transitionFrames.outgoing.initial
+                              : transitionFrames.outgoing.final),
+                            zIndex: 2,
+                          }}
+                        >
+                          {renderPresentationSlide(
+                            outgoingCard,
+                            presentationTransition.fromIndex,
+                            'outgoing',
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            ...TRANSITION_LAYER_BASE_STYLE,
+                            ...(presentationTransition.phase === 'prepare'
+                              ? transitionFrames.incoming.initial
+                              : transitionFrames.incoming.final),
+                            zIndex: 3,
+                          }}
+                        >
+                          {renderPresentationSlide(
+                            incomingCard,
+                            presentationTransition.toIndex,
+                            'incoming',
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <div
+                        style={{
+                          ...TRANSITION_LAYER_BASE_STYLE,
+                          transition: 'none',
+                          zIndex: 1,
+                        }}
+                      >
+                        {renderPresentationSlide(currentCard, currentSlide, 'active')}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <SlideCanvas
+                    card={currentCard}
+                    slideNumber={currentSlide + 1}
+                    totalSlides={exhibitedCards.length}
+                    onDrop={handleDrop}
+                    draggedAtom={draggedAtom}
+                    canEdit={canEdit && !isPresentationView}
+                    onPresentationChange={handlePresentationChange}
+                    onRemoveAtom={handleRemoveAtom}
+                    onShowNotes={handleShowNotesPanel}
+                    viewMode="horizontal"
+                    isActive
+                    onTitleChange={handleTitleChange}
+                    presenterName={presenterDisplayName}
+                    onPositionPanelChange={handleOperationsPalettePanelChange}
+                    onUndo={handleUndo}
+                    presentationMode={isPresentationView}
+                  />
+                )
               ) : (
                 emptyCanvas
               )}
