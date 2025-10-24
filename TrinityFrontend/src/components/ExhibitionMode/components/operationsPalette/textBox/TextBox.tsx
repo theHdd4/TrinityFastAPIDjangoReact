@@ -457,9 +457,8 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   const content = (
     <div
       className={cn(
-        'h-full w-full overflow-hidden rounded-2xl border border-transparent bg-transparent p-3 transition-colors focus-within:border-primary focus-within:shadow-lg',
+        'h-full w-full overflow-hidden rounded-2xl border border-transparent bg-transparent px-3 py-2 transition-colors focus-within:border-primary focus-within:shadow-lg',
         canEdit && !isEditing && 'hover:border-border/70',
-        isSelected && !isEditing && 'border-border/80 shadow-sm',
         isEditing && 'border-primary shadow-lg',
       )}
       onDoubleClick={handleDoubleClick}
@@ -477,7 +476,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
       <div
         ref={textRef}
         className={cn(
-          'h-full w-full overflow-auto outline-none empty:before:absolute empty:before:left-3 empty:before:top-3 empty:before:text-sm empty:before:text-muted-foreground/70 empty:before:content-[attr(data-placeholder)]',
+          'h-full w-full overflow-auto outline-none empty:before:absolute empty:before:left-3 empty:before:top-2 empty:before:text-sm empty:before:text-muted-foreground/70 empty:before:content-[attr(data-placeholder)]',
           canEdit ? 'cursor-text' : 'cursor-default select-none',
         )}
         contentEditable={canEdit && isEditing}

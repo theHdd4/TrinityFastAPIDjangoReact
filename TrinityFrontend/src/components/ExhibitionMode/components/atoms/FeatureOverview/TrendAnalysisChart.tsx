@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
+import { cn } from '@/lib/utils';
 import { ChartRendererConfig } from './shared';
 
 type XValueType = 'date' | 'number' | 'category';
@@ -207,7 +208,12 @@ const formatDateLabel = (value: Date): string => {
   return formatter(value);
 };
 
-const TrendAnalysisChart: React.FC<{ config: ChartRendererConfig }> = ({ config }) => {
+interface TrendAnalysisChartProps {
+  config: ChartRendererConfig;
+  transparentBackground?: boolean;
+}
+
+const TrendAnalysisChart: React.FC<TrendAnalysisChartProps> = ({ config, transparentBackground }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [width, setWidth] = useState<number>(600);
@@ -252,6 +258,8 @@ const TrendAnalysisChart: React.FC<{ config: ChartRendererConfig }> = ({ config 
     }
 
     const svg = d3.select(svgRef.current);
+    const backgroundColor = transparentBackground ? 'transparent' : '#ffffff';
+    svg.style('background', backgroundColor).style('background-color', backgroundColor);
     svg.selectAll('*').remove();
 
     const height = Math.max(config.height ?? 320, 240);
@@ -388,7 +396,17 @@ const TrendAnalysisChart: React.FC<{ config: ChartRendererConfig }> = ({ config 
           .text(yLabel);
       }
     }
-  }, [config.height, config.showAxisLabels, config.showGrid, series, width, xLabel, xType, yLabel]);
+  }, [
+    config.height,
+    config.showAxisLabels,
+    config.showGrid,
+    series,
+    transparentBackground,
+    width,
+    xLabel,
+    xType,
+    yLabel,
+  ]);
 
   if (series.length === 0) {
     return (
@@ -399,9 +417,22 @@ const TrendAnalysisChart: React.FC<{ config: ChartRendererConfig }> = ({ config 
   }
 
   return (
-    <div className="space-y-4">
-      <div ref={containerRef} className="w-full overflow-hidden">
-        <svg ref={svgRef} role="img" aria-label={config.title ?? 'Trend analysis chart'} />
+    <div
+      className={cn('space-y-4', transparentBackground && 'bg-transparent')}
+      style={{ backgroundColor: transparentBackground ? 'transparent' : '#ffffff' }}
+    >
+      <div
+        ref={containerRef}
+        className={cn('w-full overflow-hidden', transparentBackground && 'bg-transparent')}
+        style={{ backgroundColor: transparentBackground ? 'transparent' : '#ffffff' }}
+      >
+        <svg
+          ref={svgRef}
+          role="img"
+          aria-label={config.title ?? 'Trend analysis chart'}
+          className={cn(transparentBackground && 'bg-transparent')}
+          style={{ backgroundColor: transparentBackground ? 'transparent' : '#ffffff' }}
+        />
       </div>
       {config.showLegend !== false && series.length > 1 && (
         <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">

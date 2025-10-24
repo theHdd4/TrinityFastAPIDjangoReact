@@ -3,6 +3,13 @@ import { User, Calendar, Sparkles, StickyNote, Settings, Trash2 } from 'lucide-r
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
+  GRADIENT_STYLE_MAP,
+  isSolidToken,
+  isKnownGradientId,
+  isGradientToken,
+  solidTokenToHex,
+} from '@/templates/color-tray';
+import {
   useExhibitionStore,
   CardLayout,
   CardColor,
@@ -10,6 +17,8 @@ import {
   DroppedAtom,
   PresentationSettings,
   DEFAULT_PRESENTATION_SETTINGS,
+  type SlideBackgroundColor,
+  type SlideBackgroundPreset,
   type SlideObject,
   DEFAULT_CANVAS_OBJECT_WIDTH,
   DEFAULT_CANVAS_OBJECT_HEIGHT,
@@ -88,6 +97,83 @@ const isAtomObject = (
   }
   const candidate = payload.atom as DroppedAtom | undefined;
   return Boolean(candidate && typeof candidate.id === 'string');
+};
+
+const parseBooleanish = (value: unknown): boolean | null => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  if (typeof value === 'string') {
+    const lowered = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'y', 'on'].includes(lowered)) {
+      return true;
+    }
+    if (['false', '0', 'no', 'n', 'off'].includes(lowered)) {
+      return false;
+    }
+  }
+  return null;
+};
+
+const slideBackgroundClassNames: Record<SlideBackgroundPreset, string> = {
+  default: 'bg-card',
+  ivory: 'bg-amber-100',
+  slate: 'bg-slate-200',
+  charcoal: 'bg-neutral-300',
+  indigo: 'bg-indigo-100',
+  emerald: 'bg-emerald-100',
+  rose: 'bg-rose-100',
+};
+
+const resolveSlideBackground = (
+  background: SlideBackgroundColor,
+): { className: string; style: React.CSSProperties | undefined } => {
+  if (isSolidToken(background)) {
+    return {
+      className: '',
+      style: { backgroundColor: solidTokenToHex(background) },
+    };
+  }
+
+  if (isGradientToken(background)) {
+    const gradient = GRADIENT_STYLE_MAP[background] ?? null;
+    if (gradient) {
+      return {
+        className: '',
+        style: {
+          backgroundImage: gradient,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        },
+      };
+    }
+  }
+
+  const className =
+    slideBackgroundClassNames[(background as SlideBackgroundPreset) ?? 'default'] ??
+    slideBackgroundClassNames.default;
+
+  return { className, style: undefined };
+};
+
+const resolveFeatureOverviewTransparency = (
+  metadata: Record<string, any> | undefined,
+): boolean => {
+  if (!metadata || typeof metadata !== 'object') {
+    return true;
+  }
+
+  const controls = metadata.exhibitionControls;
+  if (!controls || typeof controls !== 'object') {
+    return true;
+  }
+
+  const preference = parseBooleanish((controls as Record<string, unknown>).transparentBackground);
+  return preference ?? true;
 };
 
 const UNTITLED_SLIDE_TEXT = 'Untitled Slide';
@@ -536,12 +622,15 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       let nextHeight =
         typeof rawHeight === 'number' && Number.isFinite(rawHeight) ? rawHeight : target.height;
 
-      nextWidth = Math.max(MIN_OBJECT_WIDTH, nextWidth);
-      nextHeight = Math.max(MIN_OBJECT_HEIGHT, nextHeight);
+      const minWidth = MIN_TEXT_OBJECT_WIDTH;
+      const minHeight = MIN_TEXT_OBJECT_HEIGHT;
+
+      nextWidth = Math.max(minWidth, nextWidth);
+      nextHeight = Math.max(minHeight, nextHeight);
 
       if (canvas) {
-        nextWidth = Math.min(nextWidth, canvas.clientWidth);
-        nextHeight = Math.min(nextHeight, canvas.clientHeight);
+        nextWidth = Math.max(minWidth, Math.min(nextWidth, canvas.clientWidth));
+        nextHeight = Math.max(minHeight, Math.min(nextHeight, canvas.clientHeight));
       }
 
       const rawX = updates.x;
@@ -812,11 +901,16 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     };
   }, [onPositionPanelChange]);
 
+  const { className: slideBackgroundClass, style: slideBackgroundStyle } = useMemo(
+    () => resolveSlideBackground(settings.backgroundColor),
+    [settings.backgroundColor],
+  );
+
   const containerClasses =
     viewMode === 'horizontal'
-      ? 'flex-1 h-full bg-muted/20 overflow-auto'
+      ? 'flex-1 h-full overflow-auto bg-muted/20'
       : cn(
-          'w-full bg-muted/20 overflow-hidden border rounded-3xl transition-all duration-300 shadow-sm',
+          'w-full overflow-hidden border rounded-3xl transition-all duration-300 shadow-sm bg-muted/20',
           isActive
             ? 'border-primary shadow-elegant ring-1 ring-primary/30'
             : 'border-border hover:border-primary/40'
@@ -867,11 +961,15 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
               <div
                 className={cn(
-                  'relative h-[520px] w-full overflow-hidden bg-card shadow-2xl transition-all duration-300',
-                  settings.fullBleed ? 'rounded-none' : 'rounded-2xl border-2 border-border',
+                  'relative w-full overflow-hidden shadow-2xl transition-all duration-300',
+                  slideBackgroundClass,
+                  settings.fullBleed
+                    ? 'rounded-none border-0'
+                    : 'rounded-[28px] border border-border/60',
                   isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
                   !canEdit && 'opacity-90'
                 )}
+                style={{ height: CANVAS_STAGE_HEIGHT, ...slideBackgroundStyle }}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
@@ -887,6 +985,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   accentImage={settings.accentImage ?? null}
                   accentImageName={settings.accentImageName ?? null}
                   titleObjectId={titleObjectId}
+                  fullBleed={settings.fullBleed}
                   onCanvasDragLeave={handleDragLeave}
                   onCanvasDragOver={handleDragOver}
                   onCanvasDrop={handleDrop}
@@ -1009,29 +1108,57 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
 
 const MIN_OBJECT_WIDTH = 220;
 const MIN_OBJECT_HEIGHT = 120;
+const MIN_TEXT_OBJECT_WIDTH = 140;
+const MIN_TEXT_OBJECT_HEIGHT = 60;
 
-const layoutOverlayBackgrounds: Record<CardColor, string> = {
-  default: 'from-purple-500 via-pink-500 to-orange-400',
-  blue: 'from-blue-500 via-cyan-500 to-teal-400',
-  purple: 'from-violet-500 via-purple-500 to-fuchsia-400',
-  green: 'from-emerald-500 via-green-500 to-lime-400',
-  orange: 'from-orange-500 via-amber-500 to-yellow-400',
+const resolveCardOverlayStyle = (color: CardColor): React.CSSProperties => {
+  if (isSolidToken(color)) {
+    return {
+      backgroundColor: solidTokenToHex(color),
+    };
+  }
+
+  if (isKnownGradientId(color)) {
+    const gradient = GRADIENT_STYLE_MAP[color];
+    if (gradient) {
+      return {
+        backgroundImage: gradient,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      };
+    }
+  }
+
+  const fallback = GRADIENT_STYLE_MAP.default;
+  return {
+    backgroundImage: fallback,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+  };
 };
+
+const CANVAS_STAGE_HEIGHT = 520;
+const TOP_LAYOUT_MIN_HEIGHT = 210;
+const BOTTOM_LAYOUT_MIN_HEIGHT = 220;
+const SIDE_LAYOUT_MIN_WIDTH = 280;
+const SIDE_LAYOUT_RATIO = 0.34;
 
 const LayoutOverlay: React.FC<{
   layout: CardLayout;
   color: CardColor;
   accentImage?: string | null;
   accentImageName?: string | null;
-}> = ({ layout, color, accentImage, accentImageName }) => {
+  fullBleed: boolean;
+}> = ({ layout, color, accentImage, accentImageName, fullBleed }) => {
   if (layout === 'none') {
     return null;
   }
 
-  const gradient = layoutOverlayBackgrounds[color] ?? layoutOverlayBackgrounds.default;
-  const sharedClass = cn(
-    'pointer-events-none absolute overflow-hidden transition-all duration-300 ease-out',
+  const overlayStyle = useMemo(() => resolveCardOverlayStyle(color), [color]);
+  const wrapperClass = cn(
+    'pointer-events-none absolute inset-0 overflow-hidden transition-all duration-300 ease-out',
     'shadow-[0_32px_72px_-32px_rgba(76,29,149,0.45)]',
+    fullBleed ? 'rounded-none' : 'rounded-[28px]'
   );
 
   const content = accentImage ? (
@@ -1041,42 +1168,88 @@ const LayoutOverlay: React.FC<{
       className="h-full w-full object-cover"
     />
   ) : (
-    <div className={cn('h-full w-full bg-gradient-to-br', gradient)} />
+    <div className="h-full w-full" style={overlayStyle} />
   );
+
+  if (layout === 'full') {
+    return <div className={wrapperClass}>{content}</div>;
+  }
+
+  const renderVerticalOverlay = (position: 'top' | 'bottom') => {
+    const minHeight = position === 'top' ? TOP_LAYOUT_MIN_HEIGHT : BOTTOM_LAYOUT_MIN_HEIGHT;
+    const ratio = minHeight / CANVAS_STAGE_HEIGHT;
+
+    return (
+      <div className={wrapperClass}>
+        <div className="flex h-full w-full flex-col">
+          {position === 'bottom' && <div className="flex-1 min-h-0" />}
+          <div
+            className="relative flex-shrink-0 overflow-hidden"
+            style={{ flexBasis: `${ratio * 100}%`, minHeight }}
+          >
+            {content}
+          </div>
+          {position === 'top' && <div className="flex-1 min-h-0" />}
+        </div>
+      </div>
+    );
+  };
+
+  const renderHorizontalOverlay = (position: 'left' | 'right') => {
+    return (
+      <div className={wrapperClass}>
+        <div className="flex h-full w-full flex-row">
+          {position === 'right' && <div className="flex-1 min-w-0" />}
+          <div
+            className="relative flex-shrink-0 overflow-hidden"
+            style={{ flexBasis: `${SIDE_LAYOUT_RATIO * 100}%`, minWidth: SIDE_LAYOUT_MIN_WIDTH }}
+          >
+            {content}
+          </div>
+          {position === 'left' && <div className="flex-1 min-w-0" />}
+        </div>
+      </div>
+    );
+  };
 
   switch (layout) {
     case 'top':
-      return (
-        <div className={cn(sharedClass, 'left-0 right-0 top-0 h-[210px] rounded-t-[28px]')}>
-          {content}
-        </div>
-      );
+      return renderVerticalOverlay('top');
     case 'bottom':
-      return (
-        <div className={cn(sharedClass, 'bottom-0 left-0 right-0 h-[220px] rounded-b-[28px]')}>
-          {content}
-        </div>
-      );
+      return renderVerticalOverlay('bottom');
     case 'left':
-      return (
-        <div className={cn(sharedClass, 'bottom-0 left-0 top-0 w-[34%] min-w-[280px] rounded-l-[28px]')}>
-          {content}
-        </div>
-      );
+      return renderHorizontalOverlay('left');
     case 'right':
-      return (
-        <div className={cn(sharedClass, 'bottom-0 right-0 top-0 w-[34%] min-w-[280px] rounded-r-[28px]')}>
-          {content}
-        </div>
-      );
-    case 'full':
+      return renderHorizontalOverlay('right');
     default:
-      return (
-        <div className={cn(sharedClass, 'inset-0 rounded-[28px]')}>
-          {content}
-        </div>
-      );
+      return <div className={wrapperClass}>{content}</div>;
   }
+};
+
+type CanvasStageProps = {
+  canEdit: boolean;
+  objects: SlideObject[];
+  isDragOver: boolean;
+  showEmptyState: boolean;
+  layout: CardLayout;
+  cardColor: CardColor;
+  accentImage?: string | null;
+  accentImageName?: string | null;
+  titleObjectId: string | null;
+  onCanvasDragOver?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onCanvasDragLeave?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onCanvasDrop?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onInteract: () => void;
+  onRemoveAtom?: (atomId: string) => void;
+  onBringToFront: (objectIds: string[]) => void;
+  onSendToBack: (objectIds: string[]) => void;
+  onBulkUpdate: (updates: Record<string, Partial<SlideObject>>) => void;
+  onGroupObjects: (objectIds: string[], groupId: string | null) => void;
+  onTitleCommit: (nextTitle: string) => void;
+  onRemoveObject?: (objectId: string) => void;
+  onTextToolbarChange?: (node: ReactNode | null) => void;
+  onRequestPositionPanel?: (objectId: string) => void;
+  fullBleed: boolean;
 };
 
 const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
@@ -1104,6 +1277,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       onRemoveObject,
       onTextToolbarChange,
       onRequestPositionPanel,
+      fullBleed,
     },
     forwardedRef,
   ) => {
@@ -1978,6 +2152,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             return;
           }
 
+          const { minWidth, minHeight } =
+            target.type === 'text-box'
+              ? { minWidth: MIN_TEXT_OBJECT_WIDTH, minHeight: MIN_TEXT_OBJECT_HEIGHT }
+              : { minWidth: MIN_OBJECT_WIDTH, minHeight: MIN_OBJECT_HEIGHT };
+
           const deltaX = event.clientX - activeInteraction.startClientX;
           const deltaY = event.clientY - activeInteraction.startClientY;
 
@@ -2007,25 +2186,25 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             nextHeight = Math.min(nextHeight, canvas.clientHeight);
           }
 
-          if (nextWidth < MIN_OBJECT_WIDTH) {
+          if (nextWidth < minWidth) {
             if (handle === 'nw' || handle === 'sw') {
-              nextX -= MIN_OBJECT_WIDTH - nextWidth;
+              nextX -= minWidth - nextWidth;
             }
-            nextWidth = MIN_OBJECT_WIDTH;
+            nextWidth = minWidth;
           }
 
-          if (nextHeight < MIN_OBJECT_HEIGHT) {
+          if (nextHeight < minHeight) {
             if (handle === 'nw' || handle === 'ne') {
-              nextY -= MIN_OBJECT_HEIGHT - nextHeight;
+              nextY -= minHeight - nextHeight;
             }
-            nextHeight = MIN_OBJECT_HEIGHT;
+            nextHeight = minHeight;
           }
 
           const { x, y } = clampAndSnapPosition(nextX, nextY, nextWidth, nextHeight);
-          const snappedWidth = Math.max(MIN_OBJECT_WIDTH, snapToGrid(nextWidth));
-          const snappedHeight = Math.max(MIN_OBJECT_HEIGHT, snapToGrid(nextHeight));
-          const widthLimit = canvas ? Math.max(MIN_OBJECT_WIDTH, Math.min(snappedWidth, canvas.clientWidth)) : snappedWidth;
-          const heightLimit = canvas ? Math.max(MIN_OBJECT_HEIGHT, Math.min(snappedHeight, canvas.clientHeight)) : snappedHeight;
+          const snappedWidth = Math.max(minWidth, snapToGrid(nextWidth));
+          const snappedHeight = Math.max(minHeight, snapToGrid(nextHeight));
+          const widthLimit = canvas ? Math.max(minWidth, Math.min(snappedWidth, canvas.clientWidth)) : snappedWidth;
+          const heightLimit = canvas ? Math.max(minHeight, Math.min(snappedHeight, canvas.clientHeight)) : snappedHeight;
 
           onBulkUpdate({
             [objectId]: {
@@ -2102,14 +2281,27 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       );
     };
 
+    const canvasCornerClass = fullBleed ? 'rounded-none' : 'rounded-[28px]';
+
+    const canvasBorderClass = (() => {
+      if (isDragOver) {
+        return 'border-2 border-primary/60 ring-2 ring-primary/20 shadow-xl scale-[0.99]';
+      }
+
+      if (showEmptyState) {
+        return 'border-2 border-dashed border-border/70';
+      }
+
+      return fullBleed ? 'border-0' : 'border-2 border-border/60';
+    })();
+
     return (
       <div
         ref={setRef}
         className={cn(
-          'relative h-full w-full overflow-hidden rounded-3xl border-2 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-          canEdit ? 'bg-background/95' : 'bg-background/80',
-          showEmptyState ? 'border-dashed border-border/70' : 'border-border/60',
-          isDragOver ? 'border-primary/60 ring-2 ring-primary/20 shadow-xl scale-[0.99]' : undefined,
+          'relative h-full w-full overflow-hidden transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 bg-transparent',
+          canvasCornerClass,
+          canvasBorderClass,
         )}
         tabIndex={canEdit ? 0 : -1}
         onPointerDown={handleBackgroundPointerDown}
@@ -2124,11 +2316,17 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             color={cardColor}
             accentImage={accentImage}
             accentImageName={accentImageName}
+            fullBleed={fullBleed}
           />
         </div>
 
         {showEmptyState && (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-3xl border-2 border-dashed border-border/60 bg-muted/20 px-6 text-center text-sm text-muted-foreground">
+          <div
+            className={cn(
+              'pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-border/60 bg-muted/20 px-6 text-center text-sm text-muted-foreground',
+              canvasCornerClass,
+            )}
+          >
             Add components from the catalogue to build your presentation slide.
           </div>
         )}
@@ -2155,6 +2353,17 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 ? object.props.atom.atomId
                 : null;
             const isFeatureOverviewAtom = featureOverviewAtomId === 'feature-overview';
+            const featureOverviewMetadata =
+              isFeatureOverviewAtom && object.props.atom.metadata && typeof object.props.atom.metadata === 'object'
+                ? (object.props.atom.metadata as Record<string, any>)
+                : undefined;
+            const featureOverviewTransparentBackground =
+              isFeatureOverviewAtom && resolveFeatureOverviewTransparency(featureOverviewMetadata);
+            const suppressCardChrome =
+              isShapeObject ||
+              isTextBoxObject ||
+              isTableObject ||
+              (isFeatureOverviewAtom && featureOverviewTransparentBackground);
 
           return (
             <div
@@ -2170,24 +2379,40 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
               onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
             >
+              {isSelected && (
+                <div
+                  className={cn(
+                    'pointer-events-none absolute inset-0 border border-yellow-400 transition-all duration-200',
+                    suppressCardChrome || isShapeObject || isTextBoxObject || isTableObject
+                      ? 'rounded-[22px]'
+                      : 'rounded-[32px]'
+                  )}
+                  aria-hidden="true"
+                />
+              )}
               <div
                 className={cn(
-                  'relative flex h-full w-full flex-col overflow-hidden rounded-3xl border-2 shadow-xl transition-all',
-                  isShapeObject
-                    ? 'border-none bg-transparent shadow-none overflow-visible'
-                    : isAccentImageObject
-                    ? 'bg-muted/30'
-                    : 'bg-background/95',
-                  isFeatureOverviewAtom
-                    ? isSelected
-                      ? 'border-primary shadow-2xl'
-                      : 'border-transparent'
-                    : !isShapeObject &&
-                      (isSelected
-                        ? 'border-primary shadow-2xl'
-                        : 'border-border/70 hover-border-primary/40'),
+                  'relative flex h-full w-full flex-col overflow-hidden rounded-3xl border-2 transition-all',
+                  suppressCardChrome
+                    ? 'border-transparent bg-transparent shadow-none'
+                    : 'bg-background/95 shadow-xl',
+                  isAccentImageObject && 'bg-muted/30 shadow-none border-transparent',
+                  isShapeObject && 'border-none bg-transparent shadow-none overflow-visible',
                   (isTextBoxObject || isTableObject) &&
                     'overflow-visible border-transparent bg-transparent shadow-none',
+                  (() => {
+                    const shouldShowCardChrome =
+                      !suppressCardChrome &&
+                      !isAccentImageObject &&
+                      !isShapeObject &&
+                      !(isTextBoxObject || isTableObject);
+
+                    if (!shouldShowCardChrome) {
+                      return 'border-transparent';
+                    }
+
+                    return 'border-border/70 hover:border-primary/40';
+                  })(),
                 )}
                 style={{
                   transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
@@ -2360,7 +2585,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         </div>
 
         {isDragOver && canEdit && (
-          <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center rounded-3xl border-2 border-dashed border-primary/60 bg-primary/10 text-xs font-semibold uppercase tracking-wide text-primary">
+          <div
+            className={cn(
+              'pointer-events-none absolute inset-0 z-50 flex items-center justify-center border-2 border-dashed border-primary/60 bg-primary/10 text-xs font-semibold uppercase tracking-wide text-primary',
+              canvasCornerClass,
+            )}
+          >
             Drop to add component
           </div>
         )}

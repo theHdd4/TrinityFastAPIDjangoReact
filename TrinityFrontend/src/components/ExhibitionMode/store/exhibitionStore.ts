@@ -8,8 +8,27 @@ import {
   type ExhibitionLayoutResponse,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
+import type {
+  GradientColorId,
+  GradientColorToken,
+  SolidColorToken,
+} from '@/templates/color-tray';
+import {
+  isKnownGradientId,
+  isSolidToken,
+  isGradientToken,
+} from '@/templates/color-tray';
 
-export type CardColor = 'default' | 'blue' | 'purple' | 'green' | 'orange';
+export type CardColor = GradientColorId | SolidColorToken;
+export type SlideBackgroundPreset =
+  | 'default'
+  | 'ivory'
+  | 'slate'
+  | 'charcoal'
+  | 'indigo'
+  | 'emerald'
+  | 'rose';
+export type SlideBackgroundColor = SlideBackgroundPreset | SolidColorToken | GradientColorToken;
 export type CardWidth = 'M' | 'L';
 export type ContentAlignment = 'top' | 'center' | 'bottom';
 export type CardLayout = 'none' | 'top' | 'bottom' | 'right' | 'left' | 'full';
@@ -17,7 +36,15 @@ export type CardLayout = 'none' | 'top' | 'bottom' | 'right' | 'left' | 'full';
 const DEFAULT_CARD_LAYOUT: CardLayout = 'right';
 
 const CARD_LAYOUTS: readonly CardLayout[] = ['none', 'top', 'bottom', 'right', 'left', 'full'] as const;
-const CARD_COLORS: readonly CardColor[] = ['default', 'blue', 'purple', 'green', 'orange'] as const;
+const SLIDE_BACKGROUND_PRESETS: readonly SlideBackgroundPreset[] = [
+  'default',
+  'ivory',
+  'slate',
+  'charcoal',
+  'indigo',
+  'emerald',
+  'rose',
+] as const;
 const CARD_WIDTHS: readonly CardWidth[] = ['M', 'L'] as const;
 const CONTENT_ALIGNMENTS: readonly ContentAlignment[] = ['top', 'center', 'bottom'] as const;
 const SLIDESHOW_TRANSITIONS: readonly SlideshowTransition[] = ['fade', 'slide', 'zoom'] as const;
@@ -155,6 +182,7 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   cardLayout: DEFAULT_CARD_LAYOUT,
   accentImage: null,
   accentImageName: null,
+  backgroundColor: 'default',
   slideshowDuration: 8,
   slideshowTransition: 'fade',
 };
@@ -167,6 +195,7 @@ export interface PresentationSettings {
   cardLayout: CardLayout;
   accentImage?: string | null;
   accentImageName?: string | null;
+  backgroundColor: SlideBackgroundColor;
   slideshowDuration: number;
   slideshowTransition: SlideshowTransition;
 }
@@ -354,8 +383,41 @@ const isValidDateString = (value: unknown): value is string => {
   return Number.isFinite(parsed);
 };
 
-const isValidCardColor = (value: unknown): value is CardColor =>
-  typeof value === 'string' && (CARD_COLORS as readonly string[]).includes(value);
+const isValidCardColor = (value: unknown): value is CardColor => {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  if (isSolidToken(value)) {
+    return true;
+  }
+
+  if (isKnownGradientId(value)) {
+    return true;
+  }
+
+  return false;
+};
+
+const isValidBackgroundColor = (value: unknown): value is SlideBackgroundColor => {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  if ((SLIDE_BACKGROUND_PRESETS as readonly string[]).includes(value)) {
+    return true;
+  }
+
+  if (isSolidToken(value)) {
+    return true;
+  }
+
+  if (isGradientToken(value)) {
+    return true;
+  }
+
+  return false;
+};
 
 const isValidCardWidth = (value: unknown): value is CardWidth =>
   typeof value === 'string' && (CARD_WIDTHS as readonly string[]).includes(value);
@@ -391,6 +453,9 @@ const ensurePresentationSettings = (
 
   const accentImage = isNonEmptyString(candidate.accentImage) ? candidate.accentImage : null;
   const accentImageName = isNonEmptyString(candidate.accentImageName) ? candidate.accentImageName : null;
+  const backgroundColor = isValidBackgroundColor(candidate.backgroundColor)
+    ? candidate.backgroundColor
+    : DEFAULT_PRESENTATION_SETTINGS.backgroundColor;
 
   const slideshowDuration =
     typeof candidate.slideshowDuration === 'number' && Number.isFinite(candidate.slideshowDuration)
@@ -409,6 +474,7 @@ const ensurePresentationSettings = (
     cardLayout,
     accentImage,
     accentImageName,
+    backgroundColor,
     slideshowDuration,
     slideshowTransition,
   };
