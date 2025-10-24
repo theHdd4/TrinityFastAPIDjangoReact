@@ -327,7 +327,6 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
                   onColorChange(`#${option.id.slice(6)}`);
                 }
               }}
-              showLabels={false}
               swatchSize="sm"
               optionClassName="min-h-[3.25rem]"
               defaultSectionId="solids"

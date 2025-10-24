@@ -237,7 +237,6 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
                 onFillChange(`#${option.id.slice(6)}`);
               }
             }}
-            showLabels={false}
             swatchSize="sm"
             optionClassName="min-h-[3.25rem]"
             disabled={!supportsFill || !onFillChange}
@@ -358,7 +357,6 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
                   handleOutlineColorSelect(`#${option.id.slice(6)}`);
                 }
               }}
-              showLabels={false}
               swatchSize="sm"
               optionClassName="min-h-[3.25rem]"
               defaultSectionId="solids"
