@@ -151,8 +151,10 @@ const buildSolidPalette = (): readonly ColorTrayOption[] => {
   const options: ColorTrayOption[] = [];
   const seen = new Set<string>();
 
-  SOLID_HUES.forEach((hue, hueIndex) => {
-    SOLID_LIGHTNESS_LEVELS.forEach((lightness, lightnessIndex) => {
+  for (let hueIndex = 0; hueIndex < SOLID_HUES.length; hueIndex += 1) {
+    const hue = SOLID_HUES[hueIndex];
+    for (let lightnessIndex = 0; lightnessIndex < SOLID_LIGHTNESS_LEVELS.length; lightnessIndex += 1) {
+      const lightness = SOLID_LIGHTNESS_LEVELS[lightnessIndex];
       const hex = hslToHex(hue, SOLID_SATURATION, lightness);
       const token = createSolidToken(hex);
       if (seen.has(token)) {
@@ -172,10 +174,11 @@ const buildSolidPalette = (): readonly ColorTrayOption[] => {
         ariaLabel: `Select ${tooltip}`,
         keywords: [label, hex.toUpperCase(), hex.toLowerCase()],
       });
-    });
-  });
+    }
+  }
 
-  NEUTRAL_HEXES.forEach((neutral, index) => {
+  for (let index = 0; index < NEUTRAL_HEXES.length; index += 1) {
+    const neutral = NEUTRAL_HEXES[index];
     const token = createSolidToken(neutral);
     if (seen.has(token)) {
       continue;
@@ -192,7 +195,7 @@ const buildSolidPalette = (): readonly ColorTrayOption[] => {
       ariaLabel: `Select ${tooltip}`,
       keywords: [label, neutral.toUpperCase(), neutral.toLowerCase()],
     });
-  });
+  }
 
   return options;
 };
