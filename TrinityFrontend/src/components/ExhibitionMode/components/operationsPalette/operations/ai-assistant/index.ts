@@ -3,6 +3,6 @@ import type { PaletteOperation } from '../../types';
 
 export const createAiAssistantOperation = (): PaletteOperation => ({
   icon: Sparkles,
-  label: 'AI Assistant',
+  label: 'Trinity AI',
   colorClass: 'text-purple-500',
 });
