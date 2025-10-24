@@ -1,6 +1,21 @@
-# Configuration for the development Cloudflare tunnel.
+# # Configuration for the development Cloudflare tunnel.
+# tunnel: 6351c8dd-2df0-4cc5-8799-6e95e1afc103
+# credentials-file: /etc/cloudflared/6351c8dd-2df0-4cc5-8799-6e95e1afc103.json
+
+# ingress:
+#   - hostname: trinity-dev.quantmatrixai.com
+#     service: http://traefik:80
+#   - service: http_status:404
 tunnel: 6351c8dd-2df0-4cc5-8799-6e95e1afc103
 credentials-file: /etc/cloudflared/6351c8dd-2df0-4cc5-8799-6e95e1afc103.json
+
+# Use HTTP/2 transport for better reliability on Windows/Docker
+protocol: http2
+
+# Optional reliability and stability parameters
+retries: 5
+grace-period: 10s
+no-autoupdate: true
 
 ingress:
   - hostname: trinity-dev.quantmatrixai.com
