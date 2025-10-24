@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, Droplet, Search } from 'lucide-react';
+import { Check, Droplet, Search, Sparkles } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import type { ColorTrayOption, ColorTraySection, ColorTraySwatchSize } from './types';
 
@@ -20,9 +21,9 @@ export interface ColorTrayProps {
 }
 
 const swatchSizeMap: Record<ColorTraySwatchSize, string> = {
-  sm: 'h-9 w-9 rounded-xl',
-  md: 'h-11 w-11 rounded-2xl',
-  lg: 'h-14 w-14 rounded-[1.75rem]',
+  sm: 'h-9 w-9',
+  md: 'h-11 w-11',
+  lg: 'h-14 w-14',
 };
 
 interface ColorTrayGroup {
@@ -31,6 +32,18 @@ interface ColorTrayGroup {
   order: number;
   options: ColorTrayOption[];
 }
+
+const DEFAULT_HEADER_GRADIENT = 'linear-gradient(135deg, #a855f7 0%, #ec4899 45%, #f97316 100%)';
+
+const getOptionSwatchStyle = (option: ColorTrayOption): React.CSSProperties | undefined => {
+  if (option.swatchStyle) {
+    return { ...option.swatchStyle };
+  }
+  if (option.value) {
+    return { background: option.value };
+  }
+  return undefined;
+};
 
 export const ColorTray: React.FC<ColorTrayProps> = ({
   options: legacyOptions,
@@ -45,27 +58,38 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
   defaultSectionId,
   emptyState,
 }) => {
-  const gridTemplate = columns ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } : undefined;
   const resolvedSelectedId = selectedId?.toLowerCase() ?? null;
 
   const [searchQuery, setSearchQuery] = useState('');
 
+  const hasExplicitSections = Boolean(sections && sections.length > 0);
+
   const resolvedSections = useMemo(() => {
-    if (!sections || sections.length === 0) {
-      return null;
+    if (hasExplicitSections) {
+      return sections!.map(section => ({
+        ...section,
+        id: section.id,
+        options: section.options ?? [],
+      }));
     }
-    return sections.map(section => ({
-      ...section,
-      id: section.id,
-      options: section.options ?? [],
-    }));
-  }, [sections]);
+    const fallbackOptions = legacyOptions ?? [];
+    if (fallbackOptions.length === 0) {
+      return [] as ColorTraySection[];
+    }
+    return [
+      {
+        id: 'all',
+        label: 'Colors',
+        options: fallbackOptions,
+      },
+    ];
+  }, [hasExplicitSections, legacyOptions, sections]);
 
   const [activeSectionId, setActiveSectionId] = useState<string | null>(() => {
-    if (!resolvedSections) {
+    if (resolvedSections.length === 0) {
       return null;
     }
-    if (defaultSectionId) {
+    if (hasExplicitSections && defaultSectionId) {
       const match = resolvedSections.find(
         section => section.id.toLowerCase() === defaultSectionId.toLowerCase(),
       );
@@ -77,41 +101,35 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
   });
 
   useEffect(() => {
-    if (!resolvedSections) {
+    if (resolvedSections.length === 0) {
       if (activeSectionId !== null) {
         setActiveSectionId(null);
       }
       return;
     }
 
-    const normalizedDefault = defaultSectionId?.toLowerCase() ?? '';
-    const fallbackId = resolvedSections[0]?.id ?? null;
-    const hasActiveSelection =
-      !!activeSectionId && resolvedSections.some(section => section.id === activeSectionId);
-
-    if (!hasActiveSelection) {
-      if (normalizedDefault) {
+    setActiveSectionId(current => {
+      if (current && resolvedSections.some(section => section.id === current)) {
+        return current;
+      }
+      if (hasExplicitSections && defaultSectionId) {
         const match = resolvedSections.find(
-          section => section.id.toLowerCase() === normalizedDefault,
+          section => section.id.toLowerCase() === defaultSectionId.toLowerCase(),
         );
-        if (match && match.id !== activeSectionId) {
-          setActiveSectionId(match.id);
-          return;
+        if (match) {
+          return match.id;
         }
       }
-
-      if (fallbackId && fallbackId !== activeSectionId) {
-        setActiveSectionId(fallbackId);
-      }
-    }
-  }, [activeSectionId, defaultSectionId, resolvedSections]);
+      return resolvedSections[0]?.id ?? null;
+    });
+  }, [defaultSectionId, hasExplicitSections, resolvedSections]);
 
   useEffect(() => {
     setSearchQuery('');
   }, [activeSectionId]);
 
   const activeSection = useMemo(() => {
-    if (!resolvedSections || !activeSectionId) {
+    if (!activeSectionId) {
       return null;
     }
     return (
@@ -121,21 +139,15 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
     );
   }, [activeSectionId, resolvedSections]);
 
-  const resolvedOptions = useMemo(() => {
-    if (resolvedSections) {
-      return activeSection?.options ?? [];
-    }
-    return legacyOptions ?? [];
-  }, [activeSection?.options, legacyOptions, resolvedSections]);
-
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
   const filteredOptions = useMemo(() => {
+    const source = activeSection?.options ?? [];
     if (!normalizedQuery) {
-      return resolvedOptions;
+      return source;
     }
 
-    return resolvedOptions.filter(option => {
+    return source.filter(option => {
       const sources: readonly (string | undefined)[] = [
         option.label,
         option.value,
@@ -143,9 +155,9 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
         ...(option.keywords ?? []),
       ];
 
-      return sources.some(source => source?.toLowerCase().includes(normalizedQuery));
+      return sources.some(entry => entry?.toLowerCase().includes(normalizedQuery));
     });
-  }, [normalizedQuery, resolvedOptions]);
+  }, [activeSection?.options, normalizedQuery]);
 
   const groupedOptions = useMemo(() => {
     if (filteredOptions.length === 0) {
@@ -204,32 +216,32 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
 
   const hasGroupedOptions = Array.isArray(groupedOptions) && groupedOptions.length > 0;
 
-  const effectiveColumns = useMemo(() => {
-    if (columns) {
-      return columns;
+  const isGradientSection = useMemo(() => {
+    if (!activeSection) {
+      return false;
     }
-    if (resolvedSections) {
-      return 8;
+    if (activeSection.id.toLowerCase().includes('gradient')) {
+      return true;
     }
-    return undefined;
-  }, [columns, resolvedSections]);
+    if (filteredOptions.length === 0) {
+      return false;
+    }
+    return filteredOptions.every(option => {
+      const style = option.swatchStyle;
+      if (style?.backgroundImage) {
+        return true;
+      }
+      const value = option.value ?? '';
+      return value.startsWith('linear-gradient');
+    });
+  }, [activeSection, filteredOptions]);
 
-  const gridClassName = useMemo(() => {
-    if (effectiveColumns) {
-      return 'auto-rows-fr';
-    }
-    if (resolvedSections) {
-      return 'grid-cols-8';
-    }
-    return 'grid-cols-6';
-  }, [effectiveColumns, resolvedSections]);
+  const effectiveColumns = columns ?? (resolvedSections.length > 0 ? 8 : 6);
 
-  const allOptions = useMemo(() => {
-    if (resolvedSections) {
-      return resolvedSections.flatMap(section => section.options ?? []);
-    }
-    return legacyOptions ?? [];
-  }, [legacyOptions, resolvedSections]);
+  const allOptions = useMemo(
+    () => resolvedSections.flatMap(section => section.options ?? []),
+    [resolvedSections],
+  );
 
   const selectedOption = useMemo(() => {
     if (!resolvedSelectedId) {
@@ -240,25 +252,24 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
     );
   }, [allOptions, resolvedSelectedId]);
 
-  const selectedSwatchStyle = useMemo<React.CSSProperties | undefined>(() => {
+  const headerPreviewStyle = useMemo<React.CSSProperties>(() => {
     if (!selectedOption) {
-      return undefined;
+      return { backgroundImage: DEFAULT_HEADER_GRADIENT };
     }
-    if (selectedOption.swatchStyle) {
-      return selectedOption.swatchStyle;
+    const style = getOptionSwatchStyle(selectedOption) ?? {};
+    if (Object.keys(style).length === 0) {
+      return { backgroundImage: DEFAULT_HEADER_GRADIENT };
     }
-    if (selectedOption.value) {
-      return { background: selectedOption.value };
-    }
-    return undefined;
+    return style;
   }, [selectedOption]);
 
-  const renderOption = (option: ColorTrayOption) => {
+  const renderColorOption = (option: ColorTrayOption) => {
     const optionId = option.id.toLowerCase();
     const isSelected = resolvedSelectedId === optionId;
     const isDisabled = disabled || option.disabled;
     const ariaLabel = option.ariaLabel ?? option.label ?? option.value ?? option.id;
     const tooltip = option.tooltip ?? ariaLabel;
+    const swatchStyle = getOptionSwatchStyle(option);
 
     return (
       <button
@@ -272,27 +283,27 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
           }
         }}
         className={cn(
-          'group relative flex items-center justify-center rounded-2xl border border-border/40 bg-gradient-to-br from-white/80 via-white/70 to-white/90 p-1.5 shadow-sm transition-all duration-300',
+          'group relative flex items-center justify-center rounded-2xl p-[3px] transition-all duration-200',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
           isSelected
-            ? 'z-10 scale-105 border-primary/60 bg-white shadow-xl'
-            : 'hover:-translate-y-0.5 hover:shadow-lg',
-          isDisabled && 'cursor-not-allowed opacity-60 hover:translate-y-0 hover:shadow-none',
+            ? 'scale-110 shadow-xl ring-2 ring-primary/60 ring-offset-2 ring-offset-background'
+            : 'hover:scale-110 hover:shadow-lg',
+          isDisabled && 'cursor-not-allowed opacity-60 hover:scale-100 hover:shadow-none',
           optionClassName,
         )}
         disabled={isDisabled}
       >
         <span
           className={cn(
-            'relative flex items-center justify-center rounded-[inherit] border border-white/40 bg-white/70 shadow-inner transition-all duration-300',
+            'relative flex items-center justify-center rounded-2xl border border-white/50 bg-white/80 shadow-inner transition-all duration-200',
             swatchSizeMap[swatchSize],
             option.swatchClassName,
           )}
-          style={option.swatchStyle}
+          style={swatchStyle}
         >
           {option.preview ?? null}
           {isSelected && (
-            <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[inherit] bg-black/25 backdrop-blur-sm">
+            <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[inherit] bg-black/30 backdrop-blur-sm">
               <Check className="h-4 w-4 text-white drop-shadow" />
             </span>
           )}
@@ -301,129 +312,176 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
     );
   };
 
+  const renderGradientOption = (option: ColorTrayOption) => {
+    const optionId = option.id.toLowerCase();
+    const isSelected = resolvedSelectedId === optionId;
+    const isDisabled = disabled || option.disabled;
+    const ariaLabel = option.ariaLabel ?? option.label ?? option.value ?? option.id;
+    const tooltip = option.tooltip ?? ariaLabel;
+    const swatchStyle = getOptionSwatchStyle(option);
+
+    return (
+      <button
+        key={option.id}
+        type="button"
+        aria-label={ariaLabel}
+        title={tooltip}
+        onClick={() => {
+          if (!isDisabled) {
+            onSelect?.(option);
+          }
+        }}
+        className={cn(
+          'group relative flex h-28 w-full flex-col overflow-hidden rounded-[1.75rem] border border-border/40 bg-white/10 text-left transition-all duration-300',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+          isSelected
+            ? 'scale-[1.02] border-primary/50 shadow-2xl'
+            : 'hover:-translate-y-1 hover:shadow-xl',
+          isDisabled && 'cursor-not-allowed opacity-60 hover:translate-y-0 hover:shadow-none',
+          optionClassName,
+        )}
+        disabled={isDisabled}
+      >
+        <span className="absolute inset-0" style={swatchStyle} />
+        <span className="absolute inset-0 bg-gradient-to-br from-black/15 via-transparent to-black/35 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+        {isSelected && (
+          <span className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 shadow-lg">
+            <Check className="h-4 w-4 text-primary" />
+          </span>
+        )}
+        <span className="relative mt-auto p-4">
+          <span className="block rounded-xl bg-white/90 px-3 py-1.5 text-center text-xs font-semibold text-foreground shadow-md">
+            {option.label ?? option.value ?? option.id}
+          </span>
+        </span>
+      </button>
+    );
+  };
+
+  const sectionValue = activeSectionId ?? resolvedSections[0]?.id ?? 'default';
+  const showTabs = resolvedSections.length > 1;
+  const selectedTitle = selectedOption?.label ?? selectedOption?.value ?? 'Choose a color';
+
   return (
     <div
       className={cn(
-        'w-full max-w-[26rem] rounded-[2.25rem] border border-border/60 bg-gradient-to-b from-background/95 via-background/90 to-card p-5 shadow-[0_35px_80px_-40px_rgba(15,23,42,0.45)] backdrop-blur-xl',
+        'w-[360px] rounded-[2.25rem] border border-border/50 bg-gradient-to-br from-background via-background/95 to-card shadow-[0_35px_80px_-40px_rgba(15,23,42,0.45)] backdrop-blur-2xl',
         className,
       )}
     >
-      <div className="relative overflow-hidden rounded-2xl border border-white/30 bg-gradient-to-r from-[#ff8dc7] via-[#a855f7] to-[#f97316] p-[1px] shadow-inner">
-        <div className="rounded-[inherit] bg-white/75 px-5 py-4 backdrop-blur-xl">
-          <div className="flex items-center gap-3">
-            <div className="relative flex h-11 w-11 items-center justify-center">
-              <div className="absolute inset-0 rounded-[inherit] bg-gradient-to-br from-white/70 via-white/20 to-white/80" />
-              <div
-                className="relative flex h-9 w-9 items-center justify-center rounded-xl border-2 border-white/70 bg-white/60 shadow-lg"
-                style={selectedSwatchStyle}
-              >
-                {selectedOption?.preview ? (
-                  selectedOption.preview
-                ) : (
-                  <span className="absolute inset-0 rounded-[inherit] bg-gradient-to-br from-muted/40 via-muted/20 to-muted/40" />
-                )}
+      <div className="space-y-5 p-5">
+        <div className="relative overflow-hidden rounded-[1.75rem] border border-white/30 bg-gradient-to-r from-[#a855f7]/25 via-[#ec4899]/20 to-[#f97316]/25 p-[1px] shadow-inner">
+          <div className="relative rounded-[inherit] bg-white/80 px-5 py-4 backdrop-blur-xl">
+            <div className="flex items-center gap-3">
+              <div className="relative flex h-11 w-11 items-center justify-center">
+                <div className="absolute inset-0 rounded-[inherit] bg-gradient-to-br from-white/70 via-white/20 to-white/80" />
+                <div
+                  className="relative flex h-9 w-9 items-center justify-center rounded-xl border-2 border-white/70 bg-white/60 shadow-lg"
+                  style={headerPreviewStyle}
+                >
+                  {selectedOption?.preview ? (
+                    selectedOption.preview
+                  ) : (
+                    <span className="absolute inset-0 rounded-[inherit] bg-gradient-to-br from-white/30 via-transparent to-white/40" />
+                  )}
+                </div>
               </div>
+              <div className="flex flex-1 flex-col">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.35em] text-muted-foreground">
+                  Color Palette
+                </span>
+                <span className="text-base font-semibold text-foreground">{selectedTitle}</span>
+              </div>
+              <Droplet className="h-5 w-5 text-[#a855f7]" />
             </div>
-            <div className="flex flex-1 flex-col">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-500">
-                Color Palette
-              </span>
-              {selectedOption?.label ? (
-                <span className="text-base font-semibold text-slate-900">{selectedOption.label}</span>
-              ) : selectedOption?.value ? (
-                <span className="text-base font-semibold text-slate-900">{selectedOption.value}</span>
-              ) : (
-                <span className="text-base font-semibold text-slate-800">Choose a color</span>
-              )}
-            </div>
-            <Droplet className="h-5 w-5 text-[#a855f7]" />
           </div>
         </div>
-      </div>
 
-      <div className="mt-4 space-y-4">
-        {resolvedSections ? (
-          <div className="space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="flex flex-1 flex-wrap gap-2 rounded-2xl border border-border/40 bg-gradient-to-r from-white/70 via-white/50 to-white/70 p-1.5 shadow-sm">
+        <Tabs value={sectionValue} onValueChange={setActiveSectionId} className="w-full">
+          {showTabs ? (
+            <div className="px-1">
+              <TabsList className="grid w-full grid-cols-2 gap-2 rounded-xl border border-border/30 bg-gradient-to-br from-muted/60 via-muted/40 to-muted/60 p-1.5 shadow-lg backdrop-blur">
                 {resolvedSections.map(section => {
-                  const isActive = section.id === activeSectionId;
+                  const isGradient = section.id.toLowerCase().includes('gradient');
                   return (
-                    <button
+                    <TabsTrigger
                       key={section.id}
-                      type="button"
-                      className={cn(
-                        'relative flex flex-1 items-center justify-center rounded-xl px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.3em] transition-all duration-300',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-                        isActive
-                          ? 'bg-gradient-to-r from-[#fef4ff] via-white to-[#fef9f4] text-foreground shadow-md'
-                          : 'text-muted-foreground hover:bg-white/60 hover:text-foreground',
-                      )}
-                      onClick={() => setActiveSectionId(section.id)}
-                      aria-pressed={isActive}
-                      style={{ minWidth: '6.5rem' }}
+                      value={section.id}
+                      className="relative flex items-center justify-center rounded-lg px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.32em] text-muted-foreground transition-all duration-300 data-[state=active]:scale-[0.98] data-[state=active]:border data-[state=active]:border-primary/20 data-[state=active]:bg-gradient-to-br data-[state=active]:from-background data-[state=active]:to-card data-[state=active]:text-foreground data-[state=active]:shadow-lg"
                     >
+                      {isGradient ? (
+                        <Sparkles className="mr-2 h-3.5 w-3.5" />
+                      ) : (
+                        <Droplet className="mr-2 h-3.5 w-3.5" />
+                      )}
                       {section.label}
-                    </button>
+                    </TabsTrigger>
                   );
                 })}
-              </div>
-              {activeSection?.description ? (
-                <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-muted-foreground/80">
-                  {activeSection.description}
-                </span>
-              ) : null}
+              </TabsList>
             </div>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={searchQuery}
-                onChange={event => setSearchQuery(event.target.value)}
-                placeholder="Search colors or hex codes"
-                className="h-11 rounded-2xl border border-border/50 bg-gradient-to-r from-white/90 via-white/70 to-white/90 pl-11 text-sm shadow-inner transition-all focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-primary/60"
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={searchQuery}
-              onChange={event => setSearchQuery(event.target.value)}
-              placeholder="Search colors or hex codes"
-              className="h-11 rounded-2xl border border-border/50 bg-gradient-to-r from-white/90 via-white/70 to-white/90 pl-11 text-sm shadow-inner transition-all focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-primary/60"
-            />
-          </div>
-        )}
+          ) : null}
 
-        <ScrollArea className="max-h-[22rem] pr-2">
-          {hasGroupedOptions ? (
-            <div className="space-y-4 pr-1">
-              {groupedOptions?.map(group => (
-                <div key={group.id} className="grid grid-cols-[6rem,1fr] items-start gap-4">
-                  <div className="pt-2 text-[11px] font-semibold uppercase tracking-[0.35em] text-muted-foreground">
-                    {group.label}
+          <TabsContent value={sectionValue} className="mt-4 px-0">
+            <div className="space-y-4">
+              {activeSection?.description ? (
+                <p className="px-1 text-[10px] font-semibold uppercase tracking-[0.3em] text-muted-foreground/80">
+                  {activeSection.description}
+                </p>
+              ) : null}
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={searchQuery}
+                  onChange={event => setSearchQuery(event.target.value)}
+                  placeholder="Search colors or hex codes"
+                  className="h-11 rounded-2xl border border-border/40 bg-gradient-to-r from-white/90 via-white/70 to-white/90 pl-11 text-sm shadow-inner transition-all focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-primary/60"
+                />
+              </div>
+
+              <ScrollArea className="h-[320px] pr-2">
+                {hasGroupedOptions ? (
+                  <div className="space-y-5 pr-1">
+                    {groupedOptions?.map(group => (
+                      <div key={group.id} className="space-y-3">
+                        <div className="flex items-center gap-3 px-1">
+                          <span className="text-[10px] font-semibold uppercase tracking-[0.45em] text-muted-foreground">
+                            {group.label}
+                          </span>
+                          <span className="flex-1 border-t border-dashed border-border/40" />
+                        </div>
+                        <div className="grid grid-cols-10 gap-2">
+                          {group.options.map(renderColorOption)}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    {group.options.map(renderOption)}
+                ) : isGradientSection ? (
+                  <div className="grid grid-cols-1 gap-4 pr-1 sm:grid-cols-2">
+                    {filteredOptions.map(renderGradientOption)}
+                    {filteredOptions.length === 0 && (emptyState ?? (
+                      <div className="col-span-full flex h-32 flex-col items-center justify-center rounded-3xl border border-dashed border-border/60 bg-gradient-to-br from-muted/20 via-transparent to-muted/10 text-xs font-semibold uppercase tracking-[0.4em] text-muted-foreground">
+                        No options available
+                      </div>
+                    ))}
                   </div>
-                </div>
-              ))}
+                ) : (
+                  <div
+                    className="grid gap-3 pr-1"
+                    style={{ gridTemplateColumns: `repeat(${Math.max(1, effectiveColumns)}, minmax(0, 1fr))` }}
+                  >
+                    {filteredOptions.map(renderColorOption)}
+                    {filteredOptions.length === 0 && (emptyState ?? (
+                      <div className="col-span-full flex h-28 flex-col items-center justify-center rounded-2xl border border-dashed border-border/60 bg-gradient-to-br from-muted/20 via-transparent to-muted/10 text-xs font-semibold uppercase tracking-[0.4em] text-muted-foreground">
+                        No options available
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </ScrollArea>
             </div>
-          ) : (
-            <div
-              className={cn('grid gap-3 pr-1', gridClassName)}
-              style={effectiveColumns ? { gridTemplateColumns: `repeat(${effectiveColumns}, minmax(0, 1fr))` } : gridTemplate}
-            >
-              {filteredOptions.map(renderOption)}
-              {filteredOptions.length === 0 && (emptyState ?? (
-                <div className="col-span-full flex h-28 flex-col items-center justify-center rounded-2xl border border-dashed border-border/60 bg-gradient-to-br from-muted/20 via-transparent to-muted/10 text-xs font-semibold uppercase tracking-[0.4em] text-muted-foreground">
-                  No options available
-                </div>
-              ))}
-            </div>
-          )}
-        </ScrollArea>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
