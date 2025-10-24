@@ -268,6 +268,7 @@ interface SlideCanvasProps {
   onTitleChange?: (title: string, cardId: string) => void;
   presenterName?: string | null;
   onPositionPanelChange?: (panel: ReactNode | null) => void;
+  slideshowMode?: boolean;
 }
 
 const SlideCanvasBase = React.forwardRef<HTMLDivElement, SlideCanvasProps>(({ 
@@ -285,6 +286,7 @@ const SlideCanvasBase = React.forwardRef<HTMLDivElement, SlideCanvasProps>(({
   onTitleChange,
   presenterName,
   onPositionPanelChange,
+  slideshowMode = false,
 }, ref) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -383,7 +385,12 @@ const SlideCanvasBase = React.forwardRef<HTMLDivElement, SlideCanvasProps>(({
     [],
   );
 
-  const cardWidthClass = settings.cardWidth === 'M' ? 'max-w-4xl' : 'max-w-6xl';
+  const cardWidthClass = useMemo(() => {
+    if (slideshowMode) {
+      return 'w-full max-w-none';
+    }
+    return settings.cardWidth === 'M' ? 'max-w-4xl' : 'max-w-6xl';
+  }, [settings.cardWidth, slideshowMode]);
 
   useEffect(() => {
     setSettings({
@@ -961,7 +968,7 @@ const SlideCanvasBase = React.forwardRef<HTMLDivElement, SlideCanvasProps>(({
             <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
               <div
                 className={cn(
-                  'relative w-full overflow-hidden shadow-2xl transition-all duration-300',
+                  'relative w-full overflow-hidden shadow-2xl transition-all duration-300 aspect-video',
                   slideBackgroundClass,
                   settings.fullBleed
                     ? 'rounded-none border-0'
@@ -969,7 +976,7 @@ const SlideCanvasBase = React.forwardRef<HTMLDivElement, SlideCanvasProps>(({
                   isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
                   !canEdit && 'opacity-90'
                 )}
-                style={{ height: CANVAS_STAGE_HEIGHT, ...slideBackgroundStyle }}
+                style={slideBackgroundStyle}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}

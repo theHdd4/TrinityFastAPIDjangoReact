@@ -42,7 +42,8 @@ const NOTES_STORAGE_KEY = 'exhibition-notes';
 const SLIDESHOW_ANIMATION_MS = 450;
 const EXHIBITION_STORAGE_KEY = 'exhibition-layout-cache';
 const LAB_STORAGE_KEY = 'laboratory-layout-cards';
-const SLIDESHOW_VIEWPORT_PADDING = 160;
+const SLIDESHOW_HORIZONTAL_PADDING = 96;
+const SLIDESHOW_VERTICAL_PADDING = 112;
 
 const contextsEqual = (a: ProjectContext | null, b: ProjectContext | null): boolean => {
   if (!a && !b) {
@@ -199,8 +200,8 @@ const ExhibitionMode = () => {
       return;
     }
 
-    const availableWidth = Math.max(1, window.innerWidth - SLIDESHOW_VIEWPORT_PADDING);
-    const availableHeight = Math.max(1, window.innerHeight - SLIDESHOW_VIEWPORT_PADDING);
+    const availableWidth = Math.max(1, window.innerWidth - SLIDESHOW_HORIZONTAL_PADDING);
+    const availableHeight = Math.max(1, window.innerHeight - SLIDESHOW_VERTICAL_PADDING);
     const scale = Math.min(availableWidth / naturalWidth, availableHeight / naturalHeight);
 
     setSlideshowScale(scale > 0 ? scale : 1);
@@ -1602,7 +1603,13 @@ const ExhibitionMode = () => {
                 'flex-1 flex flex-col',
                 isSlideshowActive ? 'items-center justify-center' : undefined,
               )}
-              style={isSlideshowActive ? { padding: '3.5rem 3rem' } : undefined}
+              style={
+                isSlideshowActive
+                  ? {
+                      padding: `${SLIDESHOW_VERTICAL_PADDING / 2}px ${SLIDESHOW_HORIZONTAL_PADDING / 2}px`,
+                    }
+                  : undefined
+              }
             >
               {currentCard ? (
                 <div
@@ -1625,6 +1632,7 @@ const ExhibitionMode = () => {
                     onTitleChange={handleTitleChange}
                     presenterName={presenterDisplayName}
                     onPositionPanelChange={handleOperationsPalettePanelChange}
+                    slideshowMode={isSlideshowActive}
                   />
                 </div>
               ) : (
@@ -1655,6 +1663,7 @@ const ExhibitionMode = () => {
                     onTitleChange={handleTitleChange}
                     presenterName={presenterDisplayName}
                     onPositionPanelChange={handleOperationsPalettePanelChange}
+                    slideshowMode={false}
                   />
                 </div>
               ))}

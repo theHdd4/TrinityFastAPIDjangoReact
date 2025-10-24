@@ -82,7 +82,22 @@ const AuxiliaryMenu: React.FC<Props> = ({
       {active === 'exhibition' && <ExhibitionPanel onToggle={() => setActive(null)} />}
 
       {/* Icons Column - Always visible and stays on the right */}
-      <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
+      <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0 relative z-40">
+        <div className="p-3 border-b border-gray-200 flex items-center justify-between">
+          <button
+            onClick={openSuperagent}
+            className={`group relative inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground rounded-md p-1 h-8 w-8 ${
+              active === 'superagent' ? 'bg-accent text-accent-foreground' : ''
+            }`}
+            title="Trinity AI"
+            data-superagent-ai="true"
+          >
+            <Sparkles className="w-4 h-4 text-purple-500" />
+            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-[80] shadow-lg border border-border">
+              Trinity AI
+            </span>
+          </button>
+        </div>
         <div className="p-3 border-b border-gray-200 flex items-center justify-between">
           <button
             onClick={openSettings}
@@ -93,7 +108,7 @@ const AuxiliaryMenu: React.FC<Props> = ({
             data-settings="true"
           >
             <Settings className="w-4 h-4" />
-            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 shadow-lg border border-border">
+            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-[80] shadow-lg border border-border">
               Settings
             </span>
           </button>
@@ -108,23 +123,8 @@ const AuxiliaryMenu: React.FC<Props> = ({
             data-saved-dataframes="true"
           >
             <Database className="w-4 h-4" />
-            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 shadow-lg border border-border">
+            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-[80] shadow-lg border border-border">
               Saved DataFrames
-            </span>
-          </button>
-        </div>
-        <div className="p-3 border-b border-gray-200 flex items-center justify-between">
-          <button
-            onClick={openSuperagent}
-            className={`group relative inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 hover:bg-accent hover:text-accent-foreground rounded-md p-1 h-8 w-8 ${
-              active === 'superagent' ? 'bg-accent text-accent-foreground' : ''
-            }`}
-            title="Super Agent AI"
-            data-superagent-ai="true"
-          >
-            <Sparkles className="w-4 h-4 text-[#666666]" />
-            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 shadow-lg border border-border">
-              Super Agent AI
             </span>
           </button>
         </div>
@@ -138,7 +138,7 @@ const AuxiliaryMenu: React.FC<Props> = ({
             data-exhibition-panel-toggle="true"
           >
             <GalleryHorizontal className="w-4 h-4 text-gray-600" />
-            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 shadow-lg border border-border">
+            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-[80] shadow-lg border border-border">
               Exhibition
             </span>
           </button>
@@ -152,7 +152,7 @@ const AuxiliaryMenu: React.FC<Props> = ({
             title="Help"
           >
             <HelpCircle className="w-5 h-5 text-gray-600" strokeWidth={2} />
-            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 shadow-lg border border-border">
+            <span className="pointer-events-none absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-[80] shadow-lg border border-border">
               Help
             </span>
           </button>
