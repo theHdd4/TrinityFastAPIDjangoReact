@@ -1495,6 +1495,7 @@ const ExhibitionMode = () => {
                   onTitleChange={handleTitleChange}
                   presenterName={presenterDisplayName}
                   onPositionPanelChange={handleOperationsPalettePanelChange}
+                  onUndo={handleUndo}
                 />
               ) : (
                 emptyCanvas
@@ -1524,6 +1525,7 @@ const ExhibitionMode = () => {
                     onTitleChange={handleTitleChange}
                     presenterName={presenterDisplayName}
                     onPositionPanelChange={handleOperationsPalettePanelChange}
+                    onUndo={handleUndo}
                   />
                 </div>
               ))}
