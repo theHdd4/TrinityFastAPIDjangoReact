@@ -130,6 +130,13 @@ const ExhibitionMode = () => {
   const [slideshowTransform, setSlideshowTransform] = useState('translateX(0px) scale(1)');
   const [slideshowOpacity, setSlideshowOpacity] = useState(1);
   const [slideshowScale, setSlideshowScale] = useState(1);
+  const [slideshowBaseDimensions, setSlideshowBaseDimensions] = useState<
+    | {
+        width: number;
+        height: number;
+      }
+    | null
+  >(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const slideCanvasRef = useRef<HTMLDivElement | null>(null);
@@ -189,23 +196,42 @@ const ExhibitionMode = () => {
     const element = slideCanvasRef.current;
     if (!element) {
       setSlideshowScale(1);
+      setSlideshowBaseDimensions(null);
       return;
     }
 
-    const naturalWidth = element.offsetWidth;
-    const naturalHeight = element.offsetHeight;
+    const stageElement = element.querySelector('[data-exhibition-stage]') as HTMLDivElement | null;
+    const stageWidth = stageElement?.offsetWidth ?? element.offsetWidth;
+    const stageHeight = stageElement?.offsetHeight ?? element.offsetHeight;
+    const totalHeight = element.offsetHeight;
 
-    if (naturalWidth <= 0 || naturalHeight <= 0) {
+    if (stageWidth <= 0 || stageHeight <= 0) {
       setSlideshowScale(1);
+      setSlideshowBaseDimensions(null);
       return;
     }
+
+    setSlideshowBaseDimensions(previous => {
+      if (previous && previous.width === stageWidth && previous.height === totalHeight) {
+        return previous;
+      }
+      return { width: stageWidth, height: totalHeight };
+    });
 
     const availableWidth = Math.max(1, window.innerWidth - SLIDESHOW_HORIZONTAL_PADDING);
     const availableHeight = Math.max(1, window.innerHeight - SLIDESHOW_VERTICAL_PADDING);
-    const scale = Math.min(availableWidth / naturalWidth, availableHeight / naturalHeight);
+    const widthScale = availableWidth / stageWidth;
+    const heightScale = availableHeight / Math.max(stageHeight, totalHeight);
+    const scale = Math.min(widthScale, heightScale);
 
     setSlideshowScale(scale > 0 ? scale : 1);
   }, []);
+
+  useEffect(() => {
+    if (!isSlideshowActive) {
+      setSlideshowBaseDimensions(null);
+    }
+  }, [isSlideshowActive]);
 
 
   const getTransitionStates = useCallback(
@@ -1492,15 +1518,32 @@ const ExhibitionMode = () => {
     notes,
     operationsPanelState,
   ]);
-  const slideWrapperStyle: React.CSSProperties | undefined = isSlideshowActive
-    ? {
-        opacity: slideshowOpacity,
-        transform: `${slideshowTransform} scale(${slideshowScale})`,
-        transformOrigin: 'center center',
-        transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
-        willChange: 'transform, opacity',
-      }
-    : undefined;
+  const slideWrapperStyle: React.CSSProperties | undefined = useMemo(() => {
+    if (!isSlideshowActive) {
+      return undefined;
+    }
+
+    const style: React.CSSProperties = {
+      opacity: slideshowOpacity,
+      transform: `${slideshowTransform} scale(${slideshowScale})`,
+      transformOrigin: 'center center',
+      transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
+      willChange: 'transform, opacity',
+    };
+
+    if (slideshowBaseDimensions) {
+      style.width = slideshowBaseDimensions.width;
+      style.height = slideshowBaseDimensions.height;
+    }
+
+    return style;
+  }, [
+    isSlideshowActive,
+    slideshowBaseDimensions,
+    slideshowOpacity,
+    slideshowScale,
+    slideshowTransform,
+  ]);
 
   const emptyCanvas = (
     <div className="flex-1 flex items-center justify-center bg-muted/10">
@@ -1613,7 +1656,10 @@ const ExhibitionMode = () => {
             >
               {currentCard ? (
                 <div
-                  className={cn('w-full flex flex-col', isSlideshowActive ? 'items-center' : undefined)}
+                  className={cn(
+                    'flex flex-col',
+                    isSlideshowActive ? 'items-center justify-center' : 'w-full',
+                  )}
                   style={slideWrapperStyle}
                 >
                   <SlideCanvas

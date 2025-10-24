@@ -386,11 +386,8 @@ const SlideCanvasBase = React.forwardRef<HTMLDivElement, SlideCanvasProps>(({
   );
 
   const cardWidthClass = useMemo(() => {
-    if (slideshowMode) {
-      return 'w-full max-w-none';
-    }
     return settings.cardWidth === 'M' ? 'max-w-4xl' : 'max-w-6xl';
-  }, [settings.cardWidth, slideshowMode]);
+  }, [settings.cardWidth]);
 
   useEffect(() => {
     setSettings({
@@ -951,22 +948,54 @@ const SlideCanvasBase = React.forwardRef<HTMLDivElement, SlideCanvasProps>(({
             </div>
           )}
 
-          <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-2 text-foreground">
-              <User className="h-4 w-4" />
-              <span className="font-semibold">Exhibition presenter:</span>
-              <span>{presenterLabel}</span>
+          <div
+            className={cn(
+              'flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between',
+              slideshowMode && 'text-xs md:text-sm text-foreground/70',
+            )}
+          >
+            <div
+              className={cn(
+                'flex items-center gap-2 text-foreground',
+                slideshowMode && 'text-foreground/80',
+              )}
+            >
+              <User className={cn('h-4 w-4', slideshowMode && 'h-3 w-3')} />
+              <span
+                className={cn(
+                  'font-semibold',
+                  slideshowMode && 'text-[11px] uppercase tracking-wide text-foreground/70',
+                )}
+              >
+                Exhibition presenter:
+              </span>
+              <span className={cn(slideshowMode && 'text-xs md:text-sm font-medium')}>{presenterLabel}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-foreground" />
-              <span className="font-semibold text-foreground">Last edited:</span>
-              <span>{formattedLastEdited}</span>
+            <div
+              className={cn(
+                'flex items-center gap-2',
+                slideshowMode && 'text-foreground/80',
+              )}
+            >
+              <Calendar className={cn('h-4 w-4 text-foreground', slideshowMode && 'h-3 w-3')} />
+              <span
+                className={cn(
+                  'font-semibold text-foreground',
+                  slideshowMode && 'text-[11px] uppercase tracking-wide text-foreground/70',
+                )}
+              >
+                Last edited:
+              </span>
+              <span className={cn(slideshowMode && 'text-xs md:text-sm font-medium text-foreground/80')}>
+                {formattedLastEdited}
+              </span>
             </div>
           </div>
 
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
               <div
+                data-exhibition-stage="true"
                 className={cn(
                   'relative w-full overflow-hidden shadow-2xl transition-all duration-300 aspect-video',
                   slideBackgroundClass,
@@ -1008,43 +1037,45 @@ const SlideCanvasBase = React.forwardRef<HTMLDivElement, SlideCanvasProps>(({
                   onRequestPositionPanel={handleRequestPositionPanel}
                 />
 
-                <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
-                  <Button
-                    size="icon"
-                    variant="secondary"
-                    className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
-                    onClick={() => {
-                      setShowFormatPanel(false);
-                      setPositionPanelTarget(null);
-                      onShowNotes?.();
-                    }}
-                    type="button"
-                  >
-                    <StickyNote className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="secondary"
-                    className={cn(
-                      'h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background transition-colors',
-                      showFormatPanel && 'border border-primary/40 text-primary'
-                    )}
-                    onClick={() => setShowFormatPanel(prev => !prev)}
-                    disabled={!canEdit}
-                    type="button"
-                  >
-                    <Settings className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="secondary"
-                    className="h-8 w-8 bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-lg hover:from-purple-600 hover:to-pink-600"
-                    type="button"
-                    disabled={!canEdit}
-                  >
-                    <Sparkles className="h-4 w-4" />
-                  </Button>
-                </div>
+                {!slideshowMode && (
+                  <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+                    <Button
+                      size="icon"
+                      variant="secondary"
+                      className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
+                      onClick={() => {
+                        setShowFormatPanel(false);
+                        setPositionPanelTarget(null);
+                        onShowNotes?.();
+                      }}
+                      type="button"
+                    >
+                      <StickyNote className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="secondary"
+                      className={cn(
+                        'h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background transition-colors',
+                        showFormatPanel && 'border border-primary/40 text-primary'
+                      )}
+                      onClick={() => setShowFormatPanel(prev => !prev)}
+                      disabled={!canEdit}
+                      type="button"
+                    >
+                      <Settings className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="secondary"
+                      className="h-8 w-8 bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-lg hover:from-purple-600 hover:to-pink-600"
+                      type="button"
+                      disabled={!canEdit}
+                    >
+                      <Sparkles className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
               </div>
 
             </div>
