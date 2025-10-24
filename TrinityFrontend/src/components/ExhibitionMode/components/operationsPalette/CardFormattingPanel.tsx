@@ -16,12 +16,96 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+  ColorTray,
+  DEFAULT_GRADIENT_COLOR_OPTIONS,
+  DEFAULT_SOLID_COLOR_OPTIONS,
+  DEFAULT_SOLID_SECTION,
+  DEFAULT_GRADIENT_SECTION,
+} from '@/templates/color-tray';
+import type { ColorTrayOption, ColorTraySection } from '@/templates/color-tray';
 import type { PresentationSettings } from '../../store/exhibitionStore';
+
+const backgroundPresetOptions: readonly ColorTrayOption[] = [
+  {
+    id: 'default',
+    label: 'Default',
+    tooltip: 'Default (system color)',
+    swatchClassName: 'bg-card',
+    ariaLabel: 'Use default slide background',
+  },
+  {
+    id: 'ivory',
+    label: 'Ivory',
+    value: '#fef3c7',
+    tooltip: 'Ivory (#FEF3C7)',
+    swatchStyle: { backgroundColor: '#fef3c7' },
+  },
+  {
+    id: 'slate',
+    label: 'Soft Slate',
+    value: '#e2e8f0',
+    tooltip: 'Soft Slate (#E2E8F0)',
+    swatchStyle: { backgroundColor: '#e2e8f0' },
+  },
+  {
+    id: 'charcoal',
+    label: 'Charcoal Mist',
+    value: '#d4d4d4',
+    tooltip: 'Charcoal Mist (#D4D4D4)',
+    swatchStyle: { backgroundColor: '#d4d4d4' },
+  },
+  {
+    id: 'indigo',
+    label: 'Indigo Haze',
+    value: '#e0e7ff',
+    tooltip: 'Indigo Haze (#E0E7FF)',
+    swatchStyle: { backgroundColor: '#e0e7ff' },
+  },
+  {
+    id: 'emerald',
+    label: 'Emerald Veil',
+    value: '#d1fae5',
+    tooltip: 'Emerald Veil (#D1FAE5)',
+    swatchStyle: { backgroundColor: '#d1fae5' },
+  },
+  {
+    id: 'rose',
+    label: 'Rose Quartz',
+    value: '#ffe4e6',
+    tooltip: 'Rose Quartz (#FFE4E6)',
+    swatchStyle: { backgroundColor: '#ffe4e6' },
+  },
+];
+
+const backgroundGradientOptions = DEFAULT_GRADIENT_COLOR_OPTIONS.filter(option =>
+  option.id.startsWith('gradient-'),
+) as readonly ColorTrayOption[];
+
+const layoutColorSections: readonly ColorTraySection[] = [
+  {
+    id: DEFAULT_GRADIENT_SECTION.id,
+    label: DEFAULT_GRADIENT_SECTION.label,
+    options: DEFAULT_GRADIENT_COLOR_OPTIONS,
+  },
+  {
+    id: DEFAULT_SOLID_SECTION.id,
+    label: DEFAULT_SOLID_SECTION.label,
+    options: DEFAULT_SOLID_COLOR_OPTIONS,
+  },
+];
+
+const backgroundColorSections: readonly ColorTraySection[] = [
+  {
+    id: 'solids',
+    label: 'Solid colors',
+    options: [...backgroundPresetOptions, ...DEFAULT_SOLID_COLOR_OPTIONS] as readonly ColorTrayOption[],
+  },
+  {
+    id: 'gradients',
+    label: 'Gradients',
+    options: backgroundGradientOptions,
+  },
+];
 
 interface CardFormattingPanelProps {
   settings: PresentationSettings;
@@ -216,28 +300,36 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Palette className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm">Card color</span>
+              <span className="text-sm">Layout color</span>
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs capitalize"
-                  disabled={!canEdit || hasAccentImage}
-                >
-                  {settings.cardColor}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-background">
-                <DropdownMenuItem onClick={() => onUpdateSettings({ cardColor: 'default' })}>Default</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onUpdateSettings({ cardColor: 'blue' })}>Blue</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onUpdateSettings({ cardColor: 'purple' })}>Purple</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onUpdateSettings({ cardColor: 'green' })}>Green</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onUpdateSettings({ cardColor: 'orange' })}>Orange</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
           </div>
+          <ColorTray
+            sections={layoutColorSections}
+            selectedId={settings.cardColor}
+            onSelect={option =>
+              onUpdateSettings({ cardColor: option.id as PresentationSettings['cardColor'] })
+            }
+            disabled={!canEdit || hasAccentImage}
+            defaultSectionId="gradients"
+          />
+        </section>
+
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Maximize2 className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm">Background (Card Color)</span>
+            </div>
+          </div>
+          <ColorTray
+            sections={backgroundColorSections}
+            selectedId={settings.backgroundColor}
+            onSelect={option =>
+              onUpdateSettings({ backgroundColor: option.id as PresentationSettings['backgroundColor'] })
+            }
+            disabled={!canEdit}
+            defaultSectionId="solids"
+          />
         </section>
 
         <Separator />

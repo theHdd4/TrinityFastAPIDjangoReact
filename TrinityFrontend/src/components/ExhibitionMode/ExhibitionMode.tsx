@@ -1,6 +1,6 @@
 import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Download, FileText, Grid3x3, Presentation, Save, Share2, Undo2 } from 'lucide-react';
+import { ChevronRight, Download, FileText, Grid3x3, Save, Share2, Undo2 } from 'lucide-react';
 import Header from '@/components/Header';
 import {
   useExhibitionStore,
@@ -25,11 +25,8 @@ import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  saveExhibitionConfiguration,
   saveExhibitionLayout,
   fetchExhibitionManifest,
-  type ExhibitionAtomPayload,
-  type ExhibitionComponentPayload,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 import { createTextBoxSlideObject } from './components/operationsPalette/textBox/constants';
@@ -43,6 +40,8 @@ import {
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
 const SLIDESHOW_ANIMATION_MS = 450;
+const EXHIBITION_STORAGE_KEY = 'exhibition-layout-cache';
+const LAB_STORAGE_KEY = 'laboratory-layout-cards';
 
 const contextsEqual = (a: ProjectContext | null, b: ProjectContext | null): boolean => {
   if (!a && !b) {
@@ -102,9 +101,9 @@ const ExhibitionMode = () => {
   const [showGridView, setShowGridView] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'horizontal' | 'vertical'>('horizontal');
-  const [isCatalogueOpen, setIsCatalogueOpen] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [undoAvailable, setUndoAvailable] = useState(false);
+  const [isCatalogueCollapsed, setIsCatalogueCollapsed] = useState(false);
   const [operationsPanelState, setOperationsPanelState] = useState<
     | { type: 'custom'; node: ReactNode }
     | { type: 'notes' }
@@ -723,56 +722,29 @@ const ExhibitionMode = () => {
     }
 
     try {
-      window.localStorage.setItem('laboratory-layout-cards', JSON.stringify(payloadCards));
+      const serializedPayload = JSON.stringify(payloadCards);
+
+      const possibleLabCache = window.localStorage.getItem(LAB_STORAGE_KEY);
+      if (possibleLabCache) {
+        try {
+          const parsed = JSON.parse(possibleLabCache);
+          const containsExhibitionFields = Array.isArray(parsed)
+            && parsed.some(card => card && typeof card === 'object'
+              && ('presentationSettings' in card || 'catalogueAtoms' in card));
+
+          if (containsExhibitionFields) {
+            window.localStorage.removeItem(LAB_STORAGE_KEY);
+          }
+        } catch (parseError) {
+          console.warn('Failed to inspect laboratory cache before saving exhibition layout', parseError);
+        }
+      }
+
+      window.localStorage.setItem(EXHIBITION_STORAGE_KEY, serializedPayload);
     } catch (error) {
       console.warn('Failed to cache exhibition layout locally', error);
     }
   }, []);
-
-  const mapAtomToPayload = useCallback((atom: DroppedAtom): ExhibitionComponentPayload => {
-    return {
-      id: atom.id,
-      atomId: atom.atomId,
-      title: atom.title,
-      category: atom.category,
-      color: atom.color,
-      metadata: atom.metadata ?? undefined,
-    };
-  }, []);
-
-  const mapCardToAtomEntry = useCallback(
-    (card: LayoutCard): ExhibitionAtomPayload | null => {
-      const componentsSource = Array.isArray(card.catalogueAtoms) && card.catalogueAtoms.length > 0
-        ? card.catalogueAtoms
-        : card.atoms;
-
-      const exhibitedComponents = Array.isArray(componentsSource)
-        ? componentsSource
-            .map(mapAtomToPayload)
-            .filter(component => typeof component.id === 'string' && component.id.trim().length > 0)
-        : [];
-
-      if (exhibitedComponents.length === 0) {
-        return null;
-      }
-
-      const resolvedName =
-        (typeof card.moleculeTitle === 'string' && card.moleculeTitle.trim().length > 0
-          ? card.moleculeTitle.trim()
-          : undefined) ||
-        (typeof card.moleculeId === 'string' && card.moleculeId.trim().length > 0
-          ? card.moleculeId.trim()
-          : undefined) ||
-        card.id;
-
-      return {
-        id: card.id,
-        atom_name: resolvedName,
-        exhibited_components: exhibitedComponents,
-      };
-    },
-    [mapAtomToPayload],
-  );
 
   const handleSave = useCallback(async () => {
     if (!canEdit) {
@@ -802,9 +774,6 @@ const ExhibitionMode = () => {
 
     try {
       const cardsToPersist = JSON.parse(JSON.stringify(cards)) as LayoutCard[];
-      const atomsToPersist = cardsToPersist
-        .map(mapCardToAtomEntry)
-        .filter((entry): entry is ExhibitionAtomPayload => entry !== null);
 
       const slideObjectsToPersist = cards.reduce<Record<string, any[]>>((acc, card) => {
         const objects = slideObjectsByCardId[card.id] ?? [];
@@ -812,12 +781,6 @@ const ExhibitionMode = () => {
         return acc;
       }, {} as Record<string, any[]>);
 
-      await saveExhibitionConfiguration({
-        client_name: context.client_name,
-        app_name: context.app_name,
-        project_name: context.project_name,
-        atoms: atomsToPersist,
-      });
       await saveExhibitionLayout({
         client_name: context.client_name,
         app_name: context.app_name,
@@ -828,17 +791,17 @@ const ExhibitionMode = () => {
       persistCardsLocally(cardsToPersist);
       toast({ title: 'Exhibition saved', description: 'Your exhibition updates have been saved.' });
     } catch (error) {
-      console.error('Failed to save exhibition configuration', error);
+      console.error('Failed to save exhibition layout', error);
       toast({
         title: 'Save failed',
         description:
-          error instanceof Error ? error.message : 'Unable to save your exhibition configuration right now.',
+          error instanceof Error ? error.message : 'Unable to save your exhibition layout right now.',
         variant: 'destructive',
       });
     } finally {
       setIsSaving(false);
     }
-  }, [canEdit, cards, isSaving, mapCardToAtomEntry, persistCardsLocally, toast]);
+  }, [canEdit, cards, isSaving, persistCardsLocally, slideObjectsByCardId, toast]);
 
   const handleShare = useCallback(async () => {
     if (typeof window === 'undefined' || typeof navigator === 'undefined') {
@@ -1431,32 +1394,6 @@ const ExhibitionMode = () => {
     </div>
   );
 
-  if (exhibitedCards.length === 0 && catalogueCards.length === 0) {
-    return (
-      <div className="h-screen bg-background flex flex-col">
-        <Header />
-        {renderHeaderSection()}
-
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center max-w-md">
-            <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mb-6 mx-auto">
-              <Presentation className="w-10 h-10 text-muted-foreground" />
-            </div>
-            <h3 className="text-2xl font-semibold text-foreground mb-3">No Slides to Present</h3>
-            <p className="text-muted-foreground mb-6">
-              Go to Laboratory mode, exhibit the components you want to showcase so they appear in the catalogue, then click Save.
-            </p>
-            <div className="p-4 bg-muted/50 rounded-lg border border-border">
-              <p className="text-sm text-muted-foreground">
-                💡 Exhibition mode transforms your cards into professional presentation slides
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div
       ref={containerRef}
@@ -1473,30 +1410,31 @@ const ExhibitionMode = () => {
           <div className="flex h-full flex-shrink-0">
             <div className="bg-background border-r border-border transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
               <div className="p-3 border-b border-border flex items-center justify-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowThumbnails(false);
-                    setIsCatalogueOpen(prev => !prev);
-                  }}
-                  className={cn(
-                    'inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted',
-                    isCatalogueOpen ? 'text-foreground' : 'text-muted-foreground'
-                  )}
-                  title={`${isCatalogueOpen ? 'Collapse' : 'Open'} exhibition catalogue`}
-                  aria-label={`${isCatalogueOpen ? 'Collapse' : 'Open'} exhibition catalogue`}
-                  data-exhibition-catalogue-toggle="true"
-                >
-                  <FileText className="h-4 w-4" />
-                </button>
+                {isCatalogueCollapsed ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsCatalogueCollapsed(false)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
+                    title="Expand catalogue"
+                    aria-label="Expand catalogue"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <div
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-muted text-foreground"
+                    aria-hidden="true"
+                  >
+                    <FileText className="h-4 w-4" />
+                  </div>
+                )}
               </div>
               <div className="p-3 border-b border-border flex items-center justify-center">
                 <button
                   type="button"
                   onClick={() => {
                     setShowGridView(false);
-                    setIsCatalogueOpen(false);
-                    setShowThumbnails(true);
+                    setShowThumbnails(current => !current);
                   }}
                   className={cn(
                     'inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted',
@@ -1511,7 +1449,7 @@ const ExhibitionMode = () => {
               </div>
             </div>
 
-            {isCatalogueOpen && (
+            {!isCatalogueCollapsed && !showThumbnails && (
               <ExhibitionCatalogue
                 cards={catalogueCards}
                 currentSlide={currentSlide}
@@ -1520,7 +1458,7 @@ const ExhibitionMode = () => {
                 onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
                 enableDragging={canEdit}
-                onCollapse={() => setIsCatalogueOpen(false)}
+                onCollapse={() => setIsCatalogueCollapsed(true)}
               />
             )}
 
@@ -1560,6 +1498,7 @@ const ExhibitionMode = () => {
                   onTitleChange={handleTitleChange}
                   presenterName={presenterDisplayName}
                   onPositionPanelChange={handleOperationsPalettePanelChange}
+                  onUndo={handleUndo}
                 />
               ) : (
                 emptyCanvas
@@ -1589,6 +1528,7 @@ const ExhibitionMode = () => {
                     onTitleChange={handleTitleChange}
                     presenterName={presenterDisplayName}
                     onPositionPanelChange={handleOperationsPalettePanelChange}
+                    onUndo={handleUndo}
                   />
                 </div>
               ))}

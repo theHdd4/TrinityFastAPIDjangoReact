@@ -8,8 +8,27 @@ import {
   type ExhibitionLayoutResponse,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
+import type {
+  GradientColorId,
+  GradientColorToken,
+  SolidColorToken,
+} from '@/templates/color-tray';
+import {
+  isKnownGradientId,
+  isSolidToken,
+  isGradientToken,
+} from '@/templates/color-tray';
 
-export type CardColor = 'default' | 'blue' | 'purple' | 'green' | 'orange';
+export type CardColor = GradientColorId | SolidColorToken;
+export type SlideBackgroundPreset =
+  | 'default'
+  | 'ivory'
+  | 'slate'
+  | 'charcoal'
+  | 'indigo'
+  | 'emerald'
+  | 'rose';
+export type SlideBackgroundColor = SlideBackgroundPreset | SolidColorToken | GradientColorToken;
 export type CardWidth = 'M' | 'L';
 export type ContentAlignment = 'top' | 'center' | 'bottom';
 export type CardLayout = 'none' | 'top' | 'bottom' | 'right' | 'left' | 'full';
@@ -17,10 +36,118 @@ export type CardLayout = 'none' | 'top' | 'bottom' | 'right' | 'left' | 'full';
 const DEFAULT_CARD_LAYOUT: CardLayout = 'right';
 
 const CARD_LAYOUTS: readonly CardLayout[] = ['none', 'top', 'bottom', 'right', 'left', 'full'] as const;
-const CARD_COLORS: readonly CardColor[] = ['default', 'blue', 'purple', 'green', 'orange'] as const;
+const SLIDE_BACKGROUND_PRESETS: readonly SlideBackgroundPreset[] = [
+  'default',
+  'ivory',
+  'slate',
+  'charcoal',
+  'indigo',
+  'emerald',
+  'rose',
+] as const;
 const CARD_WIDTHS: readonly CardWidth[] = ['M', 'L'] as const;
 const CONTENT_ALIGNMENTS: readonly ContentAlignment[] = ['top', 'center', 'bottom'] as const;
 const SLIDESHOW_TRANSITIONS: readonly SlideshowTransition[] = ['fade', 'slide', 'zoom'] as const;
+
+const EXHIBITION_LOCAL_STORAGE_KEYS: readonly string[] = [
+  'exhibition-layout-cache',
+  'exhibition-layout',
+  'exhibition-layout-cards',
+  'exhibition-catalogue',
+  'exhibition_catalogue',
+  'exhibition-catalogue-cache',
+  'exhibitionCatalogue',
+];
+
+const EXHIBITION_LOCAL_STORAGE_PREFIXES: readonly string[] = ['exhibition::'];
+const CATALOGUE_STORAGE_NAMESPACE = 'exhibition::catalogue::';
+
+const PERSISTENT_EXHIBITION_KEYS = new Set<string>(['exhibition-notes']);
+
+const purgeLegacyExhibitionCache = (): void => {
+  if (typeof window === 'undefined' || !window?.localStorage) {
+    return;
+  }
+
+  try {
+    const { localStorage } = window;
+
+    EXHIBITION_LOCAL_STORAGE_KEYS.forEach(key => {
+      if (localStorage.getItem(key) !== null) {
+        localStorage.removeItem(key);
+      }
+    });
+
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (!key || PERSISTENT_EXHIBITION_KEYS.has(key)) {
+        continue;
+      }
+
+      if (EXHIBITION_LOCAL_STORAGE_PREFIXES.some(prefix => key.startsWith(prefix))) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch (error) {
+    console.warn('[Exhibition] Unable to purge legacy exhibition cache entries', error);
+  }
+};
+
+const normaliseStorageSegment = (value: string): string => {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 120);
+};
+
+const buildCatalogueStorageKey = (context: ProjectContext | null): string => {
+  if (!context) {
+    return `${CATALOGUE_STORAGE_NAMESPACE}local-cache`;
+  }
+
+  const parts = [context.client_name, context.app_name, context.project_name]
+    .map(part => (typeof part === 'string' ? normaliseStorageSegment(part) : ''))
+    .filter(Boolean);
+
+  if (parts.length === 0) {
+    return `${CATALOGUE_STORAGE_NAMESPACE}local-cache`;
+  }
+
+  return `${CATALOGUE_STORAGE_NAMESPACE}${parts.join('::')}`;
+};
+
+const refreshCatalogueLocalCache = (
+  context: ProjectContext | null,
+  entries: ExhibitionAtomPayload[],
+  contextLabel: string,
+): void => {
+  if (typeof window === 'undefined' || !window?.localStorage) {
+    return;
+  }
+
+  const storageKey = buildCatalogueStorageKey(context);
+
+  try {
+    if (!entries || entries.length === 0) {
+      if (window.localStorage.getItem(storageKey) !== null) {
+        window.localStorage.removeItem(storageKey);
+        console.info(
+          `[Exhibition] Cleared cached exhibition catalogue for ${contextLabel}`,
+        );
+      }
+      return;
+    }
+
+    window.localStorage.setItem(storageKey, JSON.stringify(entries));
+    console.info(
+      `[Exhibition] Cached ${entries.length} exhibition catalogue entr${entries.length === 1 ? 'y' : 'ies'} for ${contextLabel}`,
+    );
+  } catch (error) {
+    console.warn('[Exhibition] Unable to refresh exhibition catalogue local cache', error);
+  }
+};
 
 const LEGACY_CARD_LAYOUTS: Record<string, CardLayout> = {
   blank: 'none',
@@ -55,6 +182,7 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   cardLayout: DEFAULT_CARD_LAYOUT,
   accentImage: null,
   accentImageName: null,
+  backgroundColor: 'default',
   slideshowDuration: 8,
   slideshowTransition: 'fade',
 };
@@ -67,6 +195,7 @@ export interface PresentationSettings {
   cardLayout: CardLayout;
   accentImage?: string | null;
   accentImageName?: string | null;
+  backgroundColor: SlideBackgroundColor;
   slideshowDuration: number;
   slideshowTransition: SlideshowTransition;
 }
@@ -280,8 +409,41 @@ const isValidDateString = (value: unknown): value is string => {
   return Number.isFinite(parsed);
 };
 
-const isValidCardColor = (value: unknown): value is CardColor =>
-  typeof value === 'string' && (CARD_COLORS as readonly string[]).includes(value);
+const isValidCardColor = (value: unknown): value is CardColor => {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  if (isSolidToken(value)) {
+    return true;
+  }
+
+  if (isKnownGradientId(value)) {
+    return true;
+  }
+
+  return false;
+};
+
+const isValidBackgroundColor = (value: unknown): value is SlideBackgroundColor => {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  if ((SLIDE_BACKGROUND_PRESETS as readonly string[]).includes(value)) {
+    return true;
+  }
+
+  if (isSolidToken(value)) {
+    return true;
+  }
+
+  if (isGradientToken(value)) {
+    return true;
+  }
+
+  return false;
+};
 
 const isValidCardWidth = (value: unknown): value is CardWidth =>
   typeof value === 'string' && (CARD_WIDTHS as readonly string[]).includes(value);
@@ -317,6 +479,9 @@ const ensurePresentationSettings = (
 
   const accentImage = isNonEmptyString(candidate.accentImage) ? candidate.accentImage : null;
   const accentImageName = isNonEmptyString(candidate.accentImageName) ? candidate.accentImageName : null;
+  const backgroundColor = isValidBackgroundColor(candidate.backgroundColor)
+    ? candidate.backgroundColor
+    : DEFAULT_PRESENTATION_SETTINGS.backgroundColor;
 
   const slideshowDuration =
     typeof candidate.slideshowDuration === 'number' && Number.isFinite(candidate.slideshowDuration)
@@ -335,6 +500,7 @@ const ensurePresentationSettings = (
     cardLayout,
     accentImage,
     accentImageName,
+    backgroundColor,
     slideshowDuration,
     slideshowTransition,
   };
@@ -417,7 +583,7 @@ const synchroniseSlideObjects = (
     nextProps.fontFamily =
       typeof nextProps.fontFamily === 'string' && nextProps.fontFamily.trim().length > 0
         ? nextProps.fontFamily
-        : 'Times New Roman';
+        : 'Comic Sans';
     nextProps.bold = typeof nextProps.bold === 'boolean' ? nextProps.bold : true;
     nextProps.italic = Boolean(nextProps.italic);
     nextProps.underline = Boolean(nextProps.underline);
@@ -942,6 +1108,8 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       ? `${resolvedContext.client_name}/${resolvedContext.app_name}/${resolvedContext.project_name}`
       : 'local-cache';
 
+    purgeLegacyExhibitionCache();
+
     if (resolvedContext) {
       console.info(
         `[Exhibition] Fetching exhibition catalogue from trinity_db.exhibition_catalogue for ${contextLabel}`,
@@ -951,7 +1119,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         remoteCatalogueResolved = true;
         const remoteAtoms = remote && Array.isArray(remote.atoms) ? remote.atoms : [];
         catalogueEntries = remoteAtoms;
-        
+        refreshCatalogueLocalCache(resolvedContext, remoteAtoms, contextLabel);
 
         if (remoteAtoms.length === 0) {
           console.info(
@@ -1002,11 +1170,13 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
           `[Exhibition] Failed to fetch exhibition catalogue for ${contextLabel} from trinity_db.exhibition_catalogue`,
           error,
         );
+        refreshCatalogueLocalCache(resolvedContext, [], contextLabel);
       }
     } else {
       console.info(
         '[Exhibition] Skipping exhibition catalogue fetch because no active project context was resolved',
       );
+      refreshCatalogueLocalCache(null, [], contextLabel);
     }
 
     set(state => {
@@ -1091,7 +1261,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         cards: ensuredCards,
         exhibitedCards: nextExhibitedCards,
         catalogueCards: nextCatalogueCards,
-        catalogueEntries: shouldUseRemoteCatalogue ? catalogueEntries : state.catalogueEntries,
+        catalogueEntries: shouldUseRemoteCatalogue ? catalogueEntries : [],
         lastLoadedContext: resolvedContext,
         slideObjectsByCardId: nextSlideObjects,
       };

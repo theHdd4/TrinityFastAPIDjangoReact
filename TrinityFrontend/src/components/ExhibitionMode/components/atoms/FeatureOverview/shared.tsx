@@ -71,6 +71,9 @@ export const DEFAULT_FEATURE_OVERVIEW_TREND_METADATA: FeatureOverviewMetadata = 
     })),
   },
   viewType: 'trend_analysis',
+  exhibitionControls: {
+    transparentBackground: true,
+  },
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -301,6 +304,37 @@ const normaliseSkuStatisticsSettings = (value: unknown) => {
   return Object.keys(settings).length > 0 ? settings : undefined;
 };
 
+const normaliseExhibitionControls = (value: unknown) => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const controls: NonNullable<FeatureOverviewMetadata['exhibitionControls']> = {};
+
+  const enableComponentTitle = asBoolean(
+    value.enableComponentTitle ?? value['enable_component_title'] ?? value['component_title'],
+  );
+  if (enableComponentTitle !== undefined) {
+    controls.enableComponentTitle = enableComponentTitle;
+  }
+
+  const allowEditInExhibition = asBoolean(
+    value.allowEditInExhibition ?? value['allow_edit_in_exhibition'] ?? value['allowEdit'],
+  );
+  if (allowEditInExhibition !== undefined) {
+    controls.allowEditInExhibition = allowEditInExhibition;
+  }
+
+  const transparentBackground = asBoolean(
+    value.transparentBackground ?? value['transparent_background'] ?? value['makeTransparent'],
+  );
+  if (transparentBackground !== undefined) {
+    controls.transparentBackground = transparentBackground;
+  }
+
+  return Object.keys(controls).length > 0 ? controls : undefined;
+};
+
 const parsePossibleJson = (value: unknown) => {
   if (typeof value === 'string') {
     const trimmed = value.trim();
@@ -436,6 +470,13 @@ export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverview
     result.skuStatisticsSettings = skuSettings;
   }
 
+  const exhibitionControls = normaliseExhibitionControls(
+    nested.exhibitionControls ?? nested['exhibition_controls'],
+  );
+  if (exhibitionControls) {
+    result.exhibitionControls = exhibitionControls;
+  }
+
   if ('chartRendererProps' in nested || 'chart_renderer_props' in nested) {
     result.chartRendererProps = parsePossibleJson(nested.chartRendererProps ?? nested['chart_renderer_props']);
   }
@@ -513,6 +554,15 @@ export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverview
       );
       if (selectionSkuSettings) {
         result.skuStatisticsSettings = selectionSkuSettings;
+      }
+    }
+
+    if (!result.exhibitionControls) {
+      const selectionControls = normaliseExhibitionControls(
+        selection.exhibitionControls ?? selection['exhibition_controls'],
+      );
+      if (selectionControls) {
+        result.exhibitionControls = selectionControls;
       }
     }
 

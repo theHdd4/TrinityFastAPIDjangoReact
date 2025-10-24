@@ -167,6 +167,9 @@ class ExhibitionStorage:
 
             raw_components = ExhibitionStorage._resolve_component_payload(atom)
             components = ExhibitionStorage._sanitise_components(raw_components)
+            if not components:
+                continue
+
             sanitised.append(
                 {
                     "id": raw_identifier,
@@ -277,11 +280,14 @@ class ExhibitionStorage:
                 if not entry_id or not atom_name:
                     continue
 
-                incoming_ids.add(entry_id)
-                document_id = self._mongo_document_id(client, app, project, entry_id)
                 components = ExhibitionStorage._sanitise_components(
                     ExhibitionStorage._resolve_component_payload(entry)
                 )
+                if not components:
+                    continue
+
+                incoming_ids.add(entry_id)
+                document_id = self._mongo_document_id(client, app, project, entry_id)
 
                 mongo_payload = {
                     "_id": document_id,
@@ -533,6 +539,8 @@ class ExhibitionStorage:
 
             raw_components = self._resolve_component_payload(entry)
             components = self._sanitise_components(raw_components)
+            if not components:
+                continue
             atom_payload = {
                 "id": entry_id,
                 "atom_name": atom_name,

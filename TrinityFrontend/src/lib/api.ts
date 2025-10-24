@@ -103,6 +103,14 @@ export const EXHIBITION_API =
   normalizeUrl(import.meta.env.VITE_EXHIBITION_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/exhibition`;
 
+export const LABORATORY_PROJECT_STATE_API =
+  normalizeUrl(import.meta.env.VITE_LABORATORY_PROJECT_STATE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/laboratory-project-state`;
+
+export const EXHIBITION_PROJECT_STATE_API =
+  normalizeUrl(import.meta.env.VITE_EXHIBITION_PROJECT_STATE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/exhibition-project-state`;
+
 export const CONCAT_API =
   normalizeUrl(import.meta.env.VITE_CONCAT_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/concat`;
@@ -197,6 +205,25 @@ export const MOLECULES_API =
 export const CUSTOM_MOLECULES_API =
   normalizeUrl(import.meta.env.VITE_CUSTOM_MOLECULES_API) ||
   `${backendOrigin}${djangoPrefix}/custom-molecules`;
+
+const shouldLogApiConfig =
+  typeof window !== 'undefined' &&
+  (import.meta.env.DEV || import.meta.env.VITE_SHOW_API_DEBUG === 'true');
+
+if (shouldLogApiConfig) {
+  const fastapiOrigin = backendOrigin.replace(
+    new RegExp(`:${djangoPort}$`),
+    `:${fastapiPort}`,
+  );
+
+  console.info('[Trinity API] Resolved backend endpoints', {
+    windowOrigin: window.location.origin,
+    backendOrigin,
+    fastapiOrigin,
+    exhibitionApi: EXHIBITION_API,
+    laboratoryApi: LABORATORY_API,
+  });
+}
 
 // Signup API function
 export const submitSignup = async (data: {

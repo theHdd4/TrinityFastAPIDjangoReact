@@ -1,9 +1,16 @@
 import React from 'react';
-import { Check, ChevronsDown, ChevronsUp, CircleDashed, Move, Palette, Sparkles, Trash2 } from 'lucide-react';
+import { ChevronsDown, ChevronsUp, CircleDashed, Move, Sparkles, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { type ShapeStrokeStyle } from './constants';
+import {
+  ColorTray,
+  DEFAULT_SOLID_COLOR_OPTIONS,
+  DEFAULT_GRADIENT_COLOR_OPTIONS,
+  type ColorTrayOption,
+  type ColorTraySection,
+} from '@/templates/color-tray';
 
 interface ShapeToolbarProps {
   label: string;
@@ -34,30 +41,54 @@ const clampStrokeWidth = (value: number) => Math.min(Math.max(value, 0), 60);
 
 const clampOpacity = (value: number) => Math.min(Math.max(value, 0), 1);
 
-const OUTLINE_COLORS: readonly string[] = [
-  '#111827',
-  '#1f2937',
-  '#4b5563',
-  '#6b7280',
-  '#0f172a',
-  '#2563eb',
-  '#1d4ed8',
-  '#4338ca',
-  '#7c3aed',
-  '#9333ea',
-  '#be123c',
-  '#dc2626',
-  '#f97316',
-  '#facc15',
-  '#10b981',
-  '#14b8a6',
-  '#0ea5e9',
-  '#38bdf8',
-  '#34d399',
-  '#f472b6',
-  '#fcd34d',
-  '#ffffff',
-  '#000000',
+const SHAPE_GRADIENT_OPTIONS: readonly ColorTrayOption[] = DEFAULT_GRADIENT_COLOR_OPTIONS.map(option => ({
+  ...option,
+  disabled: true,
+})) as readonly ColorTrayOption[];
+
+const SHAPE_FILL_SECTIONS: readonly ColorTraySection[] = [
+  {
+    id: 'solids',
+    label: 'Solid colors',
+    options: DEFAULT_SOLID_COLOR_OPTIONS,
+  },
+  {
+    id: 'gradients',
+    label: 'Gradients',
+    options: SHAPE_GRADIENT_OPTIONS,
+  },
+];
+
+const TRANSPARENT_OUTLINE_OPTION: ColorTrayOption = {
+  id: 'transparent',
+  value: 'transparent',
+  ariaLabel: 'Remove outline',
+  preview: (
+    <div className="flex h-full w-full items-center justify-center rounded-[inherit] bg-background">
+      <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
+        <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.4" fill="none" />
+        <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.4" strokeLinecap="round" />
+      </svg>
+    </div>
+  ),
+};
+
+const OUTLINE_SOLID_OPTIONS = [
+  TRANSPARENT_OUTLINE_OPTION,
+  ...DEFAULT_SOLID_COLOR_OPTIONS,
+] as readonly ColorTrayOption[];
+
+const OUTLINE_COLOR_SECTIONS: readonly ColorTraySection[] = [
+  {
+    id: 'solids',
+    label: 'Solid colors',
+    options: OUTLINE_SOLID_OPTIONS,
+  },
+  {
+    id: 'gradients',
+    label: 'Gradients',
+    options: SHAPE_GRADIENT_OPTIONS,
+  },
 ];
 
 type OutlineStyleOptionId = 'none' | ShapeStrokeStyle;
@@ -94,6 +125,18 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
   onDelete,
 }) => {
   const defaultStrokeWidth = supportsFill ? 2 : 6;
+
+  const normalizedFillId =
+    typeof fill === 'string' && fill.startsWith('#')
+      ? `solid-${fill.slice(1).toLowerCase()}`
+      : fill?.toLowerCase?.() ?? '';
+
+  const normalizedOutlineId = (() => {
+    if (typeof stroke === 'string' && stroke.startsWith('#')) {
+      return `solid-${stroke.slice(1).toLowerCase()}`;
+    }
+    return stroke?.toLowerCase?.() ?? '';
+  })();
 
   const handleToolbarMouseDown = (event: React.MouseEvent) => {
     event.preventDefault();
@@ -173,18 +216,42 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
       <PopoverContent
         side="top"
         align="center"
-        className="z-[4000] w-48 rounded-xl border border-border/70 bg-background/95 p-3 shadow-2xl"
+        className="z-[4000] w-60 rounded-2xl border border-border/70 bg-background/95 p-3 shadow-2xl"
         data-text-toolbar-root
       >
-        <div className="flex items-center justify-between gap-2">
-          <input
-            type="color"
-            value={fill || '#111827'}
+        <div className="flex flex-col gap-3">
+          <ColorTray
+            sections={SHAPE_FILL_SECTIONS}
+            selectedId={normalizedFillId}
+            onSelect={option => {
+              if (!supportsFill || !onFillChange) {
+                return;
+              }
+
+              const value = option.value ?? option.id;
+              if (typeof value === 'string' && value.startsWith('#')) {
+                onFillChange(value);
+                return;
+              }
+              if (option.id.startsWith('solid-')) {
+                onFillChange(`#${option.id.slice(6)}`);
+              }
+            }}
+            swatchSize="sm"
+            optionClassName="min-h-[3.25rem]"
             disabled={!supportsFill || !onFillChange}
-            onChange={event => onFillChange?.(event.target.value)}
-            className="h-10 w-full cursor-pointer rounded-lg border border-border"
+            defaultSectionId="solids"
           />
-          <Palette className="h-5 w-5 text-muted-foreground" />
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={fill || '#111827'}
+              disabled={!supportsFill || !onFillChange}
+              onChange={event => onFillChange?.(event.target.value)}
+              className="h-10 w-full cursor-pointer rounded-xl border border-border"
+            />
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Custom</span>
+          </div>
         </div>
       </PopoverContent>
     </Popover>
@@ -273,49 +340,34 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
 
           <div className="flex flex-col gap-2">
             <span className="text-[11px] font-semibold text-muted-foreground">Color</span>
-            <div className="grid grid-cols-6 gap-2">
-              {OUTLINE_COLORS.map(color => {
-                const isActive = !isOutlineDisabled && stroke.toLowerCase() === color.toLowerCase();
-                return (
-                  <button
-                    key={color}
-                    type="button"
-                    onMouseDown={handleToolbarMouseDown}
-                    onClick={() => handleOutlineColorSelect(color)}
-                    className={cn(
-                      'relative flex h-8 w-8 items-center justify-center rounded-full border border-border/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                      isActive && 'border-primary ring-2 ring-primary/60 ring-offset-1 ring-offset-background',
-                    )}
-                    style={{ backgroundColor: color }}
-                    aria-label={`Set outline color to ${color}`}
-                  >
-                    {isActive && <Check className="h-3 w-3 text-white" />}
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                onMouseDown={handleToolbarMouseDown}
-                onClick={handleNoOutline}
-                className={cn(
-                  'relative flex h-8 w-8 items-center justify-center rounded-full border border-border/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                  isOutlineDisabled && 'border-primary ring-2 ring-primary/60 ring-offset-1 ring-offset-background',
-                )}
-                aria-label="Remove outline"
-              >
-                <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
-                  <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.4" fill="none" />
-                  <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.4" strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
+            <ColorTray
+              sections={OUTLINE_COLOR_SECTIONS}
+              selectedId={isOutlineDisabled ? 'transparent' : normalizedOutlineId}
+              onSelect={option => {
+                const value = option.value ?? option.id;
+                if (value === 'transparent') {
+                  handleNoOutline();
+                  return;
+                }
+                if (typeof value === 'string' && value.startsWith('#')) {
+                  handleOutlineColorSelect(value);
+                  return;
+                }
+                if (option.id.startsWith('solid-')) {
+                  handleOutlineColorSelect(`#${option.id.slice(6)}`);
+                }
+              }}
+              swatchSize="sm"
+              optionClassName="min-h-[3.25rem]"
+              defaultSectionId="solids"
+            />
             <div className="flex items-center gap-2">
               <input
                 type="color"
                 value={stroke === 'transparent' ? '#111827' : stroke}
                 onChange={event => handleOutlineColorSelect(event.target.value)}
                 onMouseDown={handleToolbarMouseDown}
-                className="h-10 w-full cursor-pointer rounded-lg border border-border"
+                className="h-10 w-full cursor-pointer rounded-xl border border-border"
               />
               <Button
                 variant="ghost"

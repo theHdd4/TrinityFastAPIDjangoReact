@@ -1,6 +1,7 @@
+import logging
 import os
 import socket
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -114,9 +115,38 @@ def _load_cors_origins() -> List[str]:
     return _default_cors_origins()
 
 
+def _load_cors_origin_regex(origins: List[str]) -> Optional[str]:
+    """Return a regex that keeps :8080/:8081 origins CORS friendly when required."""
+
+    configured = os.getenv("FASTAPI_CORS_ORIGIN_REGEX")
+    if configured:
+        configured = configured.strip()
+        if configured:
+            return configured
+
+    # Allow opting-out by explicitly disabling the helper via the environment.
+    opt_out = os.getenv("FASTAPI_ALLOW_PORT_808X", "true").strip().lower()
+    if opt_out in {"0", "false", "no"}:
+        return None
+
+    # When credentials are allowed FastAPI requires explicit origins.  The regex
+    # keeps browsers on :8080/:8081 working even when the exact host/IP changes
+    # (for example when docker-compose injects a different HOST_IP).
+    if origins == ["*"]:
+        return None
+
+    return r"https?://[^/]+:(8080|8081)$"
+
+
 app = FastAPI()
 
 allowed_origins = _load_cors_origins()
+allowed_origin_regex = _load_cors_origin_regex(allowed_origins)
+
+logger = logging.getLogger("uvicorn.error")
+logger.info("Configured FastAPI CORS allow_origins=%s", allowed_origins)
+if allowed_origin_regex:
+    logger.info("Configured FastAPI CORS allow_origin_regex=%s", allowed_origin_regex)
 
 app.add_middleware(
     CORSMiddleware,
@@ -124,6 +154,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_origin_regex=allowed_origin_regex,
 )
 
 app.include_router(api_router, prefix="/api")

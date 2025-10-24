@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ExhibitionComponent(BaseModel):
@@ -53,8 +53,7 @@ class ExhibitionConfigurationIn(ExhibitionConfigurationBase):
 class ExhibitionConfigurationOut(ExhibitionConfigurationBase):
     updated_at: Optional[datetime] = Field(default=None, description="Timestamp of the last update")
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ExhibitionManifestOut(BaseModel):
@@ -102,8 +101,7 @@ class ExhibitionLayoutSlideObject(BaseModel):
     groupId: Optional[str] = Field(default=None, alias="groupId")
     props: Dict[str, Any] = Field(default_factory=dict)
 
-    class Config:
-        allow_population_by_field_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class ExhibitionLayoutCard(BaseModel):
@@ -129,8 +127,7 @@ class ExhibitionLayoutConfigurationBase(BaseModel):
         default_factory=dict, alias="slide_objects"
     )
 
-    class Config:
-        allow_population_by_field_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class ExhibitionLayoutConfigurationIn(ExhibitionLayoutConfigurationBase):
