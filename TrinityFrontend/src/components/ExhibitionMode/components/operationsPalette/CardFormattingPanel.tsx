@@ -15,41 +15,34 @@ import {
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
+import { ColorTray } from '@/templates/color-tray';
 import type { PresentationSettings } from '../../store/exhibitionStore';
 
-const layoutColorLabels: Record<PresentationSettings['cardColor'], string> = {
-  default: 'Default',
-  blue: 'Blue',
-  purple: 'Purple',
-  green: 'Green',
-  orange: 'Orange',
-};
-
-const backgroundColorOptions: Array<{
-  value: PresentationSettings['backgroundColor'];
+const layoutColorOptions: Array<{
+  id: PresentationSettings['cardColor'];
   label: string;
   swatchClass: string;
 }> = [
-  { value: 'default', label: 'Default', swatchClass: 'bg-muted/40' },
-  { value: 'ivory', label: 'Ivory', swatchClass: 'bg-amber-100' },
-  { value: 'slate', label: 'Soft Slate', swatchClass: 'bg-slate-200' },
-  { value: 'charcoal', label: 'Charcoal Mist', swatchClass: 'bg-neutral-300' },
-  { value: 'indigo', label: 'Indigo Haze', swatchClass: 'bg-indigo-100' },
-  { value: 'emerald', label: 'Emerald Veil', swatchClass: 'bg-emerald-100' },
-  { value: 'rose', label: 'Rose Quartz', swatchClass: 'bg-rose-100' },
+  { id: 'default', label: 'Default', swatchClass: 'bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400' },
+  { id: 'blue', label: 'Blue', swatchClass: 'bg-gradient-to-br from-blue-500 via-cyan-500 to-teal-400' },
+  { id: 'purple', label: 'Purple', swatchClass: 'bg-gradient-to-br from-violet-500 via-purple-500 to-fuchsia-400' },
+  { id: 'green', label: 'Green', swatchClass: 'bg-gradient-to-br from-emerald-500 via-green-500 to-lime-400' },
+  { id: 'orange', label: 'Orange', swatchClass: 'bg-gradient-to-br from-orange-500 via-amber-500 to-yellow-400' },
 ];
 
-const backgroundColorLabels = backgroundColorOptions.reduce<Record<string, string>>((acc, option) => {
-  acc[option.value] = option.label;
-  return acc;
-}, {});
+const backgroundColorOptions: Array<{
+  id: PresentationSettings['backgroundColor'];
+  label: string;
+  swatchClass: string;
+}> = [
+  { id: 'default', label: 'Default', swatchClass: 'bg-muted/40' },
+  { id: 'ivory', label: 'Ivory', swatchClass: 'bg-amber-100' },
+  { id: 'slate', label: 'Soft Slate', swatchClass: 'bg-slate-200' },
+  { id: 'charcoal', label: 'Charcoal Mist', swatchClass: 'bg-neutral-300' },
+  { id: 'indigo', label: 'Indigo Haze', swatchClass: 'bg-indigo-100' },
+  { id: 'emerald', label: 'Emerald Veil', swatchClass: 'bg-emerald-100' },
+  { id: 'rose', label: 'Rose Quartz', swatchClass: 'bg-rose-100' },
+];
 
 interface CardFormattingPanelProps {
   settings: PresentationSettings;
@@ -246,26 +239,20 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
               <Palette className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm">Layout color</span>
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs"
-                  disabled={!canEdit || hasAccentImage}
-                >
-                  {layoutColorLabels[settings.cardColor] ?? 'Default'}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-background">
-                <DropdownMenuItem onClick={() => onUpdateSettings({ cardColor: 'default' })}>Default</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onUpdateSettings({ cardColor: 'blue' })}>Blue</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onUpdateSettings({ cardColor: 'purple' })}>Purple</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onUpdateSettings({ cardColor: 'green' })}>Green</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => onUpdateSettings({ cardColor: 'orange' })}>Orange</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
           </div>
+          <ColorTray
+            options={layoutColorOptions.map(option => ({
+              id: option.id,
+              label: option.label,
+              swatchClassName: option.swatchClass,
+            }))}
+            selectedId={settings.cardColor}
+            onSelect={option =>
+              onUpdateSettings({ cardColor: option.id as PresentationSettings['cardColor'] })
+            }
+            columns={layoutColorOptions.length}
+            disabled={!canEdit || hasAccentImage}
+          />
         </section>
 
         <section className="space-y-3">
@@ -274,32 +261,20 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
               <Maximize2 className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm">Background (Card Color)</span>
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-xs"
-                  disabled={!canEdit}
-                >
-                  {backgroundColorLabels[settings.backgroundColor] ?? 'Default'}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-background">
-                {backgroundColorOptions.map(option => (
-                  <DropdownMenuItem
-                    key={option.value}
-                    onClick={() => onUpdateSettings({ backgroundColor: option.value })}
-                  >
-                    <span
-                      className={cn('mr-2 inline-flex h-3 w-3 rounded-full border border-border/40', option.swatchClass)}
-                    />
-                    {option.label}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
           </div>
+          <ColorTray
+            options={backgroundColorOptions.map(option => ({
+              id: option.id,
+              label: option.label,
+              swatchClassName: option.swatchClass,
+            }))}
+            selectedId={settings.backgroundColor}
+            onSelect={option =>
+              onUpdateSettings({ backgroundColor: option.id as PresentationSettings['backgroundColor'] })
+            }
+            columns={Math.min(backgroundColorOptions.length, 4)}
+            disabled={!canEdit}
+          />
         </section>
 
         <Separator />

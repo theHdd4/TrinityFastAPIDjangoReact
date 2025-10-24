@@ -9,7 +9,6 @@ import {
   ListOrdered,
   Minus,
   Move,
-  Palette as PaletteIcon,
   Plus,
   Sparkles,
   Strikethrough,
@@ -21,6 +20,31 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/utils';
 import type { TextAlignOption } from './types';
 import { FONT_OPTIONS } from './constants';
+import { ColorTray } from '@/templates/color-tray';
+
+const TEXT_COLOR_PRESETS: readonly string[] = [
+  '#111827',
+  '#1f2937',
+  '#4b5563',
+  '#6b7280',
+  '#0f172a',
+  '#1d4ed8',
+  '#2563eb',
+  '#7c3aed',
+  '#a855f7',
+  '#c026d3',
+  '#dc2626',
+  '#f97316',
+  '#facc15',
+  '#22c55e',
+  '#0ea5e9',
+  '#38bdf8',
+  '#10b981',
+  '#14b8a6',
+  '#f472b6',
+  '#f9a8d4',
+  '#ffffff',
+];
 
 interface TextBoxToolbarProps {
   fontFamily: string;
@@ -86,6 +110,8 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
     );
 
   const controlChipClasses = 'h-8 shrink-0 rounded-full px-2.5 text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40';
+
+  const normalizedColorId = color?.toLowerCase?.() ?? '';
 
   return (
     <div
@@ -281,17 +307,33 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         <PopoverContent
           side="top"
           align="center"
-          className="z-[4000] w-48 rounded-xl border border-border/70 bg-background/95 p-3 shadow-2xl"
+          className="z-[4000] w-60 rounded-2xl border border-border/70 bg-background/95 p-3 shadow-2xl"
           data-text-toolbar-root
         >
-          <div className="flex items-center justify-between gap-2">
-            <input
-              type="color"
-              value={color || '#111827'}
-              onChange={event => onColorChange(event.target.value)}
-              className="h-10 w-full cursor-pointer rounded-lg border border-border"
+          <div className="flex flex-col gap-3">
+            <ColorTray
+              options={TEXT_COLOR_PRESETS.map(preset => ({
+                id: preset.toLowerCase(),
+                value: preset,
+                swatchStyle: { backgroundColor: preset },
+                ariaLabel: `Set text color to ${preset}`,
+              }))}
+              selectedId={normalizedColorId}
+              onSelect={option => onColorChange(option.value ?? option.id)}
+              showLabels={false}
+              columns={6}
+              swatchSize="sm"
+              optionClassName="min-h-[3.25rem]"
             />
-            <PaletteIcon className="h-5 w-5 text-muted-foreground" />
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={color || '#111827'}
+                onChange={event => onColorChange(event.target.value)}
+                className="h-10 w-full cursor-pointer rounded-xl border border-border"
+              />
+              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Custom</span>
+            </div>
           </div>
         </PopoverContent>
       </Popover>
