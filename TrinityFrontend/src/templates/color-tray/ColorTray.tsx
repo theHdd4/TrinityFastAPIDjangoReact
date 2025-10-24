@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Check, Droplet, Search } from 'lucide-react';
+import { Droplet, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -21,9 +21,9 @@ export interface ColorTrayProps {
 }
 
 const swatchSizeMap: Record<ColorTraySwatchSize, string> = {
-  sm: 'h-7 w-7 rounded-lg',
-  md: 'h-8 w-8 rounded-xl',
-  lg: 'h-10 w-10 rounded-2xl',
+  sm: 'h-8 w-8 rounded-[14px]',
+  md: 'h-9 w-9 rounded-[16px]',
+  lg: 'h-11 w-11 rounded-[20px]',
 };
 
 export const ColorTray: React.FC<ColorTrayProps> = ({
@@ -209,49 +209,71 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
           }
         }}
         className={cn(
-          'group relative inline-flex items-center justify-center rounded-xl transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-          'before:absolute before:-inset-1 before:-z-10 before:rounded-[inherit] before:bg-gradient-to-br before:from-primary/10 before:via-primary/0 before:to-primary/30 before:opacity-0 before:transition-opacity before:duration-300 hover:before:opacity-100',
+          'group relative inline-flex items-center justify-center rounded-[18px] transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+          'before:absolute before:-inset-[3px] before:-z-10 before:rounded-[inherit] before:bg-gradient-to-br before:from-white/60 before:via-white/20 before:to-white/60 before:opacity-0 before:transition-opacity before:duration-300',
+          'after:absolute after:inset-0 after:-z-10 after:rounded-[inherit] after:bg-gradient-to-br after:from-border/40 after:via-border/10 after:to-transparent after:opacity-0 after:transition-opacity after:duration-300',
           isSelected
-            ? 'z-10 scale-110 ring-2 ring-primary/70 shadow-2xl rotate-3'
-            : 'hover:z-20 hover:scale-125 hover:rotate-6 hover:shadow-2xl',
-          isDisabled && 'cursor-not-allowed opacity-60 hover:scale-100 hover:rotate-0 hover:shadow-none before:opacity-0',
+            ? 'z-20 -rotate-3 scale-[1.08] before:opacity-100 after:opacity-100 shadow-xl'
+            : 'hover:-translate-y-0.5 hover:-rotate-2 hover:before:opacity-100 hover:after:opacity-100 hover:shadow-lg',
+          isDisabled &&
+            'cursor-not-allowed opacity-60 hover:translate-y-0 hover:rotate-0 hover:shadow-none before:opacity-0 after:opacity-0',
           optionClassName,
         )}
         disabled={isDisabled}
       >
         <span
           className={cn(
-            'relative flex items-center justify-center overflow-hidden rounded-[inherit] border border-border/40 bg-background/90 shadow-md transition-all duration-300',
+            'relative flex aspect-square items-center justify-center overflow-hidden rounded-[inherit] bg-white/70 shadow-sm transition-all duration-300',
+            'ring-1 ring-border/30',
+            isSelected
+              ? 'ring-2 ring-primary/40 ring-offset-2 ring-offset-background'
+              : 'group-hover:ring-border/50',
             swatchSizeMap[swatchSize],
             option.swatchClassName,
           )}
           style={option.swatchStyle}
         >
           {option.preview ?? null}
+          <span className="pointer-events-none absolute inset-0 rounded-[inherit] border border-white/40 opacity-0 transition-opacity duration-300 group-hover:opacity-70" />
           {isSelected && (
-            <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[inherit] border-2 border-background/80 bg-black/10">
-              <Check className="h-4 w-4 text-white drop-shadow" />
-            </span>
+            <span className="pointer-events-none absolute inset-0 rounded-[inherit] border-2 border-white/80 shadow-[0_12px_20px_rgba(15,23,42,0.25)]" />
           )}
         </span>
       </button>
     );
   };
 
-  const renderOptionsGrid = (optionsToRender: readonly ColorTrayOption[]) => (
-    <div
-      className={cn('grid gap-2 pr-1', gridClassName)}
-      style={effectiveColumns ? { gridTemplateColumns: `repeat(${effectiveColumns}, minmax(0, 1fr))` } : gridTemplate}
-    >
-      {optionsToRender.map(renderSwatch)}
-      {optionsToRender.length === 0 &&
-        (emptyState ?? (
-          <div className="col-span-full flex h-24 flex-col items-center justify-center rounded-2xl border border-dashed border-border/50 bg-gradient-to-br from-muted/20 via-transparent to-muted/10 text-[10px] font-semibold uppercase tracking-[0.35em] text-muted-foreground">
-            No options available
-          </div>
-        ))}
-    </div>
-  );
+  const renderOptionsGrid = (optionsToRender: readonly ColorTrayOption[]) => {
+    if (optionsToRender.length === 0) {
+      return (
+        <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-background/80 via-background/60 to-background/80 p-6">
+          {emptyState ?? (
+            <div className="text-center text-[10px] font-semibold uppercase tracking-[0.35em] text-muted-foreground">
+              No options available
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="rounded-2xl border border-border/30 bg-gradient-to-br from-background/90 via-background/70 to-background/90 p-3 shadow-inner">
+        <div
+          className={cn(
+            'grid gap-2 sm:gap-3',
+            gridClassName,
+          )}
+          style={
+            effectiveColumns
+              ? { gridTemplateColumns: `repeat(${effectiveColumns}, minmax(0, 1fr))` }
+              : gridTemplate
+          }
+        >
+          {optionsToRender.map(renderSwatch)}
+        </div>
+      </div>
+    );
+  };
 
   const renderSearch = () => (
     <div className="relative">
