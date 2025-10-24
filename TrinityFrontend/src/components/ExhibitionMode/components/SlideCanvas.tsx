@@ -3,6 +3,13 @@ import { User, Calendar, Sparkles, StickyNote, Settings, Trash2 } from 'lucide-r
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
+  GRADIENT_STYLE_MAP,
+  isSolidToken,
+  isKnownGradientId,
+  isGradientToken,
+  solidTokenToHex,
+} from '@/templates/color-tray';
+import {
   useExhibitionStore,
   CardLayout,
   CardColor,
@@ -11,6 +18,7 @@ import {
   PresentationSettings,
   DEFAULT_PRESENTATION_SETTINGS,
   type SlideBackgroundColor,
+  type SlideBackgroundPreset,
   type SlideObject,
   DEFAULT_CANVAS_OBJECT_WIDTH,
   DEFAULT_CANVAS_OBJECT_HEIGHT,
@@ -111,7 +119,7 @@ const parseBooleanish = (value: unknown): boolean | null => {
   return null;
 };
 
-const slideBackgroundClassNames: Record<SlideBackgroundColor, string> = {
+const slideBackgroundClassNames: Record<SlideBackgroundPreset, string> = {
   default: 'bg-card',
   ivory: 'bg-amber-100',
   slate: 'bg-slate-200',
@@ -119,6 +127,37 @@ const slideBackgroundClassNames: Record<SlideBackgroundColor, string> = {
   indigo: 'bg-indigo-100',
   emerald: 'bg-emerald-100',
   rose: 'bg-rose-100',
+};
+
+const resolveSlideBackground = (
+  background: SlideBackgroundColor,
+): { className: string; style: React.CSSProperties | undefined } => {
+  if (isSolidToken(background)) {
+    return {
+      className: '',
+      style: { backgroundColor: solidTokenToHex(background) },
+    };
+  }
+
+  if (isGradientToken(background)) {
+    const gradient = GRADIENT_STYLE_MAP[background] ?? null;
+    if (gradient) {
+      return {
+        className: '',
+        style: {
+          backgroundImage: gradient,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        },
+      };
+    }
+  }
+
+  const className =
+    slideBackgroundClassNames[(background as SlideBackgroundPreset) ?? 'default'] ??
+    slideBackgroundClassNames.default;
+
+  return { className, style: undefined };
 };
 
 const resolveFeatureOverviewTransparency = (
@@ -862,8 +901,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     };
   }, [onPositionPanelChange]);
 
-  const slideBackgroundClass =
-    slideBackgroundClassNames[settings.backgroundColor] ?? slideBackgroundClassNames.default;
+  const { className: slideBackgroundClass, style: slideBackgroundStyle } = useMemo(
+    () => resolveSlideBackground(settings.backgroundColor),
+    [settings.backgroundColor],
+  );
 
   const containerClasses =
     viewMode === 'horizontal'
@@ -928,7 +969,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
                   !canEdit && 'opacity-90'
                 )}
-                style={{ height: CANVAS_STAGE_HEIGHT }}
+                style={{ height: CANVAS_STAGE_HEIGHT, ...slideBackgroundStyle }}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
@@ -1070,12 +1111,30 @@ const MIN_OBJECT_HEIGHT = 120;
 const MIN_TEXT_OBJECT_WIDTH = 140;
 const MIN_TEXT_OBJECT_HEIGHT = 60;
 
-const layoutOverlayBackgrounds: Record<CardColor, string> = {
-  default: 'from-purple-500 via-pink-500 to-orange-400',
-  blue: 'from-blue-500 via-cyan-500 to-teal-400',
-  purple: 'from-violet-500 via-purple-500 to-fuchsia-400',
-  green: 'from-emerald-500 via-green-500 to-lime-400',
-  orange: 'from-orange-500 via-amber-500 to-yellow-400',
+const resolveCardOverlayStyle = (color: CardColor): React.CSSProperties => {
+  if (isSolidToken(color)) {
+    return {
+      backgroundColor: solidTokenToHex(color),
+    };
+  }
+
+  if (isKnownGradientId(color)) {
+    const gradient = GRADIENT_STYLE_MAP[color];
+    if (gradient) {
+      return {
+        backgroundImage: gradient,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      };
+    }
+  }
+
+  const fallback = GRADIENT_STYLE_MAP.default;
+  return {
+    backgroundImage: fallback,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+  };
 };
 
 const CANVAS_STAGE_HEIGHT = 520;
@@ -1095,7 +1154,7 @@ const LayoutOverlay: React.FC<{
     return null;
   }
 
-  const gradient = layoutOverlayBackgrounds[color] ?? layoutOverlayBackgrounds.default;
+  const overlayStyle = useMemo(() => resolveCardOverlayStyle(color), [color]);
   const wrapperClass = cn(
     'pointer-events-none absolute inset-0 overflow-hidden transition-all duration-300 ease-out',
     'shadow-[0_32px_72px_-32px_rgba(76,29,149,0.45)]',
@@ -1109,7 +1168,7 @@ const LayoutOverlay: React.FC<{
       className="h-full w-full object-cover"
     />
   ) : (
-    <div className={cn('h-full w-full bg-gradient-to-br', gradient)} />
+    <div className="h-full w-full" style={overlayStyle} />
   );
 
   if (layout === 'full') {

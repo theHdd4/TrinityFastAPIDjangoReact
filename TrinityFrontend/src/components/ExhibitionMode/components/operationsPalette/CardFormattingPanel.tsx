@@ -15,33 +15,83 @@ import {
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
-import { ColorTray } from '@/templates/color-tray';
+import {
+  ColorTray,
+  DEFAULT_GRADIENT_COLOR_OPTIONS,
+  DEFAULT_SOLID_COLOR_OPTIONS,
+  DEFAULT_SOLID_SECTION,
+  DEFAULT_GRADIENT_SECTION,
+} from '@/templates/color-tray';
+import type { ColorTrayOption, ColorTraySection } from '@/templates/color-tray';
 import type { PresentationSettings } from '../../store/exhibitionStore';
 
-const layoutColorOptions: Array<{
-  id: PresentationSettings['cardColor'];
-  label: string;
-  swatchClass: string;
-}> = [
-  { id: 'default', label: 'Default', swatchClass: 'bg-gradient-to-br from-purple-500 via-pink-500 to-orange-400' },
-  { id: 'blue', label: 'Blue', swatchClass: 'bg-gradient-to-br from-blue-500 via-cyan-500 to-teal-400' },
-  { id: 'purple', label: 'Purple', swatchClass: 'bg-gradient-to-br from-violet-500 via-purple-500 to-fuchsia-400' },
-  { id: 'green', label: 'Green', swatchClass: 'bg-gradient-to-br from-emerald-500 via-green-500 to-lime-400' },
-  { id: 'orange', label: 'Orange', swatchClass: 'bg-gradient-to-br from-orange-500 via-amber-500 to-yellow-400' },
+const backgroundPresetOptions: readonly ColorTrayOption[] = [
+  {
+    id: 'default',
+    label: 'Default',
+    swatchClassName: 'bg-card',
+    ariaLabel: 'Use default slide background',
+  },
+  {
+    id: 'ivory',
+    label: 'Ivory',
+    swatchStyle: { backgroundColor: '#fef3c7' },
+  },
+  {
+    id: 'slate',
+    label: 'Soft Slate',
+    swatchStyle: { backgroundColor: '#e2e8f0' },
+  },
+  {
+    id: 'charcoal',
+    label: 'Charcoal Mist',
+    swatchStyle: { backgroundColor: '#d4d4d4' },
+  },
+  {
+    id: 'indigo',
+    label: 'Indigo Haze',
+    swatchStyle: { backgroundColor: '#e0e7ff' },
+  },
+  {
+    id: 'emerald',
+    label: 'Emerald Veil',
+    swatchStyle: { backgroundColor: '#d1fae5' },
+  },
+  {
+    id: 'rose',
+    label: 'Rose Quartz',
+    swatchStyle: { backgroundColor: '#ffe4e6' },
+  },
 ];
 
-const backgroundColorOptions: Array<{
-  id: PresentationSettings['backgroundColor'];
-  label: string;
-  swatchClass: string;
-}> = [
-  { id: 'default', label: 'Default', swatchClass: 'bg-muted/40' },
-  { id: 'ivory', label: 'Ivory', swatchClass: 'bg-amber-100' },
-  { id: 'slate', label: 'Soft Slate', swatchClass: 'bg-slate-200' },
-  { id: 'charcoal', label: 'Charcoal Mist', swatchClass: 'bg-neutral-300' },
-  { id: 'indigo', label: 'Indigo Haze', swatchClass: 'bg-indigo-100' },
-  { id: 'emerald', label: 'Emerald Veil', swatchClass: 'bg-emerald-100' },
-  { id: 'rose', label: 'Rose Quartz', swatchClass: 'bg-rose-100' },
+const backgroundGradientOptions = DEFAULT_GRADIENT_COLOR_OPTIONS.filter(option =>
+  option.id.startsWith('gradient-'),
+) as readonly ColorTrayOption[];
+
+const layoutColorSections: readonly ColorTraySection[] = [
+  {
+    id: DEFAULT_GRADIENT_SECTION.id,
+    label: DEFAULT_GRADIENT_SECTION.label,
+    options: DEFAULT_GRADIENT_COLOR_OPTIONS,
+  },
+  {
+    id: DEFAULT_SOLID_SECTION.id,
+    label: DEFAULT_SOLID_SECTION.label,
+    options: DEFAULT_SOLID_COLOR_OPTIONS,
+  },
+];
+
+const backgroundColorSections: readonly ColorTraySection[] = [
+  {
+    id: 'solids',
+    label: 'Solid colors',
+    options: [...backgroundPresetOptions, ...DEFAULT_SOLID_COLOR_OPTIONS] as readonly ColorTrayOption[],
+  },
+  {
+    id: 'gradients',
+    label: 'Gradients',
+    options: backgroundGradientOptions,
+  },
 ];
 
 interface CardFormattingPanelProps {
@@ -241,17 +291,13 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
             </div>
           </div>
           <ColorTray
-            options={layoutColorOptions.map(option => ({
-              id: option.id,
-              label: option.label,
-              swatchClassName: option.swatchClass,
-            }))}
+            sections={layoutColorSections}
             selectedId={settings.cardColor}
             onSelect={option =>
               onUpdateSettings({ cardColor: option.id as PresentationSettings['cardColor'] })
             }
-            columns={layoutColorOptions.length}
             disabled={!canEdit || hasAccentImage}
+            defaultSectionId="gradients"
           />
         </section>
 
@@ -263,17 +309,13 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
             </div>
           </div>
           <ColorTray
-            options={backgroundColorOptions.map(option => ({
-              id: option.id,
-              label: option.label,
-              swatchClassName: option.swatchClass,
-            }))}
+            sections={backgroundColorSections}
             selectedId={settings.backgroundColor}
             onSelect={option =>
               onUpdateSettings({ backgroundColor: option.id as PresentationSettings['backgroundColor'] })
             }
-            columns={Math.min(backgroundColorOptions.length, 4)}
             disabled={!canEdit}
+            defaultSectionId="solids"
           />
         </section>
 

@@ -8,9 +8,19 @@ import {
   type ExhibitionLayoutResponse,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
+import type {
+  GradientColorId,
+  GradientColorToken,
+  SolidColorToken,
+} from '@/templates/color-tray';
+import {
+  isKnownGradientId,
+  isSolidToken,
+  isGradientToken,
+} from '@/templates/color-tray';
 
-export type CardColor = 'default' | 'blue' | 'purple' | 'green' | 'orange';
-export type SlideBackgroundColor =
+export type CardColor = GradientColorId | SolidColorToken;
+export type SlideBackgroundPreset =
   | 'default'
   | 'ivory'
   | 'slate'
@@ -18,6 +28,7 @@ export type SlideBackgroundColor =
   | 'indigo'
   | 'emerald'
   | 'rose';
+export type SlideBackgroundColor = SlideBackgroundPreset | SolidColorToken | GradientColorToken;
 export type CardWidth = 'M' | 'L';
 export type ContentAlignment = 'top' | 'center' | 'bottom';
 export type CardLayout = 'none' | 'top' | 'bottom' | 'right' | 'left' | 'full';
@@ -25,8 +36,7 @@ export type CardLayout = 'none' | 'top' | 'bottom' | 'right' | 'left' | 'full';
 const DEFAULT_CARD_LAYOUT: CardLayout = 'right';
 
 const CARD_LAYOUTS: readonly CardLayout[] = ['none', 'top', 'bottom', 'right', 'left', 'full'] as const;
-const CARD_COLORS: readonly CardColor[] = ['default', 'blue', 'purple', 'green', 'orange'] as const;
-const SLIDE_BACKGROUND_COLORS: readonly SlideBackgroundColor[] = [
+const SLIDE_BACKGROUND_PRESETS: readonly SlideBackgroundPreset[] = [
   'default',
   'ivory',
   'slate',
@@ -373,11 +383,41 @@ const isValidDateString = (value: unknown): value is string => {
   return Number.isFinite(parsed);
 };
 
-const isValidCardColor = (value: unknown): value is CardColor =>
-  typeof value === 'string' && (CARD_COLORS as readonly string[]).includes(value);
+const isValidCardColor = (value: unknown): value is CardColor => {
+  if (typeof value !== 'string') {
+    return false;
+  }
 
-const isValidBackgroundColor = (value: unknown): value is SlideBackgroundColor =>
-  typeof value === 'string' && (SLIDE_BACKGROUND_COLORS as readonly string[]).includes(value);
+  if (isSolidToken(value)) {
+    return true;
+  }
+
+  if (isKnownGradientId(value)) {
+    return true;
+  }
+
+  return false;
+};
+
+const isValidBackgroundColor = (value: unknown): value is SlideBackgroundColor => {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  if ((SLIDE_BACKGROUND_PRESETS as readonly string[]).includes(value)) {
+    return true;
+  }
+
+  if (isSolidToken(value)) {
+    return true;
+  }
+
+  if (isGradientToken(value)) {
+    return true;
+  }
+
+  return false;
+};
 
 const isValidCardWidth = (value: unknown): value is CardWidth =>
   typeof value === 'string' && (CARD_WIDTHS as readonly string[]).includes(value);
