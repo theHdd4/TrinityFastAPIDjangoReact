@@ -71,6 +71,10 @@ const TRANSPARENT_OUTLINE_OPTION: ColorTrayOption = {
       </svg>
     </div>
   ),
+  groupId: 'utility',
+  groupLabel: 'Utility',
+  groupOrder: -2,
+  toneOrder: 0,
 };
 
 const OUTLINE_SOLID_OPTIONS = [

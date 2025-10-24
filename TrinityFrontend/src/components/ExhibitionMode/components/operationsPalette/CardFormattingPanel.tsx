@@ -25,57 +25,68 @@ import {
 import type { ColorTrayOption, ColorTraySection } from '@/templates/color-tray';
 import type { PresentationSettings } from '../../store/exhibitionStore';
 
-const backgroundPresetOptions: readonly ColorTrayOption[] = [
-  {
-    id: 'default',
-    label: 'Default',
-    tooltip: 'Default (system color)',
-    swatchClassName: 'bg-card',
-    ariaLabel: 'Use default slide background',
-  },
-  {
-    id: 'ivory',
-    label: 'Ivory',
-    value: '#fef3c7',
-    tooltip: 'Ivory (#FEF3C7)',
-    swatchStyle: { backgroundColor: '#fef3c7' },
-  },
-  {
-    id: 'slate',
-    label: 'Soft Slate',
-    value: '#e2e8f0',
-    tooltip: 'Soft Slate (#E2E8F0)',
-    swatchStyle: { backgroundColor: '#e2e8f0' },
-  },
-  {
-    id: 'charcoal',
-    label: 'Charcoal Mist',
-    value: '#d4d4d4',
-    tooltip: 'Charcoal Mist (#D4D4D4)',
-    swatchStyle: { backgroundColor: '#d4d4d4' },
-  },
-  {
-    id: 'indigo',
-    label: 'Indigo Haze',
-    value: '#e0e7ff',
-    tooltip: 'Indigo Haze (#E0E7FF)',
-    swatchStyle: { backgroundColor: '#e0e7ff' },
-  },
-  {
-    id: 'emerald',
-    label: 'Emerald Veil',
-    value: '#d1fae5',
-    tooltip: 'Emerald Veil (#D1FAE5)',
-    swatchStyle: { backgroundColor: '#d1fae5' },
-  },
-  {
-    id: 'rose',
-    label: 'Rose Quartz',
-    value: '#ffe4e6',
-    tooltip: 'Rose Quartz (#FFE4E6)',
-    swatchStyle: { backgroundColor: '#ffe4e6' },
-  },
-];
+const BACKGROUND_PRESET_GROUP_ID = 'preset-backgrounds';
+const BACKGROUND_PRESET_GROUP_LABEL = 'Presets';
+
+const backgroundPresetOptions: readonly ColorTrayOption[] = (
+  [
+    {
+      id: 'default',
+      label: 'Default',
+      tooltip: 'Default (system color)',
+      swatchClassName: 'bg-card',
+      ariaLabel: 'Use default slide background',
+    },
+    {
+      id: 'ivory',
+      label: 'Ivory',
+      value: '#fef3c7',
+      tooltip: 'Ivory (#FEF3C7)',
+      swatchStyle: { backgroundColor: '#fef3c7' },
+    },
+    {
+      id: 'slate',
+      label: 'Soft Slate',
+      value: '#e2e8f0',
+      tooltip: 'Soft Slate (#E2E8F0)',
+      swatchStyle: { backgroundColor: '#e2e8f0' },
+    },
+    {
+      id: 'charcoal',
+      label: 'Charcoal Mist',
+      value: '#d4d4d4',
+      tooltip: 'Charcoal Mist (#D4D4D4)',
+      swatchStyle: { backgroundColor: '#d4d4d4' },
+    },
+    {
+      id: 'indigo',
+      label: 'Indigo Haze',
+      value: '#e0e7ff',
+      tooltip: 'Indigo Haze (#E0E7FF)',
+      swatchStyle: { backgroundColor: '#e0e7ff' },
+    },
+    {
+      id: 'emerald',
+      label: 'Emerald Veil',
+      value: '#d1fae5',
+      tooltip: 'Emerald Veil (#D1FAE5)',
+      swatchStyle: { backgroundColor: '#d1fae5' },
+    },
+    {
+      id: 'rose',
+      label: 'Rose Quartz',
+      value: '#ffe4e6',
+      tooltip: 'Rose Quartz (#FFE4E6)',
+      swatchStyle: { backgroundColor: '#ffe4e6' },
+    },
+  ] as const
+).map((option, index) => ({
+  ...option,
+  groupId: BACKGROUND_PRESET_GROUP_ID,
+  groupLabel: BACKGROUND_PRESET_GROUP_LABEL,
+  groupOrder: -1,
+  toneOrder: index,
+})) as readonly ColorTrayOption[];
 
 const backgroundGradientOptions = DEFAULT_GRADIENT_COLOR_OPTIONS.filter(option =>
   option.id.startsWith('gradient-'),
