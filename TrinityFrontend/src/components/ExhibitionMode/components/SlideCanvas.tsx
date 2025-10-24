@@ -1,4 +1,12 @@
-import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { User, Calendar, Sparkles, StickyNote, Settings, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -269,6 +277,7 @@ interface SlideCanvasProps {
   presenterName?: string | null;
   onPositionPanelChange?: (panel: ReactNode | null) => void;
   onUndo?: () => void;
+  presentationMode?: boolean;
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -287,6 +296,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   presenterName,
   onPositionPanelChange,
   onUndo,
+  presentationMode = false,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -298,6 +308,18 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const [positionPanelTarget, setPositionPanelTarget] = useState<{ objectId: string } | null>(null);
   const accentImageInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const presentationContainerRef = useRef<HTMLDivElement | null>(null);
+  const [canvasDimensions, setCanvasDimensions] = useState({
+    width: DEFAULT_PRESENTATION_WIDTH,
+    height: CANVAS_STAGE_HEIGHT,
+  });
+  const latestCanvasDimensionsRef = useRef(canvasDimensions);
+  const presentationModeRef = useRef(presentationMode);
+  const presentationBaseDimensionsRef = useRef<{
+    width: number;
+    height: number;
+  } | null>(null);
+  const [presentationScale, setPresentationScale] = useState(1);
 
   const slideObjects = useExhibitionStore(
     useCallback(state => state.slideObjectsByCardId[card.id] ?? [], [card.id]),
@@ -335,6 +357,113 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     );
     return match ?? null;
   }, [positionPanelTarget, slideObjects]);
+
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || typeof ResizeObserver !== 'function') {
+      return;
+    }
+
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setCanvasDimensions(prev => {
+          if (presentationModeRef.current) {
+            return prev;
+          }
+          const nextWidth = width > 0 ? width : prev.width;
+          const nextHeight = height > 0 ? height : prev.height;
+          if (Math.abs(prev.width - nextWidth) < 0.5 && Math.abs(prev.height - nextHeight) < 0.5) {
+            return prev;
+          }
+          return {
+            width: nextWidth,
+            height: nextHeight,
+          };
+        });
+      }
+    });
+
+    observer.observe(canvas);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [card.id]);
+
+  useEffect(() => {
+    latestCanvasDimensionsRef.current = canvasDimensions;
+  }, [canvasDimensions]);
+
+  useEffect(() => {
+    presentationModeRef.current = presentationMode;
+    if (presentationMode) {
+      if (!presentationBaseDimensionsRef.current) {
+        const { width, height } = latestCanvasDimensionsRef.current;
+        presentationBaseDimensionsRef.current = {
+          width: width > 0 ? width : DEFAULT_PRESENTATION_WIDTH,
+          height: height > 0 ? height : CANVAS_STAGE_HEIGHT,
+        };
+      }
+    } else {
+      presentationBaseDimensionsRef.current = null;
+    }
+  }, [presentationMode]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (!presentationMode) {
+      setPresentationScale(1);
+      return;
+    }
+
+    const updateScale = () => {
+      const container = presentationContainerRef.current;
+      if (!container) {
+        return;
+      }
+
+      const baseDimensions = presentationBaseDimensionsRef.current ?? latestCanvasDimensionsRef.current;
+      const baseWidth = baseDimensions.width || DEFAULT_PRESENTATION_WIDTH;
+      const baseHeight = baseDimensions.height || CANVAS_STAGE_HEIGHT;
+      if (baseWidth === 0 || baseHeight === 0) {
+        return;
+      }
+
+      const availableWidth = Math.max(container.clientWidth - PRESENTATION_PADDING, 0);
+      const availableHeight = Math.max(container.clientHeight - PRESENTATION_PADDING, 0);
+      if (availableWidth === 0 || availableHeight === 0) {
+        setPresentationScale(1);
+        return;
+      }
+
+      const scale = Math.min(availableWidth / baseWidth, availableHeight / baseHeight);
+      setPresentationScale(scale > 0 ? scale : 1);
+    };
+
+    updateScale();
+
+    const resizeObserver = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => updateScale())
+      : null;
+
+    const container = presentationContainerRef.current;
+    if (container && resizeObserver) {
+      resizeObserver.observe(container);
+    }
+
+    window.addEventListener('resize', updateScale);
+
+    return () => {
+      window.removeEventListener('resize', updateScale);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
+    };
+  }, [canvasDimensions.height, canvasDimensions.width, presentationMode]);
 
   const handleBulkUpdate = useCallback(
     (updates: Record<string, Partial<SlideObject>>) => {
@@ -908,8 +1037,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     [settings.backgroundColor],
   );
 
-  const containerClasses =
-    viewMode === 'horizontal'
+  const containerClasses = presentationMode
+    ? 'flex-1 h-full overflow-hidden bg-neutral-950 flex items-center justify-center'
+    : viewMode === 'horizontal'
       ? 'flex-1 h-full overflow-auto bg-muted/20'
       : cn(
           'w-full overflow-hidden border rounded-3xl transition-all duration-300 shadow-sm bg-muted/20',
@@ -921,10 +1051,12 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   return (
     <div className={containerClasses}>
       <div
-        className={cn(
-          'mx-auto transition-all duration-300 p-8',
-          cardWidthClass,
-        )}
+        ref={presentationMode ? presentationContainerRef : undefined}
+        className={
+          presentationMode
+            ? 'flex h-full w-full items-center justify-center p-12 bg-neutral-950'
+            : cn('mx-auto transition-all duration-300 p-8', cardWidthClass)
+        }
       >
         {viewMode === 'vertical' && (
           <div className="mb-4 flex items-center justify-between">
@@ -940,41 +1072,59 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         )}
 
         <div className="space-y-4">
-          {canEdit && activeTextToolbar && (
+          {!presentationMode && canEdit && activeTextToolbar && (
             <div className="relative mb-4 flex w-full justify-center">
               <div className="z-30 drop-shadow-xl">{activeTextToolbar}</div>
             </div>
           )}
 
-          <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-2 text-foreground">
-              <User className="h-4 w-4" />
-              <span className="font-semibold">Exhibition presenter:</span>
-              <span>{presenterLabel}</span>
+          {!presentationMode && (
+            <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-2 text-foreground">
+                <User className="h-4 w-4" />
+                <span className="font-semibold">Exhibition presenter:</span>
+                <span>{presenterLabel}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-foreground" />
+                <span className="font-semibold text-foreground">Last edited:</span>
+                <span>{formattedLastEdited}</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-foreground" />
-              <span className="font-semibold text-foreground">Last edited:</span>
-              <span>{formattedLastEdited}</span>
-            </div>
-          </div>
+          )}
 
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
               <div
                 className={cn(
-                  'relative w-full overflow-hidden shadow-2xl transition-all duration-300',
+                  'relative overflow-hidden shadow-2xl transition-all duration-300',
+                  presentationMode ? 'w-auto' : 'w-full',
                   slideBackgroundClass,
                   settings.fullBleed
                     ? 'rounded-none border-0'
                     : 'rounded-[28px] border border-border/60',
                   isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
-                  !canEdit && 'opacity-90'
+                  !canEdit && !presentationMode && 'opacity-90'
                 )}
-                style={{ height: CANVAS_STAGE_HEIGHT, ...slideBackgroundStyle }}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
+                style={
+                  presentationMode
+                    ? {
+                        ...slideBackgroundStyle,
+                        height:
+                          (presentationBaseDimensionsRef.current?.height ?? canvasDimensions.height) ||
+                          CANVAS_STAGE_HEIGHT,
+                        width:
+                          (presentationBaseDimensionsRef.current?.width ?? canvasDimensions.width) ||
+                          DEFAULT_PRESENTATION_WIDTH,
+                        transform: `scale(${presentationScale})`,
+                        transformOrigin: 'center center',
+                        margin: '0 auto',
+                      }
+                    : { height: CANVAS_STAGE_HEIGHT, ...slideBackgroundStyle }
+                }
+                onDragOver={presentationMode ? undefined : handleDragOver}
+                onDragLeave={presentationMode ? undefined : handleDragLeave}
+                onDrop={presentationMode ? undefined : handleDrop}
               >
                 <CanvasStage
                   ref={canvasRef}
@@ -1004,43 +1154,45 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   onUndo={onUndo}
                 />
 
-                <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
-                  <Button
-                    size="icon"
-                    variant="secondary"
-                    className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
-                    onClick={() => {
-                      setShowFormatPanel(false);
-                      setPositionPanelTarget(null);
-                      onShowNotes?.();
-                    }}
-                    type="button"
-                  >
-                    <StickyNote className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="secondary"
-                    className={cn(
-                      'h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background transition-colors',
-                      showFormatPanel && 'border border-primary/40 text-primary'
-                    )}
-                    onClick={() => setShowFormatPanel(prev => !prev)}
-                    disabled={!canEdit}
-                    type="button"
-                  >
-                    <Settings className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="secondary"
-                    className="h-8 w-8 bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-lg hover:from-purple-600 hover:to-pink-600"
-                    type="button"
-                    disabled={!canEdit}
-                  >
-                    <Sparkles className="h-4 w-4" />
-                  </Button>
-                </div>
+                {!presentationMode && (
+                  <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+                    <Button
+                      size="icon"
+                      variant="secondary"
+                      className="h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background"
+                      onClick={() => {
+                        setShowFormatPanel(false);
+                        setPositionPanelTarget(null);
+                        onShowNotes?.();
+                      }}
+                      type="button"
+                    >
+                      <StickyNote className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="secondary"
+                      className={cn(
+                        'h-8 w-8 bg-background/90 backdrop-blur-sm shadow-lg hover:bg-background transition-colors',
+                        showFormatPanel && 'border border-primary/40 text-primary'
+                      )}
+                      onClick={() => setShowFormatPanel(prev => !prev)}
+                      disabled={!canEdit}
+                      type="button"
+                    >
+                      <Settings className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="secondary"
+                      className="h-8 w-8 bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-lg hover:from-purple-600 hover:to-pink-600"
+                      type="button"
+                      disabled={!canEdit}
+                    >
+                      <Sparkles className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
               </div>
 
             </div>
@@ -1096,7 +1248,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             </div>
           )}
 
-          {viewMode === 'horizontal' && (
+          {viewMode === 'horizontal' && !presentationMode && (
             <div className="mt-6 text-center">
               <span className="inline-block px-4 py-2 bg-muted rounded-full text-sm font-medium text-muted-foreground">
                 Slide {slideNumber} of {totalSlides}
@@ -1141,6 +1293,8 @@ const resolveCardOverlayStyle = (color: CardColor): React.CSSProperties => {
 };
 
 const CANVAS_STAGE_HEIGHT = 520;
+const DEFAULT_PRESENTATION_WIDTH = 960;
+const PRESENTATION_PADDING = 160;
 const TOP_LAYOUT_MIN_HEIGHT = 210;
 const BOTTOM_LAYOUT_MIN_HEIGHT = 220;
 const SIDE_LAYOUT_MIN_WIDTH = 280;

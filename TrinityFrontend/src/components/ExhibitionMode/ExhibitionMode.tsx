@@ -43,6 +43,76 @@ const SLIDESHOW_ANIMATION_MS = 450;
 const EXHIBITION_STORAGE_KEY = 'exhibition-layout-cache';
 const LAB_STORAGE_KEY = 'laboratory-layout-cards';
 
+type TransitionPhase = 'prepare' | 'active';
+
+type PresentationTransitionState = {
+  fromIndex: number;
+  toIndex: number;
+  direction: 'forward' | 'backward';
+  transition: SlideshowTransition;
+  phase: TransitionPhase;
+};
+
+type TransitionFrames = {
+  outgoing: { initial: React.CSSProperties; final: React.CSSProperties };
+  incoming: { initial: React.CSSProperties; final: React.CSSProperties };
+};
+
+const TRANSITION_LAYER_BASE_STYLE: React.CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
+  willChange: 'opacity, transform',
+};
+
+const getTransitionFrames = (
+  transition: SlideshowTransition,
+  direction: 'forward' | 'backward',
+): TransitionFrames => {
+  switch (transition) {
+    case 'slide': {
+      const offset = direction === 'forward' ? -48 : 48;
+      const enteringOffset = -offset;
+      return {
+        outgoing: {
+          initial: { opacity: 1, transform: 'translateX(0px) scale(1)' },
+          final: { opacity: 0, transform: `translateX(${offset}px) scale(1)` },
+        },
+        incoming: {
+          initial: { opacity: 0, transform: `translateX(${enteringOffset}px) scale(1)` },
+          final: { opacity: 1, transform: 'translateX(0px) scale(1)' },
+        },
+      };
+    }
+    case 'zoom':
+      return {
+        outgoing: {
+          initial: { opacity: 1, transform: 'scale(1)' },
+          final: { opacity: 0, transform: 'scale(0.96)' },
+        },
+        incoming: {
+          initial: { opacity: 0, transform: 'scale(1.04)' },
+          final: { opacity: 1, transform: 'scale(1)' },
+        },
+      };
+    case 'fade':
+    default:
+      return {
+        outgoing: {
+          initial: { opacity: 1, transform: 'translateX(0px) scale(1)' },
+          final: { opacity: 0, transform: 'translateX(0px) scale(1)' },
+        },
+        incoming: {
+          initial: { opacity: 0, transform: 'translateX(0px) scale(1)' },
+          final: { opacity: 1, transform: 'translateX(0px) scale(1)' },
+        },
+      };
+  }
+};
+
 const contextsEqual = (a: ProjectContext | null, b: ProjectContext | null): boolean => {
   if (!a && !b) {
     return true;
@@ -70,6 +140,7 @@ const ExhibitionMode = () => {
     lastLoadedContext,
     addSlideObject,
     removeSlideObject,
+    removeSlide,
     slideObjectsByCardId,
   } = useExhibitionStore();
   const { toast } = useToast();
@@ -92,7 +163,7 @@ const ExhibitionMode = () => {
   }, [user]);
 
   const [currentSlide, setCurrentSlide] = useState(0);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isPresentationView, setIsPresentationView] = useState(false);
   const [draggedAtom, setDraggedAtom] = useState<
     { atom: DroppedAtom; cardId: string; origin: 'catalogue' | 'slide' }
     | null
@@ -124,8 +195,10 @@ const ExhibitionMode = () => {
   });
 
   const [isSlideshowActive, setIsSlideshowActive] = useState(false);
-  const [slideshowTransform, setSlideshowTransform] = useState('translateX(0px) scale(1)');
-  const [slideshowOpacity, setSlideshowOpacity] = useState(1);
+  const [presentationTransition, setPresentationTransition] =
+    useState<PresentationTransitionState | null>(null);
+
+  const presentationTransitionRef = useRef<PresentationTransitionState | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const verticalSlideRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -133,7 +206,6 @@ const ExhibitionMode = () => {
   const isRestoringSnapshotRef = useRef(false);
   const lastSerializedCardsRef = useRef<string | null>(null);
   const autoAdvanceTimerRef = useRef<number | null>(null);
-  const transitionTimerRef = useRef<number | null>(null);
   const hasRequestedInitialLoadRef = useRef(false);
 
   const generateTextBoxId = useCallback(() => {
@@ -164,45 +236,10 @@ const ExhibitionMode = () => {
     }
   }, []);
 
-  const clearTransitionTimer = useCallback(() => {
-    if (transitionTimerRef.current !== null) {
-      window.clearTimeout(transitionTimerRef.current);
-      transitionTimerRef.current = null;
-    }
-  }, []);
-
   const clearSlideshowTimers = useCallback(() => {
     clearAutoAdvanceTimer();
-    clearTransitionTimer();
-  }, [clearAutoAdvanceTimer, clearTransitionTimer]);
+  }, [clearAutoAdvanceTimer]);
 
-
-  const getTransitionStates = useCallback(
-    (transition: SlideshowTransition, direction: 'forward' | 'backward') => {
-      switch (transition) {
-        case 'slide': {
-          const exitOffset = direction === 'forward' ? -48 : 48;
-          const enterOffset = -exitOffset;
-          return {
-            exit: { opacity: 0, transform: `translateX(${exitOffset}px) scale(1)` },
-            enter: { opacity: 0, transform: `translateX(${enterOffset}px) scale(1)` },
-          };
-        }
-        case 'zoom':
-          return {
-            exit: { opacity: 0, transform: 'scale(0.96)' },
-            enter: { opacity: 0, transform: 'scale(1.04)' },
-          };
-        case 'fade':
-        default:
-          return {
-            exit: { opacity: 0, transform: 'translateX(0px) scale(1)' },
-            enter: { opacity: 0, transform: 'translateX(0px) scale(1)' },
-          };
-      }
-    },
-    [],
-  );
 
   const slideIndexByCardId = useMemo(() => {
     const lookup: Record<string, number> = {};
@@ -213,10 +250,36 @@ const ExhibitionMode = () => {
   }, [exhibitedCards]);
 
   useEffect(() => {
-    if (isFullscreen) {
+    presentationTransitionRef.current = presentationTransition;
+  }, [presentationTransition]);
+
+  useEffect(() => {
+    if (isPresentationView) {
       setOperationsPanelState(null);
     }
-  }, [isFullscreen]);
+  }, [isPresentationView]);
+
+  useEffect(() => {
+    if (!presentationTransition) {
+      return;
+    }
+
+    if (presentationTransition.phase === 'prepare') {
+      const frame = window.requestAnimationFrame(() => {
+        setPresentationTransition(state =>
+          state ? { ...state, phase: 'active' } : null,
+        );
+      });
+
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    const timeout = window.setTimeout(() => {
+      setPresentationTransition(null);
+    }, SLIDESHOW_ANIMATION_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [presentationTransition]);
 
   useEffect(() => {
     if (!canEdit) {
@@ -226,49 +289,44 @@ const ExhibitionMode = () => {
 
   const runSlideTransition = useCallback(
     (targetIndex: number, direction: 'forward' | 'backward' = 'forward') => {
-      if (targetIndex === currentSlide || targetIndex < 0 || targetIndex >= exhibitedCards.length) {
+      if (
+        targetIndex === currentSlide ||
+        targetIndex < 0 ||
+        targetIndex >= exhibitedCards.length ||
+        presentationTransitionRef.current
+      ) {
         return;
       }
 
-      const nextCard = exhibitedCards[targetIndex];
       const transitionType =
-        nextCard?.presentationSettings?.slideshowTransition ??
+        exhibitedCards[targetIndex]?.presentationSettings?.slideshowTransition ??
         DEFAULT_PRESENTATION_SETTINGS.slideshowTransition;
 
-      const { exit, enter } = getTransitionStates(transitionType, direction);
       clearSlideshowTimers();
-      setSlideshowTransform(exit.transform);
-      setSlideshowOpacity(exit.opacity);
 
-      transitionTimerRef.current = window.setTimeout(() => {
-        setCurrentSlide(targetIndex);
-        setSlideshowTransform(enter.transform);
-        setSlideshowOpacity(enter.opacity);
+      setPresentationTransition({
+        fromIndex: currentSlide,
+        toIndex: targetIndex,
+        direction,
+        transition: transitionType,
+        phase: 'prepare',
+      });
 
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            setSlideshowTransform('translateX(0px) scale(1)');
-            setSlideshowOpacity(1);
-          });
-        });
-
-        transitionTimerRef.current = null;
-      }, SLIDESHOW_ANIMATION_MS);
+      setCurrentSlide(targetIndex);
     },
     [
       clearSlideshowTimers,
       currentSlide,
       exhibitedCards,
-      getTransitionStates,
     ],
   );
 
   const handleStopSlideshow = useCallback(() => {
     setIsSlideshowActive(false);
     clearSlideshowTimers();
-    setSlideshowTransform('translateX(0px) scale(1)');
-    setSlideshowOpacity(1);
-  }, [clearSlideshowTimers]);
+    setPresentationTransition(null);
+    setIsPresentationView(false);
+  }, [clearSlideshowTimers, setIsPresentationView]);
 
   const goToSlide = useCallback(
     (targetIndex: number, direction: 'forward' | 'backward' = 'forward') => {
@@ -302,30 +360,20 @@ const ExhibitionMode = () => {
     [currentSlide, goToSlide, handleStopSlideshow, isSlideshowActive],
   );
 
-  const toggleFullscreen = useCallback(() => {
-    setIsFullscreen(prev => {
-      if (prev && isSlideshowActive) {
-        handleStopSlideshow();
-      }
-      return !prev;
-    });
-  }, [handleStopSlideshow, isSlideshowActive]);
-
   const handleStartSlideshow = useCallback(() => {
     if (exhibitedCards.length === 0) {
       return;
     }
 
     clearSlideshowTimers();
-    setSlideshowTransform('translateX(0px) scale(1)');
-    setSlideshowOpacity(1);
+    setPresentationTransition(null);
     setIsSlideshowActive(true);
     setShowThumbnails(false);
     setShowGridView(false);
     setOperationsPanelState(null);
 
-    if (!isFullscreen) {
-      setIsFullscreen(true);
+    if (!isPresentationView) {
+      setIsPresentationView(true);
     }
 
     if (viewMode !== 'horizontal') {
@@ -334,7 +382,7 @@ const ExhibitionMode = () => {
   }, [
     currentSlide,
     exhibitedCards,
-    isFullscreen,
+    isPresentationView,
     clearSlideshowTimers,
     setShowGridView,
     setShowThumbnails,
@@ -342,7 +390,7 @@ const ExhibitionMode = () => {
   ]);
 
   const scheduleAutoAdvance = useCallback(() => {
-    if (!isSlideshowActive || exhibitedCards.length <= 1) {
+    if (!isSlideshowActive || exhibitedCards.length <= 1 || presentationTransition) {
       clearAutoAdvanceTimer();
       return;
     }
@@ -368,6 +416,7 @@ const ExhibitionMode = () => {
     currentSlide,
     exhibitedCards,
     isSlideshowActive,
+    presentationTransition,
     runSlideTransition,
   ]);
 
@@ -529,13 +578,6 @@ const ExhibitionMode = () => {
   }, [currentSlide, exhibitedCards.length]);
 
   useEffect(() => {
-    if (!isSlideshowActive) {
-      setSlideshowTransform('translateX(0px) scale(1)');
-      setSlideshowOpacity(1);
-    }
-  }, [currentSlide, isSlideshowActive]);
-
-  useEffect(() => {
     const isEditableKeyboardEvent = (event: KeyboardEvent): boolean => {
       const isEditableTarget = (target: EventTarget | null | undefined): boolean => {
         if (!target || !(target instanceof HTMLElement)) {
@@ -611,18 +653,8 @@ const ExhibitionMode = () => {
           break;
         }
         case 'Escape':
-          if (isFullscreen) {
-            setIsFullscreen(false);
-          }
-          if (isSlideshowActive) {
+          if (isPresentationView || isSlideshowActive) {
             handleStopSlideshow();
-          }
-          break;
-        case 'f':
-        case 'F':
-          if (e.ctrlKey || e.metaKey) {
-            e.preventDefault();
-            toggleFullscreen();
           }
           break;
       }
@@ -634,10 +666,9 @@ const ExhibitionMode = () => {
     currentSlide,
     exhibitedCards.length,
     goToSlide,
-    isFullscreen,
+    isPresentationView,
     isSlideshowActive,
     handleStopSlideshow,
-    toggleFullscreen,
   ]);
 
   useEffect(() => {
@@ -654,41 +685,10 @@ const ExhibitionMode = () => {
   }, [clearSlideshowTimers]);
 
   useEffect(() => {
-    const element = containerRef.current;
-    if (!element || typeof element.requestFullscreen !== 'function') {
-      return;
-    }
-
-    if (isFullscreen) {
-      if (!document.fullscreenElement) {
-        element.requestFullscreen().catch(() => {
-          setIsFullscreen(false);
-        });
-      }
-    } else if (document.fullscreenElement === element && typeof document.exitFullscreen === 'function') {
-      document.exitFullscreen().catch(() => {
-        /* ignore */
-      });
-    }
-  }, [isFullscreen]);
-
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      if (!document.fullscreenElement) {
-        setIsFullscreen(false);
-        handleStopSlideshow();
-      }
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, [handleStopSlideshow]);
-
-  useEffect(() => {
-    if (!isFullscreen && isSlideshowActive) {
+    if (!isPresentationView && isSlideshowActive) {
       handleStopSlideshow();
     }
-  }, [handleStopSlideshow, isFullscreen, isSlideshowActive]);
+  }, [handleStopSlideshow, isPresentationView, isSlideshowActive]);
 
   const handleUndo = useCallback(() => {
     if (!canEdit) {
@@ -1141,6 +1141,57 @@ const ExhibitionMode = () => {
     });
   }, [addBlankSlide, canEdit, currentSlide, exhibitedCards.length, toast]);
 
+  const handleDeleteSlide = useCallback(() => {
+    const targetCard = exhibitedCards[currentSlide];
+    if (!targetCard) {
+      return;
+    }
+
+    if (isSlideshowActive) {
+      handleStopSlideshow();
+    }
+
+    const nextIndex = currentSlide >= exhibitedCards.length - 1 ? Math.max(0, currentSlide - 1) : currentSlide;
+
+    setNotes(prev => {
+      if (!prev || Object.keys(prev).length === 0) {
+        return prev;
+      }
+
+      const updated: Record<number, string> = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        const numericKey = Number(key);
+        if (!Number.isFinite(numericKey)) {
+          return;
+        }
+
+        if (numericKey === currentSlide) {
+          return;
+        }
+
+        const adjustedIndex = numericKey > currentSlide ? numericKey - 1 : numericKey;
+        updated[adjustedIndex] = value as string;
+      });
+
+      return updated;
+    });
+
+    removeSlide(targetCard.id);
+    setCurrentSlide(nextIndex);
+    toast({
+      title: 'Slide deleted',
+      description: 'The slide and its contents have been removed from your presentation.',
+    });
+  }, [
+    currentSlide,
+    exhibitedCards,
+    handleStopSlideshow,
+    isSlideshowActive,
+    removeSlide,
+    setNotes,
+    toast,
+  ]);
+
   const handleOperationsPalettePanelChange = useCallback((panel: ReactNode | null) => {
     if (panel) {
       setOperationsPanelState({ type: 'custom', node: panel });
@@ -1266,6 +1317,37 @@ const ExhibitionMode = () => {
     ...currentCard?.presentationSettings,
   };
 
+  const transitionFrames = presentationTransition
+    ? getTransitionFrames(presentationTransition.transition, presentationTransition.direction)
+    : null;
+
+  const outgoingCard =
+    presentationTransition && presentationTransition.fromIndex >= 0
+      ? exhibitedCards[presentationTransition.fromIndex] ?? null
+      : null;
+
+  const incomingCard =
+    presentationTransition && presentationTransition.toIndex >= 0
+      ? exhibitedCards[presentationTransition.toIndex] ?? null
+      : null;
+
+  const renderPresentationSlide = (card: LayoutCard, index: number, keySuffix: string) => (
+    <SlideCanvas
+      key={`${card.id}-${keySuffix}`}
+      card={card}
+      slideNumber={index + 1}
+      totalSlides={exhibitedCards.length}
+      onDrop={handleDrop}
+      canEdit={false}
+      onPresentationChange={handlePresentationChange}
+      onRemoveAtom={handleRemoveAtom}
+      onTitleChange={handleTitleChange}
+      presenterName={presenterDisplayName}
+      viewMode="horizontal"
+      presentationMode
+    />
+  );
+
   const handleCreateTextBox = useCallback(() => {
     const targetCard = exhibitedCards[currentSlide];
     if (!targetCard) {
@@ -1374,14 +1456,6 @@ const ExhibitionMode = () => {
     notes,
     operationsPanelState,
   ]);
-  const slideWrapperStyle: React.CSSProperties | undefined = isSlideshowActive
-    ? {
-        opacity: slideshowOpacity,
-        transform: slideshowTransform,
-        transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
-      }
-    : undefined;
-
   const emptyCanvas = (
     <div className="flex-1 flex items-center justify-center bg-muted/10">
       <div className="max-w-md text-center space-y-3 px-6">
@@ -1399,14 +1473,14 @@ const ExhibitionMode = () => {
       ref={containerRef}
       className={cn(
         'flex flex-col bg-background transition-all duration-300',
-        isFullscreen ? 'fixed inset-0 z-50' : 'h-screen'
+        isPresentationView ? 'fixed inset-0 z-50' : 'h-screen'
       )}
     >
-      {!isFullscreen && <Header />}
-      {!isFullscreen && renderHeaderSection()}
+      {!isPresentationView && <Header />}
+      {!isPresentationView && renderHeaderSection()}
 
       <div className="flex-1 flex overflow-hidden">
-        {!isFullscreen && (
+        {!isPresentationView && (
           <div className="flex h-full flex-shrink-0">
             <div className="bg-background border-r border-border transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
               <div className="p-3 border-b border-border flex items-center justify-center">
@@ -1476,30 +1550,82 @@ const ExhibitionMode = () => {
           </div>
         )}
 
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div
+          className={cn(
+            'flex-1 flex flex-col overflow-hidden bg-background',
+            isPresentationView && 'bg-neutral-950',
+          )}
+        >
           {viewMode === 'horizontal' ? (
-            <div
-              className={cn('flex-1 flex flex-col', isSlideshowActive && 'justify-center')}
-              style={slideWrapperStyle}
-            >
+            <div className={cn('flex-1 flex flex-col', isSlideshowActive && 'justify-center')}>
               {currentCard ? (
-                <SlideCanvas
-                  card={currentCard}
-                  slideNumber={currentSlide + 1}
-                  totalSlides={exhibitedCards.length}
-                  onDrop={handleDrop}
-                  draggedAtom={draggedAtom}
-                  canEdit={canEdit}
-                  onPresentationChange={handlePresentationChange}
-                  onRemoveAtom={handleRemoveAtom}
-                  onShowNotes={handleShowNotesPanel}
-                  viewMode="horizontal"
-                  isActive
-                  onTitleChange={handleTitleChange}
-                  presenterName={presenterDisplayName}
-                  onPositionPanelChange={handleOperationsPalettePanelChange}
-                  onUndo={handleUndo}
-                />
+                isPresentationView ? (
+                  <div className="relative flex-1">
+                    {presentationTransition && transitionFrames && outgoingCard && incomingCard ? (
+                      <>
+                        <div
+                          style={{
+                            ...TRANSITION_LAYER_BASE_STYLE,
+                            ...(presentationTransition.phase === 'prepare'
+                              ? transitionFrames.outgoing.initial
+                              : transitionFrames.outgoing.final),
+                            zIndex: 2,
+                          }}
+                        >
+                          {renderPresentationSlide(
+                            outgoingCard,
+                            presentationTransition.fromIndex,
+                            'outgoing',
+                          )}
+                        </div>
+                        <div
+                          style={{
+                            ...TRANSITION_LAYER_BASE_STYLE,
+                            ...(presentationTransition.phase === 'prepare'
+                              ? transitionFrames.incoming.initial
+                              : transitionFrames.incoming.final),
+                            zIndex: 3,
+                          }}
+                        >
+                          {renderPresentationSlide(
+                            incomingCard,
+                            presentationTransition.toIndex,
+                            'incoming',
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <div
+                        style={{
+                          ...TRANSITION_LAYER_BASE_STYLE,
+                          transition: 'none',
+                          zIndex: 1,
+                        }}
+                      >
+                        {renderPresentationSlide(currentCard, currentSlide, 'active')}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <SlideCanvas
+                    card={currentCard}
+                    slideNumber={currentSlide + 1}
+                    totalSlides={exhibitedCards.length}
+                    onDrop={handleDrop}
+                    draggedAtom={draggedAtom}
+                    canEdit={canEdit && !isPresentationView}
+                    onPresentationChange={handlePresentationChange}
+                    onRemoveAtom={handleRemoveAtom}
+                    onShowNotes={handleShowNotesPanel}
+                    viewMode="horizontal"
+                    isActive
+                    onTitleChange={handleTitleChange}
+                    presenterName={presenterDisplayName}
+                    onPositionPanelChange={handleOperationsPalettePanelChange}
+                    onUndo={handleUndo}
+                    presentationMode={isPresentationView}
+                  />
+                )
               ) : (
                 emptyCanvas
               )}
@@ -1538,9 +1664,8 @@ const ExhibitionMode = () => {
           )}
         </div>
 
-        {!isFullscreen && (
+        {!isPresentationView && (
           <OperationsPalette
-            onFullscreen={toggleFullscreen}
             onExport={() => setIsExportOpen(true)}
             onGridView={() => setShowGridView(true)}
             onCreateTextBox={handleCreateTextBox}
@@ -1563,18 +1688,17 @@ const ExhibitionMode = () => {
           }
           setShowGridView(true);
         }}
-        onFullscreen={toggleFullscreen}
         onExport={() => {
           if (isSlideshowActive) {
             handleStopSlideshow();
           }
           setIsExportOpen(true);
         }}
-        isFullscreen={isFullscreen}
         onAddSlide={handleAddSlide}
         onToggleViewMode={handleToggleViewMode}
         viewMode={viewMode}
         canEdit={canEdit}
+        onDeleteSlide={handleDeleteSlide}
         onSlideshowStart={handleStartSlideshow}
         onSlideshowStop={handleStopSlideshow}
         isSlideshowActive={isSlideshowActive}
