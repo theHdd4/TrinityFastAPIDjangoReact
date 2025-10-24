@@ -1,5 +1,5 @@
 import type { SlideObject } from '../../../store/exhibitionStore';
-import type { TextBoxFormatting } from './types';
+import type { TextBoxFormatting, TextStylePreset } from './types';
 
 export const DEFAULT_TEXT_BOX_TEXT = 'Double click to edit';
 
@@ -21,7 +21,7 @@ export const FONT_MENU_SECTIONS = [
   {
     id: 'recommended' as const,
     label: 'Recommended fonts',
-    fonts: ['Open Sans', 'DM Sans', 'Dream Avenue', 'BROWN SUGAR', 'HK Grotesk', 'Canva Sans'],
+    fonts: ['Open Sans', 'DM Sans', 'Dream Avenue', 'BROWN SUGAR', 'HK Grotesk', 'Comic Sans'],
   },
   {
     id: 'recent' as const,
@@ -33,7 +33,7 @@ export const FONT_MENU_SECTIONS = [
     label: 'Popular fonts',
     fonts: [
       'Arimo',
-      'Canva Sans',
+      'Comic Sans',
       'Montserrat',
       'Open Sans',
       'Poppins',
@@ -53,7 +53,6 @@ export const FONT_MENU_SECTIONS = [
       'Lora',
       'The Seasons',
       'Prastice',
-      'Comic Sans',
     ],
   },
 ] as const;
@@ -66,7 +65,6 @@ export const FONT_CATEGORY_LOOKUP: Record<string, readonly FontFilterChipId[]> =
   'Archivo Black': ['display'],
   'BROWN SUGAR': ['display'],
   Brittany: ['handwriting'],
-  'Canva Sans': ['corporate'],
   'Clear Sans': ['corporate'],
   'Comic Sans': ['handwriting', 'defaults'],
   'DM Sans': ['corporate'],
@@ -92,19 +90,32 @@ export const FONT_CATEGORY_LOOKUP: Record<string, readonly FontFilterChipId[]> =
 };
 
 const FONT_MENU_LIST = FONT_MENU_SECTIONS.flatMap(section => section.fonts);
-const FONT_OPTION_BASE = ['Open Sans', ...FONT_MENU_LIST];
+const FONT_OPTION_BASE = ['Comic Sans', 'Open Sans', ...FONT_MENU_LIST];
 
 export const FONT_OPTIONS = Array.from(new Set(FONT_OPTION_BASE));
 
 export const DEFAULT_TEXT_BOX_WIDTH = 360;
 export const DEFAULT_TEXT_BOX_HEIGHT = 180;
 
+export const TEXT_STYLE_PRESETS: readonly TextStylePreset[] = [
+  { id: 'small', label: 'Small text', suffix: '/sm', fontSize: 12, previewSize: 14 },
+  { id: 'normal', label: 'Normal text', suffix: '/md', fontSize: 16, previewSize: 16 },
+  { id: 'large', label: 'Large text', suffix: '/lg', fontSize: 20, previewSize: 18 },
+  { id: 'heading-4', label: 'Heading 4', suffix: '####', fontSize: 24, previewSize: 20, bold: true },
+  { id: 'heading-3', label: 'Heading 3', suffix: '###', fontSize: 28, previewSize: 22, bold: true },
+  { id: 'heading-2', label: 'Heading 2', suffix: '##', fontSize: 34, previewSize: 24, bold: true },
+  { id: 'heading-1', label: 'Heading 1', suffix: '#', fontSize: 40, previewSize: 26, bold: true },
+  { id: 'title', label: 'Title', suffix: '!', fontSize: 48, previewSize: 28, bold: true },
+  { id: 'display', label: 'Display', suffix: '!!', fontSize: 56, previewSize: 30, bold: true },
+  { id: 'monster', label: 'Monster', suffix: '!!!', fontSize: 64, previewSize: 32, bold: true },
+];
+
 const createDefaultFormatting = (
   overrides: Partial<TextBoxFormatting> = {},
 ): TextBoxFormatting => ({
   text: DEFAULT_TEXT_BOX_TEXT,
   fontSize: 16,
-  fontFamily: FONT_OPTIONS[0],
+  fontFamily: 'Comic Sans',
   bold: false,
   italic: false,
   underline: false,

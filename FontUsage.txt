@@ -14,8 +14,8 @@ Overview
    corresponding Google Fonts stylesheet (or rely on built-in system fonts) and
    ask the browser to load the family via the FontFace API.
 3. The formatted text always stores the display name, while the rendering logic
-   converts it to the mapped CSS font-family so that aliases such as “Canva Sans”
-   (rendered with DM Sans) continue to work.
+   converts it to the mapped CSS font-family so that aliases such as “Comic Sans”
+   (rendered with the Comic Neue web font and system fallbacks) continue to work.
 
 Using the existing fonts
 ------------------------

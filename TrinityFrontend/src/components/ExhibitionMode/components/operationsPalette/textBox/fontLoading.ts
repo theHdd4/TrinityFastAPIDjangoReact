@@ -97,7 +97,11 @@ const FONT_RESOURCES: Record<string, FontResource> = {
     fontFace: 'Montserrat',
     stylesheets: GOOGLE_FONT_STYLESHEETS['Montserrat'],
   },
-  'Canva Sans': { cssFamily: 'DM Sans', fontFace: 'DM Sans', stylesheets: GOOGLE_FONT_STYLESHEETS['DM Sans'] },
+  'Canva Sans': {
+    cssFamily: '"Comic Sans MS", "Comic Sans", "Comic Neue", cursive',
+    fontFace: 'Comic Neue',
+    stylesheets: GOOGLE_FONT_STYLESHEETS['Comic Neue'],
+  },
   'Clear Sans': { cssFamily: 'Open Sans', fontFace: 'Open Sans', stylesheets: GOOGLE_FONT_STYLESHEETS['Open Sans'] },
   'Times New Roman MT': {
     cssFamily: '"Times New Roman", Times, serif',
@@ -120,9 +124,9 @@ const FONT_RESOURCES: Record<string, FontResource> = {
   'GAGALN': { cssFamily: 'Anton', fontFace: 'Anton', stylesheets: GOOGLE_FONT_STYLESHEETS['Anton'] },
   'Prastice': { cssFamily: 'Pacifico', fontFace: 'Pacifico', stylesheets: GOOGLE_FONT_STYLESHEETS['Pacifico'] },
   'Comic Sans': {
-    cssFamily: '"Comic Sans MS", "Comic Sans", cursive',
-    fontFace: 'Comic Sans MS',
-    stylesheets: [],
+    cssFamily: '"Comic Sans MS", "Comic Sans", "Comic Neue", cursive',
+    fontFace: 'Comic Neue',
+    stylesheets: GOOGLE_FONT_STYLESHEETS['Comic Neue'],
   },
 };
 

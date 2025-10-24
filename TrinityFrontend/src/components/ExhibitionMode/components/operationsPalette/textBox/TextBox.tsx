@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 import TextBoxToolbar from './TextBoxToolbar';
 import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from './constants';
 import { resolveFontFamily } from './fontLoading';
-import type { TextBoxFormatting } from './types';
+import type { TextBoxFormatting, TextStylePreset } from './types';
 
 interface SlideTextBoxObjectProps {
   id: string;
@@ -369,6 +369,30 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     updateFormatting({ fontSize: clampFontSize(localFormatting.fontSize - 2) });
   }, [localFormatting.fontSize, updateFormatting]);
 
+  const handleApplyTextStyle = useCallback(
+    (preset: TextStylePreset) => {
+      const updates: Partial<TextBoxFormatting> = {
+        fontSize: clampFontSize(preset.fontSize),
+      };
+
+      if (typeof preset.bold === 'boolean') {
+        updates.bold = preset.bold;
+      }
+      if (typeof preset.italic === 'boolean') {
+        updates.italic = preset.italic;
+      }
+      if (typeof preset.underline === 'boolean') {
+        updates.underline = preset.underline;
+      }
+      if (typeof preset.strikethrough === 'boolean') {
+        updates.strikethrough = preset.strikethrough;
+      }
+
+      updateFormatting(updates);
+    },
+    [updateFormatting],
+  );
+
   const handleDoubleClick = () => {
     if (!canEdit) {
       return;
@@ -401,6 +425,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         fontSize={localFormatting.fontSize}
         onIncreaseFontSize={handleIncreaseFontSize}
         onDecreaseFontSize={handleDecreaseFontSize}
+        onApplyTextStyle={handleApplyTextStyle}
         bold={localFormatting.bold}
         italic={localFormatting.italic}
         underline={localFormatting.underline}
@@ -426,6 +451,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
       handleBulletedList,
       handleColor,
       handleDecreaseFontSize,
+      handleApplyTextStyle,
       handleFontFamily,
       handleNumberedList,
       handleIncreaseFontSize,
@@ -481,8 +507,9 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
       <div
         ref={textRef}
         className={cn(
-          'h-full w-full overflow-auto outline-none empty:before:absolute empty:before:left-3 empty:before:top-2 empty:before:text-sm empty:before:text-muted-foreground/70 empty:before:content-[attr(data-placeholder)]',
+          'relative h-full w-full outline-none empty:before:absolute empty:before:left-3 empty:before:top-2 empty:before:text-sm empty:before:text-muted-foreground/70 empty:before:content-[attr(data-placeholder)]',
           canEdit ? 'cursor-text' : 'cursor-default select-none',
+          canEdit && (isSelected || isEditing) ? 'overflow-auto' : 'overflow-hidden',
         )}
         contentEditable={canEdit && isEditing}
         suppressContentEditableWarning
