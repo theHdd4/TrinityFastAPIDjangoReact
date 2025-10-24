@@ -3,14 +3,37 @@ import type { TextBoxFormatting } from './types';
 
 export const DEFAULT_TEXT_BOX_TEXT = 'Double click to edit';
 
-export const FONT_OPTIONS = [
-  'Times New Roman',
-  'Arial',
-  'Helvetica',
-  'Georgia',
-  'Courier New',
-  'Verdana',
+export const FONT_FILTER_CHIPS = ['Handwriting', 'Corporate', 'DEFAULTS', 'DISPLAY'] as const;
+
+export const FONT_MENU_SECTIONS = [
+  {
+    id: 'document' as const,
+    label: 'Document fonts',
+    fonts: ['Migra', 'The Seasons', 'XB Niloofar'],
+  },
+  {
+    id: 'recommended' as const,
+    label: 'Recommended fonts',
+    fonts: ['Open Sans', 'DM Sans', 'Dream Avenue', 'BROWN SUGAR', 'HK Grotesk'],
+  },
+  {
+    id: 'recent' as const,
+    label: 'Recently used',
+    fonts: ['Roboto', 'Clear Sans', 'Poppins', 'Times New Roman MT'],
+  },
+  {
+    id: 'popular' as const,
+    label: 'Popular fonts',
+    fonts: ['Arimo'],
+  },
 ] as const;
+
+export type FontMenuSection = (typeof FONT_MENU_SECTIONS)[number];
+
+const FONT_MENU_LIST = FONT_MENU_SECTIONS.flatMap(section => section.fonts);
+const FONT_OPTION_BASE = ['Open Sans', ...FONT_MENU_LIST];
+
+export const FONT_OPTIONS = Array.from(new Set(FONT_OPTION_BASE));
 
 export const DEFAULT_TEXT_BOX_WIDTH = 360;
 export const DEFAULT_TEXT_BOX_HEIGHT = 180;
