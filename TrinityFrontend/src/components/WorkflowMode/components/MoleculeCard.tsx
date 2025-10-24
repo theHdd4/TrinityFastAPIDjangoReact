@@ -80,68 +80,121 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
   // Get category color based on atom categories from laboratory mode
   const getCategoryColor = (atomName: string) => {
     // Map atom names to their categories based on laboratory mode categories
+    // Supports both display names and atom IDs (kebab-case)
     const atomCategoryMap: Record<string, string> = {
       // Data Sources - Blue
       'Data Upload Validate': 'blue',
-      'CSV Import': 'blue', 
+      'data-upload-validate': 'blue',
+      'CSV Import': 'blue',
+      'csv-import': 'blue', 
       'JSON Import': 'blue',
+      'json-import': 'blue',
       'Database Connect': 'blue',
+      'database-connect': 'blue',
       
       // Data Processing - Green
       'Feature Overview': 'green',
+      'feature-overview': 'green',
       'GroupBy Weighted Average': 'green',
+      'groupby-weighted-average': 'green',
+      'groupby-wtg-avg': 'green',
       'Merge': 'green',
+      'merge': 'green',
       'Concat': 'green',
+      'concat': 'green',
       'Scope Selector': 'green',
+      'scope-selector': 'green',
       'Row Operations': 'green',
+      'row-operations': 'green',
       'Column Classifier': 'green',
-      'Create Column': 'green',
+      'column-classifier': 'green',
+      'Create and Transform Features': 'green',
+      'create-column': 'green',
       'Dataframe Operations': 'green',
+      'dataframe-operations': 'green',
       
       // Analytics - Purple
       'Correlation': 'purple',
+      'correlation': 'purple',
       'EDA': 'purple',
+      'eda': 'purple',
+      'Explore': 'purple',
+      'explore': 'purple',
       'Descriptive Stats': 'purple',
+      'descriptive-stats': 'purple',
       'Trend Analysis': 'purple',
+      'trend-analysis': 'purple',
       
       // Machine Learning - Orange
       'Auto-regressive models': 'orange',
+      'auto-regressive-models': 'orange',
       'Model Output - Non CSF': 'orange',
+      'model-output-non-csf': 'orange',
       'Single Modeling': 'orange',
+      'single-modeling': 'orange',
       'Bulk Model Output - CSF': 'orange',
+      'bulk-model-output-csf': 'orange',
       'Bulk Modeling': 'orange',
+      'bulk-modeling': 'orange',
       'Model Performance': 'orange',
+      'model-performance': 'orange',
       'Model Selector': 'orange',
+      'model-selector': 'orange',
       'Clustering': 'orange',
+      'clustering': 'orange',
+      'Build model - feature based': 'orange',
+      'build-model-feature-based': 'orange',
+      'Regression - feature based': 'orange',
+      'regression-feature-based': 'orange',
+      'Select models - feature': 'orange',
+      'select-models-feature': 'orange',
+      'Evaluate models - feature': 'orange',
+      'evaluate-models-feature': 'orange',
+      'Select models - auto regressive': 'orange',
+      'select-models-auto-regressive': 'orange',
+      'Evaluate models - auto regressive': 'orange',
+      'evaluate-models-auto-regressive': 'orange',
       
       // Visualization - Pink
       'Chart Maker': 'pink',
+      'chart-maker': 'pink',
       'Text Box': 'pink',
+      'text-box': 'pink',
       'Scatter Plot': 'pink',
+      'scatter-plot': 'pink',
       'Histogram': 'pink',
+      'histogram': 'pink',
       
       // Planning & Optimization - Indigo
       'Scenario Planner': 'indigo',
+      'scenario-planner': 'indigo',
       'Optimizer': 'indigo',
+      'optimizer': 'indigo',
       
       // Utilities - Gray
       'Atom Maker': 'gray',
+      'atom-maker': 'gray',
       'Read Presentation Summarize': 'gray',
+      'read-presentation-summarize': 'gray',
       
       // Business Intelligence - Emerald
       'Base Price Estimator': 'emerald',
+      'base-price-estimator': 'emerald',
       'Promo Estimator': 'emerald',
+      'promo-estimator': 'emerald',
       'Promo Comparison': 'emerald',
+      'promo-comparison': 'emerald',
       'Promotion Intensity Analysis': 'emerald',
+      'promotion-intensity-analysis': 'emerald',
     };
     
-    return atomCategoryMap[atomName] || 'gray';
+    return atomCategoryMap[atomName] || 'blue'; // Default to blue instead of gray for better visual appeal
   };
 
   const getMoleculeColor = () => {
     // Determine the primary category color based on the first atom in the molecule
     const primaryAtom = molecule.atoms[0];
-    const categoryColor = primaryAtom ? getCategoryColor(primaryAtom) : 'gray';
+    const categoryColor = primaryAtom ? getCategoryColor(primaryAtom) : 'blue';
     
     switch (categoryColor) {
       case 'blue': return 'bg-gradient-to-br from-blue-500 to-blue-600 shadow-blue-200/50';
@@ -152,7 +205,7 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
       case 'indigo': return 'bg-gradient-to-br from-indigo-500 to-indigo-600 shadow-indigo-200/50';
       case 'emerald': return 'bg-gradient-to-br from-emerald-500 to-emerald-600 shadow-emerald-200/50';
       case 'gray': return 'bg-gradient-to-br from-gray-500 to-gray-600 shadow-gray-200/50';
-      default: return 'bg-gradient-to-br from-gray-500 to-gray-600 shadow-gray-200/50';
+      default: return 'bg-gradient-to-br from-blue-500 to-blue-600 shadow-blue-200/50';
     }
   };
 
@@ -168,24 +221,41 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
       case 'indigo': return 'border-2 border-indigo-400 hover:border-indigo-500 hover:shadow-indigo-200/30';
       case 'emerald': return 'border-2 border-emerald-400 hover:border-emerald-500 hover:shadow-emerald-200/30';
       case 'gray': return 'border-2 border-gray-400 hover:border-gray-500 hover:shadow-gray-200/30';
-      default: return 'border-2 border-gray-400 hover:border-gray-500 hover:shadow-gray-200/30';
+      default: return 'border-2 border-blue-400 hover:border-blue-500 hover:shadow-blue-200/30';
     }
   };
 
   const getMoleculeBackground = () => {
     const primaryAtom = molecule.atoms[0];
-    const categoryColor = primaryAtom ? getCategoryColor(primaryAtom) : 'gray';
+    const categoryColor = primaryAtom ? getCategoryColor(primaryAtom) : 'blue';
     
     switch (categoryColor) {
-      case 'blue': return 'bg-gradient-to-br from-blue-50 to-blue-100 border-l-4 border-blue-400 shadow-blue-100/50';
-      case 'green': return 'bg-gradient-to-br from-green-50 to-green-100 border-l-4 border-green-400 shadow-green-100/50';
-      case 'purple': return 'bg-gradient-to-br from-purple-50 to-purple-100 border-l-4 border-purple-400 shadow-purple-100/50';
-      case 'orange': return 'bg-gradient-to-br from-orange-50 to-orange-100 border-l-4 border-orange-400 shadow-orange-100/50';
-      case 'pink': return 'bg-gradient-to-br from-pink-50 to-pink-100 border-l-4 border-pink-400 shadow-pink-100/50';
-      case 'indigo': return 'bg-gradient-to-br from-indigo-50 to-indigo-100 border-l-4 border-indigo-400 shadow-indigo-100/50';
-      case 'emerald': return 'bg-gradient-to-br from-emerald-50 to-emerald-100 border-l-4 border-emerald-400 shadow-emerald-100/50';
-      case 'gray': return 'bg-gradient-to-br from-gray-50 to-gray-100 border-l-4 border-gray-400 shadow-gray-100/50';
-      default: return 'bg-gradient-to-br from-gray-50 to-gray-100 border-l-4 border-gray-400 shadow-gray-100/50';
+      case 'blue': return 'border-l-4 border-l-blue-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      case 'green': return 'border-l-4 border-l-green-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      case 'purple': return 'border-l-4 border-l-purple-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      case 'orange': return 'border-l-4 border-l-orange-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      case 'pink': return 'border-l-4 border-l-pink-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      case 'indigo': return 'border-l-4 border-l-indigo-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      case 'emerald': return 'border-l-4 border-l-emerald-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      case 'gray': return 'border-l-4 border-l-gray-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+      default: return 'border-l-4 border-l-blue-500 bg-white shadow-lg hover:shadow-xl transition-all duration-300';
+    }
+  };
+
+  const getBadgeColor = () => {
+    const primaryAtom = molecule.atoms[0];
+    const categoryColor = primaryAtom ? getCategoryColor(primaryAtom) : 'blue';
+    
+    switch (categoryColor) {
+      case 'blue': return 'bg-gradient-to-r from-blue-500 to-purple-600 text-white border-0';
+      case 'green': return 'bg-gradient-to-r from-green-500 to-teal-600 text-white border-0';
+      case 'purple': return 'bg-gradient-to-r from-purple-500 to-pink-600 text-white border-0';
+      case 'orange': return 'bg-gradient-to-r from-orange-500 to-red-600 text-white border-0';
+      case 'pink': return 'bg-gradient-to-r from-pink-500 to-rose-600 text-white border-0';
+      case 'indigo': return 'bg-gradient-to-r from-indigo-500 to-blue-600 text-white border-0';
+      case 'emerald': return 'bg-gradient-to-r from-emerald-500 to-green-600 text-white border-0';
+      case 'gray': return 'bg-gradient-to-r from-gray-500 to-slate-600 text-white border-0';
+      default: return 'bg-gradient-to-r from-blue-500 to-purple-600 text-white border-0';
     }
   };
 
@@ -215,7 +285,7 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className={`space-y-4 p-4 rounded-xl ${getMoleculeBackground()} shadow-sm hover:shadow-md transition-all duration-200`}>
+        <div className={`space-y-4 p-4 rounded-xl ${getMoleculeBackground()} transition-all duration-200`}>
           {/* Collapsible Molecule Header */}
           <div 
             className={`flex items-center gap-2.5 pb-3 border-b border-gray-200/50 cursor-pointer hover:bg-white/30 p-2 -m-2 rounded-lg transition-all duration-200 ${canEdit ? 'cursor-grab active:cursor-grabbing' : 'cursor-not-allowed'}`}
@@ -233,7 +303,7 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
           )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-white bg-gradient-to-r from-blue-500 to-purple-500 px-3 py-1.5 rounded-full font-medium shadow-sm">
+          <span className={`text-xs px-3 py-1.5 rounded-full font-medium shadow-sm ${getBadgeColor()}`}>
             {molecule.atoms.length} atoms
           </span>
           <button className="p-1 hover:bg-gray-100 rounded transition-colors">
@@ -248,7 +318,7 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
 
       {/* Collapsible Atoms Content */}
       {!isCollapsed && (
-        <div className="grid grid-cols-3 gap-3 pl-2">
+        <div className="grid grid-cols-4 gap-3 pl-2">
           {molecule.atoms.map((atom, index) => {
             const borderColor = getAtomBorderColor(atom);
             const AtomIcon = getAtomIcon(atom);
@@ -258,21 +328,12 @@ const MoleculeCard: React.FC<MoleculeCardProps> = ({ molecule, canEdit, onDelete
               <div key={index} className="flex flex-col items-center space-y-2">
                 <div 
                   className={cn(
-                    "group relative flex items-center justify-center bg-white rounded-xl hover:shadow-lg cursor-pointer transition-all duration-300 h-14 w-14 transform hover:scale-105",
+                     "group relative flex items-center justify-center bg-white rounded-xl hover:shadow-lg cursor-pointer transition-all duration-300 h-10 w-10 transform hover:scale-105",
                     borderColor
                   )}
                   title={atom}
                 >
-                  <AtomIcon className={`h-6 w-6 transition-colors ${
-                    categoryColor === 'blue' ? 'text-blue-600 group-hover:text-blue-700' :
-                    categoryColor === 'green' ? 'text-green-600 group-hover:text-green-700' :
-                    categoryColor === 'purple' ? 'text-purple-600 group-hover:text-purple-700' :
-                    categoryColor === 'orange' ? 'text-orange-600 group-hover:text-orange-700' :
-                    categoryColor === 'pink' ? 'text-pink-600 group-hover:text-pink-700' :
-                    categoryColor === 'indigo' ? 'text-indigo-600 group-hover:text-indigo-700' :
-                    categoryColor === 'emerald' ? 'text-emerald-600 group-hover:text-emerald-700' :
-                    'text-gray-600 group-hover:text-gray-700'
-                  }`} />
+                   <AtomIcon className="h-4 w-4 text-gray-600 group-hover:text-gray-700 transition-colors" />
                 </div>
                 <span className="text-xs text-gray-700 text-center leading-tight px-1 font-medium">
                   {atom}

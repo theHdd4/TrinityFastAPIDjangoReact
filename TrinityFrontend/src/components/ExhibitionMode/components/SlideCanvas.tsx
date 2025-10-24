@@ -2150,11 +2150,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               ? extractTextBoxFormatting(object.props as Record<string, unknown> | undefined)
               : null;
             const tableState = isTableObject ? readTableState(object) : null;
-            const featureOverviewAtomId =
+            const atomId =
               isAtomObject(object) && typeof object.props.atom.atomId === 'string'
                 ? object.props.atom.atomId
                 : null;
-            const isFeatureOverviewAtom = featureOverviewAtomId === 'feature-overview';
+            const isFeatureOverviewAtom = atomId === 'feature-overview';
+            const isChartMakerAtom = atomId === 'chart-maker';
+            const isEvaluateModelsFeatureAtom = atomId === 'evaluate-models-feature';
+            const shouldShowTitle = !isFeatureOverviewAtom && !isChartMakerAtom && !isEvaluateModelsFeatureAtom;
 
           return (
             <div
@@ -2194,7 +2197,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   transformOrigin: rotation !== 0 ? 'center center' : undefined,
                 }}
               >
-                {isAtomObject(object) && !isFeatureOverviewAtom && (
+                {isAtomObject(object) && shouldShowTitle && (
                   <div className="flex items-center gap-2 border-b border-border/60 bg-muted/10 px-4 py-2">
                     <div className={`h-2.5 w-2.5 rounded-full ${object.props.atom.color}`} />
                     <div className="flex flex-col">

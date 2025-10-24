@@ -10,7 +10,20 @@ const TrendAnalysis: React.FC<FeatureOverviewComponentProps> = ({ metadata, vari
   );
 
   return (
-    <div className="rounded-2xl border border-border bg-background/80 p-6 shadow-sm">
+    <div 
+      className="rounded-2xl border border-border bg-background/80 p-6 shadow-sm"
+      onContextMenu={(e) => {
+        // Prevent context menu in ExhibitionMode to match ChartMaker behavior
+        e.preventDefault();
+        e.stopPropagation();
+        e.nativeEvent.stopImmediatePropagation();
+      }}
+      onContextMenuCapture={(e) => {
+        // Additional capture phase prevention for context menu
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+    >
       {chartConfig ? (
         <TrendAnalysisChart config={chartConfig} />
       ) : (

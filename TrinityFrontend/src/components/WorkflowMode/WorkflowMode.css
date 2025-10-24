@@ -2,25 +2,50 @@
 .custom-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: hsl(var(--primary)) hsl(var(--border));
+  /* Ensure smooth scrolling */
+  scroll-behavior: smooth;
+  /* Better scroll momentum */
+  -webkit-overflow-scrolling: touch;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: hsl(var(--border) / 0.3);
-  border-radius: 3px;
+  background: hsl(var(--border) / 0.2);
+  border-radius: 4px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: hsl(var(--primary) / 0.6);
-  border-radius: 3px;
+  border-radius: 4px;
   transition: background 0.2s ease;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--primary) / 0.8);
+}
+
+.custom-scrollbar::-webkit-scrollbar-corner {
+  background: hsl(var(--border) / 0.2);
+}
+
+/* React Flow specific scroll improvements */
+.react-flow__pane {
+  cursor: grab;
+}
+
+.react-flow__pane:active {
+  cursor: grabbing;
+}
+
+/* Better canvas scrolling */
+.workflow-canvas-container {
+  overflow: auto !important;
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--primary)) hsl(var(--border));
 }
 
 /* Right panel scrollbar positioning */

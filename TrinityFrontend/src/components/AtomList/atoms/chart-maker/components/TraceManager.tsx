@@ -163,20 +163,16 @@ const TraceManager: React.FC<TraceManagerProps> = ({
 
   // Get available filter columns (columns that aren't already used as filters)
   const getAvailableFilterColumns = () => {
-    const usedAsAxis = new Set([chart.xAxis]);
-    traces.forEach(trace => {
-      if (trace.yAxis) usedAsAxis.add(trace.yAxis);
-    });
-    
     // Get existing filter columns from any trace (they should all have the same columns)
     const existingFilterColumns = traces.length > 0 
       ? Object.keys(traces[0].filters || {})
       : [];
     
-    return availableColumns.categorical.filter(col => 
-      !usedAsAxis.has(col) && 
-      !existingFilterColumns.includes(col) &&
-      getUniqueValues(col).length > 1
+    // Combine all columns (numeric and categorical) and exclude only those already used as filters
+    const allColumns = [...availableColumns.numeric, ...availableColumns.categorical];
+    
+    return allColumns.filter(col => 
+      !existingFilterColumns.includes(col)
     );
   };
 

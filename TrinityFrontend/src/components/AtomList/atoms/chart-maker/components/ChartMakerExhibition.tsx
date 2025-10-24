@@ -8,36 +8,35 @@ import { getActiveProjectContext } from '@/utils/projectEnv';
 import {
   fetchExhibitionConfiguration,
   saveExhibitionConfiguration,
-  loadSavedConfiguration,
   type ExhibitionAtomPayload,
   type ExhibitionComponentPayload,
   type ExhibitionConfigurationPayload,
 } from '@/lib/exhibition';
 import type {
-  EvaluateModelsFeatureExhibitionComponentType,
-  EvaluateModelsFeatureExhibitionSelection,
+  ChartMakerExhibitionComponentType,
+  ChartMakerExhibitionSelection,
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
-import EvaluateModelsFeature from '@/components/ExhibitionMode/components/atoms/EvaluateModelsFeature';
+import ChartMaker from '@/components/ExhibitionMode/components/atoms/ChartMaker';
 
-export interface EvaluateModelsFeatureExhibitionHandle {
+export interface ChartMakerExhibitionHandle {
   exhibit: () => Promise<void>;
   getSelectionCount: () => number;
 }
 
-interface EvaluateModelsFeatureExhibitionProps {
+interface ChartMakerExhibitionProps {
   atomId: string;
   cardId?: string | null;
   atomColor?: string | null;
-  selections: EvaluateModelsFeatureExhibitionSelection[];
+  selections: ChartMakerExhibitionSelection[];
   onRemoveSelection?: (key: string) => void;
   onRenameSelection?: (key: string, name: string) => void;
 }
 
-const EvaluateModelsFeatureExhibition = React.forwardRef<
-  EvaluateModelsFeatureExhibitionHandle,
-  EvaluateModelsFeatureExhibitionProps
+const ChartMakerExhibition = React.forwardRef<
+  ChartMakerExhibitionHandle,
+  ChartMakerExhibitionProps
 >(
   (
     {
@@ -81,38 +80,38 @@ const EvaluateModelsFeatureExhibition = React.forwardRef<
       return '';
     });
     const resolvedAtomTitle = useMemo(() => {
-      return sourceAtomTitle || 'Evaluate Models Feature';
+      return sourceAtomTitle || 'Chart Maker';
     }, [sourceAtomTitle]);
 
-    const highlightBackgroundClass = atomColor && atomColor.trim().length > 0 ? atomColor : 'bg-orange-100';
+  const highlightBackgroundClass = atomColor && atomColor.trim().length > 0 ? atomColor : 'bg-blue-100';
 
-    // Process selections to create proper metadata structure for preview and exhibition
-    const processedSelections = React.useMemo(() => {
-      return selections.map((selection) => {
-        // Create a metadata structure similar to FeatureOverview
-        const metadata = {
-          graphId: selection.graphId,
-          graphTitle: selection.graphTitle,
-          graphState: selection.graphState,
-          graphContext: selection.graphContext,
-          capturedAt: selection.capturedAt,
-          sourceAtomTitle: resolvedAtomTitle,
-        };
+  // Process selections to create proper metadata structure for preview and exhibition
+  const processedSelections = React.useMemo(() => {
+    return selections.map((selection) => {
+      // Create a metadata structure similar to FeatureOverview
+      const metadata = {
+        chartId: selection.chartId,
+        chartTitle: selection.chartTitle,
+        chartState: selection.chartState,
+        chartContext: selection.chartContext,
+        capturedAt: selection.capturedAt,
+        sourceAtomTitle: resolvedAtomTitle,
+      };
 
-        return {
-          id: selection.graphId || selection.key,
-          title: selection.graphTitle,
-          metadata,
-          selection,
-        };
-      });
-    }, [selections, resolvedAtomTitle]);
+      return {
+        id: selection.chartId || selection.key,
+        title: selection.chartTitle,
+        metadata,
+        selection,
+      };
+    });
+  }, [selections, resolvedAtomTitle]);
 
-    const handleExhibit = React.useCallback(async () => {
-        if (selectionCount === 0) {
+  const handleExhibit = React.useCallback(async () => {
+      if (selectionCount === 0) {
         toast({
-          title: 'Select graphs to exhibit',
-          description: 'Right-click on graph headings to stage graphs for exhibition.',
+          title: 'Select charts to exhibit',
+          description: 'Right-click on chart titles to stage charts for exhibition.',
           variant: 'destructive',
         });
         return;
@@ -122,7 +121,7 @@ const EvaluateModelsFeatureExhibition = React.forwardRef<
       if (!context || !context.client_name || !context.app_name || !context.project_name) {
         toast({
           title: 'Project details required',
-          description: 'Please choose a client, app, and project before exhibiting graphs.',
+          description: 'Please choose a client, app, and project before exhibiting charts.',
           variant: 'destructive',
         });
         return;
@@ -148,28 +147,11 @@ const EvaluateModelsFeatureExhibition = React.forwardRef<
             );
           }
         } catch (error) {
-          console.warn(
-            `[Exhibition] Failed to fetch existing exhibition configuration for project ${client_name}/${app_name}/${project_name}:`,
-            error,
+          console.warn('Unable to fetch existing exhibition configuration', error);
+          console.info(
+            `[Exhibition] Proceeding to create exhibition_catalogue entry for project ${client_name}/${app_name}/${project_name}`,
           );
         }
-
-        const exhibitedComponents: ExhibitionComponentPayload[] = processedSelections.map((processed) => {
-          // Deep clone the metadata for MongoDB storage, similar to ChartMaker
-          const metadataPayload = JSON.parse(JSON.stringify(processed.metadata));
-
-          return {
-            id: processed.id,
-            atomId: 'evaluate-models-feature',
-            title: `${processed.title} · Evaluate Models Feature`,
-            category: 'Evaluate Models Feature',
-            color: 'bg-orange-500',
-            metadata: metadataPayload,
-          };
-        });
-
-        // Use the same cardIdentifier pattern as ChartMaker and FeatureOverview
-        const cardIdentifierForStorage = cardId || atomId;
 
         const existingAtoms = Array.isArray(existingConfig?.atoms) ? existingConfig.atoms : [];
         const retainedAtoms = existingAtoms.filter((entry): entry is ExhibitionAtomPayload => {
@@ -183,36 +165,47 @@ const EvaluateModelsFeatureExhibition = React.forwardRef<
             return false;
           }
 
-          return identifier !== cardIdentifierForStorage;
+          return identifier !== cardIdentifier;
         });
 
+        const exhibitedComponents: ExhibitionComponentPayload[] = processedSelections.map(
+          ({ id, title, metadata }) => {
+            // Deep clone the metadata for MongoDB storage, similar to FeatureOverview
+            const metadataPayload = JSON.parse(JSON.stringify(metadata));
+
+            return {
+              id,
+              atomId: 'chart-maker',
+              title: `${title} · Chart Maker`,
+              category: 'Chart Maker',
+              color: 'bg-blue-500',
+              metadata: metadataPayload,
+            };
+          },
+        );
+
         const newEntry: ExhibitionAtomPayload = {
-          id: cardIdentifierForStorage,
+          id: cardIdentifier,
           atom_name: resolvedAtomTitle,
           exhibited_components: exhibitedComponents,
         };
 
-        const configurationPayload: ExhibitionConfigurationPayload = {
-          client_name,
-          app_name,
-          project_name,
+        const payload: ExhibitionConfigurationPayload = {
+          client_name: context.client_name,
+          app_name: context.app_name,
+          project_name: context.project_name,
           atoms: [...retainedAtoms, newEntry],
         };
 
-
-        await saveExhibitionConfiguration(configurationPayload);
-        
+        await saveExhibitionConfiguration(payload);
+        await loadSavedConfiguration(context);
         console.info(
-          `[Exhibition] exhibition_catalogue collection successfully updated for project ${client_name}/${app_name}/${project_name} with ${selectionCount} exhibited graph(s)`,
+          `[Exhibition] exhibition_catalogue collection successfully updated for project ${client_name}/${app_name}/${project_name} with ${selections.length} exhibited chart(s)`,
         );
-        
         toast({
           title: 'Exhibition catalogue updated',
-          description: 'Your selected graphs are now ready to be exhibited.',
+          description: 'Your selected charts are now ready to be exhibited.',
         });
-
-        // Load the saved configuration into the exhibition store
-        await loadSavedConfiguration(context);
       } catch (error) {
         console.error('Failed to save exhibit catalogue entry', error);
         toast({
@@ -226,81 +219,70 @@ const EvaluateModelsFeatureExhibition = React.forwardRef<
       } finally {
         setIsSaving(false);
       }
-    }, [selectionCount, processedSelections, resolvedAtomTitle, loadSavedConfiguration, toast]);
+    }, [
+      selectionCount,
+      toast,
+      processedSelections,
+      loadSavedConfiguration,
+      cardId,
+      atomId,
+      resolvedAtomTitle,
+      cardIdentifier,
+    ]);
 
-    React.useImperativeHandle(ref, () => ({
-      exhibit: handleExhibit,
-      getSelectionCount: () => selectionCount,
-    }), [handleExhibit, selectionCount]);
+    React.useImperativeHandle(
+      ref,
+      () => ({
+        exhibit: handleExhibit,
+        getSelectionCount: () => selectionCount,
+      }),
+      [handleExhibit, selectionCount],
+    );
 
-    const startEditing = (key: string) => {
-      const selection = selections.find(s => s.key === key);
-      setDraftNames(prev => ({ ...prev, [key]: selection?.graphTitle || '' }));
-      setEditingKey(key);
-    };
-
-    const finishEditing = (key: string) => {
-      const draftName = draftNames[key];
-      if (draftName && draftName.trim() && onRenameSelection) {
-        onRenameSelection(key, draftName.trim());
-      }
-      setEditingKey(null);
-      setDraftNames(prev => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
-    };
-
-    const togglePreview = (key: string) => {
-      setExpandedPreviewSelections(prev => ({
-        ...prev,
-        [key]: !prev[key],
-      }));
-    };
-
-    if (selectionCount === 0) {
-      return null;
-    }
-
-    const showDetailSections = selectionCount > 0;
-
-  return (
-      <div className="space-y-3">
-        {showDetailSections && (
+    return (
+      <div className="space-y-4">
+        {selectionCount === 0 ? (
+          <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
+            No charts have been staged for exhibition yet. Right-click on chart titles to stage charts for exhibition.
+          </div>
+        ) : (
           <div className="space-y-3">
-            {processedSelections.map((processed) => {
+            {processedSelections.map((processed, index) => {
               const selection = processed.selection;
-              const isPreviewOpen = expandedPreviewSelections[selection.key];
               const isEditing = editingKey === selection.key;
-              const draftValue = draftNames[selection.key] ?? selection.graphTitle;
+              const draftValue = draftNames[selection.key] ?? selection.chartTitle;
+              const isPreviewOpen = expandedPreviewSelections[selection.key] ?? false;
+              const isSettingsOpen = openSettingsSelections[selection.key] ?? false;
+
+              const startEditing = () => {
+                setDraftNames(prev => ({ ...prev, [selection.key]: selection.chartTitle }));
+                setEditingKey(selection.key);
+              };
+
+              const finishEditing = (shouldSave: boolean) => {
+                setEditingKey(null);
+                setDraftNames(prev => {
+                  const { [selection.key]: _discarded, ...rest } = prev;
+                  return rest;
+                });
+
+                if (!shouldSave || !onRenameSelection) {
+                  return;
+                }
+
+                const proposedName = draftValue.trim();
+                const nextName = proposedName.length > 0 ? proposedName : selection.chartTitle;
+                onRenameSelection(selection.key, nextName);
+              };
 
               const togglePreview = () => {
                 setExpandedPreviewSelections(prev => ({
                   ...prev,
-                  [selection.key]: !prev[selection.key],
+                  [selection.key]: !isPreviewOpen,
                 }));
               };
 
-              const finishEditing = (commit: boolean) => {
-                if (commit) {
-                  const draft = draftNames[selection.key];
-                  if (draft && draft.trim() && onRenameSelection) {
-                    onRenameSelection(selection.key, draft.trim());
-                  }
-                }
-                setEditingKey(null);
-                setDraftNames(prev => {
-                  const next = { ...prev };
-                  delete next[selection.key];
-                  return next;
-                });
-              };
-
-              const startEditing = () => {
-                setDraftNames(prev => ({ ...prev, [selection.key]: selection.graphTitle }));
-                setEditingKey(selection.key);
-              };
+              const showDetailSections = isPreviewOpen;
 
               return (
                 <div
@@ -330,14 +312,14 @@ const EvaluateModelsFeatureExhibition = React.forwardRef<
                             'flex w-full flex-wrap items-center gap-2 rounded-md px-2 py-1 text-sm font-semibold text-black shadow-sm',
                             highlightBackgroundClass,
                           )}>
-                            <span className="truncate">{selection.graphTitle}</span>
+                            <span className="truncate">{selection.chartTitle}</span>
                           </div>
                         </div>
                       )}
                       <div className="mt-1 text-xs text-gray-500">
-                        Graph ID: {selection.graphId}
+                        Chart ID: {selection.chartId}
                       </div>
-                </div>
+                    </div>
                     <div className="flex items-center gap-1">
                       <Button
                         variant="ghost"
@@ -355,10 +337,8 @@ const EvaluateModelsFeatureExhibition = React.forwardRef<
                           size="sm"
                           onClick={startEditing}
                           className="h-6 w-6 p-0"
-                          disabled={isSaving}
                         >
-                          <PencilLine className="h-3 w-3" />
-                          <span className="sr-only">Edit</span>
+                          <PencilLine className="w-3 h-3" />
                         </Button>
                       )}
                       <Button
@@ -366,14 +346,13 @@ const EvaluateModelsFeatureExhibition = React.forwardRef<
                         size="sm"
                         onClick={() => _onRemoveSelection?.(selection.key)}
                         className="h-6 w-6 p-0 text-red-500 hover:text-red-700"
-                        disabled={isSaving}
                       >
                         <X className="w-3 h-3" />
                       </Button>
-            </div>
-      </div>
+                    </div>
+                  </div>
 
-                  <p className="text-xs font-medium text-gray-700">{selection.graphTitle}</p>
+                  <p className="text-xs font-medium text-gray-700">{selection.chartTitle}</p>
 
                   {showDetailSections && (
                     <div className="space-y-4 border-t border-gray-200 pt-3">
@@ -382,19 +361,21 @@ const EvaluateModelsFeatureExhibition = React.forwardRef<
                           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-700">
                             <Image className="h-3.5 w-3.5" />
                             Preview snapshot
-            </div>
+                          </div>
                           <div className="mt-2 rounded-md border border-gray-200 bg-white/80 p-2">
-                            <div className="overflow-auto">
-                              <EvaluateModelsFeature 
-                                metadata={processed.metadata} 
-                                variant="full" 
-                              />
-            </div>
-                            <p className="mt-3 text-center text-sm font-semibold text-gray-900">
-                              {selection.graphTitle}
-                            </p>
-            </div>
-          </div>
+                            <div className="pointer-events-none select-none">
+                              <div className="overflow-auto">
+                                <ChartMaker 
+                                  metadata={processed.metadata} 
+                                  variant="full" 
+                                />
+                              </div>
+                              <p className="mt-3 text-center text-sm font-semibold text-gray-900">
+                                {selection.chartTitle}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
                   )}
@@ -403,11 +384,11 @@ const EvaluateModelsFeatureExhibition = React.forwardRef<
             })}
           </div>
         )}
-    </div>
-  );
+      </div>
+    );
   },
 );
 
-EvaluateModelsFeatureExhibition.displayName = 'EvaluateModelsFeatureExhibition';
+ChartMakerExhibition.displayName = 'ChartMakerExhibition';
 
-export default EvaluateModelsFeatureExhibition;
+export default ChartMakerExhibition;

@@ -185,9 +185,17 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
   const getAvailableColumns = () => {
     if (!settings.uploadedData) return { numeric: [], categorical: [] };
     
+    const numeric = settings.uploadedData.numericColumns || [];
+    const categorical = settings.uploadedData.categoricalColumns || [];
+    const allColumns = settings.uploadedData.allColumns || [];
+    
+    // Find any columns that aren't categorized and add them to categorical
+    const categorizedColumns = new Set([...numeric, ...categorical]);
+    const uncategorizedColumns = allColumns.filter(col => !categorizedColumns.has(col));
+    
     return {
-      numeric: settings.uploadedData.numericColumns || [],
-      categorical: settings.uploadedData.categoricalColumns || [],
+      numeric,
+      categorical: [...categorical, ...uncategorizedColumns],
     };
   };
 
@@ -259,22 +267,15 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     onSettingsChange({ charts: newCharts });
   };
 
-  // Exclude columns with only one unique value, and those selected as xAxis or yAxis
+  // Return ALL columns for filtering
   const getAvailableFilterColumns = () => {
     if (!settings.uploadedData) return [];
-    const allCategorical = getCategoricalColumns();
-    return allCategorical.filter(column => {
-      // Exclude if only one unique value
-      const uniqueVals = getUniqueValues(column);
-      if (uniqueVals.length <= 1) return false;
-      // Exclude if selected as xAxis or yAxis
-      // COMMENTED OUT: Allow filtering on X/Y axis columns to filter visible values in the graph
-      // if (settings.charts.some(chart => chart.xAxis === column || chart.yAxis === column)) return false;
-      return true;
-    });
+    // Return all columns (both numeric and categorical)
+    return settings.uploadedData.allColumns || 
+           [...(settings.uploadedData.numericColumns || []), ...(settings.uploadedData.categoricalColumns || [])];
   };
 
-  // Remove filters for columns that are now excluded (e.g., columns with only one unique value)
+  // Remove filters for columns that no longer exist in the dataset
   React.useEffect(() => {
     settings.charts.forEach((chart, chartIndex) => {
       const available = getAvailableFilterColumns();
@@ -613,9 +614,9 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                               </PopoverTrigger>
                                <PopoverContent className="w-64" align="start">
                                  <div className="space-y-3">
-                                   <Label className="text-xs font-medium">Select Categorical Column to Filter</Label>
+                                   <Label className="text-xs font-medium">Select Column to Filter</Label>
                                    {getAvailableFilterColumns().length === 0 ? (
-                                     <p className="text-xs text-muted-foreground">No categorical columns available for filtering</p>
+                                     <p className="text-xs text-muted-foreground">No columns available for filtering</p>
                                    ) : (
                                      <div style={{ maxHeight: '224px', overflowY: 'auto' }}>
                                        {getAvailableFilterColumns().map((column) => (

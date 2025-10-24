@@ -195,22 +195,22 @@ class ChartMakerService:
         if not data:
             return data
         
-        # Check if we have date columns
+        # Check if we have date columns - only check for columns named exactly 'date'
         date_columns = []
         
         # Check x_column
         if x_column:
             sample_value = data[0].get(x_column) if data else None
-            # Check if sample value is a date type or if column name suggests it's a date
+            # Check if sample value is a date type or if column name is exactly 'date'
             if sample_value is not None and (
                 isinstance(sample_value, (datetime, date, pd.Timestamp)) or
-                x_column.lower().find('date') != -1
+                x_column.lower() == 'date'
             ):
                 date_columns.append(x_column)
         
-        # Also check other columns that might be dates
+        # Also check other columns that might be dates - only check for exact 'date' name
         for key in data[0].keys() if data else []:
-            if key not in date_columns and key.lower().find('date') != -1:
+            if key not in date_columns and key.lower() == 'date':
                 date_columns.append(key)
         
         # Convert date values in identified date columns

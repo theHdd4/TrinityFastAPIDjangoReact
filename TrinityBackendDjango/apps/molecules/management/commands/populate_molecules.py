@@ -1,5 +1,6 @@
 from django.core.management.base import BaseCommand
 from apps.molecules.models import Molecule
+from apps.trinity_v1_atoms.models import TrinityV1Atom
 
 
 class Command(BaseCommand):
@@ -7,10 +8,10 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         """
-        Populate the Molecule table with predefined molecules.
-        Data source: TrinityFrontend/src/components/MoleculeList/data/molecules.ts
+        Populate the Molecule table with predefined molecules using real atom IDs from the atom library.
+        Updated to use correct atom IDs from TrinityV1Atom model instead of dummy atom names.
         """
-        # Data from molecules.ts
+        # Data from molecules.ts - Updated to use correct atom IDs from atom library
         molecules_data = [
             {
                 'molecule_id': 'build',
@@ -19,9 +20,9 @@ class Command(BaseCommand):
                 'subtitle': 'Model building and creation',
                 'tag': 'Modeling',
                 'atoms': [
-                    'Auto-regressive models',
-                    'Model Output - Non CSF',
-                    'Single Modeling'
+                    'auto-regressive-models',
+                    'build-model-feature-based',
+                    'regression-feature-based'
                 ]
             },
             {
@@ -31,11 +32,10 @@ class Command(BaseCommand):
                 'subtitle': 'Data preparation and processing',
                 'tag': 'Data Processing',
                 'atoms': [
-                    'Base Price Estimator',
-                    'Clustering',
-                    'Data Preparation',
-                    'Promo Comparison',
-                    'Promotion Intensity Analysis'
+                    'data-upload-validate',
+                    'feature-overview',
+                    'dataframe-operations',
+                    'clustering'
                 ]
             },
             {
@@ -45,11 +45,10 @@ class Command(BaseCommand):
                 'subtitle': 'Data exploration and analysis',
                 'tag': 'Exploration',
                 'atoms': [
-                    'Correlation',
-                    'Depth Ladder',
-                    'EDA',
-                    'Promo Comparison',
-                    'Promotion Intensity Analysis'
+                    'correlation',
+                    'explore',
+                    'descriptive-stats',
+                    'chart-maker'
                 ]
             },
             {
@@ -59,16 +58,10 @@ class Command(BaseCommand):
                 'subtitle': 'Model engineering and algorithm synthesis',
                 'tag': 'Engineering',
                 'atoms': [
-                    'Bulk Model Output - CSF',
-                    'Bulk Modeling',
-                    'Key Selector',
-                    'Model Performance',
-                    'Model Selector',
-                    'Concatination',
-                    'Create or Transform',
-                    'Delete',
-                    'Merge',
-                    'Rename'
+                    'select-models-feature',
+                    'evaluate-models-feature',
+                    'merge',
+                    'concat'
                 ]
             },
             {
@@ -78,8 +71,9 @@ class Command(BaseCommand):
                 'subtitle': 'Initial data preprocessing',
                 'tag': 'Preprocessing',
                 'atoms': [
-                    'Feature Over View',
-                    'GroupBy'
+                    'feature-overview',
+                    'groupby-wtg-avg',
+                    'scope-selector'
                 ]
             },
             {
@@ -88,7 +82,12 @@ class Command(BaseCommand):
                 'type': 'Evaluate',
                 'subtitle': 'Model evaluation and results',
                 'tag': 'Analysis',
-                'atoms': []
+                'atoms': [
+                    'evaluate-models-feature',
+                    'evaluate-models-auto-regressive',
+                    'chart-maker',
+                    'descriptive-stats'
+                ]
             },
             {
                 'molecule_id': 'plan',
@@ -96,7 +95,10 @@ class Command(BaseCommand):
                 'type': 'Plan',
                 'subtitle': 'Planning tasks and workflows',
                 'tag': 'Planning',
-                'atoms': []
+                'atoms': [
+                    'scenario-planner',
+                    'optimizer'
+                ]
             },
             {
                 'molecule_id': 'report',
@@ -104,12 +106,49 @@ class Command(BaseCommand):
                 'type': 'Report',
                 'subtitle': 'Reporting and presentation',
                 'tag': 'Reporting',
-                'atoms': []
+                'atoms': [
+                    'chart-maker',
+                    'text-box',
+                    'histogram',
+                    'scatter-plot'
+                ]
             }
         ]
 
         created_count = 0
         updated_count = 0
+
+        # Validate that all atoms exist in the atom library and no molecule has more than 4 atoms
+        all_atom_ids = set()
+        molecules_with_too_many_atoms = []
+        
+        for mol_data in molecules_data:
+            all_atom_ids.update(mol_data['atoms'])
+            
+            # Check if molecule has more than 4 atoms
+            if len(mol_data['atoms']) > 4:
+                molecules_with_too_many_atoms.append(f"{mol_data['name']} ({mol_data['molecule_id']}) has {len(mol_data['atoms'])} atoms")
+        
+        existing_atoms = set(TrinityV1Atom.objects.values_list('atom_id', flat=True))
+        missing_atoms = all_atom_ids - existing_atoms
+        
+        if missing_atoms:
+            self.stdout.write(
+                self.style.WARNING(
+                    f'⚠️  Warning: The following atoms are not found in the atom library: {sorted(missing_atoms)}\n'
+                    'Some molecules may have invalid atom references.'
+                )
+            )
+        
+        if molecules_with_too_many_atoms:
+            self.stdout.write(
+                self.style.ERROR(
+                    f'❌ Error: The following molecules exceed the 4-atom limit:\n' +
+                    '\n'.join(f'  • {mol}' for mol in molecules_with_too_many_atoms) +
+                    '\nPlease reduce atoms to maximum 4 per molecule.'
+                )
+            )
+            return
 
         for mol_data in molecules_data:
             molecule, created = Molecule.objects.get_or_create(

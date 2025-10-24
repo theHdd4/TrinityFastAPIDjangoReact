@@ -542,8 +542,8 @@ export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverview
 };
 
 const DEFAULT_TREND_CHART_HEIGHT = {
-  full: 300,
-  compact: 220,
+  full: 400,
+  compact: 280,
 } as const;
 
 const toRendererType = (value: unknown): ChartRendererType | null => {
@@ -724,14 +724,14 @@ const parseDirectChartRendererConfig = (
     toRendererType(candidate['chart_type']) ||
     toRendererType(candidate['chartType']);
 
-  const data = ensureRecordArray(candidate.data ?? candidate['filtered_data'] ?? candidate['filteredData']);
-  if (!type || data.length === 0) {
+  const rawData = ensureRecordArray(candidate.data ?? candidate['filtered_data'] ?? candidate['filteredData']);
+  if (!type || rawData.length === 0) {
     return null;
   }
 
   const config: ChartRendererConfig = {
     type,
-    data,
+    data: rawData, // Will be sanitized later
     height: DEFAULT_TREND_CHART_HEIGHT[variant],
   };
 
@@ -739,6 +739,11 @@ const parseDirectChartRendererConfig = (
   if (typeof candidate['x_field'] === 'string') config.xField = candidate['x_field'] as string;
   if (typeof candidate.yField === 'string') config.yField = candidate.yField;
   if (typeof candidate['y_field'] === 'string') config.yField = candidate['y_field'] as string;
+  
+  // Sanitize the data to match the expected field names
+  if (config.xField && config.yField) {
+    config.data = sanitizeTimeseries(rawData, config.xField, config.yField);
+  }
 
   const yFields = candidate.yFields ?? candidate['y_fields'];
   if (Array.isArray(yFields)) {
@@ -795,6 +800,7 @@ const createChartRendererConfig = (
   const xField = chartState.xAxisField || 'index';
   const yField = chartState.yAxisField || metadata.metric || 'value';
   const type = toRendererType(chartState.chartType) ?? 'line_chart';
+  
   const data = prepareChartData(metadata.statisticalDetails, xField, yField);
 
   if (data.length === 0) {
@@ -826,12 +832,15 @@ const createChartRendererConfig = (
 export const deriveChartConfig = (
   metadata: FeatureOverviewMetadata,
   variant: FeatureOverviewComponentProps['variant'],
-): ChartRendererConfig | null =>
-  ensureRenderableChartConfig(
-    parseDirectChartRendererConfig(metadata, variant) ??
-      createChartRendererConfig(metadata, variant) ??
-      buildDefaultTrendChartConfig(variant),
+): ChartRendererConfig | null => {
+  const directConfig = parseDirectChartRendererConfig(metadata, variant);
+  const createdConfig = createChartRendererConfig(metadata, variant);
+  const defaultConfig = buildDefaultTrendChartConfig(variant);
+  
+  return ensureRenderableChartConfig(
+    directConfig ?? createdConfig ?? defaultConfig,
   );
+};
 
 export const extractSummaryEntries = (stats: FeatureOverviewStatistics | undefined): Array<[string, unknown]> => {
   if (!stats || !isRecord(stats.summary)) {

@@ -131,67 +131,18 @@ const LaboratoryMode = () => {
       console.log('Successfully Loaded Existing Project State');
       toast({ title: 'Successfully Loaded Existing Project State' });
     }
+    
+    // Hide navigation list when switching from workflow mode
+    const hasWorkflowData = localStorage.getItem('workflow-data') || 
+                           localStorage.getItem('workflow-selected-atoms') || 
+                           localStorage.getItem('workflow-molecules');
+    if (hasWorkflowData) {
+      setShowFloatingNavigationList(false);
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load workflow data from WorkflowMode
-  useEffect(() => {
-    const workflowData = localStorage.getItem('workflow-data');
-    if (workflowData) {
-      try {
-        const data = JSON.parse(workflowData);
-        console.log('Loading workflow data:', data);
-        
-        if (data.molecules && Array.isArray(data.molecules)) {
-          // Convert workflow data to the format expected by CanvasArea
-          const workflowSelectedAtoms: Array<{
-            atomName: string;
-            moleculeId: string;
-            moleculeTitle: string;
-            order: number;
-          }> = [];
-          
-          data.molecules.forEach((molecule: any) => {
-            (molecule.atomOrder || molecule.atoms || []).forEach((atomId: string, index: number) => {
-              // Find the atom definition to get the proper name
-              const atomDefinition = allAtoms.find(atom => atom.id === atomId);
-              const atomName = atomDefinition?.title || atomId;
-              
-              workflowSelectedAtoms.push({
-                atomName: atomName,
-                moleculeId: molecule.id,
-                moleculeTitle: molecule.title,
-                order: index
-              });
-            });
-          });
-
-          // Save in the format that CanvasArea expects
-          localStorage.setItem('workflow-selected-atoms', JSON.stringify(workflowSelectedAtoms));
-          
-          // Clear the old workflow data
-          localStorage.removeItem('workflow-data');
-          
-          // Clear any existing laboratory config to force reload
-          localStorage.removeItem('laboratory-config');
-          
-          toast({
-            title: 'Workflow Loaded',
-            description: `Successfully loaded ${workflowSelectedAtoms.length} atoms from ${data.molecules.length} molecules`
-          });
-          
-          // Force a page reload to trigger the CanvasArea workflow loading
-          window.location.reload();
-        }
-      } catch (error) {
-        console.error('Error loading workflow data:', error);
-        toast({
-          title: 'Error Loading Workflow',
-          description: 'Failed to load workflow data',
-          variant: 'destructive'
-        });
-      }
-    }
-  }, [setLabCards, setExhibitionCards, toast]);
+  // Note: Workflow data loading is now handled entirely by CanvasArea component
+  // This prevents conflicts and ensures proper molecule container restoration
 
   const handleUndo = async () => {
     if (!canEdit) return;

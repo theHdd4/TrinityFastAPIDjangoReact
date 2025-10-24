@@ -242,6 +242,32 @@ const looksLikeFeatureOverviewMetadata = (metadata: Record<string, any> | undefi
   return Boolean(hasMetric && (hasDimensions || hasStatistics || hasChartConfig));
 };
 
+const looksLikeChartMakerMetadata = (metadata: Record<string, any> | undefined): boolean => {
+  if (!metadata) {
+    return false;
+  }
+
+  const hasChartId = typeof metadata.chartId === 'string' || typeof metadata.chart_id === 'string';
+  const hasChartTitle = typeof metadata.chartTitle === 'string' || typeof metadata.chart_title === 'string';
+  const hasChartState = metadata.chartState != null || metadata.chart_state != null;
+  const hasChartContext = metadata.chartContext != null || metadata.chart_context != null;
+
+  return Boolean(hasChartId && hasChartTitle && (hasChartState || hasChartContext));
+};
+
+const looksLikeEvaluateModelsFeatureMetadata = (metadata: Record<string, any> | undefined): boolean => {
+  if (!metadata) {
+    return false;
+  }
+
+  const hasGraphId = typeof metadata.graphId === 'string' || typeof metadata.graph_id === 'string';
+  const hasGraphTitle = typeof metadata.graphTitle === 'string' || typeof metadata.graph_title === 'string';
+  const hasGraphState = metadata.graphState != null || metadata.graph_state != null;
+  const hasGraphContext = metadata.graphContext != null || metadata.graph_context != null;
+
+  return Boolean(hasGraphId && hasGraphTitle && (hasGraphState || hasGraphContext));
+};
+
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
 
@@ -318,18 +344,25 @@ const dedupeAtoms = (atoms: DroppedAtom[]): DroppedAtom[] => {
   const seen = new Set<string>();
   const result: DroppedAtom[] = [];
 
+  console.log('🔍 ExhibitionStore - dedupeAtoms input:', atoms);
   atoms.forEach(atom => {
+    // For EvaluateModelsFeature, just use the id since it's already unique (graph.id-combinationName)
     const key = atom.id ?? atom.atomId;
+    console.log('🔍 ExhibitionStore - dedupeAtoms processing atom:', atom.atomId, 'id:', atom.id, 'title:', atom.title, 'key:', key);
     if (!key) {
+      console.log('🔍 ExhibitionStore - dedupeAtoms skipping atom (no key):', atom);
       return;
     }
     if (seen.has(key)) {
+      console.log('🔍 ExhibitionStore - dedupeAtoms DUPLICATE FOUND! Skipping:', atom.atomId, 'key:', key);
       return;
     }
     seen.add(key);
     result.push(atom);
+    console.log('🔍 ExhibitionStore - dedupeAtoms ADDED:', atom.atomId, 'key:', key);
   });
 
+  console.log('🔍 ExhibitionStore - dedupeAtoms result:', result);
   return result;
 };
 
@@ -533,6 +566,7 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     return null;
   }
 
+  console.log('🔍 ExhibitionStore - normalizeAtom input:', component);
   const candidate = component as Partial<DroppedAtom & ExhibitionComponentPayload>;
 
   const resolvedId = isNonEmptyString(candidate.id) ? candidate.id.trim() : undefined;
@@ -572,6 +606,26 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     atomId = 'feature-overview';
   }
 
+  if (
+    looksLikeChartMakerMetadata(metadata) &&
+    (!resolvedAtomId ||
+      atomId === id ||
+      atomId.toLowerCase().includes('chart-maker') ||
+      category.toLowerCase().includes('chart maker'))
+  ) {
+    atomId = 'chart-maker';
+  }
+
+  if (
+    looksLikeEvaluateModelsFeatureMetadata(metadata) &&
+    (!resolvedAtomId ||
+      atomId === id ||
+      atomId.toLowerCase().includes('evaluate-models-feature') ||
+      category.toLowerCase().includes('evaluate models feature'))
+  ) {
+    atomId = 'evaluate-models-feature';
+  }
+
   if (manifest && metadata.visualizationManifest == null) {
     metadata.visualizationManifest = manifest;
   }
@@ -580,7 +634,7 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     metadata.manifestId = manifestId;
   }
 
-  return {
+  const result = {
     id,
     atomId,
     title,
@@ -588,6 +642,8 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     color,
     metadata,
   };
+  console.log('🔍 ExhibitionStore - normalizeAtom result:', result);
+  return result;
 };
 
 const normaliseAtomList = (atoms: unknown): DroppedAtom[] => {
@@ -782,7 +838,9 @@ const computeCatalogueCards = (cards: LayoutCard[]): LayoutCard[] => {
 };
 
 const normaliseCatalogueComponent = (component: ExhibitionComponentPayload, atomName: string): DroppedAtom | null => {
+  console.log('🔍 ExhibitionStore - normaliseCatalogueComponent input:', component);
   const normalised = normalizeAtom(component);
+  console.log('🔍 ExhibitionStore - normaliseCatalogueComponent normalized:', normalised);
   if (!normalised) {
     return null;
   }
@@ -837,9 +895,19 @@ const buildCardFromEntry = (entry: ExhibitionAtomPayload, index: number): Layout
   const rawName = typeof entry.atom_name === 'string' && entry.atom_name.trim().length > 0 ? entry.atom_name.trim() : '';
   const atomName = rawName || identifier;
 
-  const components = extractExhibitedComponents(entry as AtomEntryLike)
-    .map(component => normaliseCatalogueComponent(component, atomName))
+  const extractedComponents = extractExhibitedComponents(entry as AtomEntryLike);
+  console.log('🔍 ExhibitionStore - buildCardFromEntry for:', atomName, 'extracted components:', extractedComponents);
+
+  const components = extractedComponents
+    .map((component, index) => {
+      console.log(`🔍 ExhibitionStore - Processing component ${index}:`, component);
+      const normalized = normaliseCatalogueComponent(component, atomName);
+      console.log(`🔍 ExhibitionStore - Normalized component ${index}:`, normalized);
+      return normalized;
+    })
     .filter((component): component is DroppedAtom => component !== null);
+
+  console.log('🔍 ExhibitionStore - buildCardFromEntry normalized components:', components);
 
   if (components.length === 0) {
     return null;
@@ -883,6 +951,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         remoteCatalogueResolved = true;
         const remoteAtoms = remote && Array.isArray(remote.atoms) ? remote.atoms : [];
         catalogueEntries = remoteAtoms;
+        
 
         if (remoteAtoms.length === 0) {
           console.info(

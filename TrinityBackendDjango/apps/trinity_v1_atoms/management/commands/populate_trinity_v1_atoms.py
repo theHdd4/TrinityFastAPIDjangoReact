@@ -26,7 +26,7 @@ class Command(BaseCommand):
             {'atom_id': 'scope-selector', 'name': 'Scope Selector', 'description': 'Select and filter data by scope', 'category': 'Data Processing'},
             {'atom_id': 'row-operations', 'name': 'Row Operations', 'description': 'Perform operations on data rows', 'category': 'Data Processing'},
             {'atom_id': 'column-classifier', 'name': 'Column Classifier', 'description': 'Classify and categorize data columns', 'category': 'Data Processing'},
-            {'atom_id': 'create-column', 'name': 'Create and Transform', 'description': 'Create new columns from existing data', 'category': 'Data Processing'},
+            {'atom_id': 'create-column', 'name': 'Create and Transform Features', 'description': 'Create or Transform new features using arithmetic operations on dataframe columns', 'category': 'Data Processing'},
             {'atom_id': 'dataframe-operations', 'name': 'DataFrame Operations', 'description': 'Perform operations on DataFrames', 'category': 'Data Processing'},
             
             # Analytics

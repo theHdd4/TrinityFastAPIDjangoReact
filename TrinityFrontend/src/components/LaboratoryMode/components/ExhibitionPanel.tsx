@@ -8,9 +8,17 @@ import { ChevronDown, ChevronRight, FolderKanban, GalleryHorizontal, Loader2, Pl
 import FeatureOverviewExhibition, {
   FeatureOverviewExhibitionHandle,
 } from '@/components/AtomList/atoms/feature-overview/components/FeatureOverviewExhibition';
+import ChartMakerExhibition, {
+  ChartMakerExhibitionHandle,
+} from '@/components/AtomList/atoms/chart-maker/components/ChartMakerExhibition';
+import EvaluateModelsFeatureExhibition, {
+  EvaluateModelsFeatureExhibitionHandle,
+} from '@/components/AtomList/atoms/evaluate-models-feature/components/EvaluateModelsFeatureExhibition';
 import {
   useLaboratoryStore,
   type FeatureOverviewExhibitionSelection,
+  type ChartMakerExhibitionSelection,
+  type EvaluateModelsFeatureExhibitionSelection,
 } from '../store/laboratoryStore';
 
 interface ExhibitionPanelProps {
@@ -23,7 +31,7 @@ interface ExhibitedAtomEntry {
   atomTitle?: string;
   cardId: string;
   atomColor?: string;
-  selections: FeatureOverviewExhibitionSelection[];
+  selections: FeatureOverviewExhibitionSelection[] | ChartMakerExhibitionSelection[] | EvaluateModelsFeatureExhibitionSelection[];
 }
 
 interface AtomInfo {
@@ -42,26 +50,61 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
 
     cards.forEach((card) => {
       card.atoms.forEach((atom) => {
-        if (atom.atomId !== 'feature-overview') {
-          return;
-        }
+        // Check for both feature-overview and chart-maker atoms
+        if (atom.atomId === 'feature-overview') {
+          const selections = Array.isArray(atom.settings?.exhibitionSelections)
+            ? (atom.settings.exhibitionSelections as FeatureOverviewExhibitionSelection[])
+            : [];
 
-        const selections = Array.isArray(atom.settings?.exhibitionSelections)
-          ? (atom.settings.exhibitionSelections as FeatureOverviewExhibitionSelection[])
-          : [];
+          if (selections.length > 0) {
+            const atomColor = typeof atom.color === 'string' ? atom.color : undefined;
+            const atomTypeId = typeof atom.atomId === 'string' ? atom.atomId : 'unknown';
+            const atomTitle = typeof atom.title === 'string' ? atom.title : undefined;
+            entries.push({
+              atomId: atom.id,
+              atomTypeId,
+              atomTitle,
+              cardId: card.id,
+              atomColor,
+              selections,
+            });
+          }
+        } else if (atom.atomId === 'chart-maker') {
+          const selections = Array.isArray(atom.settings?.exhibitionSelections)
+            ? (atom.settings.exhibitionSelections as ChartMakerExhibitionSelection[])
+            : [];
 
-        if (selections.length > 0) {
-          const atomColor = typeof atom.color === 'string' ? atom.color : undefined;
-          const atomTypeId = typeof atom.atomId === 'string' ? atom.atomId : 'unknown';
-          const atomTitle = typeof atom.title === 'string' ? atom.title : undefined;
-          entries.push({
-            atomId: atom.id,
-            atomTypeId,
-            atomTitle,
-            cardId: card.id,
-            atomColor,
-            selections,
-          });
+          if (selections.length > 0) {
+            const atomColor = typeof atom.color === 'string' ? atom.color : undefined;
+            const atomTypeId = typeof atom.atomId === 'string' ? atom.atomId : 'unknown';
+            const atomTitle = typeof atom.title === 'string' ? atom.title : undefined;
+            entries.push({
+              atomId: atom.id,
+              atomTypeId,
+              atomTitle,
+              cardId: card.id,
+              atomColor,
+              selections,
+            });
+          }
+        } else if (atom.atomId === 'evaluate-models-feature') {
+          const selections = Array.isArray(atom.settings?.exhibitionSelections)
+            ? (atom.settings.exhibitionSelections as EvaluateModelsFeatureExhibitionSelection[])
+            : [];
+
+          if (selections.length > 0) {
+            const atomColor = typeof atom.color === 'string' ? atom.color : undefined;
+            const atomTypeId = typeof atom.atomId === 'string' ? atom.atomId : 'unknown';
+            const atomTitle = typeof atom.title === 'string' ? atom.title : undefined;
+            entries.push({
+              atomId: atom.id,
+              atomTypeId,
+              atomTitle,
+              cardId: card.id,
+              atomColor,
+              selections,
+            });
+          }
         }
       });
     });
@@ -114,7 +157,7 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
 
   const [expandedAtomKey, setExpandedAtomKey] = React.useState<string | null>(null);
   const hasInitialisedExpandedAtomRef = React.useRef(false);
-  const exhibitionHandlesRef = React.useRef<Map<string, FeatureOverviewExhibitionHandle>>(new Map());
+  const exhibitionHandlesRef = React.useRef<Map<string, FeatureOverviewExhibitionHandle | ChartMakerExhibitionHandle | EvaluateModelsFeatureExhibitionHandle>>(new Map());
   const [exhibitingAtomKey, setExhibitingAtomKey] = React.useState<string | null>(null);
   const [isExhibitingAll, setIsExhibitingAll] = React.useState(false);
 
@@ -156,7 +199,7 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
       }
 
       const currentSelections = Array.isArray(atom.settings?.exhibitionSelections)
-        ? (atom.settings.exhibitionSelections as FeatureOverviewExhibitionSelection[])
+        ? (atom.settings.exhibitionSelections as (FeatureOverviewExhibitionSelection | ChartMakerExhibitionSelection | EvaluateModelsFeatureExhibitionSelection)[])
         : [];
       const nextSelections = currentSelections.filter((selection) => selection.key !== key);
       updateAtomSettings(atomId, { exhibitionSelections: nextSelections });
@@ -172,12 +215,22 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
       }
 
       const currentSelections = Array.isArray(atom.settings?.exhibitionSelections)
-        ? (atom.settings.exhibitionSelections as FeatureOverviewExhibitionSelection[])
+        ? (atom.settings.exhibitionSelections as (FeatureOverviewExhibitionSelection | ChartMakerExhibitionSelection | EvaluateModelsFeatureExhibitionSelection)[])
         : [];
 
-      const nextSelections = currentSelections.map((selection) =>
-        selection.key === key ? { ...selection, label: name } : selection,
-      );
+      const nextSelections = currentSelections.map((selection) => {
+        if (selection.key === key) {
+          // Handle different property names for different atom types
+          if ('label' in selection) {
+            return { ...selection, label: name };
+          } else if ('chartTitle' in selection) {
+            return { ...selection, chartTitle: name };
+          } else if ('graphTitle' in selection) {
+            return { ...selection, graphTitle: name };
+          }
+        }
+        return selection;
+      });
 
       updateAtomSettings(atomId, { exhibitionSelections: nextSelections });
     },
@@ -319,21 +372,62 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
                   id={`${panel.key}-exhibition-list`}
                   aria-hidden={!isExpanded}
                 >
-                  <FeatureOverviewExhibition
-                    ref={(instance: FeatureOverviewExhibitionHandle | null) => {
-                      if (instance) {
-                        exhibitionHandlesRef.current.set(panel.key, instance);
-                      } else {
-                        exhibitionHandlesRef.current.delete(panel.key);
-                      }
-                    }}
-                    atomId={panel.entry.atomId}
-                    cardId={panel.entry.cardId}
-                    atomColor={panel.entry.atomColor}
-                    selections={panel.entry.selections}
-                    onRemoveSelection={(key) => handleRemoveSelection(panel.entry.atomId, key)}
-                    onRenameSelection={(key, name) => handleRenameSelection(panel.entry.atomId, key, name)}
-                  />
+                  {/* Render FeatureOverviewExhibition for feature-overview atoms */}
+                  {panel.entry.atomTypeId === 'feature-overview' && (
+                    <FeatureOverviewExhibition
+                      ref={(instance: FeatureOverviewExhibitionHandle | null) => {
+                        if (instance) {
+                          exhibitionHandlesRef.current.set(panel.key, instance);
+                        } else {
+                          exhibitionHandlesRef.current.delete(panel.key);
+                        }
+                      }}
+                      atomId={panel.entry.atomId}
+                      cardId={panel.entry.cardId}
+                      atomColor={panel.entry.atomColor}
+                      selections={panel.entry.selections as FeatureOverviewExhibitionSelection[]}
+                      onRemoveSelection={(key) => handleRemoveSelection(panel.entry.atomId, key)}
+                      onRenameSelection={(key, name) => handleRenameSelection(panel.entry.atomId, key, name)}
+                    />
+                  )}
+                  
+                  {/* Render ChartMakerExhibition for chart-maker atoms */}
+                  {panel.entry.atomTypeId === 'chart-maker' && (
+                    <ChartMakerExhibition
+                      ref={(instance: ChartMakerExhibitionHandle | null) => {
+                        if (instance) {
+                          exhibitionHandlesRef.current.set(panel.key, instance);
+                        } else {
+                          exhibitionHandlesRef.current.delete(panel.key);
+                        }
+                      }}
+                      atomId={panel.entry.atomId}
+                      cardId={panel.entry.cardId}
+                      atomColor={panel.entry.atomColor}
+                      selections={panel.entry.selections as ChartMakerExhibitionSelection[]}
+                      onRemoveSelection={(key) => handleRemoveSelection(panel.entry.atomId, key)}
+                      onRenameSelection={(key, name) => handleRenameSelection(panel.entry.atomId, key, name)}
+                    />
+                  )}
+                  
+                  {/* Render EvaluateModelsFeatureExhibition for evaluate-models-feature atoms */}
+                  {panel.entry.atomTypeId === 'evaluate-models-feature' && (
+                    <EvaluateModelsFeatureExhibition
+                      ref={(instance: EvaluateModelsFeatureExhibitionHandle | null) => {
+                        if (instance) {
+                          exhibitionHandlesRef.current.set(panel.key, instance);
+                        } else {
+                          exhibitionHandlesRef.current.delete(panel.key);
+                        }
+                      }}
+                      atomId={panel.entry.atomId}
+                      cardId={panel.entry.cardId}
+                      atomColor={panel.entry.atomColor}
+                      selections={panel.entry.selections as EvaluateModelsFeatureExhibitionSelection[]}
+                      onRemoveSelection={(key) => handleRemoveSelection(panel.entry.atomId, key)}
+                      onRenameSelection={(key, name) => handleRenameSelection(panel.entry.atomId, key, name)}
+                    />
+                  )}
                 </div>
               </div>
             );

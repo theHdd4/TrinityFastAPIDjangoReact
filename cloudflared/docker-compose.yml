@@ -6,6 +6,7 @@ services:
       - ./tunnelCreds:/etc/cloudflared:ro
     networks:
       - trinity-net
+    restart: always
 
 networks:
   trinity-net:

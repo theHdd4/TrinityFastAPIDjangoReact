@@ -1034,9 +1034,12 @@ const ExhibitionMode = () => {
       origin: 'catalogue' | 'slide' = 'catalogue',
       placement?: { x: number; y: number; width: number; height: number },
     ) => {
+      console.log('🔍 ExhibitionMode - handleDrop called with:', { atom, sourceCardId, targetCardId, origin, placement });
       const processDrop = async () => {
         const sourceCard = cards.find(card => card.id === sourceCardId);
         const destinationCard = cards.find(card => card.id === targetCardId);
+        console.log('🔍 ExhibitionMode - sourceCard:', sourceCard);
+        console.log('🔍 ExhibitionMode - destinationCard:', destinationCard);
 
         if (!sourceCard || !destinationCard) {
           setDraggedAtom(null);

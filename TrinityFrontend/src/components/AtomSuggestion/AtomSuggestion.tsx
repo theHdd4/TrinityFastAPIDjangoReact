@@ -386,8 +386,8 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
       
       suggestions.push({
         id: 'create-column',
-        name: 'Create and transform',
-        color: 'bg-indigo-500'
+        name: 'Create and Transform Features',
+        color: 'bg-green-500'
       });
       
       suggestions.push({
