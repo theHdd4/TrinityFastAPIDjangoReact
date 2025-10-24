@@ -3,13 +3,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Grid3x3,
-  Maximize2,
   Minimize2,
   Download,
   Plus,
   ArrowUpDown,
   ArrowLeftRight,
   Trash2,
+  MonitorPlay,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -170,11 +170,7 @@ export const SlideNavigation: React.FC<SlideNavigationProps> = ({
         title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
         disabled={!hasSlides || isSlideshowActive}
       >
-        {isFullscreen ? (
-          <Minimize2 className="h-4 w-4" />
-        ) : (
-          <Maximize2 className="h-4 w-4" />
-        )}
+        {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <MonitorPlay className="h-4 w-4" />}
       </Button>
 
       <Button

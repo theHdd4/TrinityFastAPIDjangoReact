@@ -59,6 +59,7 @@ type ActiveInteraction =
       startClientX: number;
       startClientY: number;
       initialPositions: Map<string, { x: number; y: number }>;
+      scale: number;
     }
   | {
       kind: 'resize';
@@ -67,6 +68,7 @@ type ActiveInteraction =
       startClientX: number;
       startClientY: number;
       initial: { x: number; y: number; width: number; height: number };
+      scale: number;
     };
 
 interface EditingTextState {
@@ -91,6 +93,8 @@ const isAtomObject = (
 };
 
 const UNTITLED_SLIDE_TEXT = 'Untitled Slide';
+
+const FULLSCREEN_VIEWPORT_PADDING = 64;
 
 type TableState = {
   data: TableCellData[][];
@@ -216,6 +220,16 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const [positionPanelTarget, setPositionPanelTarget] = useState<{ objectId: string } | null>(null);
   const accentImageInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [baseCanvasSize, setBaseCanvasSize] = useState<{ width: number; height: number } | null>(null);
+  const [fullscreenMetrics, setFullscreenMetrics] = useState<{
+    width: number;
+    height: number;
+    scale: number;
+  } | null>(null);
+  const isFullscreenEditor = isFullscreen && mode === 'editor' && viewMode === 'horizontal';
+  const stageScale = isFullscreenEditor && fullscreenMetrics ? fullscreenMetrics.scale : 1;
+  const fullscreenWidthConstraint = `min(100vw - ${FULLSCREEN_VIEWPORT_PADDING * 2}px, (100vh - ${FULLSCREEN_VIEWPORT_PADDING * 2}px) * 16 / 9)`;
+  const fullscreenHeightConstraint = `min(100vh - ${FULLSCREEN_VIEWPORT_PADDING * 2}px, (100vw - ${FULLSCREEN_VIEWPORT_PADDING * 2}px) * 9 / 16)`;
 
   const slideObjects = useExhibitionStore(
     useCallback(state => state.slideObjectsByCardId[card.id] ?? [], [card.id]),
@@ -414,6 +428,105 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const [hasInteracted, setHasInteracted] = useState(
     () => nonStructuralObjects.length > 0,
   );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const updateBaseSize = () => {
+      const node = canvasRef.current;
+      if (!node) {
+        return;
+      }
+
+      const width = node.clientWidth;
+      const height = node.clientHeight;
+
+      if (width === 0 || height === 0) {
+        return;
+      }
+
+      setBaseCanvasSize(prev => {
+        if (prev && Math.abs(prev.width - width) < 0.5 && Math.abs(prev.height - height) < 0.5) {
+          return prev;
+        }
+        return { width, height };
+      });
+    };
+
+    updateBaseSize();
+
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (!isFullscreenEditor) {
+        updateBaseSize();
+      }
+    });
+
+    const node = canvasRef.current;
+    if (node) {
+      observer.observe(node);
+    }
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [isFullscreenEditor, card.id]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (!isFullscreenEditor) {
+      setFullscreenMetrics(null);
+      return;
+    }
+
+    const base =
+      baseCanvasSize ??
+      (canvasRef.current
+        ? {
+            width: canvasRef.current.clientWidth,
+            height: canvasRef.current.clientHeight,
+          }
+        : null);
+
+    if (!base || base.width === 0 || base.height === 0) {
+      return;
+    }
+
+    const computeMetrics = () => {
+      const viewportWidth = Math.max(window.innerWidth - FULLSCREEN_VIEWPORT_PADDING * 2, 320);
+      const viewportHeight = Math.max(window.innerHeight - FULLSCREEN_VIEWPORT_PADDING * 2, 320);
+      const scale = Math.min(viewportWidth / base.width, viewportHeight / base.height);
+      const width = base.width * scale;
+      const height = base.height * scale;
+
+      setFullscreenMetrics(prev => {
+        if (
+          prev &&
+          Math.abs(prev.width - width) < 0.5 &&
+          Math.abs(prev.height - height) < 0.5 &&
+          Math.abs(prev.scale - scale) < 0.001
+        ) {
+          return prev;
+        }
+        return { width, height, scale };
+      });
+    };
+
+    computeMetrics();
+
+    window.addEventListener('resize', computeMetrics);
+    return () => {
+      window.removeEventListener('resize', computeMetrics);
+    };
+  }, [isFullscreenEditor, baseCanvasSize]);
 
   const handleTitleCommit = useCallback(
     (nextTitle: string) => {
@@ -672,8 +785,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
 
     if (canvas) {
       const rect = canvas.getBoundingClientRect();
-      dropX = e.clientX - rect.left - width / 2;
-      dropY = e.clientY - rect.top - height / 2;
+      const effectiveScale = stageScale === 0 ? 1 : stageScale;
+      const relativeX = (e.clientX - rect.left) / effectiveScale;
+      const relativeY = (e.clientY - rect.top) / effectiveScale;
+      dropX = relativeX - width / 2;
+      dropY = relativeY - height / 2;
       const maxX = Math.max(0, canvas.clientWidth - width);
       const maxY = Math.max(0, canvas.clientHeight - height);
       dropX = Math.min(Math.max(0, dropX), maxX);
@@ -778,8 +894,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     };
   }, [onPositionPanelChange]);
 
-  const isFullscreenEditor = isFullscreen && mode === 'editor' && viewMode === 'horizontal';
-
   const containerClasses =
     viewMode === 'horizontal'
       ? cn(
@@ -845,7 +959,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       <div
         className={
           isFullscreenEditor
-            ? 'flex h-full w-full items-center justify-center p-4 sm:p-8 lg:p-12 transition-all duration-300'
+            ? 'flex h-full w-full items-center justify-center p-6 sm:p-10 lg:p-16 transition-all duration-300'
             : cn('mx-auto transition-all duration-300 p-8', cardWidthClass)
         }
       >
@@ -902,40 +1016,88 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                 onDrop={handleDrop}
                 style={
                   isFullscreenEditor
-                    ? {
-                        aspectRatio: '16 / 9',
-                        width: '100%',
-                        maxWidth: 'min(100vw, calc(100vh * 16 / 9))',
-                        maxHeight: 'min(100vh, calc(100vw * 9 / 16))',
-                      }
+                    ? fullscreenMetrics
+                      ? {
+                          width: `${fullscreenMetrics.width}px`,
+                          height: `${fullscreenMetrics.height}px`,
+                          maxWidth: fullscreenWidthConstraint,
+                          maxHeight: fullscreenHeightConstraint,
+                        }
+                      : {
+                          width: fullscreenWidthConstraint,
+                          height: fullscreenHeightConstraint,
+                          aspectRatio: '16 / 9',
+                        }
                     : undefined
                 }
               >
-                <CanvasStage
-                  ref={canvasRef}
-                  canEdit={canEdit}
-                  isDragOver={Boolean(isDragOver && canEdit && draggedAtom)}
-                  objects={slideObjects}
-                  showEmptyState={!hasInteracted && nonStructuralObjects.length === 0}
-                  layout={settings.cardLayout}
-                  cardColor={settings.cardColor}
-                  accentImage={settings.accentImage ?? null}
-                  accentImageName={settings.accentImageName ?? null}
-                  titleObjectId={titleObjectId}
-                  onCanvasDragLeave={handleDragLeave}
-                  onCanvasDragOver={handleDragOver}
-                  onCanvasDrop={handleDrop}
-                  onInteract={handleCanvasInteraction}
-                  onRemoveAtom={handleAtomRemove}
-                  onBringToFront={handleBringToFront}
-                  onSendToBack={handleSendToBack}
-                  onBulkUpdate={handleBulkUpdate}
-                  onGroupObjects={handleGroupObjects}
-                  onTitleCommit={handleTitleCommit}
-                  onRemoveObject={objectId => removeSlideObject(card.id, objectId)}
-                  onTextToolbarChange={setActiveTextToolbar}
-                  onRequestPositionPanel={handleRequestPositionPanel}
-                />
+                {isFullscreenEditor ? (
+                  <div
+                    className="h-full w-full origin-top-left"
+                    style={
+                      baseCanvasSize
+                        ? {
+                            width: baseCanvasSize.width,
+                            height: baseCanvasSize.height,
+                            transform: `scale(${stageScale})`,
+                            transformOrigin: 'top left',
+                          }
+                        : undefined
+                    }
+                  >
+                    <CanvasStage
+                      ref={canvasRef}
+                      canEdit={canEdit}
+                      isDragOver={Boolean(isDragOver && canEdit && draggedAtom)}
+                      objects={slideObjects}
+                      showEmptyState={!hasInteracted && nonStructuralObjects.length === 0}
+                      layout={settings.cardLayout}
+                      cardColor={settings.cardColor}
+                      accentImage={settings.accentImage ?? null}
+                      accentImageName={settings.accentImageName ?? null}
+                      titleObjectId={titleObjectId}
+                      onCanvasDragLeave={handleDragLeave}
+                      onCanvasDragOver={handleDragOver}
+                      onCanvasDrop={handleDrop}
+                      onInteract={handleCanvasInteraction}
+                      onRemoveAtom={handleAtomRemove}
+                      onBringToFront={handleBringToFront}
+                      onSendToBack={handleSendToBack}
+                      onBulkUpdate={handleBulkUpdate}
+                      onGroupObjects={handleGroupObjects}
+                      onTitleCommit={handleTitleCommit}
+                      onRemoveObject={objectId => removeSlideObject(card.id, objectId)}
+                      onTextToolbarChange={setActiveTextToolbar}
+                      onRequestPositionPanel={handleRequestPositionPanel}
+                    />
+                  </div>
+                ) : (
+                  <CanvasStage
+                    ref={canvasRef}
+                    canEdit={canEdit}
+                    isDragOver={Boolean(isDragOver && canEdit && draggedAtom)}
+                    objects={slideObjects}
+                    showEmptyState={!hasInteracted && nonStructuralObjects.length === 0}
+                    layout={settings.cardLayout}
+                    cardColor={settings.cardColor}
+                    accentImage={settings.accentImage ?? null}
+                    accentImageName={settings.accentImageName ?? null}
+                    titleObjectId={titleObjectId}
+                    onCanvasDragLeave={handleDragLeave}
+                    onCanvasDragOver={handleDragOver}
+                    onCanvasDrop={handleDrop}
+                    onInteract={handleCanvasInteraction}
+                    onRemoveAtom={handleAtomRemove}
+                    onBringToFront={handleBringToFront}
+                    onSendToBack={handleSendToBack}
+                    onBulkUpdate={handleBulkUpdate}
+                    onGroupObjects={handleGroupObjects}
+                    onTitleCommit={handleTitleCommit}
+                    onRemoveObject={objectId => removeSlideObject(card.id, objectId)}
+                    onTextToolbarChange={setActiveTextToolbar}
+                    onRequestPositionPanel={handleRequestPositionPanel}
+                  />
+                )}
 
                 <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
                   <Button
@@ -1781,6 +1943,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           startClientX: event.clientX,
           startClientY: event.clientY,
           initialPositions,
+          scale: stageScale,
         });
       },
       [
@@ -1792,6 +1955,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         objectsMap,
         onBringToFront,
         selectedIds,
+        stageScale,
       ],
     );
 
@@ -1822,9 +1986,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             width: target.width,
             height: target.height,
           },
+          scale: stageScale,
         });
       },
-      [canEdit, focusCanvas, onInteract, objectsMap, onBringToFront],
+      [canEdit, focusCanvas, onInteract, objectsMap, onBringToFront, stageScale],
     );
 
     const handleKeyDown = useCallback(
@@ -1941,8 +2106,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }
 
         if (activeInteraction.kind === 'move') {
-          const deltaX = event.clientX - activeInteraction.startClientX;
-          const deltaY = event.clientY - activeInteraction.startClientY;
+          const scale = activeInteraction.scale === 0 ? 1 : activeInteraction.scale;
+          const deltaX = (event.clientX - activeInteraction.startClientX) / scale;
+          const deltaY = (event.clientY - activeInteraction.startClientY) / scale;
           const updates: Record<string, Partial<SlideObject>> = {};
           activeInteraction.objectIds.forEach(id => {
             const initial = activeInteraction.initialPositions.get(id);
@@ -1963,8 +2129,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             return;
           }
 
-          const deltaX = event.clientX - activeInteraction.startClientX;
-          const deltaY = event.clientY - activeInteraction.startClientY;
+          const scale = activeInteraction.scale === 0 ? 1 : activeInteraction.scale;
+          const deltaX = (event.clientX - activeInteraction.startClientX) / scale;
+          const deltaY = (event.clientY - activeInteraction.startClientY) / scale;
 
           let nextX = initial.x;
           let nextY = initial.y;
