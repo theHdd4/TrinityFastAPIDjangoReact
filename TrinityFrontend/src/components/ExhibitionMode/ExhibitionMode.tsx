@@ -243,10 +243,10 @@ const ExhibitionMode = () => {
 
       transitionTimerRef.current = window.setTimeout(() => {
         setCurrentSlide(targetIndex);
-        setSlideshowTransform(enter.transform);
-        setSlideshowOpacity(enter.opacity);
-
         requestAnimationFrame(() => {
+          setSlideshowTransform(enter.transform);
+          setSlideshowOpacity(enter.opacity);
+
           requestAnimationFrame(() => {
             setSlideshowTransform('translateX(0px) scale(1)');
             setSlideshowOpacity(1);
@@ -1378,6 +1378,7 @@ const ExhibitionMode = () => {
         opacity: slideshowOpacity,
         transform: slideshowTransform,
         transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
+        willChange: 'opacity, transform',
       }
     : undefined;
 
@@ -1475,7 +1476,12 @@ const ExhibitionMode = () => {
           </div>
         )}
 
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div
+          className={cn(
+            'flex-1 flex flex-col overflow-hidden bg-background',
+            isPresentationView && 'bg-neutral-950',
+          )}
+        >
           {viewMode === 'horizontal' ? (
             <div
               className={cn('flex-1 flex flex-col', isSlideshowActive && 'justify-center')}

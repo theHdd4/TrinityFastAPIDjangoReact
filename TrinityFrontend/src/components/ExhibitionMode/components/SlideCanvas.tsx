@@ -1025,7 +1025,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         ref={presentationMode ? presentationContainerRef : undefined}
         className={
           presentationMode
-            ? 'flex h-full w-full items-center justify-center p-12'
+            ? 'flex h-full w-full items-center justify-center p-12 bg-neutral-950'
             : cn('mx-auto transition-all duration-300 p-8', cardWidthClass)
         }
       >
