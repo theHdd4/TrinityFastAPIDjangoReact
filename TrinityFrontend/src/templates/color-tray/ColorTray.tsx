@@ -20,10 +20,17 @@ export interface ColorTrayProps {
 }
 
 const swatchSizeMap: Record<ColorTraySwatchSize, string> = {
-  sm: 'h-8 w-8 rounded-lg',
-  md: 'h-10 w-10 rounded-xl',
-  lg: 'h-12 w-12 rounded-2xl',
+  sm: 'h-9 w-9 rounded-xl',
+  md: 'h-11 w-11 rounded-2xl',
+  lg: 'h-14 w-14 rounded-[1.75rem]',
 };
+
+interface ColorTrayGroup {
+  id: string;
+  label: string;
+  order: number;
+  options: ColorTrayOption[];
+}
 
 export const ColorTray: React.FC<ColorTrayProps> = ({
   options: legacyOptions,
@@ -140,6 +147,63 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
     });
   }, [normalizedQuery, resolvedOptions]);
 
+  const groupedOptions = useMemo(() => {
+    if (filteredOptions.length === 0) {
+      return [] as ColorTrayGroup[];
+    }
+
+    const optionsWithGroups = filteredOptions.filter(
+      option => option.groupId && option.groupLabel,
+    );
+
+    if (optionsWithGroups.length !== filteredOptions.length) {
+      return null;
+    }
+
+    const groups = new Map<string, ColorTrayGroup>();
+
+    optionsWithGroups.forEach(option => {
+      const id = option.groupId!;
+      const label = option.groupLabel!;
+      const existing = groups.get(id);
+      if (existing) {
+        existing.order = Math.min(existing.order, option.groupOrder ?? existing.order);
+        existing.options.push(option);
+        return;
+      }
+      groups.set(id, {
+        id,
+        label,
+        order: option.groupOrder ?? Number.MAX_SAFE_INTEGER,
+        options: [option],
+      });
+    });
+
+    const sortedGroups = Array.from(groups.values()).sort((a, b) => {
+      if (a.order !== b.order) {
+        return a.order - b.order;
+      }
+      return a.label.localeCompare(b.label);
+    });
+
+    sortedGroups.forEach(group => {
+      group.options = [...group.options].sort((a, b) => {
+        const toneA = a.toneOrder ?? Number.MAX_SAFE_INTEGER;
+        const toneB = b.toneOrder ?? Number.MAX_SAFE_INTEGER;
+        if (toneA !== toneB) {
+          return toneA - toneB;
+        }
+        const labelA = a.label ?? a.ariaLabel ?? a.id;
+        const labelB = b.label ?? b.ariaLabel ?? b.id;
+        return labelA.localeCompare(labelB);
+      });
+    });
+
+    return sortedGroups;
+  }, [filteredOptions]);
+
+  const hasGroupedOptions = Array.isArray(groupedOptions) && groupedOptions.length > 0;
+
   const effectiveColumns = useMemo(() => {
     if (columns) {
       return columns;
@@ -189,42 +253,91 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
     return undefined;
   }, [selectedOption]);
 
+  const renderOption = (option: ColorTrayOption) => {
+    const optionId = option.id.toLowerCase();
+    const isSelected = resolvedSelectedId === optionId;
+    const isDisabled = disabled || option.disabled;
+    const ariaLabel = option.ariaLabel ?? option.label ?? option.value ?? option.id;
+    const tooltip = option.tooltip ?? ariaLabel;
+
+    return (
+      <button
+        key={option.id}
+        type="button"
+        aria-label={ariaLabel}
+        title={tooltip}
+        onClick={() => {
+          if (!isDisabled) {
+            onSelect?.(option);
+          }
+        }}
+        className={cn(
+          'group relative flex items-center justify-center rounded-2xl border border-border/40 bg-gradient-to-br from-white/80 via-white/70 to-white/90 p-1.5 shadow-sm transition-all duration-300',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+          isSelected
+            ? 'z-10 scale-105 border-primary/60 bg-white shadow-xl'
+            : 'hover:-translate-y-0.5 hover:shadow-lg',
+          isDisabled && 'cursor-not-allowed opacity-60 hover:translate-y-0 hover:shadow-none',
+          optionClassName,
+        )}
+        disabled={isDisabled}
+      >
+        <span
+          className={cn(
+            'relative flex items-center justify-center rounded-[inherit] border border-white/40 bg-white/70 shadow-inner transition-all duration-300',
+            swatchSizeMap[swatchSize],
+            option.swatchClassName,
+          )}
+          style={option.swatchStyle}
+        >
+          {option.preview ?? null}
+          {isSelected && (
+            <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[inherit] bg-black/25 backdrop-blur-sm">
+              <Check className="h-4 w-4 text-white drop-shadow" />
+            </span>
+          )}
+        </span>
+      </button>
+    );
+  };
+
   return (
     <div
       className={cn(
-        'w-full max-w-md rounded-3xl border border-border/50 bg-gradient-to-br from-background via-background/95 to-card p-4 shadow-2xl backdrop-blur-xl',
+        'w-full max-w-[26rem] rounded-[2.25rem] border border-border/60 bg-gradient-to-b from-background/95 via-background/90 to-card p-5 shadow-[0_35px_80px_-40px_rgba(15,23,42,0.45)] backdrop-blur-xl',
         className,
       )}
     >
-      <div className="relative overflow-hidden rounded-2xl border border-border/30 bg-gradient-to-br from-primary/5 via-transparent to-primary/10 px-5 py-4 shadow-inner">
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-primary/10 to-transparent opacity-70" />
-        <div className="relative flex items-center gap-3">
-          <div className="relative flex h-10 w-10 items-center justify-center">
-            <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-primary/20 to-primary/40 opacity-70 blur-sm" />
-            <div
-              className="relative flex h-9 w-9 items-center justify-center rounded-xl border-2 border-primary/30 shadow-lg ring-2 ring-background"
-              style={selectedSwatchStyle}
-            >
-              {selectedOption?.preview ? (
-                selectedOption.preview
+      <div className="relative overflow-hidden rounded-2xl border border-white/30 bg-gradient-to-r from-[#ff8dc7] via-[#a855f7] to-[#f97316] p-[1px] shadow-inner">
+        <div className="rounded-[inherit] bg-white/75 px-5 py-4 backdrop-blur-xl">
+          <div className="flex items-center gap-3">
+            <div className="relative flex h-11 w-11 items-center justify-center">
+              <div className="absolute inset-0 rounded-[inherit] bg-gradient-to-br from-white/70 via-white/20 to-white/80" />
+              <div
+                className="relative flex h-9 w-9 items-center justify-center rounded-xl border-2 border-white/70 bg-white/60 shadow-lg"
+                style={selectedSwatchStyle}
+              >
+                {selectedOption?.preview ? (
+                  selectedOption.preview
+                ) : (
+                  <span className="absolute inset-0 rounded-[inherit] bg-gradient-to-br from-muted/40 via-muted/20 to-muted/40" />
+                )}
+              </div>
+            </div>
+            <div className="flex flex-1 flex-col">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-500">
+                Color Palette
+              </span>
+              {selectedOption?.label ? (
+                <span className="text-base font-semibold text-slate-900">{selectedOption.label}</span>
+              ) : selectedOption?.value ? (
+                <span className="text-base font-semibold text-slate-900">{selectedOption.value}</span>
               ) : (
-                <span className="absolute inset-0 rounded-[inherit] bg-gradient-to-br from-muted/40 via-muted/20 to-muted/40" />
+                <span className="text-base font-semibold text-slate-800">Choose a color</span>
               )}
             </div>
+            <Droplet className="h-5 w-5 text-[#a855f7]" />
           </div>
-          <div className="flex flex-1 flex-col">
-            <span className="bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-xs font-bold uppercase tracking-[0.2em] text-transparent">
-              Color Palette
-            </span>
-            {selectedOption?.label ? (
-              <span className="text-sm font-semibold text-foreground/90">{selectedOption.label}</span>
-            ) : selectedOption?.value ? (
-              <span className="text-sm font-semibold text-foreground/90">{selectedOption.value}</span>
-            ) : (
-              <span className="text-sm font-semibold text-foreground/80">Choose a color</span>
-            )}
-          </div>
-          <Droplet className="h-4 w-4 text-primary/70" />
         </div>
       </div>
 
@@ -232,7 +345,7 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
         {resolvedSections ? (
           <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <div className="flex flex-1 flex-wrap gap-2 rounded-2xl border border-border/30 bg-gradient-to-br from-muted/60 via-muted/40 to-muted/50 p-1.5 shadow-lg">
+              <div className="flex flex-1 flex-wrap gap-2 rounded-2xl border border-border/40 bg-gradient-to-r from-white/70 via-white/50 to-white/70 p-1.5 shadow-sm">
                 {resolvedSections.map(section => {
                   const isActive = section.id === activeSectionId;
                   return (
@@ -240,11 +353,11 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
                       key={section.id}
                       type="button"
                       className={cn(
-                        'relative flex flex-1 items-center justify-center rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-all duration-300',
+                        'relative flex flex-1 items-center justify-center rounded-xl px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.3em] transition-all duration-300',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
                         isActive
-                          ? 'bg-gradient-to-br from-background via-card to-background text-foreground shadow-lg'
-                          : 'text-muted-foreground hover:text-foreground',
+                          ? 'bg-gradient-to-r from-[#fef4ff] via-white to-[#fef9f4] text-foreground shadow-md'
+                          : 'text-muted-foreground hover:bg-white/60 hover:text-foreground',
                       )}
                       onClick={() => setActiveSectionId(section.id)}
                       aria-pressed={isActive}
@@ -267,7 +380,7 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
                 value={searchQuery}
                 onChange={event => setSearchQuery(event.target.value)}
                 placeholder="Search colors or hex codes"
-                className="h-10 rounded-2xl border border-border/50 bg-gradient-to-r from-background/90 via-background/70 to-background/90 pl-11 text-sm shadow-inner transition-all focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-primary/60"
+                className="h-11 rounded-2xl border border-border/50 bg-gradient-to-r from-white/90 via-white/70 to-white/90 pl-11 text-sm shadow-inner transition-all focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-primary/60"
               />
             </div>
           </div>
@@ -278,69 +391,38 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
               value={searchQuery}
               onChange={event => setSearchQuery(event.target.value)}
               placeholder="Search colors or hex codes"
-              className="h-10 rounded-2xl border border-border/50 bg-gradient-to-r from-background/90 via-background/70 to-background/90 pl-11 text-sm shadow-inner transition-all focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-primary/60"
+              className="h-11 rounded-2xl border border-border/50 bg-gradient-to-r from-white/90 via-white/70 to-white/90 pl-11 text-sm shadow-inner transition-all focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-primary/60"
             />
           </div>
         )}
 
         <ScrollArea className="max-h-[22rem] pr-2">
-          <div
-            className={cn('grid gap-3 pr-1', gridClassName)}
-            style={effectiveColumns ? { gridTemplateColumns: `repeat(${effectiveColumns}, minmax(0, 1fr))` } : gridTemplate}
-          >
-            {filteredOptions.map(option => {
-              const optionId = option.id.toLowerCase();
-              const isSelected = resolvedSelectedId === optionId;
-              const isDisabled = disabled || option.disabled;
-              const ariaLabel = option.ariaLabel ?? option.label ?? option.value ?? option.id;
-              const tooltip = option.tooltip ?? ariaLabel;
-
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  aria-label={ariaLabel}
-                  title={tooltip}
-                  onClick={() => {
-                    if (!isDisabled) {
-                      onSelect?.(option);
-                    }
-                  }}
-                  className={cn(
-                    'group relative inline-flex items-center justify-center rounded-2xl transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-                    'before:absolute before:-inset-1 before:-z-10 before:rounded-[1.25rem] before:bg-gradient-to-br before:from-primary/10 before:via-primary/0 before:to-primary/20 before:opacity-0 before:transition-opacity before:duration-300 hover:before:opacity-100',
-                    isSelected
-                      ? 'z-10 scale-105 ring-2 ring-primary/50 shadow-2xl'
-                      : 'hover:z-10 hover:scale-105 hover:-rotate-1 hover:shadow-xl',
-                    isDisabled && 'cursor-not-allowed opacity-60 hover:scale-100 hover:shadow-none before:opacity-0',
-                    optionClassName,
-                  )}
-                  disabled={isDisabled}
-                >
-                  <span
-                    className={cn(
-                      'relative flex items-center justify-center rounded-[inherit] border border-border/40 bg-background shadow-inner transition-all duration-300',
-                      swatchSizeMap[swatchSize],
-                      option.swatchClassName,
-                    )}
-                    style={option.swatchStyle}
-                  >
-                    {option.preview ?? null}
-                    {isSelected && (
-                      <span className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-[inherit] bg-black/25 backdrop-blur-sm">
-                        <Check className="h-4 w-4 text-white drop-shadow" />
-                      </span>
-                    )}
-                  </span>
-                </button>
-              );
-            })}
-            {filteredOptions.length === 0 && (emptyState ?? (
-              <div className="col-span-full flex h-28 flex-col items-center justify-center rounded-2xl border border-dashed border-border/60 bg-gradient-to-br from-muted/20 via-transparent to-muted/10 text-xs font-semibold uppercase tracking-[0.4em] text-muted-foreground">
-                No options available
-              </div>
-            ))}
-          </div>
+          {hasGroupedOptions ? (
+            <div className="space-y-4 pr-1">
+              {groupedOptions?.map(group => (
+                <div key={group.id} className="grid grid-cols-[6rem,1fr] items-start gap-4">
+                  <div className="pt-2 text-[11px] font-semibold uppercase tracking-[0.35em] text-muted-foreground">
+                    {group.label}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {group.options.map(renderOption)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div
+              className={cn('grid gap-3 pr-1', gridClassName)}
+              style={effectiveColumns ? { gridTemplateColumns: `repeat(${effectiveColumns}, minmax(0, 1fr))` } : gridTemplate}
+            >
+              {filteredOptions.map(renderOption)}
+              {filteredOptions.length === 0 && (emptyState ?? (
+                <div className="col-span-full flex h-28 flex-col items-center justify-center rounded-2xl border border-dashed border-border/60 bg-gradient-to-br from-muted/20 via-transparent to-muted/10 text-xs font-semibold uppercase tracking-[0.4em] text-muted-foreground">
+                  No options available
+                </div>
+              ))}
+            </div>
+          )}
         </ScrollArea>
       </div>
     </div>
