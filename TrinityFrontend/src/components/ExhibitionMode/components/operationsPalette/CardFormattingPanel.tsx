@@ -155,6 +155,16 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
         return option;
       }
     }
+    if (isSolidToken(id)) {
+      const hex = solidTokenToHex(id);
+      return {
+        id,
+        value: hex,
+        label: `Custom (${hex.toUpperCase()})`,
+        tooltip: `Custom color (${hex.toUpperCase()})`,
+        swatchStyle: { backgroundColor: hex },
+      } satisfies ColorTrayOption;
+    }
     return undefined;
   };
 
@@ -379,8 +389,9 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                 </PopoverTrigger>
                 <PopoverContent
                   side="bottom"
-                  align="end"
-                  sideOffset={8}
+                  align="center"
+                  sideOffset={12}
+                  collisionPadding={16}
                   className="z-[3000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
                 >
                   <ColorTray
@@ -391,6 +402,7 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                     }
                     disabled={!canEdit || hasAccentImage}
                     defaultSectionId="gradients"
+                    showCustomColorSection
                   />
                 </PopoverContent>
               </Popover>
@@ -431,8 +443,9 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                 </PopoverTrigger>
                 <PopoverContent
                   side="bottom"
-                  align="end"
-                  sideOffset={8}
+                  align="center"
+                  sideOffset={12}
+                  collisionPadding={16}
                   className="z-[3000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
                 >
                   <ColorTray
@@ -445,6 +458,7 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                     }
                     disabled={!canEdit}
                     defaultSectionId="solids"
+                    showCustomColorSection
                   />
                 </PopoverContent>
               </Popover>
