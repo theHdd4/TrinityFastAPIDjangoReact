@@ -1,13 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Sparkles, Atom, FileQuestion, X, ChevronDown, Search } from 'lucide-react';
+import { Atom, FileQuestion, X, ChevronDown, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { atomCategories } from '@/components/AtomCategory/data/atomCategories';
 import { atomIconMap } from '../utils/atomIconMap';
 import AtomTooltip from './AtomTooltip';
+import { TrinityAIIcon } from '@/components/TrinityAI';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -339,7 +340,7 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
             title="Trinity AI"
             type="button"
           >
-            <Sparkles className="w-4 h-4 text-purple-500" />
+            <TrinityAIIcon className="text-purple-500" />
             <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
               Trinity AI
             </span>

@@ -1,8 +1,8 @@
-import { Sparkles } from 'lucide-react';
 import type { PaletteOperation } from '../../types';
+import { TrinityAIIcon } from '@/components/TrinityAI';
 
 export const createAiAssistantOperation = (): PaletteOperation => ({
-  icon: Sparkles,
+  icon: TrinityAIIcon,
   label: 'Trinity AI',
   colorClass: 'text-purple-500',
 });

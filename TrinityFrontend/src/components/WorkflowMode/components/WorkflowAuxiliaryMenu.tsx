@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { SuperagentAIPanel } from '@/components/TrinityAI';
+import { SuperagentAIPanel, TrinityAIIcon } from '@/components/TrinityAI';
 
 const WorkflowAuxiliaryMenu: React.FC = () => {
   const [isTrinityAIActive, setIsTrinityAIActive] = useState(false);
@@ -30,7 +29,7 @@ const WorkflowAuxiliaryMenu: React.FC = () => {
             aria-pressed={isTrinityAIActive}
             aria-label="Toggle Trinity AI"
           >
-            <Sparkles className="w-4 h-4 text-purple-500" />
+            <TrinityAIIcon className="text-purple-500" />
             <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
               Trinity AI
             </span>

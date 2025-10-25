@@ -1,7 +1,7 @@
-import type { LucideIcon } from 'lucide-react';
+import type { ComponentType } from 'react';
 
 export interface PaletteOperation {
-  icon: LucideIcon;
+  icon: ComponentType<{ className?: string }>;
   label: string;
   colorClass?: string;
   onSelect?: () => void;
