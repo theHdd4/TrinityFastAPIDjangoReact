@@ -2274,8 +2274,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             if (isAtomObject(object) && onRemoveAtom) {
               onRemoveAtom(object.props.atom.id);
             } else if (
-              (object.type === 'text-box' || object.type === 'table' || object.type === 'shape') &&
-              onRemoveObject
+              onRemoveObject &&
+              object.type !== 'accent-image' &&
+              !(object.type === 'text-box' && object.id === titleObjectId)
             ) {
               onRemoveObject(id);
             }

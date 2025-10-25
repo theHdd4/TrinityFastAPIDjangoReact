@@ -269,7 +269,10 @@ interface ExhibitionStore {
   loadSavedConfiguration: (context?: ProjectContext | null) => Promise<void>;
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => void;
   addBlankSlide: (afterSlideIndex?: number) => LayoutCard | null;
-  setCards: (cards: LayoutCard[] | unknown) => void;
+  setCards: (
+    cards: LayoutCard[] | unknown,
+    slideObjects?: Record<string, SlideObject[] | undefined>,
+  ) => void;
   addSlideObject: (cardId: string, object: SlideObject) => void;
   bulkUpdateSlideObjects: (cardId: string, updates: Record<string, Partial<SlideObject>>) => void;
   removeSlideObject: (cardId: string, objectId: string) => void;
@@ -1320,7 +1323,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     return createdCard;
   },
 
-  setCards: (cards: LayoutCard[] | unknown) => {
+  setCards: (cards: LayoutCard[] | unknown, slideObjects?: Record<string, SlideObject[] | undefined>) => {
     const safeCards = extractCards(cards);
 
     const cardsWithDefaults = safeCards.map(withPresentationDefaults);
@@ -1329,6 +1332,12 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     set(state => {
       const nextSlideObjects: Record<string, SlideObject[]> = {};
       cardsWithDefaults.forEach(card => {
+        const provided = slideObjects?.[card.id];
+        if (provided) {
+          nextSlideObjects[card.id] = synchroniseSlideObjects(provided, card);
+          return;
+        }
+
         nextSlideObjects[card.id] = synchroniseSlideObjects(state.slideObjectsByCardId[card.id], card);
       });
 
