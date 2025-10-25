@@ -601,6 +601,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         <PopoverContent
           side="top"
           align="center"
+          sideOffset={12}
           className="z-[4000] w-60 rounded-2xl border border-border/70 bg-background/95 p-3 shadow-2xl"
           data-text-toolbar-root
         >
