@@ -86,14 +86,6 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
   canEdit = true,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const assignFileInputRef = useCallback((node: HTMLInputElement | null) => {
-    if (node) {
-      node.setAttribute('directory', '');
-      node.setAttribute('webkitdirectory', '');
-      node.setAttribute('mozdirectory', '');
-    }
-    fileInputRef.current = node;
-  }, []);
   const { toast } = useToast();
 
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
@@ -411,7 +403,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
               </div>
               <div className="rounded-xl border-2 border-dashed border-border p-4 transition-colors hover:border-primary/50">
                 <input
-                  ref={assignFileInputRef}
+                  ref={fileInputRef}
                   type="file"
                   accept={ALLOWED_EXTENSIONS.join(',')}
                   multiple
