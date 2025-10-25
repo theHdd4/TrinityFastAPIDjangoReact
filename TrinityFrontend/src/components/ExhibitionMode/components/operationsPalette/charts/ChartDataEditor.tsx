@@ -189,6 +189,50 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     const maxValue = Math.max(...chartData.map(row => row.value), 1);
     const isBar = config.type === 'horizontalBar';
 
+    const renderVerticalBar = (row: ChartDataRow, index: number) => {
+      const ratio = maxValue === 0 ? 0 : row.value / maxValue;
+      return (
+        <div
+          key={row.label}
+          className="flex flex-col items-center gap-1.5 text-xs font-medium text-muted-foreground"
+        >
+          <div className="flex h-44 w-8 items-end overflow-hidden rounded-2xl bg-muted/20">
+            <div
+              className="h-full w-full rounded-t-2xl transition-transform duration-300"
+              style={{
+                backgroundColor: palette[index % palette.length],
+                transform: `scaleY(${ratio})`,
+                transformOrigin: 'center bottom',
+              }}
+            />
+          </div>
+          <span>{row.label}</span>
+        </div>
+      );
+    };
+
+    const renderHorizontalBar = (row: ChartDataRow, index: number) => {
+      const ratio = maxValue === 0 ? 0 : row.value / maxValue;
+      return (
+        <div
+          key={row.label}
+          className="flex w-full flex-row items-center gap-2 text-xs font-medium text-muted-foreground"
+        >
+          <div className="flex h-4 flex-1 items-center overflow-hidden rounded-2xl bg-muted/20">
+            <div
+              className="h-full w-full rounded-r-2xl transition-transform duration-300"
+              style={{
+                backgroundColor: palette[index % palette.length],
+                transform: `scaleX(${ratio})`,
+                transformOrigin: 'left center',
+              }}
+            />
+          </div>
+          <span>{row.label}</span>
+        </div>
+      );
+    };
+
     return (
       <div
         className={cn(
@@ -196,28 +240,9 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
           isBar ? 'flex-col justify-center' : 'items-end justify-center',
         )}
       >
-        {chartData.map((row, index) => {
-          const size = (row.value / maxValue) * 100;
-          return (
-            <div
-              key={row.label}
-              className={cn(
-                'flex gap-1.5 text-xs font-medium text-muted-foreground',
-                isBar ? 'flex-row items-center' : 'flex-col items-center justify-end',
-              )}
-            >
-              <div
-                className="rounded-lg transition-all"
-                style={{
-                  backgroundColor: palette[index % palette.length],
-                  width: isBar ? `${size}%` : '28px',
-                  height: isBar ? '18px' : `${size}%`,
-                }}
-              />
-              <span>{row.label}</span>
-            </div>
-          );
-        })}
+        {chartData.map((row, index) =>
+          isBar ? renderHorizontalBar(row, index) : renderVerticalBar(row, index),
+        )}
       </div>
     );
   };
