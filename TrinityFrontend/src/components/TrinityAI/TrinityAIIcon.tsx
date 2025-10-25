@@ -13,18 +13,13 @@ const TrinityAIIcon: React.FC<TrinityAIIconProps> = ({ className, iconClassName,
   return (
     <span
       className={cn(
-        'trinity-ai-icon h-4 w-4 text-purple-500 drop-shadow-[0_0_8px_rgba(168,85,247,0.45)]',
+        'trinity-ai-icon h-4 w-4 text-purple-500 drop-shadow-[0_0_8px_rgba(168,85,247,0.55)]',
         className
       )}
       aria-hidden="true"
       {...props}
     >
-      <Sparkles
-        className={cn(
-          'h-full w-full transition-transform duration-700 ease-out group-hover:rotate-3',
-          iconClassName
-        )}
-      />
+      <Sparkles className={cn('trinity-ai-icon__sparkles h-full w-full', iconClassName)} />
     </span>
   );
 };

@@ -8,29 +8,62 @@
 .trinity-ai-icon::after {
   content: '';
   position: absolute;
-  inset: -45%;
-  background: linear-gradient(120deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.85) 45%, rgba(255, 255, 255, 0) 100%);
-  transform: translateX(-120%) rotate(25deg);
+  inset: -40%;
+  background: linear-gradient(
+    120deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.95) 45%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  transform: translateX(-140%) rotate(20deg);
   opacity: 0;
   border-radius: 9999px;
-  animation: trinity-ai-shine 2.8s ease-in-out infinite;
+  animation: trinity-ai-shine 2.1s ease-in-out infinite;
   pointer-events: none;
   mix-blend-mode: screen;
+}
+
+.trinity-ai-icon__sparkles {
+  transform-origin: 50% 60%;
+  animation: trinity-ai-wobble 2.1s ease-in-out infinite;
+  will-change: transform;
 }
 
 @keyframes trinity-ai-shine {
   0% {
     opacity: 0;
-    transform: translateX(-140%) rotate(25deg);
+    transform: translateX(-160%) rotate(20deg) scale(0.9);
   }
   20% {
-    opacity: 0.8;
+    opacity: 1;
   }
-  40% {
+  45% {
+    opacity: 0.35;
+  }
+  60% {
     opacity: 0;
   }
   100% {
     opacity: 0;
-    transform: translateX(140%) rotate(25deg);
+    transform: translateX(160%) rotate(20deg) scale(0.9);
+  }
+}
+
+@keyframes trinity-ai-wobble {
+  0%,
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
+  20% {
+    transform: rotate(-5deg) scale(1.07);
+  }
+  40% {
+    transform: rotate(3deg) scale(0.98);
+  }
+  60% {
+    transform: rotate(-2deg) scale(1.04);
+  }
+  80% {
+    transform: rotate(3deg) scale(1);
   }
 }
