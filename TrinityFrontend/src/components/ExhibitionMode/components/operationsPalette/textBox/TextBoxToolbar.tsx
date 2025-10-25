@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlignCenter,
   AlignLeft,
@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import { useResponsivePopoverSide } from '../useResponsivePopoverSide';
 import type { TextAlignOption } from './types';
 import {
   FONT_CATEGORY_LOOKUP,
@@ -134,6 +135,9 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
   const [activeFilter, setActiveFilter] = useState<FontFilterChipId | null>(null);
   const [activeTab, setActiveTab] = useState<'font' | 'styles'>('font');
   const [searchTerm, setSearchTerm] = useState('');
+  const [colorPopoverOpen, setColorPopoverOpen] = useState(false);
+  const colorTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const colorPopoverSide = useResponsivePopoverSide(colorTriggerRef, colorPopoverOpen, 360);
   const cssFontFamily = useMemo(() => resolveFontFamily(fontFamily), [fontFamily]);
   const activeTextStyleId = useMemo(() => {
     const presetMatch = TEXT_STYLE_PRESETS.find(preset => {
@@ -582,7 +586,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
 
       <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
 
-      <Popover>
+      <Popover open={colorPopoverOpen} onOpenChange={setColorPopoverOpen}>
         <PopoverTrigger asChild>
           <Button
             variant="ghost"
@@ -590,6 +594,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
             type="button"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border/50 p-0"
             onMouseDown={handleToolbarMouseDown}
+            ref={colorTriggerRef}
           >
             <span
               className="h-5 w-5 rounded-full border border-white/70 shadow-inner"
@@ -599,9 +604,10 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          side="top"
+          side={colorPopoverSide}
           align="center"
           sideOffset={12}
+          collisionPadding={24}
           className="z-[4000] w-60 rounded-2xl border border-border/70 bg-background/95 p-3 shadow-2xl"
           data-text-toolbar-root
         >
@@ -622,6 +628,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
               swatchSize="sm"
               optionClassName="min-h-[3.25rem]"
               defaultSectionId="solids"
+              variant="compact"
             />
             <div className="flex items-center gap-2">
               <input

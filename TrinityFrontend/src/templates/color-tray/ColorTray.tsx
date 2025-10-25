@@ -18,6 +18,7 @@ export interface ColorTrayProps {
   swatchSize?: ColorTraySwatchSize;
   defaultSectionId?: string;
   emptyState?: React.ReactNode;
+  variant?: 'default' | 'compact';
 }
 
 const swatchSizeMap: Record<ColorTraySwatchSize, string> = {
@@ -57,8 +58,10 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
   swatchSize = 'md',
   defaultSectionId,
   emptyState,
+  variant = 'default',
 }) => {
   const resolvedSelectedId = selectedId?.toLowerCase() ?? null;
+  const isCompact = variant === 'compact';
 
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -362,40 +365,46 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
   const showTabs = resolvedSections.length > 1;
   const selectedTitle = selectedOption?.label ?? selectedOption?.value ?? 'Choose a color';
 
+  const containerClassName = cn(
+    isCompact
+      ? 'w-full space-y-4'
+      : 'w-[360px] rounded-[2.25rem] border border-border/50 bg-gradient-to-br from-background via-background/95 to-card shadow-[0_35px_80px_-40px_rgba(15,23,42,0.45)] backdrop-blur-2xl',
+    className,
+  );
+
+  const contentClassName = cn(isCompact ? 'space-y-4' : 'space-y-5 p-5');
+
   return (
-    <div
-      className={cn(
-        'w-[360px] rounded-[2.25rem] border border-border/50 bg-gradient-to-br from-background via-background/95 to-card shadow-[0_35px_80px_-40px_rgba(15,23,42,0.45)] backdrop-blur-2xl',
-        className,
-      )}
-    >
-      <div className="space-y-5 p-5">
-        <div className="relative overflow-hidden rounded-[1.75rem] border border-white/30 bg-gradient-to-r from-[#a855f7]/25 via-[#ec4899]/20 to-[#f97316]/25 p-[1px] shadow-inner">
-          <div className="relative rounded-[inherit] bg-white/80 px-5 py-4 backdrop-blur-xl">
-            <div className="flex items-center gap-3">
-              <div className="relative flex h-11 w-11 items-center justify-center">
-                <div className="absolute inset-0 rounded-[inherit] bg-gradient-to-br from-white/70 via-white/20 to-white/80" />
-                <div
-                  className="relative flex h-9 w-9 items-center justify-center rounded-xl border-2 border-white/70 bg-white/60 shadow-lg"
-                  style={headerPreviewStyle}
-                >
-                  {selectedOption?.preview ? (
-                    selectedOption.preview
-                  ) : (
-                    <span className="absolute inset-0 rounded-[inherit] bg-gradient-to-br from-white/30 via-transparent to-white/40" />
-                  )}
+    <div className={containerClassName}>
+      <div className={contentClassName}>
+        {!isCompact && (
+          <div className="relative overflow-hidden rounded-[1.75rem] border border-white/30 bg-gradient-to-r from-[#a855f7]/25 via-[#ec4899]/20 to-[#f97316]/25 p-[1px] shadow-inner">
+            <div className="relative rounded-[inherit] bg-white/80 px-5 py-4 backdrop-blur-xl">
+              <div className="flex items-center gap-3">
+                <div className="relative flex h-11 w-11 items-center justify-center">
+                  <div className="absolute inset-0 rounded-[inherit] bg-gradient-to-br from-white/70 via-white/20 to-white/80" />
+                  <div
+                    className="relative flex h-9 w-9 items-center justify-center rounded-xl border-2 border-white/70 bg-white/60 shadow-lg"
+                    style={headerPreviewStyle}
+                  >
+                    {selectedOption?.preview ? (
+                      selectedOption.preview
+                    ) : (
+                      <span className="absolute inset-0 rounded-[inherit] bg-gradient-to-br from-white/30 via-transparent to-white/40" />
+                    )}
+                  </div>
                 </div>
+                <div className="flex flex-1 flex-col">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.35em] text-muted-foreground">
+                    Color Palette
+                  </span>
+                  <span className="text-base font-semibold text-foreground">{selectedTitle}</span>
+                </div>
+                <Droplet className="h-5 w-5 text-[#a855f7]" />
               </div>
-              <div className="flex flex-1 flex-col">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.35em] text-muted-foreground">
-                  Color Palette
-                </span>
-                <span className="text-base font-semibold text-foreground">{selectedTitle}</span>
-              </div>
-              <Droplet className="h-5 w-5 text-[#a855f7]" />
             </div>
           </div>
-        </div>
+        )}
 
         <Tabs value={sectionValue} onValueChange={setActiveSectionId} className="w-full">
           {showTabs ? (
