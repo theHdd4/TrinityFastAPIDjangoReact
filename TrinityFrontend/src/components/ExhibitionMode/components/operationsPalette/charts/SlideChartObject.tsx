@@ -107,6 +107,17 @@ export const SlideChartObject: React.FC<SlideChartObjectProps> = ({
     setIsEditorOpen(false);
   };
 
+  const handleDataEditorApply = (rows: ChartDataRow[], nextConfig: ChartConfig) => {
+    if (!canEdit) {
+      return;
+    }
+    onInteract();
+    onUpdate({
+      data: rows.map(entry => ({ ...entry })),
+      config: { ...nextConfig },
+    });
+  };
+
   return (
     <>
       <ContextMenu>
@@ -180,20 +191,23 @@ export const SlideChartObject: React.FC<SlideChartObjectProps> = ({
               <span>Switch type</span>
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="w-52 rounded-xl border border-border/60 bg-background/95 backdrop-blur-xl shadow-2xl">
-              {CHART_TYPES.map(type => (
-                <ContextMenuItem
-                  key={type.id}
-                  onSelect={() => handleTypeChange(type.id)}
-                  disabled={!canEdit}
-                  className={cn(
-                    'rounded-lg gap-3',
-                    safeConfig.type === type.id && 'bg-muted/60 text-foreground',
-                  )}
-                >
-                  <type.icon className="h-4 w-4" />
-                  <span>{type.name}</span>
-                </ContextMenuItem>
-              ))}
+              {CHART_TYPES.map(type => {
+                const Icon = type.icon;
+                return (
+                  <ContextMenuItem
+                    key={type.id}
+                    onSelect={() => handleTypeChange(type.id)}
+                    disabled={!canEdit}
+                    className={cn(
+                      'rounded-lg gap-3',
+                      safeConfig.type === type.id && 'bg-muted/60 text-foreground',
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span>{type.name}</span>
+                  </ContextMenuItem>
+                );
+              })}
             </ContextMenuSubContent>
           </ContextMenuSub>
           <ContextMenuSeparator className="bg-border/50" />
@@ -227,6 +241,7 @@ export const SlideChartObject: React.FC<SlideChartObjectProps> = ({
         open={isEditorOpen}
         onClose={() => setIsEditorOpen(false)}
         onSave={handleDataEditorSave}
+        onApply={handleDataEditorApply}
         initialData={safeData}
         initialConfig={safeConfig}
       />

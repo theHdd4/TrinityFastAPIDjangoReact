@@ -143,7 +143,7 @@ export const SlideChart: React.FC<SlideChartProps> = ({ data, config, className 
   };
 
   return (
-    <div className={cn('relative h-full w-full overflow-hidden rounded-3xl border border-border/40 bg-background/90', className)}>
+    <div className={cn('relative h-full w-full overflow-hidden rounded-3xl border border-border/40 bg-transparent', className)}>
       <div className="flex h-full w-full items-center justify-center">
         {config.type === 'pie' || config.type === 'donut'
           ? renderPie(config.type)

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
   Circle,
@@ -33,6 +33,7 @@ interface ChartDataEditorProps {
   onSave: (rows: ChartDataRow[], config: ChartConfig) => void;
   initialData?: ChartDataRow[];
   initialConfig?: ChartConfig;
+  onApply?: (rows: ChartDataRow[], config: ChartConfig) => void;
 }
 
 const iconByChartType = {
@@ -49,15 +50,37 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   onSave,
   initialData,
   initialConfig,
+  onApply,
 }) => {
-  const [chartData, setChartData] = useState<ChartDataRow[]>(initialData ?? DEFAULT_CHART_DATA);
-  const [config, setConfig] = useState<ChartConfig>(initialConfig ?? DEFAULT_CHART_CONFIG);
+  const [chartData, setChartData] = useState<ChartDataRow[]>(() =>
+    (initialData ?? DEFAULT_CHART_DATA).map(row => ({ ...row })),
+  );
+  const [config, setConfig] = useState<ChartConfig>(() => ({
+    ...DEFAULT_CHART_CONFIG,
+    ...(initialConfig ?? {}),
+  }));
   const [legendPosition, setLegendPosition] = useState<string>('bottom');
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    setChartData((initialData ?? DEFAULT_CHART_DATA).map(row => ({ ...row })));
+    setConfig({
+      ...DEFAULT_CHART_CONFIG,
+      ...(initialConfig ?? {}),
+    });
+    setLegendPosition('bottom');
+  }, [open, initialData, initialConfig]);
 
   const colorScheme = useMemo(
     () => COLOR_SCHEMES.find(scheme => scheme.id === config.colorScheme) ?? COLOR_SCHEMES[0],
     [config.colorScheme],
   );
+
+  const cloneRows = () => chartData.map(row => ({ ...row }));
+  const cloneConfig = () => ({ ...config });
 
   const addRow = () => {
     setChartData(prev => [...prev, { label: `Item ${prev.length + 1}`, value: 0 }]);
@@ -187,8 +210,12 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     );
   };
 
+  const handleApply = () => {
+    onApply?.(cloneRows(), cloneConfig());
+  };
+
   const handleSave = () => {
-    onSave(chartData, config);
+    onSave(cloneRows(), cloneConfig());
     onClose();
   };
 
@@ -398,13 +425,25 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
             variant="outline"
             className="h-11 flex-1 rounded-xl border-2 border-border/50"
             onClick={() => {
-              setChartData(initialData ?? DEFAULT_CHART_DATA);
-              setConfig(initialConfig ?? DEFAULT_CHART_CONFIG);
+              setChartData((initialData ?? DEFAULT_CHART_DATA).map(row => ({ ...row })));
+              setConfig({
+                ...DEFAULT_CHART_CONFIG,
+                ...(initialConfig ?? {}),
+              });
               onClose();
             }}
           >
             Cancel
           </Button>
+          {onApply && (
+            <Button
+              variant="outline"
+              className="h-11 flex-1 rounded-xl border-2 border-border/40 bg-card/40 hover:bg-card/60"
+              onClick={handleApply}
+            >
+              Apply
+            </Button>
+          )}
           <Button
             className="relative h-11 flex-1 overflow-hidden rounded-xl bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 font-semibold text-white shadow-lg transition-transform hover:scale-[1.02]"
             onClick={handleSave}
