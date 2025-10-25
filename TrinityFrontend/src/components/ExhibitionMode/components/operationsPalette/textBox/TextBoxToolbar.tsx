@@ -137,7 +137,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [colorPopoverOpen, setColorPopoverOpen] = useState(false);
   const colorTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const colorPopoverSide = useResponsivePopoverSide(colorTriggerRef, colorPopoverOpen, 360);
+  const colorPopoverSide = useResponsivePopoverSide(colorTriggerRef, colorPopoverOpen);
   const cssFontFamily = useMemo(() => resolveFontFamily(fontFamily), [fontFamily]);
   const activeTextStyleId = useMemo(() => {
     const presetMatch = TEXT_STYLE_PRESETS.find(preset => {
@@ -608,10 +608,10 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           align="center"
           sideOffset={12}
           collisionPadding={24}
-          className="z-[4000] w-60 rounded-2xl border border-border/70 bg-background/95 p-3 shadow-2xl"
+          className="z-[4000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
           data-text-toolbar-root
         >
-          <div className="flex flex-col gap-3">
+          <div className="space-y-4">
             <ColorTray
               sections={TEXT_COLOR_SECTIONS}
               selectedId={normalizedColorId}
@@ -625,17 +625,14 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
                   onColorChange(`#${option.id.slice(6)}`);
                 }
               }}
-              swatchSize="sm"
-              optionClassName="min-h-[3.25rem]"
               defaultSectionId="solids"
-              variant="compact"
             />
             <div className="flex items-center gap-2">
               <input
                 type="color"
                 value={color || '#111827'}
                 onChange={event => onColorChange(event.target.value)}
-                className="h-10 w-full cursor-pointer rounded-xl border border-border"
+                className="h-11 w-full cursor-pointer rounded-2xl border border-border"
               />
               <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Custom</span>
             </div>
