@@ -3,11 +3,13 @@ from __future__ import annotations
 import io
 import logging
 import mimetypes
+import os
 import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from motor.motor_asyncio import AsyncIOMotorCollection
@@ -38,6 +40,24 @@ storage = ExhibitionStorage()
 
 
 _FILENAME_SANITISER = re.compile(r"[^A-Za-z0-9_.-]+")
+_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+
+
+def _normalise_minio_base_url() -> str:
+    """Return the public MinIO base URL derived from configuration."""
+
+    public_endpoint = os.getenv("MINIO_PUBLIC_ENDPOINT")
+    if public_endpoint:
+        return public_endpoint.rstrip("/")
+
+    endpoint = MINIO_ENDPOINT.rstrip("/")
+    parsed = urlparse(endpoint)
+    if parsed.scheme:
+        return endpoint
+
+    is_secure = os.getenv("MINIO_SECURE", "false").lower() in {"1", "true", "yes"}
+    scheme = "https" if is_secure else "http"
+    return f"{scheme}://{endpoint}"
 
 
 async def _resolve_images_prefix(client_name: str, app_name: str, project_name: str) -> str:
@@ -54,19 +74,31 @@ async def _resolve_images_prefix(client_name: str, app_name: str, project_name: 
 
 
 def _build_image_url(object_name: str) -> str:
-    return f"http://{MINIO_ENDPOINT}/{MINIO_BUCKET}/{object_name}"
+    base_url = _normalise_minio_base_url()
+    return f"{base_url}/{MINIO_BUCKET}/{object_name}"
+
+
+def _is_allowed_image(filename: str, content_type: str | None) -> bool:
+    extension = Path(filename or "").suffix.lower()
+    if extension in _ALLOWED_EXTENSIONS:
+        return True
+
+    if content_type:
+        return content_type.lower() in {"image/jpeg", "image/png"}
+
+    return False
 
 
 def _normalise_filename(original: str, content_type: str | None) -> str:
     candidate = Path(original or "").name
     stem = Path(candidate).stem or "image"
-    extension = Path(candidate).suffix
+    extension = Path(candidate).suffix.lower()
 
     safe_stem = _FILENAME_SANITISER.sub("_", stem).strip("._") or "image"
 
     if not extension:
         guessed = mimetypes.guess_extension(content_type or "") or ""
-        extension = guessed
+        extension = guessed.lower()
 
     safe_extension = ""
     if extension:
@@ -109,10 +141,21 @@ async def list_exhibition_images(
     """Return all images uploaded for the active exhibition project."""
 
     prefix = await _resolve_images_prefix(client_name, app_name, project_name)
-    ensure_minio_bucket()
+    if not ensure_minio_bucket():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Image storage bucket is unavailable",
+        )
 
     client = get_client()
-    objects = client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
+    try:
+        objects: Iterable[Any] = client.list_objects(MINIO_BUCKET, prefix=prefix, recursive=True)
+    except Exception as exc:  # pragma: no cover - network/storage failure
+        logging.error("Failed to list exhibition images for %s: %s", prefix, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to list stored images",
+        ) from exc
 
     images: List[ExhibitionImage] = []
     for obj in objects:
@@ -143,11 +186,21 @@ async def upload_exhibition_image(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only image uploads are supported")
 
     prefix = await _resolve_images_prefix(client_name, app_name, project_name)
-    ensure_minio_bucket()
+    if not ensure_minio_bucket():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Image storage bucket is unavailable",
+        )
 
     content = await file.read()
     if not content:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file was empty")
+
+    if not _is_allowed_image(file.filename, file.content_type):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only .jpg, .jpeg, or .png uploads are supported",
+        )
 
     filename = _normalise_filename(file.filename, file.content_type)
     object_name = f"{prefix}{filename}"

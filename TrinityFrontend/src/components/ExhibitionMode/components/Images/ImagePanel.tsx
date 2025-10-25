@@ -75,6 +75,7 @@ export const stockImages: ReadonlyArray<{ url: string; title: string }> = [
 ];
 
 const SELECTED_RING_CLASSES = 'border-primary ring-2 ring-primary/20';
+const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png'];
 
 const ImagePanel: React.FC<ImagePanelProps> = ({
   currentImage,
@@ -85,6 +86,14 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
   canEdit = true,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const assignFileInputRef = useCallback((node: HTMLInputElement | null) => {
+    if (node) {
+      node.setAttribute('directory', '');
+      node.setAttribute('webkitdirectory', '');
+      node.setAttribute('mozdirectory', '');
+    }
+    fileInputRef.current = node;
+  }, []);
   const { toast } = useToast();
 
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
@@ -213,17 +222,35 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
       let uploadedAny = false;
       setIsUploading(true);
 
-      try {
-        for (const file of Array.from(files)) {
-          if (!file.type.startsWith('image/')) {
-            toast({
-              title: `${file.name} was not uploaded`,
-              description: 'Only image files are supported.',
-              variant: 'destructive',
-            });
-            continue;
-          }
+      const allFiles = Array.from(files);
+      const validFiles: File[] = [];
+      const rejectedFiles: string[] = [];
 
+      for (const file of allFiles) {
+        const extension = `.${file.name.split('.').pop()?.toLowerCase() ?? ''}`;
+        if (!ALLOWED_EXTENSIONS.includes(extension)) {
+          rejectedFiles.push(file.name);
+          continue;
+        }
+        validFiles.push(file);
+      }
+
+      if (rejectedFiles.length > 0) {
+        toast({
+          title: rejectedFiles.length === 1 ? `${rejectedFiles[0]} was not uploaded` : 'Some files were skipped',
+          description:
+            'Only .jpg, .jpeg, or .png files can be uploaded from the selected folder.',
+          variant: 'destructive',
+        });
+      }
+
+      if (validFiles.length === 0) {
+        setIsUploading(false);
+        return;
+      }
+
+      try {
+        for (const file of validFiles) {
           const formData = new FormData();
           formData.append('file', file);
           formData.append('client_name', projectContext.client_name);
@@ -370,7 +397,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
               <div className="space-y-2">
                 <p className="text-sm font-medium text-foreground">Upload images</p>
                 <p className="text-xs text-muted-foreground">
-                  Add your own visuals to customise this slide&apos;s accent image.
+                  Add your own visuals to customise this slide&apos;s accent image. JPEG and PNG files are supported.
                 </p>
                 {uploadsPath ? (
                   <p className="text-[11px] text-muted-foreground">
@@ -384,9 +411,9 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
               </div>
               <div className="rounded-xl border-2 border-dashed border-border p-4 transition-colors hover:border-primary/50">
                 <input
-                  ref={fileInputRef}
+                  ref={assignFileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept={ALLOWED_EXTENSIONS.join(',')}
                   multiple
                   onChange={handleFileUpload}
                   className="hidden"
@@ -407,7 +434,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                   ) : (
                     <>
                       <Upload className="mr-2 h-5 w-5" />
-                      Upload your images
+                      Select folder images
                     </>
                   )}
                 </Button>
