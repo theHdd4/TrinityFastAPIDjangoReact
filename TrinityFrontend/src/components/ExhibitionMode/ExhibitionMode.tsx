@@ -1028,18 +1028,20 @@ const ExhibitionMode = () => {
       origin: 'catalogue' | 'slide' = 'catalogue',
       placement?: { x: number; y: number; width: number; height: number },
     ) => {
-      console.log('🔍 ExhibitionMode - handleDrop called with:', { atom, sourceCardId, targetCardId, origin, placement });
       const processDrop = async () => {
-        const sourceCard = cards.find(card => card.id === sourceCardId);
-        const destinationCard = cards.find(card => card.id === targetCardId);
-        console.log('🔍 ExhibitionMode - sourceCard:', sourceCard);
-        console.log('🔍 ExhibitionMode - destinationCard:', destinationCard);
+        const primarySourceCard = cards.find(card => card.id === sourceCardId) ?? null;
+        const catalogueSourceCard =
+          origin === 'catalogue'
+            ? catalogueCards.find(card => card.id === sourceCardId) ?? null
+            : null;
+        const destinationCard = cards.find(card => card.id === targetCardId) ?? null;
 
-        if (!sourceCard || !destinationCard) {
+        if (!destinationCard) {
           setDraggedAtom(null);
           return;
         }
 
+        const resolvedSourceCard = primarySourceCard ?? catalogueSourceCard;
         const destinationAlreadyHasAtom = destinationCard.atoms.some(a => a.id === atom.id);
         if (destinationAlreadyHasAtom) {
           toast({
@@ -1069,17 +1071,22 @@ const ExhibitionMode = () => {
           }),
         );
 
-        if (origin === 'catalogue' && Array.isArray(sourceCard.catalogueAtoms)) {
-          const nextCatalogueAtoms = sourceCard.catalogueAtoms.map(existing =>
+        if (origin === 'catalogue' && resolvedSourceCard && Array.isArray(resolvedSourceCard.catalogueAtoms)) {
+          const nextCatalogueAtoms = resolvedSourceCard.catalogueAtoms.map(existing =>
             existing.id === manifestedAtom.id ? manifestedAtom : existing,
           );
-          updateCard(sourceCard.id, { catalogueAtoms: nextCatalogueAtoms });
+          updateCard(resolvedSourceCard.id, { catalogueAtoms: nextCatalogueAtoms });
         }
 
-        if (origin === 'slide' && sourceCard.id !== destinationCard.id) {
-          const sourceAtoms = sourceCard.atoms.filter(a => a.id !== atom.id);
-          updateCard(sourceCard.id, { atoms: sourceAtoms });
-          removeSlideObject(sourceCard.id, atom.id);
+        if (
+          origin === 'slide' &&
+          primarySourceCard &&
+          primarySourceCard.id !== destinationCard.id &&
+          Array.isArray(primarySourceCard.atoms)
+        ) {
+          const sourceAtoms = primarySourceCard.atoms.filter(a => a.id !== atom.id);
+          updateCard(primarySourceCard.id, { atoms: sourceAtoms });
+          removeSlideObject(primarySourceCard.id, atom.id);
         }
 
         const targetIndex = exhibitedCards.findIndex(card => card.id === destinationCard.id);
@@ -1104,6 +1111,7 @@ const ExhibitionMode = () => {
     [
       addSlideObject,
       cards,
+      catalogueCards,
       ensureAtomManifest,
       exhibitedCards,
       removeSlideObject,
