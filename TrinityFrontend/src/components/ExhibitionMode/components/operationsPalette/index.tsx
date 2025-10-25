@@ -22,6 +22,7 @@ interface OperationsPaletteProps {
   onCreateTextBox?: () => void;
   onCreateTable?: () => void;
   onOpenShapesPanel?: () => void;
+  onOpenImagesPanel?: () => void;
   canEdit?: boolean;
   positionPanel?: ReactNode | null;
 }
@@ -32,6 +33,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
   onCreateTextBox,
   onCreateTable,
   onOpenShapesPanel,
+  onOpenImagesPanel,
   canEdit = true,
   positionPanel = null,
 }) => {
@@ -39,12 +41,12 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
     () => [
       createAiAssistantOperation(),
       createTextOperation({ onCreateTextBox, canEdit }),
-      createImagesOperation(),
+      createImagesOperation({ onOpenImagesPanel, canEdit }),
       createTablesOperation({ onCreateTable, canEdit }),
       createShapesOperation({ onOpenShapesPanel, canEdit }),
       createChartsOperation(),
     ],
-    [onCreateTextBox, onCreateTable, onOpenShapesPanel, canEdit],
+    [onCreateTextBox, onCreateTable, onOpenShapesPanel, onOpenImagesPanel, canEdit],
   );
 
   const tools = useMemo<PaletteOperation[]>(
@@ -65,7 +67,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
         style={{ width: isPanelVisible ? POSITION_PANEL_WIDTH : 0 }}
       >
         {isPanelVisible && (
-          <div className="flex w-full justify-end">
+          <div className="flex h-full w-full justify-end">
             {positionPanel}
           </div>
         )}

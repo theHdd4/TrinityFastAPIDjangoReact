@@ -2435,6 +2435,24 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         );
       }
 
+      if (object.type === 'image') {
+        const src = typeof object.props?.src === 'string' ? object.props.src : null;
+        const name =
+          typeof object.props?.name === 'string' && object.props.name.trim().length > 0
+            ? object.props.name.trim()
+            : 'Slide image';
+
+        if (src) {
+          return <img src={src} alt={name} className="h-full w-full object-cover" />;
+        }
+
+        return (
+          <div className="flex h-full w-full items-center justify-center bg-muted/20 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Image
+          </div>
+        );
+      }
+
       if (object.type === 'text-box') {
         return null;
       }
@@ -2510,6 +2528,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
             const rotation = typeof object.rotation === 'number' ? object.rotation : 0;
             const isAccentImageObject = object.type === 'accent-image';
+            const isImageObject = object.type === 'image';
             const isTextBoxObject = object.type === 'text-box';
             const isTableObject = object.type === 'table';
             const isShapeObject = object.type === 'shape';
@@ -2609,7 +2628,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 <div
                   className={cn(
                     'relative flex-1 overflow-hidden',
-                    isAccentImageObject || isShapeObject ? undefined : 'p-4',
+                    isAccentImageObject || isShapeObject || isImageObject ? undefined : 'p-4',
                     (isTextBoxObject || isTableObject) && 'overflow-visible p-0',
                     isShapeObject && 'flex items-center justify-center overflow-visible p-0',
                   )}
