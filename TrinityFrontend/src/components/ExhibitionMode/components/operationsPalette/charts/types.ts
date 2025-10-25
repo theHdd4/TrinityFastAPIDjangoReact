@@ -1,6 +1,12 @@
 import type { LucideIcon } from 'lucide-react';
 
-export type ChartType = 'column' | 'bar' | 'line' | 'pie' | 'donut';
+export type ChartType =
+  | 'verticalBar'
+  | 'horizontalBar'
+  | 'line'
+  | 'area'
+  | 'pie'
+  | 'donut';
 
 export interface ChartDataRow {
   label: string;
