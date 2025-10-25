@@ -606,10 +606,10 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           align="center"
           sideOffset={14}
           collisionPadding={24}
-          className="z-[4000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
+          className="z-[4000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
           data-text-toolbar-root
         >
-          <div className="space-y-4">
+          <div className="w-[360px] space-y-4 p-4">
             <ColorTray
               sections={TEXT_COLOR_SECTIONS}
               selectedId={normalizedColorId}

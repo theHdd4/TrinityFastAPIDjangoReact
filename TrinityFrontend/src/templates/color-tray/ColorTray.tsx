@@ -366,9 +366,10 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
   const selectedTitle = selectedOption?.label ?? selectedOption?.value ?? 'Choose a color';
 
   const containerClassName = cn(
+    'mx-auto w-full',
     isCompact
-      ? 'w-full space-y-4'
-      : 'w-[360px] rounded-[2.25rem] border border-border/50 bg-gradient-to-br from-background via-background/95 to-card shadow-[0_35px_80px_-40px_rgba(15,23,42,0.45)] backdrop-blur-2xl',
+      ? 'space-y-4'
+      : 'max-w-[360px] rounded-[2.25rem] border border-border/50 bg-gradient-to-br from-background via-background/95 to-card shadow-[0_35px_80px_-40px_rgba(15,23,42,0.45)] backdrop-blur-2xl',
     className,
   );
 

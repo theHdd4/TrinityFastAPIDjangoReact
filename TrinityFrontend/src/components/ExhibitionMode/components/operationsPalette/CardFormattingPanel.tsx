@@ -457,9 +457,9 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                   align="center"
                   sideOffset={16}
                   collisionPadding={24}
-                  className="z-[3000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
+                  className="z-[3000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
                 >
-                  <div className="space-y-4">
+                  <div className="w-[360px] space-y-4 p-4">
                     <ColorTray
                       sections={layoutColorSections}
                       selectedId={settings.cardColor}
@@ -521,9 +521,9 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                   align="center"
                   sideOffset={16}
                   collisionPadding={24}
-                  className="z-[3000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
+                  className="z-[3000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
                 >
-                  <div className="space-y-4">
+                  <div className="w-[360px] space-y-4 p-4">
                     <ColorTray
                       sections={backgroundColorSections}
                       selectedId={settings.backgroundColor}
