@@ -192,6 +192,9 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
       ? `solid-${color.slice(1).toLowerCase()}`
       : color?.toLowerCase?.() ?? '';
 
+  const resolvedCustomColor =
+    typeof color === 'string' && color.startsWith('#') ? color : '#111827';
+
   const normalizedSearch = searchTerm.trim().toLowerCase();
 
   const filteredSections = useMemo(() => {
@@ -621,16 +624,10 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
               swatchSize="sm"
               optionClassName="min-h-[3.25rem]"
               defaultSectionId="solids"
+              customColorValue={resolvedCustomColor}
+              onCustomColorChange={hex => onColorChange(hex)}
+              customColorPlaceholder="#000000"
             />
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={color || '#111827'}
-                onChange={event => onColorChange(event.target.value)}
-                className="h-10 w-full cursor-pointer rounded-xl border border-border"
-              />
-              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Custom</span>
-            </div>
           </div>
         </PopoverContent>
       </Popover>

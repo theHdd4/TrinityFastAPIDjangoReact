@@ -71,6 +71,10 @@ const TRANSPARENT_OUTLINE_OPTION: ColorTrayOption = {
       </svg>
     </div>
   ),
+  groupId: 'utility',
+  groupLabel: 'Utility',
+  groupOrder: -2,
+  toneOrder: 0,
 };
 
 const OUTLINE_SOLID_OPTIONS = [
@@ -131,11 +135,24 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
       ? `solid-${fill.slice(1).toLowerCase()}`
       : fill?.toLowerCase?.() ?? '';
 
+  const resolvedFillCustomColor =
+    typeof fill === 'string' && fill.startsWith('#') ? fill : '#111827';
+
   const normalizedOutlineId = (() => {
     if (typeof stroke === 'string' && stroke.startsWith('#')) {
       return `solid-${stroke.slice(1).toLowerCase()}`;
     }
     return stroke?.toLowerCase?.() ?? '';
+  })();
+
+  const resolvedOutlineCustomColor = (() => {
+    if (typeof stroke === 'string' && stroke.startsWith('#')) {
+      return stroke;
+    }
+    if (stroke === 'transparent') {
+      return '#111827';
+    }
+    return '#111827';
   })();
 
   const handleToolbarMouseDown = (event: React.MouseEvent) => {
@@ -241,17 +258,10 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
             optionClassName="min-h-[3.25rem]"
             disabled={!supportsFill || !onFillChange}
             defaultSectionId="solids"
+            customColorValue={resolvedFillCustomColor}
+            onCustomColorChange={value => onFillChange?.(value)}
+            customColorPlaceholder="#000000"
           />
-          <div className="flex items-center gap-2">
-            <input
-              type="color"
-              value={fill || '#111827'}
-              disabled={!supportsFill || !onFillChange}
-              onChange={event => onFillChange?.(event.target.value)}
-              className="h-10 w-full cursor-pointer rounded-xl border border-border"
-            />
-            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Custom</span>
-          </div>
         </div>
       </PopoverContent>
     </Popover>
@@ -360,15 +370,11 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
               swatchSize="sm"
               optionClassName="min-h-[3.25rem]"
               defaultSectionId="solids"
+              customColorValue={resolvedOutlineCustomColor}
+              onCustomColorChange={value => handleOutlineColorSelect(value)}
+              customColorPlaceholder="#000000"
             />
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={stroke === 'transparent' ? '#111827' : stroke}
-                onChange={event => handleOutlineColorSelect(event.target.value)}
-                onMouseDown={handleToolbarMouseDown}
-                className="h-10 w-full cursor-pointer rounded-xl border border-border"
-              />
+            <div className="flex justify-end">
               <Button
                 variant="ghost"
                 size="sm"
