@@ -73,11 +73,10 @@ export const SlideChart: React.FC<SlideChartProps> = ({ data, config, className 
         <div key={item.label + index} className="flex flex-col items-center gap-1.5 text-xs text-muted-foreground">
           <div className="flex h-44 w-9 items-end overflow-hidden rounded-2xl bg-muted/20">
             <div
-              className="h-full w-full rounded-t-2xl transition-transform duration-300"
+              className="w-full rounded-t-2xl transition-all duration-300"
               style={{
                 backgroundColor: palette.colors[index % palette.colors.length],
-                transform: `scaleY(${ratio})`,
-                transformOrigin: 'center bottom',
+                height: `${Math.max(ratio * 100, item.value > 0 ? 6 : 0)}%`,
               }}
             />
           </div>
@@ -97,11 +96,10 @@ export const SlideChart: React.FC<SlideChartProps> = ({ data, config, className 
           {config.showLabels && <span className="w-16 shrink-0 text-right">{item.label}</span>}
           <div className="flex h-4 flex-1 items-center overflow-hidden rounded-2xl bg-muted/20">
             <div
-              className="h-full w-full rounded-r-2xl transition-transform duration-300"
+              className="h-full rounded-r-2xl transition-all duration-300"
               style={{
                 backgroundColor: palette.colors[index % palette.colors.length],
-                transform: `scaleX(${ratio})`,
-                transformOrigin: 'left center',
+                width: `${Math.max(ratio * 100, item.value > 0 ? 6 : 0)}%`,
               }}
             />
           </div>
