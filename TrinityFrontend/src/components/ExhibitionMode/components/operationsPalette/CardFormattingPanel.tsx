@@ -38,7 +38,7 @@ import {
 import type { ColorTrayOption, ColorTraySection } from '@/templates/color-tray';
 import type { PresentationSettings } from '../../store/exhibitionStore';
 import { cn } from '@/lib/utils';
-import { useResponsivePopoverSide } from './useResponsivePopoverSide';
+import { usePanelAlignedPopoverOffset, useResponsivePopoverSide } from './useResponsivePopoverSide';
 
 const BACKGROUND_PRESET_GROUP_ID = 'preset-backgrounds';
 const BACKGROUND_PRESET_GROUP_LABEL = 'Presets';
@@ -154,12 +154,19 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
   accentImageInputRef,
   onClose,
 }) => {
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const [layoutPopoverOpen, setLayoutPopoverOpen] = useState(false);
   const [backgroundPopoverOpen, setBackgroundPopoverOpen] = useState(false);
   const layoutTriggerRef = useRef<HTMLButtonElement | null>(null);
   const backgroundTriggerRef = useRef<HTMLButtonElement | null>(null);
   const layoutPopoverSide = useResponsivePopoverSide(layoutTriggerRef, layoutPopoverOpen);
   const backgroundPopoverSide = useResponsivePopoverSide(backgroundTriggerRef, backgroundPopoverOpen);
+  const layoutAlignOffset = usePanelAlignedPopoverOffset(layoutTriggerRef, panelRef, layoutPopoverOpen);
+  const backgroundAlignOffset = usePanelAlignedPopoverOffset(
+    backgroundTriggerRef,
+    panelRef,
+    backgroundPopoverOpen,
+  );
   const hasAccentImage = Boolean(settings.accentImage);
 
   const getSelectedOption = (sections: readonly ColorTraySection[], id: string | null | undefined) => {
@@ -256,7 +263,10 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
   );
 
   return (
-    <div className="w-full shrink-0 rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
+    <div
+      ref={panelRef}
+      className="w-full shrink-0 rounded-3xl border border-border/70 bg-background/95 shadow-2xl"
+    >
       <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
         <div className="flex items-center gap-2">
           <Settings className="h-4 w-4 text-muted-foreground" />
@@ -456,7 +466,8 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                 <PopoverContent
                   side={layoutPopoverSide}
                   align="center"
-                  sideOffset={12}
+                  alignOffset={layoutAlignOffset}
+                  sideOffset={18}
                   collisionPadding={24}
                   className="z-[3000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
                 >
@@ -520,7 +531,8 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                 <PopoverContent
                   side={backgroundPopoverSide}
                   align="center"
-                  sideOffset={12}
+                  alignOffset={backgroundAlignOffset}
+                  sideOffset={18}
                   collisionPadding={24}
                   className="z-[3000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
                 >

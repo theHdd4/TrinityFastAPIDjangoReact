@@ -46,3 +46,48 @@ export const useResponsivePopoverSide = (
 };
 
 export default useResponsivePopoverSide;
+
+export const usePanelAlignedPopoverOffset = (
+  triggerRef: RefObject<HTMLElement | null>,
+  containerRef: RefObject<HTMLElement | null>,
+  open: boolean,
+): number => {
+  const [offset, setOffset] = useState(0);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const updateOffset = () => {
+      const trigger = triggerRef.current;
+      const container = containerRef.current;
+
+      if (!trigger || !container) {
+        return;
+      }
+
+      const triggerRect = trigger.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+
+      const triggerCenter = triggerRect.left + triggerRect.width / 2;
+      const containerCenter = containerRect.left + containerRect.width / 2;
+
+      const nextOffset = containerCenter - triggerCenter;
+
+      setOffset(current => (Math.abs(current - nextOffset) < 0.5 ? current : nextOffset));
+    };
+
+    updateOffset();
+
+    window.addEventListener('resize', updateOffset);
+    window.addEventListener('scroll', updateOffset, true);
+
+    return () => {
+      window.removeEventListener('resize', updateOffset);
+      window.removeEventListener('scroll', updateOffset, true);
+    };
+  }, [containerRef, open, triggerRef]);
+
+  return offset;
+};
