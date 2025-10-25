@@ -38,7 +38,6 @@ import {
 import type { ColorTrayOption, ColorTraySection } from '@/templates/color-tray';
 import type { PresentationSettings } from '../../store/exhibitionStore';
 import { cn } from '@/lib/utils';
-import { usePanelAlignedPopoverOffset, useResponsivePopoverSide } from './useResponsivePopoverSide';
 
 const BACKGROUND_PRESET_GROUP_ID = 'preset-backgrounds';
 const BACKGROUND_PRESET_GROUP_LABEL = 'Presets';
@@ -107,8 +106,6 @@ const backgroundGradientOptions = DEFAULT_GRADIENT_COLOR_OPTIONS.filter(option =
   option.id.startsWith('gradient-'),
 ) as readonly ColorTrayOption[];
 
-const COLOR_POPOVER_ESTIMATED_HEIGHT = 420;
-
 const layoutColorSections: readonly ColorTraySection[] = [
   {
     id: DEFAULT_GRADIENT_SECTION.id,
@@ -159,14 +156,6 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
   const [backgroundPopoverOpen, setBackgroundPopoverOpen] = useState(false);
   const layoutTriggerRef = useRef<HTMLButtonElement | null>(null);
   const backgroundTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const layoutPopoverSide = useResponsivePopoverSide(layoutTriggerRef, layoutPopoverOpen);
-  const backgroundPopoverSide = useResponsivePopoverSide(backgroundTriggerRef, backgroundPopoverOpen);
-  const layoutAlignOffset = usePanelAlignedPopoverOffset(layoutTriggerRef, panelRef, layoutPopoverOpen);
-  const backgroundAlignOffset = usePanelAlignedPopoverOffset(
-    backgroundTriggerRef,
-    panelRef,
-    backgroundPopoverOpen,
-  );
   const hasAccentImage = Boolean(settings.accentImage);
 
   const getSelectedOption = (sections: readonly ColorTraySection[], id: string | null | undefined) => {
@@ -464,10 +453,9 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent
-                  side={layoutPopoverSide}
+                  side="left"
                   align="center"
-                  alignOffset={layoutAlignOffset}
-                  sideOffset={18}
+                  sideOffset={16}
                   collisionPadding={24}
                   className="z-[3000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
                 >
@@ -529,10 +517,9 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent
-                  side={backgroundPopoverSide}
+                  side="left"
                   align="center"
-                  alignOffset={backgroundAlignOffset}
-                  sideOffset={18}
+                  sideOffset={16}
                   collisionPadding={24}
                   className="z-[3000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
                 >

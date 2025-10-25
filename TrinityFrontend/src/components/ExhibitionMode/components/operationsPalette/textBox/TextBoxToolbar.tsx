@@ -26,7 +26,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import { useResponsivePopoverSide } from '../useResponsivePopoverSide';
 import type { TextAlignOption } from './types';
 import {
   FONT_CATEGORY_LOOKUP,
@@ -137,7 +136,6 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [colorPopoverOpen, setColorPopoverOpen] = useState(false);
   const colorTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const colorPopoverSide = useResponsivePopoverSide(colorTriggerRef, colorPopoverOpen);
   const cssFontFamily = useMemo(() => resolveFontFamily(fontFamily), [fontFamily]);
   const activeTextStyleId = useMemo(() => {
     const presetMatch = TEXT_STYLE_PRESETS.find(preset => {
@@ -604,9 +602,9 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          side={colorPopoverSide}
+          side="left"
           align="center"
-          sideOffset={12}
+          sideOffset={14}
           collisionPadding={24}
           className="z-[4000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
           data-text-toolbar-root
