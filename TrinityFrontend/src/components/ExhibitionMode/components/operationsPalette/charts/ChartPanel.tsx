@@ -25,6 +25,7 @@ import {
   COLOR_SCHEMES,
   DEFAULT_CHART_CONFIG,
   DEFAULT_CHART_DATA,
+  normalizeChartType,
 } from './constants';
 import type { ChartConfig, ChartDataRow, ChartPanelResult, ChartType } from './types';
 
@@ -56,6 +57,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
   const [config, setConfig] = useState<ChartConfig>(() => ({
     ...DEFAULT_CHART_CONFIG,
     ...(initialConfig ?? {}),
+    type: normalizeChartType(initialConfig?.type),
   }));
   const [showDataEditor, setShowDataEditor] = useState(false);
 
@@ -74,6 +76,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     setConfig({
       ...DEFAULT_CHART_CONFIG,
       ...(initialConfig ?? {}),
+      type: normalizeChartType(initialConfig?.type),
     });
   }, [initialConfig]);
 
@@ -90,13 +93,16 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
 
   const handleDataEditorSave = (rows: ChartDataRow[], nextConfig: ChartConfig) => {
     setChartData(rows.map(entry => ({ ...entry })));
-    setConfig({ ...nextConfig });
+    setConfig({
+      ...nextConfig,
+      type: normalizeChartType(nextConfig.type),
+    });
   };
 
   const renderPreview = () => {
     if (chartData.length === 0) {
       return (
-        <div className="flex h-60 items-center justify-center rounded-2xl border border-dashed border-border/50 text-sm text-muted-foreground">
+        <div className="flex h-56 items-center justify-center rounded-2xl border border-dashed border-border/50 text-xs text-muted-foreground">
           Add data to preview your chart
         </div>
       );
@@ -106,7 +112,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
       const total = chartData.reduce((sum, item) => sum + item.value, 0);
       if (total === 0) {
         return (
-          <div className="flex h-60 items-center justify-center rounded-2xl border border-dashed border-border/50 text-sm text-muted-foreground">
+          <div className="flex h-56 items-center justify-center rounded-2xl border border-dashed border-border/50 text-xs text-muted-foreground">
             Add non-zero values to preview your chart
           </div>
         );
@@ -114,8 +120,8 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
 
       let currentAngle = -90;
       return (
-        <div className="flex h-60 w-full items-center justify-center">
-          <svg viewBox="0 0 220 220" width={220} height={220} className="-rotate-90">
+        <div className="flex h-56 w-full items-center justify-center">
+          <svg viewBox="0 0 220 220" width={200} height={200} className="-rotate-90">
             {chartData.map((item, index) => {
               const percentage = (item.value / total) * 360;
               const start = currentAngle;
@@ -156,19 +162,22 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
       );
     }
 
-    if (selectedType === 'line') {
+    if (selectedType === 'line' || selectedType === 'area') {
       const maxValue = Math.max(...chartData.map(item => item.value), 1);
       const points = chartData
         .map((item, index) => {
-          const x = (index / Math.max(chartData.length - 1, 1)) * 320;
-          const y = 200 - (item.value / maxValue) * 180;
+          const x = (index / Math.max(chartData.length - 1, 1)) * 240;
+          const y = 200 - (item.value / maxValue) * 170;
           return `${x},${y}`;
         })
         .join(' ');
 
       return (
-        <div className="flex h-60 items-center justify-center">
-          <svg viewBox="0 0 320 220" width={320} height={220}>
+        <div className="flex h-56 items-center justify-center">
+          <svg viewBox="0 0 240 220" width={240} height={220}>
+            {selectedType === 'area' && (
+              <polygon points={`0,200 ${points} 240,200`} fill={`${palette.colors[0]}33`} stroke="none" />
+            )}
             <polyline
               points={points}
               fill="none"
@@ -178,8 +187,8 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
               strokeLinejoin="round"
             />
             {chartData.map((item, index) => {
-              const x = (index / Math.max(chartData.length - 1, 1)) * 320;
-              const y = 200 - (item.value / maxValue) * 180;
+              const x = (index / Math.max(chartData.length - 1, 1)) * 240;
+              const y = 200 - (item.value / maxValue) * 170;
               return <circle key={item.label} cx={x} cy={y} r={5} fill={palette.colors[index % palette.colors.length]} />;
             })}
           </svg>
@@ -188,13 +197,13 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     }
 
     const maxValue = Math.max(...chartData.map(item => item.value), 1);
-    const isBar = selectedType === 'bar';
+    const isHorizontal = selectedType === 'horizontalBar';
 
     return (
       <div
         className={cn(
-          'flex h-60 w-full gap-4 px-6 py-8',
-          isBar ? 'flex-col justify-center' : 'items-end justify-center',
+          'flex h-56 w-full gap-3 px-5 py-6',
+          isHorizontal ? 'flex-col justify-center' : 'items-end justify-center',
         )}
       >
         {chartData.map((item, index) => {
@@ -203,16 +212,16 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
             <div
               key={item.label}
               className={cn(
-                'flex text-xs font-medium text-muted-foreground',
-                isBar ? 'flex-row items-center gap-3' : 'flex-col items-center gap-2',
+                'flex text-[0.7rem] font-medium text-muted-foreground',
+                isHorizontal ? 'flex-row items-center gap-2' : 'flex-col items-center gap-1.5',
               )}
             >
               <div
                 className="rounded-xl"
                 style={{
                   backgroundColor: palette.colors[index % palette.colors.length],
-                  width: isBar ? `${size}%` : '36px',
-                  height: isBar ? '18px' : `${size}%`,
+                  width: isHorizontal ? `${size}%` : '26px',
+                  height: isHorizontal ? '16px' : `${size}%`,
                 }}
               />
               <span>{item.label}</span>
@@ -224,7 +233,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
   };
 
   const renderLegend = () => (
-    <div className="mt-5 flex flex-wrap items-center justify-center gap-3 text-xs font-medium text-muted-foreground">
+    <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-[0.7rem] font-medium text-muted-foreground">
       {chartData.map((item, index) => (
         <span key={item.label} className="flex items-center gap-2">
           <span
@@ -251,34 +260,34 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
 
   return (
     <>
-      <div className="flex h-full w-full shrink-0 flex-col rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
-        <div className="relative flex items-start justify-between border-b border-border/60 px-8 py-6">
+      <div className="flex h-full w-full max-w-[20rem] shrink-0 flex-col rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
+        <div className="relative flex items-start justify-between border-b border-border/60 px-6 py-5">
           {renderSparkles()}
           <div className="relative flex items-center gap-4">
             <div className="relative">
               <div className="absolute inset-0 animate-pulse rounded-2xl bg-gradient-to-br from-pink-500 to-purple-500 opacity-30 blur-xl" />
-              <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-500/20 to-purple-500/20 ring-2 ring-pink-500/30">
-                <BarChart3 className="h-7 w-7 text-pink-500" />
+              <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-500/20 to-purple-500/20 ring-2 ring-pink-500/30">
+                <BarChart3 className="h-6 w-6 text-pink-500" />
               </div>
             </div>
             <div>
-              <h2 className="flex items-center gap-3 text-2xl font-bold text-foreground">
+              <h2 className="flex items-center gap-2 text-xl font-semibold text-foreground">
                 Charts & diagrams
-                <Sparkles className="h-5 w-5 text-yellow-400" />
+                <Sparkles className="h-4 w-4 text-yellow-400" />
               </h2>
-              <p className="text-sm text-muted-foreground">Craft a beautiful data story for your slide.</p>
+              <p className="text-xs text-muted-foreground">Craft a beautiful data story for your slide.</p>
             </div>
           </div>
         </div>
 
-        <ScrollArea className="h-[620px]">
-          <div className="space-y-8 p-8">
-            <section className="space-y-4">
-              <header className="flex items-center gap-3">
-                <div className="h-8 w-1 rounded-full bg-gradient-to-b from-blue-500 to-purple-500" />
-                <h3 className="text-lg font-semibold text-foreground">Chart styles</h3>
+        <ScrollArea className="h-full">
+          <div className="space-y-6 p-6">
+            <section className="space-y-3">
+              <header className="flex items-center gap-2">
+                <div className="h-7 w-1 rounded-full bg-gradient-to-b from-blue-500 to-purple-500" />
+                <h3 className="text-base font-semibold text-foreground">Chart styles</h3>
               </header>
-              <div className="grid grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 gap-2">
                 {CHART_TYPES.map(type => {
                   const Icon = type.icon;
                   const isSelected = selectedType === type.id;
@@ -288,14 +297,14 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                       type="button"
                       onClick={() => handleChartTypeChange(type.id)}
                       className={cn(
-                        'group relative flex flex-col items-center gap-3 rounded-2xl border-2 p-5 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+                        'group relative flex flex-col items-center gap-2 rounded-2xl border-2 p-4 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
                         isSelected
                           ? 'border-primary shadow-2xl ring-2 ring-primary/20'
                           : 'border-border/50 bg-card hover:scale-[1.03] hover:border-primary/40 hover:shadow-xl',
                       )}
                     >
-                      <Icon className={cn('h-6 w-6 transition-colors duration-200', isSelected ? 'text-primary' : type.colorClass)} />
-                      <span className={cn('text-sm font-semibold', isSelected ? 'text-foreground' : 'text-muted-foreground')}>
+                      <Icon className={cn('h-5 w-5 transition-colors duration-200', isSelected ? 'text-primary' : type.colorClass)} />
+                      <span className={cn('text-xs font-semibold', isSelected ? 'text-foreground' : 'text-muted-foreground')}>
                         {type.name}
                       </span>
                     </button>
@@ -306,12 +315,12 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
 
             <Separator className="bg-gradient-to-r from-transparent via-border to-transparent" />
 
-            <section className="space-y-4">
-              <header className="flex items-center gap-3">
-                <div className="h-8 w-1 rounded-full bg-gradient-to-b from-cyan-500 to-teal-500" />
-                <h3 className="text-lg font-semibold text-foreground">Preview</h3>
+            <section className="space-y-3">
+              <header className="flex items-center gap-2">
+                <div className="h-7 w-1 rounded-full bg-gradient-to-b from-cyan-500 to-teal-500" />
+                <h3 className="text-base font-semibold text-foreground">Preview</h3>
               </header>
-              <div className="rounded-2xl border border-border/40 bg-card/70 p-6 shadow-lg">
+              <div className="rounded-2xl border border-border/40 bg-card/70 p-4 shadow-lg">
                 {renderPreview()}
                 {renderLegend()}
               </div>
@@ -326,7 +335,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                   value={config.colorScheme}
                   onValueChange={value => setConfig(prev => ({ ...prev, colorScheme: value }))}
                 >
-                  <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/70">
+                  <SelectTrigger className="h-10 rounded-xl border-2 border-border/50 bg-card/70 text-sm">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl border border-border/50 bg-popover/95 backdrop-blur">
@@ -351,9 +360,9 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                 </Select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex items-center justify-between rounded-xl border border-border/40 bg-muted/20 p-4">
-                  <Label htmlFor="chart-show-labels" className="text-sm font-medium">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex items-center justify-between rounded-xl border border-border/40 bg-muted/20 p-3">
+                  <Label htmlFor="chart-show-labels" className="text-xs font-medium">
                     Show labels
                   </Label>
                   <Switch
@@ -362,8 +371,8 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                     onCheckedChange={checked => setConfig(prev => ({ ...prev, showLabels: checked }))}
                   />
                 </div>
-                <div className="flex items-center justify-between rounded-xl border border-border/40 bg-muted/20 p-4">
-                  <Label htmlFor="chart-show-values" className="text-sm font-medium">
+                <div className="flex items-center justify-between rounded-xl border border-border/40 bg-muted/20 p-3">
+                  <Label htmlFor="chart-show-values" className="text-xs font-medium">
                     Show values
                   </Label>
                   <Switch
@@ -389,7 +398,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                         key={option.value}
                         variant={isSelected ? 'default' : 'outline'}
                         className={cn(
-                          'h-12 rounded-xl border-2 font-medium transition-colors',
+                          'h-10 rounded-xl border-2 text-xs font-medium transition-colors',
                           isSelected
                             ? 'border-primary bg-primary text-primary-foreground shadow-lg'
                             : 'border-border/50 text-muted-foreground hover:border-primary/40 hover:text-primary',
@@ -404,9 +413,9 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                 </div>
               </div>
 
-              {(selectedType === 'column' || selectedType === 'bar' || selectedType === 'line') && (
-                <div className="flex items-center justify-between rounded-xl border border-border/40 bg-muted/20 p-4">
-                  <Label htmlFor="chart-axis-zero" className="text-sm font-medium">
+              {(selectedType === 'verticalBar' || selectedType === 'horizontalBar' || selectedType === 'line' || selectedType === 'area') && (
+                <div className="flex items-center justify-between rounded-xl border border-border/40 bg-muted/20 p-3">
+                  <Label htmlFor="chart-axis-zero" className="text-xs font-medium">
                     Axis always includes zero
                   </Label>
                   <Switch
@@ -418,13 +427,13 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
               )}
             </section>
 
-            <div className="rounded-2xl border border-dashed border-border/50 bg-muted/10 p-6 text-center">
-              <div className="flex flex-col items-center gap-3 text-sm text-muted-foreground">
+            <div className="rounded-2xl border border-dashed border-border/50 bg-muted/10 p-5 text-center">
+              <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
                 <Wand2 className="h-5 w-5 text-primary" />
                 <span>Need to fine-tune the data? Open the rich data editor for full control.</span>
               </div>
               <Button
-                className="mt-4 w-full rounded-xl bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 font-semibold text-white shadow-lg transition-transform hover:scale-105"
+                className="mt-3 w-full rounded-xl bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-sm font-semibold text-white shadow-lg transition-transform hover:scale-105"
                 onClick={() => setShowDataEditor(true)}
               >
                 <Database className="mr-2 h-4 w-4" /> Edit chart data
@@ -434,12 +443,12 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
           </div>
         </ScrollArea>
 
-        <div className="relative flex items-center justify-between gap-4 border-t border-border/60 bg-muted/10 px-8 py-5">
-          <Button variant="outline" className="h-11 flex-1 rounded-xl border-2 border-border/60" onClick={onClose}>
+        <div className="relative flex items-center justify-between gap-3 border-t border-border/60 bg-muted/10 px-6 py-4">
+          <Button variant="outline" className="h-10 flex-1 rounded-xl border-2 border-border/60 text-sm" onClick={onClose}>
             Cancel
           </Button>
           <Button
-            className="relative h-11 flex-1 overflow-hidden rounded-xl bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 font-semibold text-white shadow-lg transition-transform hover:scale-[1.02]"
+            className="relative h-10 flex-1 overflow-hidden rounded-xl bg-gradient-to-r from-pink-500 via-purple-500 to-blue-500 text-sm font-semibold text-white shadow-lg transition-transform hover:scale-[1.02]"
             onClick={handleInsert}
           >
             <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover:translate-x-full" />

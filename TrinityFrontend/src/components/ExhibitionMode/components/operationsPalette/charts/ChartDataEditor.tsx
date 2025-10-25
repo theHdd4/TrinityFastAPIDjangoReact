@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  AreaChart,
   BarChart3,
   Circle,
   Columns3,
@@ -24,6 +25,7 @@ import {
   LEGEND_POSITIONS,
   DEFAULT_CHART_CONFIG,
   DEFAULT_CHART_DATA,
+  normalizeChartType,
 } from './constants';
 import type { ChartConfig, ChartDataRow } from './types';
 
@@ -37,12 +39,13 @@ interface ChartDataEditorProps {
 }
 
 const iconByChartType = {
-  column: Columns3,
-  bar: BarChart3,
+  verticalBar: Columns3,
+  horizontalBar: BarChart3,
   line: LineChart,
+  area: AreaChart,
   pie: PieChart,
   donut: Circle,
-};
+} as const;
 
 export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   open,
@@ -58,6 +61,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   const [config, setConfig] = useState<ChartConfig>(() => ({
     ...DEFAULT_CHART_CONFIG,
     ...(initialConfig ?? {}),
+    type: normalizeChartType(initialConfig?.type),
   }));
   const [legendPosition, setLegendPosition] = useState<string>('bottom');
 
@@ -70,6 +74,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     setConfig({
       ...DEFAULT_CHART_CONFIG,
       ...(initialConfig ?? {}),
+      type: normalizeChartType(initialConfig?.type),
     });
     setLegendPosition('bottom');
   }, [open, initialData, initialConfig]);
@@ -150,23 +155,30 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       );
     }
 
-    if (config.type === 'line') {
+    if (config.type === 'line' || config.type === 'area') {
       const maxValue = Math.max(...chartData.map(row => row.value), 1);
       const points = chartData
         .map((row, index) => {
-          const x = (index / Math.max(chartData.length - 1, 1)) * 320;
-          const y = 200 - (row.value / maxValue) * 180;
+          const x = (index / Math.max(chartData.length - 1, 1)) * 260;
+          const y = 200 - (row.value / maxValue) * 170;
           return `${x},${y}`;
         })
         .join(' ');
 
       return (
         <div className="flex h-64 w-full items-center justify-center">
-          <svg viewBox="0 0 320 220" width={340} height={220}>
+          <svg viewBox="0 0 260 220" width={280} height={220}>
+            {config.type === 'area' && (
+              <polygon
+                points={`0,200 ${points} 260,200`}
+                fill={`${colorScheme.colors[0]}33`}
+                stroke="none"
+              />
+            )}
             <polyline points={points} fill="none" stroke={palette[0]} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
             {chartData.map((row, index) => {
-              const x = (index / Math.max(chartData.length - 1, 1)) * 320;
-              const y = 200 - (row.value / maxValue) * 180;
+              const x = (index / Math.max(chartData.length - 1, 1)) * 260;
+              const y = 200 - (row.value / maxValue) * 170;
               return <circle key={row.label} cx={x} cy={y} r={5} fill={palette[index % palette.length]} className="transition-transform hover:scale-125" />;
             })}
           </svg>
@@ -175,12 +187,12 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     }
 
     const maxValue = Math.max(...chartData.map(row => row.value), 1);
-    const isBar = config.type === 'bar';
+    const isBar = config.type === 'horizontalBar';
 
     return (
       <div
         className={cn(
-          'flex h-64 w-full gap-4 p-6',
+          'flex h-64 w-full gap-3 p-5',
           isBar ? 'flex-col justify-center' : 'items-end justify-center',
         )}
       >
@@ -190,7 +202,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
             <div
               key={row.label}
               className={cn(
-                'flex gap-2 text-xs font-medium text-muted-foreground',
+                'flex gap-1.5 text-xs font-medium text-muted-foreground',
                 isBar ? 'flex-row items-center' : 'flex-col items-center justify-end',
               )}
             >
@@ -198,8 +210,8 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                 className="rounded-lg transition-all"
                 style={{
                   backgroundColor: palette[index % palette.length],
-                  width: isBar ? `${size}%` : '36px',
-                  height: isBar ? '20px' : `${size}%`,
+                  width: isBar ? `${size}%` : '28px',
+                  height: isBar ? '18px' : `${size}%`,
                 }}
               />
               <span>{row.label}</span>
@@ -211,11 +223,11 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   };
 
   const handleApply = () => {
-    onApply?.(cloneRows(), cloneConfig());
+    onApply?.(cloneRows(), { ...cloneConfig(), type: normalizeChartType(config.type) });
   };
 
   const handleSave = () => {
-    onSave(cloneRows(), cloneConfig());
+    onSave(cloneRows(), { ...cloneConfig(), type: normalizeChartType(config.type) });
     onClose();
   };
 
@@ -322,7 +334,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
                 <div className="space-y-3">
                   <Label className="text-sm font-semibold">Chart type</Label>
-                  <div className="grid grid-cols-5 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     {CHART_TYPES.map(type => {
                       const Icon = type.icon;
                       const isSelected = config.type === type.id;

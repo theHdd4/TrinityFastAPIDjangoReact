@@ -23,7 +23,13 @@ import {
 import { cn } from '@/lib/utils';
 import { ChartDataEditor } from './ChartDataEditor';
 import { SlideChart as ChartDisplay } from './SlideChart';
-import { CHART_TYPES, COLOR_SCHEMES, DEFAULT_CHART_CONFIG, DEFAULT_CHART_DATA } from './constants';
+import {
+  CHART_TYPES,
+  COLOR_SCHEMES,
+  DEFAULT_CHART_CONFIG,
+  DEFAULT_CHART_DATA,
+  normalizeChartType,
+} from './constants';
 import type { ChartConfig, ChartDataRow, ChartType } from './types';
 
 interface SlideChartObjectProps {
@@ -62,6 +68,7 @@ export const SlideChartObject: React.FC<SlideChartObjectProps> = ({
     () => ({
       ...DEFAULT_CHART_CONFIG,
       ...config,
+      type: normalizeChartType(config?.type),
     }),
     [config],
   );
@@ -102,7 +109,7 @@ export const SlideChartObject: React.FC<SlideChartObjectProps> = ({
     onInteract();
     onUpdate({
       data: rows.map(entry => ({ ...entry })),
-      config: { ...nextConfig },
+      config: { ...nextConfig, type: normalizeChartType(nextConfig.type) },
     });
     setIsEditorOpen(false);
   };
@@ -114,7 +121,7 @@ export const SlideChartObject: React.FC<SlideChartObjectProps> = ({
     onInteract();
     onUpdate({
       data: rows.map(entry => ({ ...entry })),
-      config: { ...nextConfig },
+      config: { ...nextConfig, type: normalizeChartType(nextConfig.type) },
     });
   };
 
