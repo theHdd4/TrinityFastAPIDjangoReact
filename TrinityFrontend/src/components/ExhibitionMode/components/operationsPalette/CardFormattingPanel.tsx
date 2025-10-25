@@ -1,4 +1,4 @@
-import React, { RefObject } from 'react';
+import React, { RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlignCenter,
   AlignLeft,
@@ -143,7 +143,105 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
   accentImageInputRef,
   onClose,
 }) => {
+  const [layoutPopoverOpen, setLayoutPopoverOpen] = useState(false);
+  const [backgroundPopoverOpen, setBackgroundPopoverOpen] = useState(false);
+  const layoutTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const backgroundTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const layoutContentRef = useRef<HTMLDivElement | null>(null);
+  const backgroundContentRef = useRef<HTMLDivElement | null>(null);
+  const [layoutPopoverSide, setLayoutPopoverSide] = useState<'top' | 'bottom'>('bottom');
+  const [backgroundPopoverSide, setBackgroundPopoverSide] = useState<'top' | 'bottom'>('bottom');
+
   const hasAccentImage = Boolean(settings.accentImage);
+
+  const updatePopoverSide = useCallback(
+    (
+      trigger: HTMLButtonElement | null,
+      content: HTMLDivElement | null,
+      setSide: React.Dispatch<React.SetStateAction<'top' | 'bottom'>>,
+    ) => {
+      if (!trigger) {
+        return;
+      }
+      const rect = trigger.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const estimatedHeight = content?.offsetHeight ?? 420;
+      const spaceAbove = rect.top;
+      const spaceBelow = viewportHeight - rect.bottom;
+      const nextSide = spaceBelow >= estimatedHeight || spaceBelow >= spaceAbove ? 'bottom' : 'top';
+
+      setSide(current => (current === nextSide ? current : nextSide));
+    },
+    [],
+  );
+
+  const handleLayoutOpenChange = useCallback(
+    (open: boolean) => {
+      setLayoutPopoverOpen(open);
+      if (open) {
+        requestAnimationFrame(() => {
+          updatePopoverSide(layoutTriggerRef.current, layoutContentRef.current, setLayoutPopoverSide);
+        });
+      }
+    },
+    [updatePopoverSide],
+  );
+
+  const handleBackgroundOpenChange = useCallback(
+    (open: boolean) => {
+      setBackgroundPopoverOpen(open);
+      if (open) {
+        requestAnimationFrame(() => {
+          updatePopoverSide(
+            backgroundTriggerRef.current,
+            backgroundContentRef.current,
+            setBackgroundPopoverSide,
+          );
+        });
+      }
+    },
+    [updatePopoverSide],
+  );
+
+  useEffect(() => {
+    if (!layoutPopoverOpen) {
+      return;
+    }
+    const handler = () => {
+      updatePopoverSide(layoutTriggerRef.current, layoutContentRef.current, setLayoutPopoverSide);
+    };
+
+    window.addEventListener('resize', handler);
+    window.addEventListener('scroll', handler, true);
+    handler();
+
+    return () => {
+      window.removeEventListener('resize', handler);
+      window.removeEventListener('scroll', handler, true);
+    };
+  }, [layoutPopoverOpen, updatePopoverSide]);
+
+  useEffect(() => {
+    if (!backgroundPopoverOpen) {
+      return;
+    }
+    const handler = () => {
+      updatePopoverSide(
+        backgroundTriggerRef.current,
+        backgroundContentRef.current,
+        setBackgroundPopoverSide,
+      );
+    };
+
+    window.addEventListener('resize', handler);
+    window.addEventListener('scroll', handler, true);
+    handler();
+
+    return () => {
+      window.removeEventListener('resize', handler);
+      window.removeEventListener('scroll', handler, true);
+    };
+  }, [backgroundPopoverOpen, updatePopoverSide]);
 
   const getSelectedOption = (sections: readonly ColorTraySection[], id: string | null | undefined) => {
     if (!id) {
@@ -368,7 +466,7 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
               {layoutColorOption?.label && (
                 <span className="text-xs font-medium text-muted-foreground">{layoutColorOption.label}</span>
               )}
-              <Popover>
+              <Popover open={layoutPopoverOpen} onOpenChange={handleLayoutOpenChange}>
                 <PopoverTrigger asChild>
                   <Button
                     variant="ghost"
@@ -376,6 +474,7 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                     type="button"
                     className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
                     disabled={!canEdit || hasAccentImage}
+                    ref={layoutTriggerRef}
                   >
                     <span
                       className={cn(
@@ -388,11 +487,13 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent
-                  side="bottom"
+                  ref={layoutContentRef}
+                  side={layoutPopoverSide}
                   align="center"
                   sideOffset={12}
                   collisionPadding={16}
                   className="z-[3000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
+                  updatePositionStrategy="always"
                 >
                   <ColorTray
                     sections={layoutColorSections}
@@ -422,7 +523,7 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                   {backgroundColorOption.label}
                 </span>
               )}
-              <Popover>
+              <Popover open={backgroundPopoverOpen} onOpenChange={handleBackgroundOpenChange}>
                 <PopoverTrigger asChild>
                   <Button
                     variant="ghost"
@@ -430,6 +531,7 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                     type="button"
                     className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
                     disabled={!canEdit}
+                    ref={backgroundTriggerRef}
                   >
                     <span
                       className={cn(
@@ -442,11 +544,13 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent
-                  side="bottom"
+                  ref={backgroundContentRef}
+                  side={backgroundPopoverSide}
                   align="center"
                   sideOffset={12}
                   collisionPadding={16}
                   className="z-[3000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
+                  updatePositionStrategy="always"
                 >
                   <ColorTray
                     sections={backgroundColorSections}

@@ -621,16 +621,8 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
               swatchSize="sm"
               optionClassName="min-h-[3.25rem]"
               defaultSectionId="solids"
+              showCustomColorSection
             />
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={color || '#111827'}
-                onChange={event => onColorChange(event.target.value)}
-                className="h-10 w-full cursor-pointer rounded-xl border border-border"
-              />
-              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Custom</span>
-            </div>
           </div>
         </PopoverContent>
       </Popover>
