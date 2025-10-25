@@ -86,6 +86,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
   const cloneRows = () => chartData.map(row => ({ ...row }));
   const cloneConfig = () => ({ ...config });
+  const hasApply = typeof onApply === 'function';
 
   const addRow = () => {
     setChartData(prev => [...prev, { label: `Item ${prev.length + 1}`, value: 0 }]);
@@ -248,6 +249,10 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   };
 
   const handleApply = () => {
+    if (!hasApply) {
+      return;
+    }
+
     onApply?.(cloneRows(), { ...cloneConfig(), type: normalizeChartType(config.type) });
   };
 
@@ -466,21 +471,24 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
               setConfig({
                 ...DEFAULT_CHART_CONFIG,
                 ...(initialConfig ?? {}),
+                type: normalizeChartType(initialConfig?.type),
               });
               onClose();
             }}
           >
             Cancel
           </Button>
-          {onApply && (
-            <Button
-              variant="outline"
-              className="h-11 flex-1 rounded-xl border-2 border-border/40 bg-card/40 hover:bg-card/60"
-              onClick={handleApply}
-            >
-              Apply
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            className={cn(
+              'h-11 flex-1 rounded-xl border-2 border-border/40 bg-card/40 hover:bg-card/60',
+              !hasApply && 'cursor-not-allowed opacity-50 hover:bg-card/40',
+            )}
+            onClick={handleApply}
+            disabled={!hasApply}
+          >
+            Apply
+          </Button>
           <Button
             className="relative h-11 flex-1 overflow-hidden rounded-xl bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 font-semibold text-white shadow-lg transition-transform hover:scale-[1.02]"
             onClick={handleSave}
