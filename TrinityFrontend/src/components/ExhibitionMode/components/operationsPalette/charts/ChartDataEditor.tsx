@@ -192,6 +192,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
     const renderVerticalBar = (row: ChartDataRow, index: number) => {
       const ratio = maxValue === 0 ? 0 : row.value / maxValue;
+      const heightPercent = `${Math.max(ratio * 100, row.value > 0 ? 6 : 0)}%`;
       return (
         <div
           key={row.label}
@@ -199,37 +200,38 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
         >
           <div className="flex h-44 w-8 items-end overflow-hidden rounded-2xl bg-muted/20">
             <div
-              className="h-full w-full rounded-t-2xl transition-transform duration-300"
+              className="w-full rounded-t-2xl transition-all duration-300"
               style={{
                 backgroundColor: palette[index % palette.length],
-                transform: `scaleY(${ratio})`,
-                transformOrigin: 'center bottom',
+                height: heightPercent,
               }}
             />
           </div>
-          <span>{row.label}</span>
+          {config.showLabels && <span>{row.label}</span>}
+          {config.showValues && <span className="font-semibold text-foreground">{row.value}</span>}
         </div>
       );
     };
 
     const renderHorizontalBar = (row: ChartDataRow, index: number) => {
       const ratio = maxValue === 0 ? 0 : row.value / maxValue;
+      const widthPercent = `${Math.max(ratio * 100, row.value > 0 ? 6 : 0)}%`;
       return (
         <div
           key={row.label}
           className="flex w-full flex-row items-center gap-2 text-xs font-medium text-muted-foreground"
         >
+          {config.showLabels && <span className="w-12 text-right">{row.label}</span>}
           <div className="flex h-4 flex-1 items-center overflow-hidden rounded-2xl bg-muted/20">
             <div
-              className="h-full w-full rounded-r-2xl transition-transform duration-300"
+              className="h-full rounded-r-2xl transition-all duration-300"
               style={{
                 backgroundColor: palette[index % palette.length],
-                transform: `scaleX(${ratio})`,
-                transformOrigin: 'left center',
+                width: widthPercent,
               }}
             />
           </div>
-          <span>{row.label}</span>
+          {config.showValues && <span className="min-w-[2ch] text-right text-foreground">{row.value}</span>}
         </div>
       );
     };
