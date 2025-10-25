@@ -37,6 +37,7 @@ import {
   createImageSlideObject,
   generateImageObjectId,
 } from './components/operationsPalette/images/constants';
+import { createChartSlideObject, type ChartPanelResult } from './components/operationsPalette/charts';
 import {
   buildChartRendererPropsFromManifest,
   buildTableDataFromManifest,
@@ -233,6 +234,13 @@ const ExhibitionMode = () => {
       return (crypto as Crypto).randomUUID();
     }
     return `shape-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }, []);
+
+  const generateChartId = useCallback(() => {
+    if (typeof crypto !== 'undefined' && typeof (crypto as Crypto).randomUUID === 'function') {
+      return (crypto as Crypto).randomUUID();
+    }
+    return `chart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }, []);
 
   const clearAutoAdvanceTimer = useCallback(() => {
@@ -1496,6 +1504,35 @@ const ExhibitionMode = () => {
     );
   }, [addSlideObject, currentSlide, exhibitedCards, generateTableId, slideObjectsByCardId]);
 
+  const handleCreateChart = useCallback(
+    (result: ChartPanelResult) => {
+      const targetCard = exhibitedCards[currentSlide];
+      if (!targetCard) {
+        return;
+      }
+
+      const existingObjects = slideObjectsByCardId[targetCard.id] ?? [];
+      const existingCharts = existingObjects.filter(object => object.type === 'chart').length;
+      const offset = existingCharts * 32;
+
+      addSlideObject(
+        targetCard.id,
+        createChartSlideObject(
+          generateChartId(),
+          {
+            x: 160 + offset,
+            y: 160 + offset,
+          },
+          {
+            data: result.data,
+            config: result.config,
+          },
+        ),
+      );
+    },
+    [addSlideObject, currentSlide, exhibitedCards, generateChartId, slideObjectsByCardId],
+  );
+
   const handleShapeSelect = useCallback(
     (shape: ShapeDefinition) => {
       if (!canEdit) {
@@ -1802,6 +1839,7 @@ const ExhibitionMode = () => {
             onCreateTable={handleCreateTable}
             onOpenShapesPanel={handleOpenShapesPanel}
             onOpenImagesPanel={handleOpenImagesPanel}
+            onCreateChart={handleCreateChart}
             canEdit={canEdit}
             positionPanel={operationsPalettePanel}
           />
