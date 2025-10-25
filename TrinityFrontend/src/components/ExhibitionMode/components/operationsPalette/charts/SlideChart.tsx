@@ -67,6 +67,49 @@ export const SlideChart: React.FC<SlideChartProps> = ({ data, config, className 
     const maxValue = Math.max(...dataset.map(item => item.value), 1);
     const isHorizontal = variant === 'horizontalBar';
 
+    const renderVerticalBar = (item: ChartDataRow, index: number) => {
+      const ratio = maxValue === 0 ? 0 : item.value / maxValue;
+      return (
+        <div key={item.label + index} className="flex flex-col items-center gap-1.5 text-xs text-muted-foreground">
+          <div className="flex h-44 w-9 items-end overflow-hidden rounded-2xl bg-muted/20">
+            <div
+              className="h-full w-full rounded-t-2xl transition-transform duration-300"
+              style={{
+                backgroundColor: palette.colors[index % palette.colors.length],
+                transform: `scaleY(${ratio})`,
+                transformOrigin: 'center bottom',
+              }}
+            />
+          </div>
+          {config.showLabels && <span className="font-medium">{item.label}</span>}
+          {config.showValues && <span className="font-semibold text-foreground">{item.value}</span>}
+        </div>
+      );
+    };
+
+    const renderHorizontalBar = (item: ChartDataRow, index: number) => {
+      const ratio = maxValue === 0 ? 0 : item.value / maxValue;
+      return (
+        <div
+          key={item.label + index}
+          className="flex w-full flex-row items-center gap-3 text-xs font-medium text-muted-foreground"
+        >
+          {config.showLabels && <span className="w-16 shrink-0 text-right">{item.label}</span>}
+          <div className="flex h-4 flex-1 items-center overflow-hidden rounded-2xl bg-muted/20">
+            <div
+              className="h-full w-full rounded-r-2xl transition-transform duration-300"
+              style={{
+                backgroundColor: palette.colors[index % palette.colors.length],
+                transform: `scaleX(${ratio})`,
+                transformOrigin: 'left center',
+              }}
+            />
+          </div>
+          {config.showValues && <span className="min-w-[2ch] text-right font-semibold text-foreground">{item.value}</span>}
+        </div>
+      );
+    };
+
     return (
       <div
         className={cn(
@@ -74,29 +117,9 @@ export const SlideChart: React.FC<SlideChartProps> = ({ data, config, className 
           isHorizontal ? 'flex-col justify-center' : 'items-end justify-center',
         )}
       >
-        {dataset.map((item, index) => {
-          const size = (item.value / maxValue) * 100;
-          return (
-            <div
-              key={item.label + index}
-              className={cn(
-                'flex text-xs font-medium text-muted-foreground',
-                isHorizontal ? 'flex-row items-center gap-2' : 'flex-col items-center gap-1.5',
-              )}
-            >
-              <div
-                className="rounded-xl"
-                style={{
-                  backgroundColor: palette.colors[index % palette.colors.length],
-                  width: isHorizontal ? `${size}%` : '26px',
-                  height: isHorizontal ? '16px' : `${size}%`,
-                }}
-              />
-              {config.showLabels && <span>{item.label}</span>}
-              {config.showValues && <span className="font-semibold text-foreground">{item.value}</span>}
-            </div>
-          );
-        })}
+        {dataset.map((item, index) =>
+          isHorizontal ? renderHorizontalBar(item, index) : renderVerticalBar(item, index),
+        )}
       </div>
     );
   };

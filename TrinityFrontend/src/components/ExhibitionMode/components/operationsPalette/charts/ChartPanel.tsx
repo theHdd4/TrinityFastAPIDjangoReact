@@ -199,6 +199,50 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     const maxValue = Math.max(...chartData.map(item => item.value), 1);
     const isHorizontal = selectedType === 'horizontalBar';
 
+    const renderVerticalBar = (item: typeof chartData[number], index: number) => {
+      const ratio = maxValue === 0 ? 0 : item.value / maxValue;
+      return (
+        <div
+          key={item.label}
+          className="flex flex-col items-center gap-1.5 text-[0.7rem] font-medium text-muted-foreground"
+        >
+          <div className="flex h-40 w-8 items-end overflow-hidden rounded-2xl bg-muted/20">
+            <div
+              className="h-full w-full rounded-t-2xl transition-transform duration-300"
+              style={{
+                backgroundColor: palette.colors[index % palette.colors.length],
+                transform: `scaleY(${ratio})`,
+                transformOrigin: 'center bottom',
+              }}
+            />
+          </div>
+          <span>{item.label}</span>
+        </div>
+      );
+    };
+
+    const renderHorizontalBar = (item: typeof chartData[number], index: number) => {
+      const ratio = maxValue === 0 ? 0 : item.value / maxValue;
+      return (
+        <div
+          key={item.label}
+          className="flex w-full flex-row items-center gap-2 text-[0.7rem] font-medium text-muted-foreground"
+        >
+          <div className="flex h-3.5 flex-1 items-center overflow-hidden rounded-2xl bg-muted/20">
+            <div
+              className="h-full w-full rounded-r-2xl transition-transform duration-300"
+              style={{
+                backgroundColor: palette.colors[index % palette.colors.length],
+                transform: `scaleX(${ratio})`,
+                transformOrigin: 'left center',
+              }}
+            />
+          </div>
+          <span>{item.label}</span>
+        </div>
+      );
+    };
+
     return (
       <div
         className={cn(
@@ -206,28 +250,9 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
           isHorizontal ? 'flex-col justify-center' : 'items-end justify-center',
         )}
       >
-        {chartData.map((item, index) => {
-          const size = (item.value / maxValue) * 100;
-          return (
-            <div
-              key={item.label}
-              className={cn(
-                'flex text-[0.7rem] font-medium text-muted-foreground',
-                isHorizontal ? 'flex-row items-center gap-2' : 'flex-col items-center gap-1.5',
-              )}
-            >
-              <div
-                className="rounded-xl"
-                style={{
-                  backgroundColor: palette.colors[index % palette.colors.length],
-                  width: isHorizontal ? `${size}%` : '26px',
-                  height: isHorizontal ? '16px' : `${size}%`,
-                }}
-              />
-              <span>{item.label}</span>
-            </div>
-          );
-        })}
+        {chartData.map((item, index) =>
+          isHorizontal ? renderHorizontalBar(item, index) : renderVerticalBar(item, index),
+        )}
       </div>
     );
   };
