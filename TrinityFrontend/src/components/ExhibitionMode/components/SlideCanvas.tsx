@@ -44,6 +44,12 @@ import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
 import { SlideShapeObject } from './operationsPalette/shapes';
 import type { ShapeObjectProps } from './operationsPalette/shapes/constants';
 import {
+  SlideChart,
+  DEFAULT_CHART_CONFIG,
+  type ChartConfig,
+  type ChartDataRow,
+} from './operationsPalette/charts';
+import {
   DEFAULT_TABLE_COLS,
   DEFAULT_TABLE_ROWS,
   cloneTableHeaders,
@@ -2531,6 +2537,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const isImageObject = object.type === 'image';
             const isTextBoxObject = object.type === 'text-box';
             const isTableObject = object.type === 'table';
+            const isChartObject = object.type === 'chart';
             const isShapeObject = object.type === 'shape';
             const isEditingTextBox =
               isTextBoxObject &&
@@ -2540,6 +2547,15 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               ? extractTextBoxFormatting(object.props as Record<string, unknown> | undefined)
               : null;
             const tableState = isTableObject ? readTableState(object) : null;
+            const chartProps = isChartObject
+              ? (object.props as { data?: ChartDataRow[]; config?: ChartConfig } | undefined)
+              : null;
+            const chartData = Array.isArray(chartProps?.data)
+              ? (chartProps?.data as ChartDataRow[])
+              : [];
+            const chartConfig: ChartConfig = chartProps?.config
+              ? { ...DEFAULT_CHART_CONFIG, ...chartProps.config }
+              : DEFAULT_CHART_CONFIG;
             const atomId =
               isAtomObject(object) && typeof object.props.atom.atomId === 'string'
                 ? object.props.atom.atomId
@@ -2555,6 +2571,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               isShapeObject ||
               isTextBoxObject ||
               isTableObject ||
+              isChartObject ||
               (isFeatureOverviewAtom && featureOverviewTransparentBackground);
             const isChartMakerAtom = atomId === 'chart-maker';
             const isEvaluateModelsFeatureAtom = atomId === 'evaluate-models-feature';
@@ -2577,10 +2594,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               {isSelected && !(isTextBoxObject && isEditingTextBox) && (
                 <div
                   className={cn(
-                    'pointer-events-none absolute inset-0 border border-yellow-400 transition-all duration-200',
-                    suppressCardChrome || isShapeObject || isTextBoxObject || isTableObject
-                      ? 'rounded-[22px]'
-                      : 'rounded-[32px]'
+                  'pointer-events-none absolute inset-0 border border-yellow-400 transition-all duration-200',
+                  suppressCardChrome || isShapeObject || isTextBoxObject || isTableObject || isChartObject
+                    ? 'rounded-[22px]'
+                    : 'rounded-[32px]'
                   )}
                   aria-hidden="true"
                 />
@@ -2593,14 +2610,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     : 'bg-background/95 shadow-xl',
                   isAccentImageObject && 'bg-muted/30 shadow-none border-transparent',
                   isShapeObject && 'border-none bg-transparent shadow-none overflow-visible',
-                  (isTextBoxObject || isTableObject) &&
+                  (isTextBoxObject || isTableObject || isChartObject) &&
                     'overflow-hidden border-transparent bg-transparent shadow-none',
                   (() => {
                     const shouldShowCardChrome =
                       !suppressCardChrome &&
                       !isAccentImageObject &&
                       !isShapeObject &&
-                      !(isTextBoxObject || isTableObject);
+                      !(isTextBoxObject || isTableObject || isChartObject);
 
                     if (!shouldShowCardChrome) {
                       return 'border-transparent';
@@ -2629,7 +2646,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   className={cn(
                     'relative flex-1 overflow-hidden',
                     isAccentImageObject || isShapeObject || isImageObject ? undefined : 'p-4',
-                    (isTextBoxObject || isTableObject) && 'overflow-visible p-0',
+                    (isTextBoxObject || isTableObject || isChartObject) && 'overflow-visible p-0',
                     isShapeObject && 'flex items-center justify-center overflow-visible p-0',
                   )}
                 >
@@ -2719,6 +2736,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onSendToBack={() => onSendToBack([object.id])}
                       onInteract={onInteract}
                     />
+                  ) : isChartObject ? (
+                    <SlideChart data={chartData} config={chartConfig} className="h-full w-full" />
                   ) : (
                     <div
                       className={cn(
