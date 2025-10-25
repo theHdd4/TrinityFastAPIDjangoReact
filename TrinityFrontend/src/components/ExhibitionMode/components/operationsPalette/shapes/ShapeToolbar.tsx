@@ -146,6 +146,10 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
     event.preventDefault();
   };
 
+  const handleSliderMouseDown = (event: React.MouseEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+  };
+
   const handleOpacityInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const value = Number(event.target.value) / 100;
     onOpacityChange(clampOpacity(Number.isFinite(value) ? value : opacity));
@@ -371,7 +375,7 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
                   max={60}
                   value={displayedStrokeWidth}
                   onChange={handleStrokeWidthSliderChange}
-                  onMouseDown={handleToolbarMouseDown}
+                  onMouseDown={handleSliderMouseDown}
                   className="h-1.5 w-full cursor-pointer accent-primary"
                 />
                 <span className="text-xs font-medium text-muted-foreground">60</span>
