@@ -8,6 +8,7 @@ import {
   type DroppedAtom,
   type PresentationSettings,
   type LayoutCard,
+  type SlideObject,
   type SlideshowTransition,
   createSlideObjectFromAtom,
   DEFAULT_CANVAS_OBJECT_WIDTH,
@@ -61,6 +62,11 @@ type PresentationTransitionState = {
 type TransitionFrames = {
   outgoing: { initial: React.CSSProperties; final: React.CSSProperties };
   incoming: { initial: React.CSSProperties; final: React.CSSProperties };
+};
+
+type ExhibitionSnapshot = {
+  cards: LayoutCard[];
+  slideObjects: Record<string, SlideObject[]>;
 };
 
 const TRANSITION_LAYER_BASE_STYLE: React.CSSProperties = {
@@ -208,9 +214,9 @@ const ExhibitionMode = () => {
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const verticalSlideRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const undoStackRef = useRef<LayoutCard[][]>([]);
+  const undoStackRef = useRef<ExhibitionSnapshot[]>([]);
   const isRestoringSnapshotRef = useRef(false);
-  const lastSerializedCardsRef = useRef<string | null>(null);
+  const lastSerializedSnapshotRef = useRef<string | null>(null);
   const autoAdvanceTimerRef = useRef<number | null>(null);
   const hasRequestedInitialLoadRef = useRef(false);
 
@@ -554,16 +560,21 @@ const ExhibitionMode = () => {
   }, [projectContext, lastLoadedContext, loadSavedConfiguration]);
 
   useEffect(() => {
-    const serialized = JSON.stringify(cards);
+    const snapshot: ExhibitionSnapshot = {
+      cards,
+      slideObjects: slideObjectsByCardId,
+    };
+
+    const serialized = JSON.stringify(snapshot);
 
     if (isRestoringSnapshotRef.current) {
       isRestoringSnapshotRef.current = false;
-      lastSerializedCardsRef.current = serialized;
+      lastSerializedSnapshotRef.current = serialized;
       return;
     }
 
-    if (lastSerializedCardsRef.current && lastSerializedCardsRef.current !== serialized) {
-      const previous = JSON.parse(lastSerializedCardsRef.current) as LayoutCard[];
+    if (lastSerializedSnapshotRef.current && lastSerializedSnapshotRef.current !== serialized) {
+      const previous = JSON.parse(lastSerializedSnapshotRef.current) as ExhibitionSnapshot;
       undoStackRef.current.push(previous);
 
       const MAX_UNDO_HISTORY = 20;
@@ -574,8 +585,8 @@ const ExhibitionMode = () => {
       setUndoAvailable(undoStackRef.current.length > 0);
     }
 
-    lastSerializedCardsRef.current = serialized;
-  }, [cards]);
+    lastSerializedSnapshotRef.current = serialized;
+  }, [cards, slideObjectsByCardId]);
 
   useEffect(() => {
     if (currentSlide >= exhibitedCards.length) {
@@ -717,7 +728,7 @@ const ExhibitionMode = () => {
     }
 
     isRestoringSnapshotRef.current = true;
-    setCards(previous);
+    setCards(previous.cards, previous.slideObjects);
     setUndoAvailable(undoStackRef.current.length > 0);
     toast({ title: 'Undo', description: 'Reverted the last change to your exhibition.' });
   }, [canEdit, setCards, toast]);
