@@ -862,42 +862,23 @@ const ExhibitionMode = () => {
         return component;
       }
 
-      const hasManifest =
-        component.metadata &&
-        typeof component.metadata === 'object' &&
-        (component.metadata as Record<string, unknown>)['visualizationManifest'];
-      if (hasManifest) {
-        return component;
-      }
+      const enhanceMetadataWithManifest = (
+        manifestInput: unknown,
+        baseMetadata?: Record<string, any>,
+        responseMetadata?: Record<string, any> | null,
+        manifestId?: string | null,
+      ): Record<string, any> | undefined => {
+        const manifest = manifestInput && typeof manifestInput === 'object' ? clonePlain(manifestInput) : undefined;
+        if (!manifest && !responseMetadata && !manifestId && !baseMetadata) {
+          return baseMetadata;
+        }
 
-      try {
-        const response = await fetchExhibitionManifest({
-          client_name: resolvedContext.client_name,
-          app_name: resolvedContext.app_name,
-          project_name: resolvedContext.project_name,
-          component_id: component.id,
-        });
+        const nextMetadata: Record<string, any> = { ...(baseMetadata || {}) };
 
-        if (response && response.manifest) {
-          const manifestClone = clonePlain(response.manifest);
-          const nextMetadata: Record<string, any> = {
-            ...(component.metadata || {}),
-            visualizationManifest: manifestClone,
-          };
+        if (manifest) {
+          nextMetadata.visualizationManifest = manifest;
 
-          if (response.metadata && typeof response.metadata === 'object') {
-            Object.entries(response.metadata).forEach(([key, value]) => {
-              if (value !== undefined) {
-                nextMetadata[key] = value;
-              }
-            });
-          }
-
-          if (response.manifest_id) {
-            nextMetadata.manifestId = response.manifest_id;
-          }
-
-          const manifestChartProps = buildChartRendererPropsFromManifest(manifestClone);
+          const manifestChartProps = buildChartRendererPropsFromManifest(manifest);
           if (manifestChartProps) {
             if (nextMetadata.chartRendererProps == null) {
               nextMetadata.chartRendererProps = clonePlain(manifestChartProps);
@@ -913,20 +894,18 @@ const ExhibitionMode = () => {
             }
           }
 
-          const manifestTable = buildTableDataFromManifest(manifestClone);
+          const manifestTable = buildTableDataFromManifest(manifest);
           if (manifestTable && nextMetadata.tableData == null) {
             nextMetadata.tableData = clonePlain(manifestTable);
           }
 
           if (!nextMetadata.statisticalDetails) {
-            const summarySnapshot = manifestClone?.data?.summary
-              ? clonePlain(manifestClone.data.summary)
+            const summarySnapshot = manifest?.data?.summary ? clonePlain(manifest.data.summary) : undefined;
+            const timeseriesSnapshot = Array.isArray(manifest?.data?.timeseries)
+              ? clonePlain(manifest.data.timeseries)
               : undefined;
-            const timeseriesSnapshot = Array.isArray(manifestClone?.data?.timeseries)
-              ? clonePlain(manifestClone.data.timeseries)
-              : undefined;
-            const fullSnapshot = manifestClone?.data?.statisticalFull
-              ? clonePlain(manifestClone.data.statisticalFull)
+            const fullSnapshot = manifest?.data?.statisticalFull
+              ? clonePlain(manifest.data.statisticalFull)
               : undefined;
 
             if (summarySnapshot || timeseriesSnapshot || fullSnapshot) {
@@ -938,42 +917,88 @@ const ExhibitionMode = () => {
             }
           }
 
-          if (!nextMetadata.skuRow && manifestClone?.data?.skuRow) {
-            nextMetadata.skuRow = clonePlain(manifestClone.data.skuRow);
+          if (!nextMetadata.skuRow && manifest?.data?.skuRow) {
+            nextMetadata.skuRow = clonePlain(manifest.data.skuRow);
           }
 
-          if (!nextMetadata.featureContext && manifestClone?.featureContext) {
-            nextMetadata.featureContext = clonePlain(manifestClone.featureContext);
+          if (!nextMetadata.featureContext && manifest?.featureContext) {
+            nextMetadata.featureContext = clonePlain(manifest.featureContext);
           }
 
-          if (!nextMetadata.metric && manifestClone?.metric) {
-            nextMetadata.metric = manifestClone.metric;
+          if (!nextMetadata.metric && manifest?.metric) {
+            nextMetadata.metric = manifest.metric;
           }
 
-          if (!nextMetadata.label && manifestClone?.label) {
-            nextMetadata.label = manifestClone.label;
+          if (!nextMetadata.label && manifest?.label) {
+            nextMetadata.label = manifest.label;
           }
 
-          if (!nextMetadata.capturedAt && manifestClone?.capturedAt) {
-            nextMetadata.capturedAt = manifestClone.capturedAt;
+          if (!nextMetadata.capturedAt && manifest?.capturedAt) {
+            nextMetadata.capturedAt = manifest.capturedAt;
           }
 
-          if (!nextMetadata.chartState && manifestClone?.chart) {
+          if (!nextMetadata.chartState && manifest?.chart) {
             nextMetadata.chartState = {
-              chartType: manifestClone.chart.type,
-              theme: manifestClone.chart.theme,
-              showDataLabels: manifestClone.chart.showDataLabels,
-              showAxisLabels: manifestClone.chart.showAxisLabels,
-              showGrid: manifestClone.chart.showGrid,
-              showLegend: manifestClone.chart.showLegend,
-              xAxisField: manifestClone.chart.xField,
-              yAxisField: manifestClone.chart.yField,
-              legendField: manifestClone.chart.legendField,
-              colorPalette: Array.isArray(manifestClone.chart.colorPalette)
-                ? [...manifestClone.chart.colorPalette]
-                : manifestClone.chart.colorPalette,
+              chartType: manifest.chart.type,
+              theme: manifest.chart.theme,
+              showDataLabels: manifest.chart.showDataLabels,
+              showAxisLabels: manifest.chart.showAxisLabels,
+              showGrid: manifest.chart.showGrid,
+              showLegend: manifest.chart.showLegend,
+              xAxisField: manifest.chart.xField,
+              yAxisField: manifest.chart.yField,
+              legendField: manifest.chart.legendField,
+              colorPalette: Array.isArray(manifest.chart.colorPalette)
+                ? [...manifest.chart.colorPalette]
+                : manifest.chart.colorPalette,
             };
           }
+        }
+
+        if (responseMetadata && typeof responseMetadata === 'object') {
+          Object.entries(responseMetadata).forEach(([key, value]) => {
+            if (value !== undefined) {
+              nextMetadata[key] = value;
+            }
+          });
+        }
+
+        if (manifestId) {
+          nextMetadata.manifestId = manifestId;
+        }
+
+        return nextMetadata;
+      };
+
+      const metadataRecord =
+        component.metadata && typeof component.metadata === 'object'
+          ? (component.metadata as Record<string, any>)
+          : undefined;
+      const manifestFromMetadata = metadataRecord?.visualizationManifest ?? metadataRecord?.visualisationManifest;
+
+      if (manifestFromMetadata) {
+        const enhancedMetadata = enhanceMetadataWithManifest(manifestFromMetadata, metadataRecord);
+        return {
+          ...component,
+          metadata: enhancedMetadata,
+        };
+      }
+
+      try {
+        const response = await fetchExhibitionManifest({
+          client_name: resolvedContext.client_name,
+          app_name: resolvedContext.app_name,
+          project_name: resolvedContext.project_name,
+          component_id: component.id,
+        });
+
+        if (response && response.manifest) {
+          const nextMetadata = enhanceMetadataWithManifest(
+            response.manifest,
+            metadataRecord,
+            response.metadata,
+            response.manifest_id,
+          );
 
           return {
             ...component,
