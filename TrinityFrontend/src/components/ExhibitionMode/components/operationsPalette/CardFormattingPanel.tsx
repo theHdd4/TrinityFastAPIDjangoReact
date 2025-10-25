@@ -15,15 +15,21 @@ import {
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   ColorTray,
   DEFAULT_GRADIENT_COLOR_OPTIONS,
   DEFAULT_SOLID_COLOR_OPTIONS,
   DEFAULT_SOLID_SECTION,
   DEFAULT_GRADIENT_SECTION,
+  GRADIENT_STYLE_MAP,
+  isKnownGradientId,
+  isSolidToken,
+  solidTokenToHex,
 } from '@/templates/color-tray';
 import type { ColorTrayOption, ColorTraySection } from '@/templates/color-tray';
 import type { PresentationSettings } from '../../store/exhibitionStore';
+import { cn } from '@/lib/utils';
 
 const BACKGROUND_PRESET_GROUP_ID = 'preset-backgrounds';
 const BACKGROUND_PRESET_GROUP_LABEL = 'Presets';
@@ -138,6 +144,41 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
   onClose,
 }) => {
   const hasAccentImage = Boolean(settings.accentImage);
+
+  const getSelectedOption = (sections: readonly ColorTraySection[], id: string | null | undefined) => {
+    if (!id) {
+      return undefined;
+    }
+    for (const section of sections) {
+      const option = section.options.find(candidate => candidate.id === id);
+      if (option) {
+        return option;
+      }
+    }
+    return undefined;
+  };
+
+  const resolveSwatchStyle = (id: string | null | undefined, option?: ColorTrayOption) => {
+    if (!id) {
+      return {};
+    }
+    if (option?.swatchStyle) {
+      return option.swatchStyle;
+    }
+    if (isSolidToken(id)) {
+      return { backgroundColor: solidTokenToHex(id) };
+    }
+    if (isKnownGradientId(id)) {
+      return { backgroundImage: GRADIENT_STYLE_MAP[id] };
+    }
+    return {};
+  };
+
+  const layoutColorOption = getSelectedOption(layoutColorSections, settings.cardColor);
+  const layoutSwatchStyle = resolveSwatchStyle(settings.cardColor, layoutColorOption);
+
+  const backgroundColorOption = getSelectedOption(backgroundColorSections, settings.backgroundColor);
+  const backgroundSwatchStyle = resolveSwatchStyle(settings.backgroundColor, backgroundColorOption);
 
   return (
     <div className="w-full shrink-0 rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
@@ -313,16 +354,48 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
               <Palette className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm">Layout color</span>
             </div>
+            <div className="flex items-center gap-3">
+              {layoutColorOption?.label && (
+                <span className="text-xs font-medium text-muted-foreground">{layoutColorOption.label}</span>
+              )}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    type="button"
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
+                    disabled={!canEdit || hasAccentImage}
+                  >
+                    <span
+                      className={cn(
+                        'h-5 w-5 rounded-full border border-white/70 shadow-inner',
+                        layoutColorOption?.swatchClassName,
+                      )}
+                      style={layoutSwatchStyle}
+                    />
+                    <span className="sr-only">Select layout color</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  side="bottom"
+                  align="end"
+                  sideOffset={8}
+                  className="z-[3000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
+                >
+                  <ColorTray
+                    sections={layoutColorSections}
+                    selectedId={settings.cardColor}
+                    onSelect={option =>
+                      onUpdateSettings({ cardColor: option.id as PresentationSettings['cardColor'] })
+                    }
+                    disabled={!canEdit || hasAccentImage}
+                    defaultSectionId="gradients"
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
-          <ColorTray
-            sections={layoutColorSections}
-            selectedId={settings.cardColor}
-            onSelect={option =>
-              onUpdateSettings({ cardColor: option.id as PresentationSettings['cardColor'] })
-            }
-            disabled={!canEdit || hasAccentImage}
-            defaultSectionId="gradients"
-          />
         </section>
 
         <section className="space-y-3">
@@ -331,16 +404,52 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
               <Maximize2 className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm">Background (Card Color)</span>
             </div>
+            <div className="flex items-center gap-3">
+              {backgroundColorOption?.label && (
+                <span className="text-xs font-medium text-muted-foreground">
+                  {backgroundColorOption.label}
+                </span>
+              )}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    type="button"
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
+                    disabled={!canEdit}
+                  >
+                    <span
+                      className={cn(
+                        'h-5 w-5 rounded-full border border-white/70 shadow-inner',
+                        backgroundColorOption?.swatchClassName,
+                      )}
+                      style={backgroundSwatchStyle}
+                    />
+                    <span className="sr-only">Select background color</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  side="bottom"
+                  align="end"
+                  sideOffset={8}
+                  className="z-[3000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
+                >
+                  <ColorTray
+                    sections={backgroundColorSections}
+                    selectedId={settings.backgroundColor}
+                    onSelect={option =>
+                      onUpdateSettings({
+                        backgroundColor: option.id as PresentationSettings['backgroundColor'],
+                      })
+                    }
+                    disabled={!canEdit}
+                    defaultSectionId="solids"
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
-          <ColorTray
-            sections={backgroundColorSections}
-            selectedId={settings.backgroundColor}
-            onSelect={option =>
-              onUpdateSettings({ backgroundColor: option.id as PresentationSettings['backgroundColor'] })
-            }
-            disabled={!canEdit}
-            defaultSectionId="solids"
-          />
         </section>
 
         <Separator />
