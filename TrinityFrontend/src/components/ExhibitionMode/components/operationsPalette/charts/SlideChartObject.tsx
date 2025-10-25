@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlignCenter,
   AlignLeft,
@@ -59,71 +59,173 @@ export const SlideChartObject: React.FC<SlideChartObjectProps> = ({
 }) => {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
 
-  const safeData = useMemo(
-    () => (data.length > 0 ? data : DEFAULT_CHART_DATA).map(entry => ({ ...entry })),
-    [data],
+  const coerceData = useCallback(
+    (rows?: ChartDataRow[]): ChartDataRow[] =>
+      (rows && rows.length > 0 ? rows : DEFAULT_CHART_DATA).map(entry => ({ ...entry })),
+    [],
   );
 
-  const safeConfig = useMemo<ChartConfig>(
-    () => ({
-      ...DEFAULT_CHART_CONFIG,
-      ...config,
-      type: normalizeChartType(config?.type),
-    }),
-    [config],
+  const coerceConfig = useCallback(
+    (value?: ChartConfig): ChartConfig => {
+      const merged = { ...DEFAULT_CHART_CONFIG, ...(value ?? {}) } as ChartConfig;
+      return {
+        ...merged,
+        type: normalizeChartType(merged.type),
+      };
+    },
+    [],
   );
 
-  const handleConfigChange = (nextConfig: ChartConfig) => {
-    if (!canEdit) {
-      return;
+  const [previewData, setPreviewData] = useState<ChartDataRow[]>(() => coerceData(data));
+  const [previewConfig, setPreviewConfig] = useState<ChartConfig>(() => coerceConfig(config));
+
+  const dataSetsEqual = useCallback((left: ChartDataRow[], right: ChartDataRow[]): boolean => {
+    if (left.length !== right.length) {
+      return false;
     }
-    onInteract();
-    onUpdate({ config: { ...nextConfig } });
+
+    for (let index = 0; index < left.length; index += 1) {
+      const a = left[index];
+      const b = right[index];
+      if (a.label !== b.label || a.value !== b.value) {
+        return false;
+      }
+    }
+
+    return true;
+  }, []);
+
+  const configShallowEqual = useCallback((a: ChartConfig, b: ChartConfig): boolean => {
+    return (
+      a.type === b.type &&
+      a.colorScheme === b.colorScheme &&
+      a.showLabels === b.showLabels &&
+      a.showValues === b.showValues &&
+      a.horizontalAlignment === b.horizontalAlignment &&
+      a.axisIncludesZero === b.axisIncludesZero
+    );
+  }, []);
+
+  useEffect(() => {
+    setPreviewData(coerceData(data));
+  }, [coerceData, data]);
+
+  useEffect(() => {
+    setPreviewConfig(coerceConfig(config));
+  }, [coerceConfig, config]);
+
+  const pushUpdates = useCallback(
+    (
+      updates: { data?: ChartDataRow[]; config?: ChartConfig },
+      options: { closeEditor?: boolean } = {},
+    ) => {
+      const { closeEditor = false } = options;
+      if (!canEdit) {
+        if (closeEditor) {
+          setIsEditorOpen(false);
+        }
+        return;
+      }
+
+      const hasDataUpdate = Array.isArray(updates.data);
+      const hasConfigUpdate = Boolean(updates.config);
+
+      if (!hasDataUpdate && !hasConfigUpdate) {
+        if (closeEditor) {
+          setIsEditorOpen(false);
+        }
+        return;
+      }
+
+      let nextData: ChartDataRow[] | undefined;
+      let nextConfig: ChartConfig | undefined;
+
+      if (hasDataUpdate) {
+        const candidate = coerceData(updates.data);
+        if (!dataSetsEqual(previewData, candidate)) {
+          nextData = candidate;
+          setPreviewData(candidate);
+        }
+      }
+
+      if (hasConfigUpdate) {
+        const candidate = coerceConfig(updates.config);
+        if (!configShallowEqual(previewConfig, candidate)) {
+          nextConfig = candidate;
+          setPreviewConfig(candidate);
+        }
+      }
+
+      if (!nextData && !nextConfig) {
+        if (closeEditor) {
+          setIsEditorOpen(false);
+        }
+        return;
+      }
+
+      onInteract();
+      onUpdate({
+        data: nextData ? nextData.map(entry => ({ ...entry })) : undefined,
+        config: nextConfig ? { ...nextConfig } : undefined,
+      });
+
+      if (closeEditor) {
+        setIsEditorOpen(false);
+      }
+    },
+    [
+      canEdit,
+      coerceConfig,
+      coerceData,
+      configShallowEqual,
+      dataSetsEqual,
+      onInteract,
+      onUpdate,
+      previewConfig,
+      previewData,
+    ],
+  );
+
+  const handleConfigChange = (partial: Partial<ChartConfig>) => {
+    pushUpdates({
+      config: {
+        ...previewConfig,
+        ...partial,
+      },
+    });
   };
 
   const handleTypeChange = (type: ChartType) => {
-    handleConfigChange({
-      ...safeConfig,
-      type,
-    });
+    handleConfigChange({ type });
   };
 
   const handleColorSchemeChange = (schemeId: string) => {
-    handleConfigChange({
-      ...safeConfig,
-      colorScheme: schemeId,
-    });
+    handleConfigChange({ colorScheme: schemeId });
   };
 
   const handleAlignmentChange = (alignment: ChartConfig['horizontalAlignment']) => {
-    handleConfigChange({
-      ...safeConfig,
-      horizontalAlignment: alignment,
-    });
+    handleConfigChange({ horizontalAlignment: alignment });
   };
 
   const handleDataEditorSave = (rows: ChartDataRow[], nextConfig: ChartConfig) => {
-    if (!canEdit) {
-      return;
-    }
-    onInteract();
-    onUpdate({
-      data: rows.map(entry => ({ ...entry })),
-      config: { ...nextConfig, type: normalizeChartType(nextConfig.type) },
-    });
-    setIsEditorOpen(false);
+    pushUpdates(
+      {
+        data: rows,
+        config: nextConfig,
+      },
+      { closeEditor: true },
+    );
   };
 
   const handleDataEditorApply = (rows: ChartDataRow[], nextConfig: ChartConfig) => {
-    if (!canEdit) {
-      return;
-    }
-    onInteract();
-    onUpdate({
-      data: rows.map(entry => ({ ...entry })),
-      config: { ...nextConfig, type: normalizeChartType(nextConfig.type) },
+    pushUpdates({
+      data: rows,
+      config: nextConfig,
     });
   };
+
+  const safeData = useMemo(() => previewData.map(entry => ({ ...entry })), [previewData]);
+  const safeConfig = useMemo(() => ({ ...previewConfig }), [previewConfig]);
 
   return (
     <>
