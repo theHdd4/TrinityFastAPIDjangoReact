@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ChevronDown, Image, PencilLine, Settings2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { getActiveProjectContext } from '@/utils/projectEnv';
+import { resolveProjectContext } from '@/utils/projectEnv';
 import {
   fetchExhibitionConfiguration,
   saveExhibitionConfiguration,
@@ -340,7 +340,7 @@ const FeatureOverviewExhibition = React.forwardRef<
       return;
     }
 
-    const context = getActiveProjectContext();
+    const context = await resolveProjectContext();
     if (!context || !context.client_name || !context.app_name || !context.project_name) {
       toast({
         title: 'Project details required',
