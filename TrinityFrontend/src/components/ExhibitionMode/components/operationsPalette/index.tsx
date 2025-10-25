@@ -67,7 +67,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
         style={{ width: isPanelVisible ? POSITION_PANEL_WIDTH : 0 }}
       >
         {isPanelVisible && (
-          <div className="flex w-full justify-end">
+          <div className="flex h-full w-full justify-end">
             {positionPanel}
           </div>
         )}

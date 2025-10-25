@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -54,6 +54,31 @@ class ExhibitionConfigurationOut(ExhibitionConfigurationBase):
     updated_at: Optional[datetime] = Field(default=None, description="Timestamp of the last update")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ExhibitionImage(BaseModel):
+    """Metadata describing an image stored for Exhibition Mode."""
+
+    object_name: str = Field(..., description="Full MinIO object path for the image")
+    filename: str = Field(..., description="Display file name for the image")
+    url: str = Field(..., description="Public URL that can be used to render the image")
+    uploaded_at: Optional[datetime] = Field(
+        default=None,
+        description="Timestamp recorded when the image was uploaded",
+    )
+
+
+class ExhibitionImageUploadResponse(BaseModel):
+    """Response returned after a successful image upload."""
+
+    status: Literal["success"] = Field(default="success")
+    image: ExhibitionImage
+
+
+class ExhibitionImageListResponse(BaseModel):
+    """Collection of images stored for Exhibition Mode."""
+
+    images: List[ExhibitionImage] = Field(default_factory=list)
 
 
 class ExhibitionManifestOut(BaseModel):
