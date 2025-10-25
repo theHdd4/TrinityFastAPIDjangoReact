@@ -21,6 +21,7 @@ import { SlideThumbnails } from './components/SlideThumbnails';
 import { SlideNotes } from './components/SlideNotes';
 import { GridView } from './components/GridView';
 import { ExportDialog } from './components/ExportDialog';
+import { ImagePanel, type ImageSelectionMetadata } from './components/Images';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -179,6 +180,7 @@ const ExhibitionMode = () => {
     | { type: 'custom'; node: ReactNode }
     | { type: 'notes' }
     | { type: 'shapes' }
+    | { type: 'images' }
     | null
   >(null);
   const [notes, setNotes] = useState<Record<number, string>>(() => {
@@ -1224,7 +1226,7 @@ const ExhibitionMode = () => {
     }
 
     setOperationsPanelState(prev => {
-      if (prev?.type === 'notes' || prev?.type === 'shapes') {
+      if (prev?.type === 'notes' || prev?.type === 'shapes' || prev?.type === 'images') {
         return prev;
       }
       return null;
@@ -1246,6 +1248,67 @@ const ExhibitionMode = () => {
   const handleCloseShapesPanel = useCallback(() => {
     setOperationsPanelState(null);
   }, []);
+
+  const handleOpenImagesPanel = useCallback(() => {
+    if (!canEdit) {
+      return;
+    }
+
+    const targetCard = exhibitedCards[currentSlide];
+    if (!targetCard) {
+      return;
+    }
+
+    setOperationsPanelState(prev => (prev?.type === 'images' ? null : { type: 'images' }));
+  }, [canEdit, currentSlide, exhibitedCards]);
+
+  const handleCloseImagesPanel = useCallback(() => {
+    setOperationsPanelState(prev => (prev?.type === 'images' ? null : prev));
+  }, []);
+
+  const handleImagePanelSelect = useCallback(
+    (imageUrl: string, metadata: ImageSelectionMetadata) => {
+      if (!canEdit) {
+        return;
+      }
+
+      const targetCard = exhibitedCards[currentSlide];
+      if (!targetCard) {
+        return;
+      }
+
+      const merged: PresentationSettings = {
+        ...DEFAULT_PRESENTATION_SETTINGS,
+        ...targetCard.presentationSettings,
+        accentImage: imageUrl,
+        accentImageName: metadata.title ?? (metadata.source === 'upload' ? 'Uploaded image' : 'Selected image'),
+      };
+
+      handlePresentationChange(merged, targetCard.id);
+      setOperationsPanelState(prev => (prev?.type === 'images' ? null : prev));
+    },
+    [canEdit, currentSlide, exhibitedCards, handlePresentationChange],
+  );
+
+  const handleRemoveAccentImage = useCallback(() => {
+    if (!canEdit) {
+      return;
+    }
+
+    const targetCard = exhibitedCards[currentSlide];
+    if (!targetCard) {
+      return;
+    }
+
+    const merged: PresentationSettings = {
+      ...DEFAULT_PRESENTATION_SETTINGS,
+      ...targetCard.presentationSettings,
+      accentImage: null,
+      accentImageName: null,
+    };
+
+    handlePresentationChange(merged, targetCard.id);
+  }, [canEdit, currentSlide, exhibitedCards, handlePresentationChange]);
 
   const handleToggleViewMode = useCallback(() => {
     if (isSlideshowActive) {
@@ -1275,7 +1338,7 @@ const ExhibitionMode = () => {
       return;
     }
 
-    setOperationsPanelState(prev => (prev?.type === 'shapes' ? null : prev));
+    setOperationsPanelState(prev => (prev?.type === 'shapes' || prev?.type === 'images' ? null : prev));
   }, [canEdit]);
 
   const hasSlides = exhibitedCards.length > 0;
@@ -1470,14 +1533,34 @@ const ExhibitionMode = () => {
       );
     }
 
+    if (operationsPanelState.type === 'images') {
+      return (
+        <ImagePanel
+          currentImage={currentPresentationSettings.accentImage ?? null}
+          currentImageName={currentPresentationSettings.accentImageName ?? null}
+          onClose={handleCloseImagesPanel}
+          onImageSelect={handleImagePanelSelect}
+          onRemoveImage={
+            currentPresentationSettings.accentImage ? handleRemoveAccentImage : undefined
+          }
+          canEdit={canEdit}
+        />
+      );
+    }
+
     return operationsPanelState.node;
   }, [
     canEdit,
     currentSlide,
     handleCloseNotesPanel,
     handleCloseShapesPanel,
+    handleCloseImagesPanel,
+    handleImagePanelSelect,
     handleNotesChange,
     handleShapeSelect,
+    handleRemoveAccentImage,
+    currentPresentationSettings.accentImage,
+    currentPresentationSettings.accentImageName,
     notes,
     operationsPanelState,
   ]);
@@ -1696,6 +1779,7 @@ const ExhibitionMode = () => {
             onCreateTextBox={handleCreateTextBox}
             onCreateTable={handleCreateTable}
             onOpenShapesPanel={handleOpenShapesPanel}
+            onOpenImagesPanel={handleOpenImagesPanel}
             canEdit={canEdit}
             positionPanel={operationsPalettePanel}
           />
