@@ -342,6 +342,28 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
             </div>
           </div>
 
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <span>Outline width</span>
+              <span className="text-foreground">{displayedStrokeWidth} px</span>
+            </div>
+            <div className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-medium text-muted-foreground">0</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={60}
+                  value={displayedStrokeWidth}
+                  onChange={handleStrokeWidthSliderChange}
+                  onMouseDown={handleToolbarMouseDown}
+                  className="h-1.5 w-full cursor-pointer accent-primary"
+                />
+                <span className="text-xs font-medium text-muted-foreground">60</span>
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-2">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Outline color</p>
             <ColorTray
@@ -381,28 +403,6 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
               >
                 Reset
               </Button>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              <span>Outline width</span>
-              <span className="text-foreground">{displayedStrokeWidth} px</span>
-            </div>
-            <div className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-medium text-muted-foreground">0</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={60}
-                  value={displayedStrokeWidth}
-                  onChange={handleStrokeWidthSliderChange}
-                  onMouseDown={handleToolbarMouseDown}
-                  className="h-1.5 w-full cursor-pointer accent-primary"
-                />
-                <span className="text-xs font-medium text-muted-foreground">60</span>
-              </div>
             </div>
           </div>
         </div>
