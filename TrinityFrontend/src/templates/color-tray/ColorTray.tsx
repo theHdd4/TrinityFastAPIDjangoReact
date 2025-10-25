@@ -1,10 +1,17 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Droplet, Search, Sparkles } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import type { ColorTrayOption, ColorTraySection, ColorTraySwatchSize } from './types';
+import {
+  createSolidToken,
+  isSolidToken,
+  solidTokenToHex,
+  type SolidColorToken,
+} from './presets';
 
 export interface ColorTrayProps {
   options?: readonly ColorTrayOption[];
@@ -18,6 +25,7 @@ export interface ColorTrayProps {
   swatchSize?: ColorTraySwatchSize;
   defaultSectionId?: string;
   emptyState?: React.ReactNode;
+  showCustomColorSection?: boolean;
 }
 
 const swatchSizeMap: Record<ColorTraySwatchSize, string> = {
@@ -57,10 +65,14 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
   swatchSize = 'md',
   defaultSectionId,
   emptyState,
+  showCustomColorSection = true,
 }) => {
   const resolvedSelectedId = selectedId?.toLowerCase() ?? null;
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [customInput, setCustomInput] = useState<string>('#6366f1');
+  const [customPreview, setCustomPreview] = useState<string>('#6366f1');
+  const [customError, setCustomError] = useState<string | null>(null);
 
   const hasExplicitSections = Boolean(sections && sections.length > 0);
 
@@ -122,7 +134,7 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
       }
       return resolvedSections[0]?.id ?? null;
     });
-  }, [defaultSectionId, hasExplicitSections, resolvedSections]);
+  }, [activeSectionId, defaultSectionId, hasExplicitSections, resolvedSections]);
 
   useEffect(() => {
     setSearchQuery('');
@@ -252,16 +264,93 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
     );
   }, [allOptions, resolvedSelectedId]);
 
+  const selectedCustomOption = useMemo(() => {
+    if (!resolvedSelectedId || selectedOption) {
+      return null;
+    }
+    if (!isSolidToken(resolvedSelectedId)) {
+      return null;
+    }
+    const hex = solidTokenToHex(resolvedSelectedId as SolidColorToken);
+    return {
+      id: resolvedSelectedId,
+      value: hex,
+      label: `Custom (${hex.toUpperCase()})`,
+      ariaLabel: `Use custom color ${hex.toUpperCase()}`,
+      tooltip: `Custom color (${hex.toUpperCase()})`,
+      swatchStyle: { backgroundColor: hex },
+    } satisfies ColorTrayOption;
+  }, [resolvedSelectedId, selectedOption]);
+
+  const normalizedCustomHex = selectedCustomOption?.value ?? null;
+
   const headerPreviewStyle = useMemo<React.CSSProperties>(() => {
-    if (!selectedOption) {
+    if (!selectedOption && !selectedCustomOption) {
       return { backgroundImage: DEFAULT_HEADER_GRADIENT };
     }
-    const style = getOptionSwatchStyle(selectedOption) ?? {};
+    const style =
+      getOptionSwatchStyle(selectedOption ?? selectedCustomOption!) ?? {};
     if (Object.keys(style).length === 0) {
       return { backgroundImage: DEFAULT_HEADER_GRADIENT };
     }
     return style;
-  }, [selectedOption]);
+  }, [selectedCustomOption, selectedOption]);
+
+  useEffect(() => {
+    if (normalizedCustomHex) {
+      setCustomInput(normalizedCustomHex.toUpperCase());
+      setCustomPreview(normalizedCustomHex);
+      setCustomError(null);
+      return;
+    }
+    setCustomError(null);
+  }, [normalizedCustomHex]);
+
+  const parseCustomHex = useCallback((value: string): string | null => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const withoutHash = trimmed.replace(/^#/, '');
+    if (!/^[0-9a-f]{3}$|^[0-9a-f]{6}$/i.test(withoutHash)) {
+      return null;
+    }
+    const normalized =
+      withoutHash.length === 3
+        ? withoutHash
+            .split('')
+            .map(character => character.repeat(2))
+            .join('')
+        : withoutHash;
+    return `#${normalized.toLowerCase()}`;
+  }, []);
+
+  const applyCustomColor = useCallback(
+    (value: string) => {
+      if (disabled) {
+        return;
+      }
+      const normalised = parseCustomHex(value);
+      if (!normalised) {
+        setCustomError('Enter a valid hex value');
+        return;
+      }
+      setCustomInput(normalised.toUpperCase());
+      setCustomPreview(normalised);
+      setCustomError(null);
+      const token = createSolidToken(normalised);
+      const label = `Custom (${normalised.toUpperCase()})`;
+      onSelect?.({
+        id: token,
+        value: normalised,
+        label,
+        ariaLabel: `Use custom color ${normalised.toUpperCase()}`,
+        tooltip: label,
+        swatchStyle: { backgroundColor: normalised },
+      });
+    },
+    [disabled, onSelect, parseCustomHex],
+  );
 
   const renderColorOption = (option: ColorTrayOption) => {
     const optionId = option.id.toLowerCase();
@@ -360,7 +449,12 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
 
   const sectionValue = activeSectionId ?? resolvedSections[0]?.id ?? 'default';
   const showTabs = resolvedSections.length > 1;
-  const selectedTitle = selectedOption?.label ?? selectedOption?.value ?? 'Choose a color';
+  const selectedTitle =
+    selectedOption?.label ??
+    selectedOption?.value ??
+    selectedCustomOption?.label ??
+    selectedCustomOption?.value?.toUpperCase() ??
+    'Choose a color';
 
   return (
     <div
@@ -479,6 +573,76 @@ export const ColorTray: React.FC<ColorTrayProps> = ({
                   </div>
                 )}
               </ScrollArea>
+              {showCustomColorSection ? (
+                <div className="pt-2">
+                  <div
+                    className={cn(
+                      'relative w-full overflow-hidden rounded-2xl border border-dashed border-border/60 bg-gradient-to-br from-muted/20 via-transparent to-muted/10 px-5 py-4 text-center shadow-sm transition-all duration-300',
+                      (selectedCustomOption || (!selectedOption && resolvedSelectedId && isSolidToken(resolvedSelectedId)))
+                        ? 'border-primary/60 shadow-md ring-2 ring-primary/15'
+                        : 'hover:border-primary/40 hover:shadow-md',
+                    )}
+                  >
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.4em] text-muted-foreground">
+                      Custom color
+                    </div>
+                    <div className="mt-3 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+                      <label className="relative flex h-12 w-12 items-center justify-center rounded-2xl border border-border/40 bg-white/80 shadow-inner">
+                        <span
+                          className="pointer-events-none absolute inset-0 rounded-[inherit] border border-white/60 shadow"
+                          style={{ backgroundColor: customPreview }}
+                        />
+                        <input
+                          type="color"
+                          value={customPreview}
+                          onChange={event => applyCustomColor(event.target.value)}
+                          className="relative h-full w-full cursor-pointer opacity-0"
+                          aria-label="Pick custom color"
+                          disabled={disabled}
+                        />
+                      </label>
+                      <form
+                        className="flex w-full flex-col items-center gap-2 sm:flex-row"
+                        onSubmit={event => {
+                          event.preventDefault();
+                          applyCustomColor(customInput);
+                        }}
+                      >
+                        <Input
+                          value={customInput}
+                          onChange={event => {
+                            const value = event.target.value;
+                            setCustomInput(value);
+                            const parsed = parseCustomHex(value);
+                            if (parsed) {
+                              setCustomPreview(parsed);
+                              setCustomError(null);
+                            }
+                          }}
+                          placeholder="#AABBCC"
+                          className="h-11 w-full rounded-2xl border border-border/40 bg-white/80 text-center text-sm uppercase shadow-inner transition-all focus-visible:border-primary/40 focus-visible:ring-2 focus-visible:ring-primary/60"
+                          spellCheck={false}
+                          autoComplete="off"
+                          inputMode="text"
+                          disabled={disabled}
+                          aria-label="Enter custom hex color"
+                        />
+                        <Button
+                          type="submit"
+                          size="sm"
+                          disabled={disabled}
+                          className="h-11 w-full rounded-2xl text-xs font-semibold uppercase tracking-[0.35em] sm:w-auto"
+                        >
+                          Apply
+                        </Button>
+                      </form>
+                    </div>
+                    {customError ? (
+                      <p className="mt-3 text-[11px] font-medium text-destructive">{customError}</p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </div>
           </TabsContent>
         </Tabs>
