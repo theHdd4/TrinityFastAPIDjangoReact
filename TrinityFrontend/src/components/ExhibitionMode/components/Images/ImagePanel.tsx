@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
-import { EXHIBITION_API } from '@/lib/api';
+import { IMAGES_API } from '@/lib/api';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 
 export type ImagePanelSource = 'stock' | 'upload' | 'existing';
@@ -112,7 +112,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
         project_name: projectContext.project_name,
       });
 
-      const response = await fetch(`${EXHIBITION_API}/images?${params.toString()}`, {
+      const response = await fetch(`${IMAGES_API}?${params.toString()}`, {
         credentials: 'include',
       });
 
@@ -249,7 +249,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
           formData.append('app_name', projectContext.app_name);
           formData.append('project_name', projectContext.project_name);
 
-          const response = await fetch(`${EXHIBITION_API}/images/upload`, {
+          const response = await fetch(`${IMAGES_API}/upload`, {
             method: 'POST',
             body: formData,
             credentials: 'include',
