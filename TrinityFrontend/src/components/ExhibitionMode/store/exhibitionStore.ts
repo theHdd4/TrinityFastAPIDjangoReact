@@ -226,12 +226,9 @@ export const DEFAULT_CANVAS_OBJECT_WIDTH = 420;
 export const DEFAULT_CANVAS_OBJECT_HEIGHT = 320;
 const DEFAULT_TITLE_OBJECT_WIDTH = 560;
 const DEFAULT_TITLE_OBJECT_HEIGHT = 120;
-const DEFAULT_ACCENT_IMAGE_OBJECT_WIDTH = 360;
-const DEFAULT_ACCENT_IMAGE_OBJECT_HEIGHT = 240;
 export const CANVAS_SNAP_GRID = 8;
 
 export const buildSlideTitleObjectId = (cardId: string) => `${cardId}::slide-title`;
-export const buildSlideAccentImageObjectId = (cardId: string) => `${cardId}::accent-image`;
 
 export const createSlideObjectFromAtom = (
   atom: DroppedAtom,
@@ -639,21 +636,6 @@ const synchroniseSlideObjects = (
         titleSource = { ...object };
       } else if (object.type === 'text-box' && object.id === titleId) {
         titleSource = { ...object };
-      } else if (object.type === 'accent-image') {
-        const accentImage = card.presentationSettings?.accentImage;
-        if (!accentImage) {
-          return;
-        }
-        next.push({
-          ...object,
-          id: buildSlideAccentImageObjectId(card.id),
-          type: 'accent-image',
-          props: {
-            ...(object.props || {}),
-            src: accentImage,
-            name: card.presentationSettings?.accentImageName ?? null,
-          },
-        });
       } else {
         next.push({ ...object });
       }
@@ -677,44 +659,7 @@ const synchroniseSlideObjects = (
     });
   }
 
-  const accentId = buildSlideAccentImageObjectId(card.id);
-
-  const accentImage = card.presentationSettings?.accentImage;
-  if (accentImage) {
-    const accentIndex = next.findIndex(object => object.id === accentId || object.type === 'accent-image');
-    const accentName = card.presentationSettings?.accentImageName ?? null;
-    const accentObject: SlideObject = accentIndex !== -1
-      ? {
-          ...next[accentIndex],
-          id: accentId,
-          type: 'accent-image',
-          props: {
-            ...(next[accentIndex].props || {}),
-            src: accentImage,
-            name: accentName,
-          },
-        }
-      : {
-          id: accentId,
-          type: 'accent-image',
-          x: 48,
-          y: 160,
-          width: DEFAULT_ACCENT_IMAGE_OBJECT_WIDTH,
-          height: DEFAULT_ACCENT_IMAGE_OBJECT_HEIGHT,
-          zIndex: 1,
-          rotation: 0,
-          groupId: null,
-          props: {
-            src: accentImage,
-            name: accentName,
-          },
-        };
-
-    next = next.filter(object => object.id !== accentId && object.type !== 'accent-image');
-    next = [accentObject, ...next];
-  } else {
-    next = next.filter(object => object.id !== accentId && object.type !== 'accent-image');
-  }
+  next = next.filter(object => object.type !== 'accent-image');
 
   const titleObject = createTitleObject(titleSource);
 
