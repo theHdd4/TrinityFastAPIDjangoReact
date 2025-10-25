@@ -38,8 +38,6 @@ export interface ImagePanelProps {
   canEdit?: boolean;
 }
 
-const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png'];
-
 export const stockImages: ReadonlyArray<{ url: string; title: string }> = [
   {
     url: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&q=80',
@@ -168,7 +166,8 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
   const [storedImages, setStoredImages] = useState<StoredImage[]>([]);
   const [isLoadingImages, setIsLoadingImages] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
+  const [localUploads, setLocalUploads] = useState<StoredImage[]>([]);
+  const [isProcessingUpload, setIsProcessingUpload] = useState(false);
   const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
 
   useEffect(() => {
@@ -248,185 +247,59 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
 
   const handleFileUpload = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
-      if (!canEdit) {
+      if (!canEdit || isProcessingUpload) {
         return;
       }
 
-      const files = event.target.files;
+      const file = event.target.files?.[0] ?? null;
       event.target.value = '';
 
-      if (!files || files.length === 0) {
+      if (!file) {
         return;
       }
 
-      const validFiles: File[] = [];
-      const rejected: string[] = [];
-
-      for (const file of Array.from(files)) {
-        const extension = `.${file.name.split('.').pop()?.toLowerCase() ?? ''}`;
-        if (!ALLOWED_EXTENSIONS.includes(extension)) {
-          rejected.push(file.name);
-          continue;
-        }
-        validFiles.push(file);
-      }
-
-      if (rejected.length > 0) {
+      if (!file.type?.startsWith('image/')) {
         toast({
-          title:
-            rejected.length === 1
-              ? `${rejected[0]} was not uploaded`
-              : 'Some files were not uploaded',
-          description: 'Only .jpg, .jpeg, or .png files are supported.',
+          title: 'Unsupported file',
+          description: 'Please choose an image file to upload.',
           variant: 'destructive',
         });
-      }
-
-      if (validFiles.length === 0) {
         return;
       }
 
-      setIsUploading(true);
-
-      let hasRemoteSuccess = false;
+      setIsProcessingUpload(true);
 
       try {
-        const placeholders: Array<{ file: File; placeholder: StoredImage }> = [];
-        const failedReads: string[] = [];
+        const url = await readFileAsDataUrl(file);
+        const uploadedImage: StoredImage = {
+          id: generateLocalImageId(),
+          url,
+          label: file.name || 'Uploaded image',
+          uploadedAt: new Date().toISOString(),
+        };
 
-        for (const file of validFiles) {
-          try {
-            const url = await readFileAsDataUrl(file);
-            placeholders.push({
-              file,
-              placeholder: {
-                id: generateLocalImageId(),
-                url,
-                label: file.name,
-                uploadedAt: new Date().toISOString(),
-              },
-            });
-          } catch (error) {
-            console.error('Unable to read image file', error);
-            failedReads.push(file.name);
-          }
-        }
-
-        if (failedReads.length > 0) {
-          toast({
-            title:
-              failedReads.length === 1
-                ? `${failedReads[0]} could not be processed`
-                : 'Some images could not be processed',
-            description: 'Please try selecting the files again or choose different images.',
-            variant: 'destructive',
-          });
-        }
-
-        if (placeholders.length > 0) {
-          setStoredImages(prev => {
-            const existing = new Map(prev.map(image => [image.id, image] as const));
-            for (const entry of placeholders) {
-              existing.set(entry.placeholder.id, entry.placeholder);
-            }
-            return sortStoredImages(Array.from(existing.values()));
-          });
-
-          const firstPlaceholder = placeholders[0].placeholder;
-          setSelectedImage({ url: firstPlaceholder.url, label: firstPlaceholder.label, source: 'upload' });
-        }
-
-        if (!projectContext) {
-          if (placeholders.length > 0) {
-            toast({
-              title: placeholders.length > 1 ? 'Images ready' : 'Image ready',
-              description: 'The images have been added and can now be placed on the slide.',
-            });
-          }
-          return;
-        }
-
-        if (placeholders.length === 0) {
-          return;
-        }
-
-        const uploads = await Promise.all(
-          placeholders.map(async ({ file }) => {
-            try {
-              const formData = new FormData();
-              formData.append('file', file);
-              formData.append('client_name', projectContext.client_name);
-              formData.append('app_name', projectContext.app_name);
-              formData.append('project_name', projectContext.project_name);
-
-              const response = await fetch(`${IMAGES_API}/upload`, {
-                method: 'POST',
-                body: formData,
-                credentials: 'include',
-              });
-
-              if (!response.ok) {
-                const message = await response.text().catch(() => '');
-                throw new Error(message || `Upload failed with status ${response.status}`);
-              }
-
-              const payload = await response.json();
-              const image = normaliseStoredImage(payload?.image);
-              return image ?? null;
-            } catch (error) {
-              console.error('Image upload failed', error);
-              return null;
-            }
-          }),
-        );
-
-        const successful = uploads.filter((image): image is StoredImage => Boolean(image));
-
-        if (successful.length > 0) {
-          setStoredImages(prev => {
-            const existing = new Map(prev.map(image => [image.id, image] as const));
-            for (const entry of placeholders) {
-              existing.delete(entry.placeholder.id);
-            }
-            for (const image of successful) {
-              existing.set(image.id, image);
-            }
-            return sortStoredImages(Array.from(existing.values()));
-          });
-
-          const first = successful[0];
-          setSelectedImage({ url: first.url, label: first.label, source: 'upload' });
-          toast({
-            title: successful.length > 1 ? 'Images uploaded' : 'Image uploaded',
-            description: 'Your images are ready to use.',
-          });
-          hasRemoteSuccess = true;
-        } else if (placeholders.length > 0) {
-          toast({
-            title: placeholders.length > 1 ? 'Images ready locally' : 'Image ready locally',
-            description: 'Uploads to storage failed, but you can still place these images on the slide.',
-            variant: 'destructive',
-          });
-        }
+        setLocalUploads(prev => sortStoredImages([...prev, uploadedImage]));
+        setSelectedImage({ url: uploadedImage.url, label: uploadedImage.label, source: 'upload' });
+        toast({
+          title: 'Image ready',
+          description: 'The image has been added to your uploads.',
+        });
       } catch (error) {
-        console.error('Image upload failed', error);
+        console.error('Unable to process image', error);
         toast({
           title: 'Upload failed',
-          description: 'We were unable to process one or more images. Please try again.',
+          description: 'We were unable to process the selected image. Please try again.',
           variant: 'destructive',
         });
       } finally {
-        setIsUploading(false);
-        if (projectContext && hasRemoteSuccess) {
-          await fetchStoredImages();
-        }
+        setIsProcessingUpload(false);
       }
     },
-    [canEdit, projectContext, toast, fetchStoredImages],
+    [canEdit, isProcessingUpload, toast],
   );
 
   const handleInsertImage = useCallback(() => {
-    if (!selectedImage || !canEdit || isUploading) {
+    if (!selectedImage || !canEdit || isProcessingUpload) {
       return;
     }
 
@@ -440,20 +313,38 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
       source: selectedImage.source,
     });
     onClose();
-  }, [canEdit, currentImage, isUploading, onClose, onImageSelect, selectedImage]);
+  }, [canEdit, currentImage, isProcessingUpload, onClose, onImageSelect, selectedImage]);
 
   const handleRemove = useCallback(() => {
-    if (!canEdit || isUploading) {
+    if (!canEdit || isProcessingUpload) {
       return;
     }
     onRemoveImage?.();
     setSelectedImage(null);
-  }, [canEdit, isUploading, onRemoveImage]);
+  }, [canEdit, isProcessingUpload, onRemoveImage]);
 
   const uploadsPath = useMemo(() => buildUploadsPath(projectContext), [projectContext]);
 
+  const availableUploads = useMemo(() => {
+    if (localUploads.length === 0) {
+      return storedImages;
+    }
+
+    const combined = [...localUploads, ...storedImages];
+    const uniqueByUrl = new Map<string, StoredImage>();
+
+    combined.forEach(image => {
+      const key = image.url ?? image.id;
+      if (!uniqueByUrl.has(key)) {
+        uniqueByUrl.set(key, image);
+      }
+    });
+
+    return sortStoredImages(Array.from(uniqueByUrl.values()));
+  }, [localUploads, storedImages]);
+
   const insertDisabled =
-    !selectedImage || !canEdit || isUploading ||
+    !selectedImage || !canEdit || isProcessingUpload ||
     (selectedImage.source === 'existing' && selectedImage.url === currentImage);
 
   return (
@@ -481,15 +372,16 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
               <div className="space-y-2">
                 <p className="text-sm font-medium text-foreground">Upload images</p>
                 <p className="text-xs text-muted-foreground">
-                  Add JPEG or PNG images to place them anywhere on the slide.
+                  Add images to place them anywhere on the slide.
                 </p>
                 {uploadsPath ? (
                   <p className="text-[11px] text-muted-foreground">
-                    Files are saved to <span className="font-medium text-foreground">{uploadsPath}</span>.
+                    Shared uploads for this project live at{' '}
+                    <span className="font-medium text-foreground">{uploadsPath}</span>.
                   </p>
                 ) : (
                   <p className="text-[11px] text-muted-foreground">
-                    Connect to a project to sync uploads to shared storage.
+                    Connect to a project to sync and reuse shared uploads.
                   </p>
                 )}
               </div>
@@ -497,28 +389,27 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept={ALLOWED_EXTENSIONS.join(',')}
-                  multiple
+                  accept="image/*"
                   onChange={handleFileUpload}
                   className="hidden"
-                  disabled={!canEdit || isUploading}
+                  disabled={!canEdit || isProcessingUpload}
                 />
                 <Button
                   variant="outline"
                   className="flex h-20 w-full items-center justify-center"
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={!canEdit || isUploading}
+                  disabled={!canEdit || isProcessingUpload}
                 >
-                  {isUploading ? (
+                  {isProcessingUpload ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Uploading…
+                      Processing…
                     </>
                   ) : (
                     <>
                       <Upload className="mr-2 h-5 w-5" />
-                      Upload your images
+                      Upload your image
                     </>
                   )}
                 </Button>
@@ -535,10 +426,10 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                 <div className="flex h-32 items-center justify-center rounded-lg border border-dashed border-border/70 text-xs text-muted-foreground">
                   Loading images…
                 </div>
-              ) : storedImages.length > 0 ? (
+              ) : availableUploads.length > 0 ? (
                 <div className="max-h-48 overflow-y-auto pr-1">
                   <div className="grid grid-cols-2 gap-3">
-                    {storedImages.map(image => {
+                    {availableUploads.map(image => {
                       const isSelected = selectedImage?.url === image.url;
                       return (
                         <button
@@ -578,7 +469,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                 </div>
               ) : (
                 <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
-                  Upload images to see them here. {projectContext ? '' : 'Connect to a project to sync them for future sessions.'}
+                  Upload images to see them here during this session. Connect to a project to access shared uploads.
                 </div>
               )}
             </section>
@@ -636,7 +527,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                 type="button"
                 className="h-9 px-3 text-xs text-destructive"
                 onClick={handleRemove}
-                disabled={!canEdit || isUploading}
+                disabled={!canEdit || isProcessingUpload}
               >
                 <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                 Remove image
