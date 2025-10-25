@@ -127,31 +127,6 @@ const sortStoredImages = (images: StoredImage[]): StoredImage[] => {
   });
 };
 
-const generateLocalImageId = () => {
-  if (typeof crypto !== 'undefined' && typeof (crypto as Crypto).randomUUID === 'function') {
-    return (crypto as Crypto).randomUUID();
-  }
-
-  return `local-image-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-};
-
-const readFileAsDataUrl = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result);
-        return;
-      }
-      reject(new Error('Invalid file contents.'));
-    };
-    reader.onerror = () => {
-      reject(reader.error ?? new Error('Unable to read file.'));
-    };
-    reader.readAsDataURL(file);
-  });
-};
-
 const ImagePanel: React.FC<ImagePanelProps> = ({
   currentImage,
   currentImageName,
@@ -166,7 +141,6 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(null);
   const [storedImages, setStoredImages] = useState<StoredImage[]>([]);
   const [isLoadingImages, setIsLoadingImages] = useState(false);
-  const [localUploads, setLocalUploads] = useState<StoredImage[]>([]);
   const [isProcessingUpload, setIsProcessingUpload] = useState(false);
   const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
 
@@ -267,35 +241,81 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
         return;
       }
 
+      const context = projectContext;
+      if (!context || !context.client_name || !context.app_name || !context.project_name) {
+        toast({
+          title: 'Project required',
+          description: 'Connect to a project before uploading images.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
       setIsProcessingUpload(true);
 
       try {
-        const url = await readFileAsDataUrl(file);
-        const uploadedImage: StoredImage = {
-          id: generateLocalImageId(),
-          url,
-          label: file.name || 'Uploaded image',
-          uploadedAt: new Date().toISOString(),
-        };
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('client_name', context.client_name);
+        formData.append('app_name', context.app_name);
+        formData.append('project_name', context.project_name);
 
-        setLocalUploads(prev => sortStoredImages([...prev, uploadedImage]));
+        const response = await fetch(`${IMAGES_API}/upload`, {
+          method: 'POST',
+          body: formData,
+          credentials: 'include',
+        });
+
+        if (!response.ok) {
+          let errorMessage = 'We were unable to upload the selected image. Please try again.';
+          try {
+            const errorPayload = await response.json();
+            if (typeof errorPayload?.detail === 'string' && errorPayload.detail.trim().length > 0) {
+              errorMessage = errorPayload.detail.trim();
+            }
+          } catch {
+            // ignore parsing issues
+          }
+          throw new Error(errorMessage);
+        }
+
+        const payload = await response.json();
+        const uploadedImage = normaliseStoredImage(payload?.image);
+
+        if (!uploadedImage) {
+          throw new Error('Upload response did not include image metadata.');
+        }
+
+        setStoredImages(prev => {
+          const unique = new Map<string, StoredImage>();
+          [...prev, uploadedImage].forEach(image => {
+            if (image.id) {
+              unique.set(image.id, image);
+            }
+          });
+          return sortStoredImages(Array.from(unique.values()));
+        });
+
         setSelectedImage({ url: uploadedImage.url, label: uploadedImage.label, source: 'upload' });
         toast({
-          title: 'Image ready',
+          title: 'Image uploaded',
           description: 'The image has been added to your uploads.',
         });
       } catch (error) {
-        console.error('Unable to process image', error);
+        console.error('Unable to upload image', error);
         toast({
           title: 'Upload failed',
-          description: 'We were unable to process the selected image. Please try again.',
+          description:
+            error instanceof Error
+              ? error.message
+              : 'We were unable to upload the selected image. Please try again.',
           variant: 'destructive',
         });
       } finally {
         setIsProcessingUpload(false);
       }
     },
-    [canEdit, isProcessingUpload, toast],
+    [canEdit, isProcessingUpload, projectContext, toast],
   );
 
   const handleInsertImage = useCallback(() => {
@@ -325,23 +345,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
 
   const uploadsPath = useMemo(() => buildUploadsPath(projectContext), [projectContext]);
 
-  const availableUploads = useMemo(() => {
-    if (localUploads.length === 0) {
-      return storedImages;
-    }
-
-    const combined = [...localUploads, ...storedImages];
-    const uniqueByUrl = new Map<string, StoredImage>();
-
-    combined.forEach(image => {
-      const key = image.url ?? image.id;
-      if (!uniqueByUrl.has(key)) {
-        uniqueByUrl.set(key, image);
-      }
-    });
-
-    return sortStoredImages(Array.from(uniqueByUrl.values()));
-  }, [localUploads, storedImages]);
+  const availableUploads = storedImages;
 
   const insertDisabled =
     !selectedImage || !canEdit || isProcessingUpload ||
