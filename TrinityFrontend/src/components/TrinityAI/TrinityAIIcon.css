@@ -1,0 +1,36 @@
+.trinity-ai-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.trinity-ai-icon::after {
+  content: '';
+  position: absolute;
+  inset: -45%;
+  background: linear-gradient(120deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.85) 45%, rgba(255, 255, 255, 0) 100%);
+  transform: translateX(-120%) rotate(25deg);
+  opacity: 0;
+  border-radius: 9999px;
+  animation: trinity-ai-shine 2.8s ease-in-out infinite;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+@keyframes trinity-ai-shine {
+  0% {
+    opacity: 0;
+    transform: translateX(-140%) rotate(25deg);
+  }
+  20% {
+    opacity: 0.8;
+  }
+  40% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(140%) rotate(25deg);
+  }
+}

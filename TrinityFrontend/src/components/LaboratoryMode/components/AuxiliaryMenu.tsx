@@ -3,8 +3,8 @@ import SettingsPanel from './SettingsPanel/';
 import SavedDataFramesPanel from './SavedDataFramesPanel';
 import HelpPanel from './HelpPanel/';
 import ExhibitionPanel from './ExhibitionPanel';
-import { SuperagentAIPanel } from '@/components/TrinityAI';
-import { Settings, Database, HelpCircle, Sparkles, GalleryHorizontal } from 'lucide-react';
+import { SuperagentAIPanel, TrinityAIIcon } from '@/components/TrinityAI';
+import { Settings, Database, HelpCircle, GalleryHorizontal } from 'lucide-react';
 
 interface Props {
   selectedAtomId?: string;
@@ -93,7 +93,7 @@ const AuxiliaryMenu: React.FC<Props> = ({
             data-superagent-ai="true"
             type="button"
           >
-            <Sparkles className="w-4 h-4 text-purple-500" />
+            <TrinityAIIcon className="text-purple-500" />
             <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
               Trinity AI
             </span>
