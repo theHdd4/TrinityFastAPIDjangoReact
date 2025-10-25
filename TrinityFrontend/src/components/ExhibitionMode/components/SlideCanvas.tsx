@@ -44,8 +44,9 @@ import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
 import { SlideShapeObject } from './operationsPalette/shapes';
 import type { ShapeObjectProps } from './operationsPalette/shapes/constants';
 import {
-  SlideChart,
+  SlideChartObject,
   DEFAULT_CHART_CONFIG,
+  DEFAULT_CHART_DATA,
   type ChartConfig,
   type ChartDataRow,
 } from './operationsPalette/charts';
@@ -1557,6 +1558,35 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [objectsMap, onBulkUpdate],
     );
 
+    const updateChartProps = useCallback(
+      (objectId: string, updates: { data?: ChartDataRow[]; config?: ChartConfig }) => {
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'chart') {
+          return;
+        }
+
+        const currentProps = (object.props ?? {}) as { data?: ChartDataRow[]; config?: ChartConfig };
+        const currentData = Array.isArray(currentProps.data) ? (currentProps.data as ChartDataRow[]) : DEFAULT_CHART_DATA;
+        const currentConfig = currentProps.config
+          ? { ...DEFAULT_CHART_CONFIG, ...(currentProps.config as ChartConfig) }
+          : DEFAULT_CHART_CONFIG;
+
+        const nextData = Array.isArray(updates.data) ? updates.data : currentData;
+        const nextConfig = updates.config ? { ...DEFAULT_CHART_CONFIG, ...updates.config } : currentConfig;
+
+        onBulkUpdate({
+          [objectId]: {
+            props: {
+              ...currentProps,
+              data: nextData.map(entry => ({ ...entry })),
+              config: nextConfig,
+            },
+          },
+        });
+      },
+      [objectsMap, onBulkUpdate],
+    );
+
     const mutateTableState = useCallback(
       (objectId: string, mutator: (state: TableState) => TableState | null) => {
         const object = objectsMap.get(objectId);
@@ -2737,7 +2767,15 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onInteract={onInteract}
                     />
                   ) : isChartObject ? (
-                    <SlideChart data={chartData} config={chartConfig} className="h-full w-full" />
+                    <SlideChartObject
+                      data={chartData}
+                      config={chartConfig}
+                      canEdit={canEdit}
+                      className="h-full w-full"
+                      onUpdate={updates => updateChartProps(object.id, updates)}
+                      onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
+                      onInteract={onInteract}
+                    />
                   ) : (
                     <div
                       className={cn(

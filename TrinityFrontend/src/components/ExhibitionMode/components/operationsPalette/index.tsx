@@ -1,4 +1,4 @@
-import React, { ReactNode, useCallback, useMemo, useState } from 'react';
+import React, { ReactNode, useCallback, useMemo } from 'react';
 import { Layers, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -13,15 +13,6 @@ import { createChartsOperation } from './operations/charts';
 import { createTemplatesTool } from './tools/templates';
 import { createThemesTool } from './tools/themes';
 import { createSettingsTool } from './tools/settings';
-import {
-  ChartPanel,
-  type ChartPanelResult,
-  type ChartConfig,
-  type ChartDataRow,
-  DEFAULT_CHART_CONFIG,
-  DEFAULT_CHART_DATA,
-} from './charts';
-
 export const POSITION_PANEL_WIDTH = '22rem';
 
 interface OperationsPaletteProps {
@@ -31,7 +22,7 @@ interface OperationsPaletteProps {
   onCreateTable?: () => void;
   onOpenShapesPanel?: () => void;
   onOpenImagesPanel?: () => void;
-  onCreateChart?: (result: ChartPanelResult) => void;
+  onOpenChartPanel?: () => void;
   canEdit?: boolean;
   positionPanel?: ReactNode | null;
 }
@@ -43,34 +34,16 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
   onCreateTable,
   onOpenShapesPanel,
   onOpenImagesPanel,
-  onCreateChart,
+  onOpenChartPanel,
   canEdit = true,
   positionPanel = null,
 }) => {
-  const [isChartPanelOpen, setIsChartPanelOpen] = useState(false);
-  const [chartData, setChartData] = useState<ChartDataRow[]>(DEFAULT_CHART_DATA);
-  const [chartConfig, setChartConfig] = useState<ChartConfig>(DEFAULT_CHART_CONFIG);
-
   const handleChartPanelRequest = useCallback(() => {
-    if (canEdit === false || typeof onCreateChart !== 'function') {
+    if (canEdit === false || typeof onOpenChartPanel !== 'function') {
       return;
     }
-    setIsChartPanelOpen(true);
-  }, [canEdit, onCreateChart]);
-
-  const handleChartInsert = useCallback(
-    (result: ChartPanelResult) => {
-      setChartData(result.data);
-      setChartConfig(result.config);
-      onCreateChart?.(result);
-      setIsChartPanelOpen(false);
-    },
-    [onCreateChart],
-  );
-
-  const handleChartPanelClose = useCallback(() => {
-    setIsChartPanelOpen(false);
-  }, []);
+    onOpenChartPanel();
+  }, [canEdit, onOpenChartPanel]);
 
   const operations = useMemo<PaletteOperation[]>(
     () => [
@@ -82,13 +55,13 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
       createChartsOperation({
         canEdit,
         onOpenChartPanel:
-          canEdit !== false && typeof onCreateChart === 'function' ? handleChartPanelRequest : undefined,
+          canEdit !== false && typeof onOpenChartPanel === 'function' ? handleChartPanelRequest : undefined,
       }),
     ],
     [
       canEdit,
       handleChartPanelRequest,
-      onCreateChart,
+      onOpenChartPanel,
       onCreateTable,
       onCreateTextBox,
       onOpenImagesPanel,
@@ -216,13 +189,6 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
         </div>
       </div>
 
-      <ChartPanel
-        open={isChartPanelOpen}
-        onClose={handleChartPanelClose}
-        onInsert={handleChartInsert}
-        initialData={chartData}
-        initialConfig={chartConfig}
-      />
     </>
   );
 };
