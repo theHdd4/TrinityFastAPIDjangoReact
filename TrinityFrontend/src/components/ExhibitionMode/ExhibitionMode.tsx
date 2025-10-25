@@ -37,7 +37,15 @@ import {
   createImageSlideObject,
   generateImageObjectId,
 } from './components/operationsPalette/images/constants';
-import { createChartSlideObject, type ChartPanelResult } from './components/operationsPalette/charts';
+import {
+  ChartPanel,
+  createChartSlideObject,
+  DEFAULT_CHART_CONFIG,
+  DEFAULT_CHART_DATA,
+  type ChartConfig,
+  type ChartDataRow,
+  type ChartPanelResult,
+} from './components/operationsPalette/charts';
 import {
   buildChartRendererPropsFromManifest,
   buildTableDataFromManifest,
@@ -186,8 +194,11 @@ const ExhibitionMode = () => {
     | { type: 'notes' }
     | { type: 'shapes' }
     | { type: 'images' }
+    | { type: 'charts' }
     | null
   >(null);
+  const [chartPanelData, setChartPanelData] = useState<ChartDataRow[]>(DEFAULT_CHART_DATA);
+  const [chartPanelConfig, setChartPanelConfig] = useState<ChartConfig>(DEFAULT_CHART_CONFIG);
   const [notes, setNotes] = useState<Record<number, string>>(() => {
     if (typeof window === 'undefined') {
       return {};
@@ -1261,6 +1272,17 @@ const ExhibitionMode = () => {
     setOperationsPanelState(null);
   }, []);
 
+  const handleOpenChartsPanel = useCallback(() => {
+    if (!canEdit) {
+      return;
+    }
+    setOperationsPanelState(prev => (prev?.type === 'charts' ? null : { type: 'charts' }));
+  }, [canEdit]);
+
+  const handleCloseChartsPanel = useCallback(() => {
+    setOperationsPanelState(prev => (prev?.type === 'charts' ? null : prev));
+  }, []);
+
   const handleOpenImagesPanel = useCallback(() => {
     if (!canEdit) {
       return;
@@ -1607,20 +1629,44 @@ const ExhibitionMode = () => {
       );
     }
 
+    if (operationsPanelState.type === 'charts') {
+      return (
+        <ChartPanel
+          onClose={handleCloseChartsPanel}
+          onInsert={result => {
+            setChartPanelData(result.data);
+            setChartPanelConfig(result.config);
+            handleCreateChart(result);
+            setOperationsPanelState(null);
+          }}
+          initialData={chartPanelData}
+          initialConfig={chartPanelConfig}
+          onStateChange={({ data, config }) => {
+            setChartPanelData(data);
+            setChartPanelConfig(config);
+          }}
+        />
+      );
+    }
+
     return operationsPanelState.node;
   }, [
     canEdit,
     currentSlide,
     handleCloseNotesPanel,
     handleCloseShapesPanel,
+    handleCloseChartsPanel,
     handleCloseImagesPanel,
     handleImagePanelSelect,
     handleNotesChange,
     handleShapeSelect,
     handleRemoveAccentImage,
+    handleCreateChart,
     currentPresentationSettings.accentImage,
     currentPresentationSettings.accentImageName,
     notes,
+    chartPanelData,
+    chartPanelConfig,
     operationsPanelState,
   ]);
   const emptyCanvas = (
@@ -1839,7 +1885,7 @@ const ExhibitionMode = () => {
             onCreateTable={handleCreateTable}
             onOpenShapesPanel={handleOpenShapesPanel}
             onOpenImagesPanel={handleOpenImagesPanel}
-            onCreateChart={handleCreateChart}
+            onOpenChartPanel={handleOpenChartsPanel}
             canEdit={canEdit}
             positionPanel={operationsPalettePanel}
           />
