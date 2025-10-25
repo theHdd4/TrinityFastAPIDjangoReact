@@ -88,7 +88,10 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
   }, [chartData, config, onStateChange]);
 
   const handleInsert = () => {
-    onInsert({ data: chartData, config });
+    onInsert({
+      data: chartData.map(entry => ({ ...entry })),
+      config: { ...config, type: normalizeChartType(config.type) },
+    });
   };
 
   const syncEditorState = (rows: ChartDataRow[], nextConfig: ChartConfig) => {
