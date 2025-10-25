@@ -91,12 +91,20 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     onInsert({ data: chartData, config });
   };
 
-  const handleDataEditorSave = (rows: ChartDataRow[], nextConfig: ChartConfig) => {
+  const syncEditorState = (rows: ChartDataRow[], nextConfig: ChartConfig) => {
     setChartData(rows.map(entry => ({ ...entry })));
     setConfig({
       ...nextConfig,
       type: normalizeChartType(nextConfig.type),
     });
+  };
+
+  const handleDataEditorSave = (rows: ChartDataRow[], nextConfig: ChartConfig) => {
+    syncEditorState(rows, nextConfig);
+  };
+
+  const handleDataEditorApply = (rows: ChartDataRow[], nextConfig: ChartConfig) => {
+    syncEditorState(rows, nextConfig);
   };
 
   const renderPreview = () => {
@@ -489,6 +497,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
         open={showDataEditor}
         onClose={() => setShowDataEditor(false)}
         onSave={handleDataEditorSave}
+        onApply={handleDataEditorApply}
         initialData={chartData}
         initialConfig={config}
       />
