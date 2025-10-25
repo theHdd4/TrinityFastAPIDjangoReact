@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Upload, Image as ImageIcon, Check, Trash2, Loader2 } from 'lucide-react';
+import { Check, Image as ImageIcon, Loader2, Trash2, Upload, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -16,18 +16,17 @@ export interface ImageSelectionMetadata {
 }
 
 interface StoredImage {
-  objectName: string;
-  filename: string;
+  id: string;
   url: string;
+  label: string;
   uploadedAt?: string | null;
 }
 
 interface SelectedImage {
   url: string;
+  label?: string | null;
   title?: string | null;
-  name?: string | null;
   source: ImagePanelSource;
-  objectName?: string | null;
 }
 
 export interface ImagePanelProps {
@@ -38,6 +37,8 @@ export interface ImagePanelProps {
   onRemoveImage?: () => void;
   canEdit?: boolean;
 }
+
+const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png'];
 
 export const stockImages: ReadonlyArray<{ url: string; title: string }> = [
   {
@@ -74,8 +75,51 @@ export const stockImages: ReadonlyArray<{ url: string; title: string }> = [
   },
 ];
 
-const SELECTED_RING_CLASSES = 'border-primary ring-2 ring-primary/20';
-const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png'];
+const SELECTED_CLASSES = 'border-primary ring-2 ring-primary/20';
+
+const normaliseStoredImage = (image: any): StoredImage | null => {
+  const objectName: string | undefined = image?.object_name ?? image?.objectName;
+  const url: string | undefined = image?.url;
+
+  if (!objectName || !url) {
+    return null;
+  }
+
+  const label: string =
+    image?.filename ?? image?.name ?? objectName.split('/').pop() ?? 'Uploaded image';
+  const uploadedAt: string | null = image?.uploaded_at ?? image?.uploadedAt ?? null;
+
+  return {
+    id: objectName,
+    url,
+    label,
+    uploadedAt,
+  };
+};
+
+const buildUploadsPath = (context: ProjectContext | null): string | null => {
+  if (!context) {
+    return null;
+  }
+  const { client_name, app_name, project_name } = context;
+  if (!client_name || !app_name || !project_name) {
+    return null;
+  }
+
+  return `${client_name}/${app_name}/${project_name}/Images`;
+};
+
+const resolveSelectionTitle = (selection: SelectedImage): string => {
+  if (selection.title) {
+    return selection.title;
+  }
+
+  if (selection.label) {
+    return selection.label;
+  }
+
+  return selection.source === 'upload' ? 'Uploaded image' : 'Selected image';
+};
 
 const ImagePanel: React.FC<ImagePanelProps> = ({
   currentImage,
@@ -98,6 +142,18 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
     setProjectContext(getActiveProjectContext());
   }, []);
 
+  useEffect(() => {
+    if (currentImage) {
+      setSelectedImage({
+        url: currentImage,
+        title: currentImageName ?? 'Current image',
+        source: 'existing',
+      });
+    } else {
+      setSelectedImage(prev => (prev?.source === 'existing' ? null : prev));
+    }
+  }, [currentImage, currentImageName]);
+
   const fetchStoredImages = useCallback(async () => {
     if (!projectContext) {
       setStoredImages([]);
@@ -117,29 +173,15 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
       });
 
       if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
+        throw new Error(`Failed to load images (${response.status})`);
       }
 
       const payload = await response.json();
-      const rawImages = Array.isArray(payload.images) ? payload.images : [];
-
-      const mapped: StoredImage[] = rawImages
-        .map((image: any) => {
-          const objectName: string = image?.object_name ?? image?.objectName ?? '';
-          const url: string = image?.url ?? '';
-          if (!objectName || !url) {
-            return null;
-          }
-          const filename: string = image?.filename ?? image?.name ?? objectName.split('/').pop() ?? 'Uploaded image';
-          const uploadedAt: string | null = image?.uploaded_at ?? image?.uploadedAt ?? null;
-          return {
-            objectName,
-            filename,
-            url,
-            uploadedAt,
-          };
-        })
-        .filter((value): value is StoredImage => Boolean(value));
+      const mapped = Array.isArray(payload?.images)
+        ? (payload.images as any[])
+            .map(normaliseStoredImage)
+            .filter((value): value is StoredImage => Boolean(value))
+        : [];
 
       mapped.sort((a, b) => {
         const aTime = a.uploadedAt ? Date.parse(a.uploadedAt) : 0;
@@ -149,7 +191,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
 
       setStoredImages(mapped);
     } catch (error) {
-      console.error('Failed to load exhibition images', error);
+      console.error('Unable to fetch stored images', error);
       toast({
         title: 'Unable to load images',
         description: 'We could not retrieve uploaded images for this project.',
@@ -164,30 +206,16 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
     void fetchStoredImages();
   }, [fetchStoredImages]);
 
-  useEffect(() => {
-    setSelectedImage(prev => {
-      if (prev && prev.source !== 'existing') {
-        return prev;
+  const handleImageClick = useCallback(
+    (image: SelectedImage) => {
+      if (!canEdit) {
+        return;
       }
 
-      if (currentImage) {
-        if (prev?.url === currentImage) {
-          return { ...prev, title: currentImageName ?? prev.title ?? 'Current image' };
-        }
-        return {
-          url: currentImage,
-          title: currentImageName ?? 'Current image',
-          source: 'existing',
-        };
-      }
-
-      if (prev?.source === 'existing') {
-        return null;
-      }
-
-      return prev;
-    });
-  }, [currentImage, currentImageName]);
+      setSelectedImage(image);
+    },
+    [canEdit],
+  );
 
   const handleFileUpload = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -204,117 +232,102 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
 
       if (!projectContext) {
         toast({
-          title: 'Project details unavailable',
-          description: 'Select a client, app, and project before uploading images.',
+          title: 'Project details missing',
+          description: 'Please select a client, app, and project before uploading images.',
           variant: 'destructive',
         });
         return;
       }
 
-      let uploadedAny = false;
-      setIsUploading(true);
-
-      const allFiles = Array.from(files);
       const validFiles: File[] = [];
-      const rejectedFiles: string[] = [];
+      const rejected: string[] = [];
 
-      for (const file of allFiles) {
+      for (const file of Array.from(files)) {
         const extension = `.${file.name.split('.').pop()?.toLowerCase() ?? ''}`;
         if (!ALLOWED_EXTENSIONS.includes(extension)) {
-          rejectedFiles.push(file.name);
+          rejected.push(file.name);
           continue;
         }
         validFiles.push(file);
       }
 
-      if (rejectedFiles.length > 0) {
+      if (rejected.length > 0) {
         toast({
-          title: rejectedFiles.length === 1 ? `${rejectedFiles[0]} was not uploaded` : 'Some files were skipped',
-          description:
-            'Only .jpg, .jpeg, or .png files can be uploaded from the selected folder.',
+          title:
+            rejected.length === 1
+              ? `${rejected[0]} was not uploaded`
+              : 'Some files were not uploaded',
+          description: 'Only .jpg, .jpeg, or .png files are supported.',
           variant: 'destructive',
         });
       }
 
       if (validFiles.length === 0) {
-        setIsUploading(false);
         return;
       }
 
+      setIsUploading(true);
+
       try {
-        for (const file of validFiles) {
-          const formData = new FormData();
-          formData.append('file', file);
-          formData.append('client_name', projectContext.client_name);
-          formData.append('app_name', projectContext.app_name);
-          formData.append('project_name', projectContext.project_name);
+        const uploads = await Promise.all(
+          validFiles.map(async file => {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('client_name', projectContext.client_name);
+            formData.append('app_name', projectContext.app_name);
+            formData.append('project_name', projectContext.project_name);
 
-          const response = await fetch(`${IMAGES_API}/upload`, {
-            method: 'POST',
-            body: formData,
-            credentials: 'include',
-          });
-
-          if (!response.ok) {
-            const message = await response.text().catch(() => '');
-            console.error('Image upload failed', response.status, message);
-            toast({
-              title: `Could not upload ${file.name}`,
-              description: 'Please try again in a moment.',
-              variant: 'destructive',
+            const response = await fetch(`${IMAGES_API}/upload`, {
+              method: 'POST',
+              body: formData,
+              credentials: 'include',
             });
-            continue;
-          }
 
-          const payload = await response.json();
-          const uploaded = payload?.image;
-          const objectName: string = uploaded?.object_name ?? uploaded?.objectName ?? '';
-          const url: string = uploaded?.url ?? '';
-          if (!objectName || !url) {
-            continue;
-          }
-          const filename: string = uploaded?.filename ?? file.name;
-          const uploadedAt: string | null = uploaded?.uploaded_at ?? uploaded?.uploadedAt ?? null;
+            if (!response.ok) {
+              const message = await response.text().catch(() => '');
+              throw new Error(message || `Upload failed with status ${response.status}`);
+            }
 
-          uploadedAny = true;
+            const payload = await response.json();
+            const image = normaliseStoredImage(payload?.image);
+            if (!image) {
+              throw new Error('Upload succeeded but no image metadata was returned.');
+            }
+
+            return image;
+          }),
+        );
+
+        if (uploads.length > 0) {
           setStoredImages(prev => {
-            const filtered = prev.filter(image => image.objectName !== objectName);
-            const next: StoredImage = {
-              objectName,
-              filename,
-              url,
-              uploadedAt,
-            };
-            return [next, ...filtered];
+            const existing = new Map(prev.map(image => [image.id, image] as const));
+            for (const image of uploads) {
+              existing.set(image.id, image);
+            }
+            return Array.from(existing.values()).sort((a, b) => {
+              const aTime = a.uploadedAt ? Date.parse(a.uploadedAt) : 0;
+              const bTime = b.uploadedAt ? Date.parse(b.uploadedAt) : 0;
+              return bTime - aTime;
+            });
           });
-          setSelectedImage({ url, name: filename, source: 'upload', objectName });
+
+          const first = uploads[0];
+          setSelectedImage({ url: first.url, label: first.label, source: 'upload' });
+          toast({ title: 'Images uploaded', description: 'Your images are ready to use.' });
         }
       } catch (error) {
-        console.error('Failed to upload image', error);
+        console.error('Image upload failed', error);
         toast({
           title: 'Upload failed',
-          description: 'We were unable to upload the selected images.',
+          description: 'We were unable to upload one or more images. Please try again.',
           variant: 'destructive',
         });
       } finally {
         setIsUploading(false);
-      }
-
-      if (uploadedAny) {
         await fetchStoredImages();
       }
     },
     [canEdit, projectContext, toast, fetchStoredImages],
-  );
-
-  const handleImageClick = useCallback(
-    (image: SelectedImage) => {
-      if (!canEdit) {
-        return;
-      }
-      setSelectedImage(image);
-    },
-    [canEdit],
   );
 
   const handleInsertImage = useCallback(() => {
@@ -327,17 +340,12 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
       return;
     }
 
-    const title =
-      selectedImage.title ??
-      selectedImage.name ??
-      (selectedImage.source === 'upload' ? 'Uploaded image' : 'Selected image');
-
     onImageSelect(selectedImage.url, {
-      title,
+      title: resolveSelectionTitle(selectedImage),
       source: selectedImage.source,
     });
     onClose();
-  }, [canEdit, currentImage, onClose, onImageSelect, selectedImage, isUploading]);
+  }, [canEdit, currentImage, isUploading, onClose, onImageSelect, selectedImage]);
 
   const handleRemove = useCallback(() => {
     if (!canEdit || isUploading) {
@@ -347,22 +355,11 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
     setSelectedImage(null);
   }, [canEdit, isUploading, onRemoveImage]);
 
-  const isInsertDisabled = useMemo(() => {
-    if (!selectedImage || !canEdit || isUploading) {
-      return true;
-    }
-    if (selectedImage.source === 'existing' && selectedImage.url === currentImage) {
-      return true;
-    }
-    return false;
-  }, [canEdit, currentImage, isUploading, selectedImage]);
+  const uploadsPath = useMemo(() => buildUploadsPath(projectContext), [projectContext]);
 
-  const uploadsPath = useMemo(() => {
-    if (!projectContext) {
-      return null;
-    }
-    return `${projectContext.client_name || '—'}/${projectContext.app_name || '—'}/${projectContext.project_name || '—'}/Images`;
-  }, [projectContext]);
+  const insertDisabled =
+    !selectedImage || !canEdit || isUploading ||
+    (selectedImage.source === 'existing' && selectedImage.url === currentImage);
 
   return (
     <div className="flex h-full w-full max-w-[22rem] flex-col rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
@@ -389,7 +386,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
               <div className="space-y-2">
                 <p className="text-sm font-medium text-foreground">Upload images</p>
                 <p className="text-xs text-muted-foreground">
-                  Add your own visuals to customise this slide&apos;s accent image. JPEG and PNG files are supported.
+                  Add JPEG or PNG images to use them as slide accents.
                 </p>
                 {uploadsPath ? (
                   <p className="text-[11px] text-muted-foreground">
@@ -397,7 +394,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                   </p>
                 ) : (
                   <p className="text-[11px] text-muted-foreground">
-                    Project information is required before images can be uploaded.
+                    Select a project to enable uploads.
                   </p>
                 )}
               </div>
@@ -414,8 +411,8 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                 <Button
                   variant="outline"
                   className="flex h-20 w-full items-center justify-center"
-                  onClick={() => fileInputRef.current?.click()}
                   type="button"
+                  onClick={() => fileInputRef.current?.click()}
                   disabled={!canEdit || !projectContext || isUploading}
                 >
                   {isUploading ? (
@@ -426,7 +423,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                   ) : (
                     <>
                       <Upload className="mr-2 h-5 w-5" />
-                      Select folder images
+                      Upload your images
                     </>
                   )}
                 </Button>
@@ -438,6 +435,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                 <p className="text-sm font-medium text-foreground">Your uploads</p>
                 {isLoadingImages && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
               </div>
+
               {projectContext ? (
                 isLoadingImages ? (
                   <div className="flex h-32 items-center justify-center rounded-lg border border-dashed border-border/70 text-xs text-muted-foreground">
@@ -450,28 +448,27 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                         const isSelected = selectedImage?.url === image.url;
                         return (
                           <button
-                            key={image.objectName}
+                            key={image.id}
                             type="button"
                             onClick={() =>
                               handleImageClick({
                                 url: image.url,
-                                name: image.filename,
+                                label: image.label,
                                 source: 'upload',
-                                objectName: image.objectName,
                               })
                             }
                             className={cn(
                               'group relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all',
                               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
                               canEdit && 'hover:scale-[1.02] hover:border-primary/40',
-                              isSelected ? SELECTED_RING_CLASSES : 'border-border/60',
+                              isSelected ? SELECTED_CLASSES : 'border-border/60',
                               !canEdit && 'cursor-not-allowed opacity-50',
                             )}
                             disabled={!canEdit}
                           >
-                            <img src={image.url} alt={image.filename} className="h-full w-full object-cover" />
+                            <img src={image.url} alt={image.label} className="h-full w-full object-cover" />
                             <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                              <p className="truncate text-[11px] font-medium text-white">{image.filename}</p>
+                              <p className="truncate text-[11px] font-medium text-white">{image.label}</p>
                             </div>
                             {isSelected && (
                               <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
@@ -487,12 +484,12 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                   </div>
                 ) : (
                   <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
-                    Upload images to populate this gallery.
+                    Upload images to see them here.
                   </div>
                 )
               ) : (
                 <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
-                  Connect to a project to view previously uploaded images.
+                  Connect to a project to view uploaded images.
                 </div>
               )}
             </section>
@@ -501,7 +498,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
               <div className="space-y-1">
                 <p className="text-sm font-medium text-foreground">Stock images</p>
                 <p className="text-xs text-muted-foreground">
-                  Choose from curated royalty-free visuals to enhance your narrative.
+                  Choose from curated royalty-free visuals.
                 </p>
               </div>
               <div className="max-h-64 overflow-y-auto pr-1">
@@ -517,7 +514,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                           'group relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
                           canEdit && 'hover:scale-[1.02] hover:border-primary/40',
-                          isSelected ? SELECTED_RING_CLASSES : 'border-border/60',
+                          isSelected ? SELECTED_CLASSES : 'border-border/60',
                           !canEdit && 'cursor-not-allowed opacity-50',
                         )}
                         disabled={!canEdit}
@@ -562,7 +559,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
               <Button variant="outline" type="button" onClick={onClose} className="h-9 px-4 text-xs">
                 Cancel
               </Button>
-              <Button type="button" onClick={handleInsertImage} disabled={isInsertDisabled} className="h-9 px-4 text-xs">
+              <Button type="button" onClick={handleInsertImage} disabled={insertDisabled} className="h-9 px-4 text-xs">
                 Insert image
               </Button>
             </div>
@@ -574,3 +571,4 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
 };
 
 export default ImagePanel;
+
