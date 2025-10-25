@@ -121,6 +121,39 @@ const resolveSelectionTitle = (selection: SelectedImage): string => {
   return selection.source === 'upload' ? 'Uploaded image' : 'Selected image';
 };
 
+const sortStoredImages = (images: StoredImage[]): StoredImage[] => {
+  return [...images].sort((a, b) => {
+    const aTime = a.uploadedAt ? Date.parse(a.uploadedAt) : 0;
+    const bTime = b.uploadedAt ? Date.parse(b.uploadedAt) : 0;
+    return bTime - aTime;
+  });
+};
+
+const generateLocalImageId = () => {
+  if (typeof crypto !== 'undefined' && typeof (crypto as Crypto).randomUUID === 'function') {
+    return (crypto as Crypto).randomUUID();
+  }
+
+  return `local-image-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+};
+
+const readFileAsDataUrl = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error('Invalid file contents.'));
+    };
+    reader.onerror = () => {
+      reject(reader.error ?? new Error('Unable to read file.'));
+    };
+    reader.readAsDataURL(file);
+  });
+};
+
 const ImagePanel: React.FC<ImagePanelProps> = ({
   currentImage,
   currentImageName,
@@ -178,16 +211,12 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
 
       const payload = await response.json();
       const mapped = Array.isArray(payload?.images)
-        ? (payload.images as any[])
-            .map(normaliseStoredImage)
-            .filter((value): value is StoredImage => Boolean(value))
+        ? sortStoredImages(
+            (payload.images as any[])
+              .map(normaliseStoredImage)
+              .filter((value): value is StoredImage => Boolean(value)),
+          )
         : [];
-
-      mapped.sort((a, b) => {
-        const aTime = a.uploadedAt ? Date.parse(a.uploadedAt) : 0;
-        const bTime = b.uploadedAt ? Date.parse(b.uploadedAt) : 0;
-        return bTime - aTime;
-      });
 
       setStoredImages(mapped);
     } catch (error) {
@@ -230,15 +259,6 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
         return;
       }
 
-      if (!projectContext) {
-        toast({
-          title: 'Project details missing',
-          description: 'Please select a client, app, and project before uploading images.',
-          variant: 'destructive',
-        });
-        return;
-      }
-
       const validFiles: File[] = [];
       const rejected: string[] = [];
 
@@ -268,63 +288,138 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
 
       setIsUploading(true);
 
+      let hasRemoteSuccess = false;
+
       try {
-        const uploads = await Promise.all(
-          validFiles.map(async file => {
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('client_name', projectContext.client_name);
-            formData.append('app_name', projectContext.app_name);
-            formData.append('project_name', projectContext.project_name);
+        const placeholders: Array<{ file: File; placeholder: StoredImage }> = [];
+        const failedReads: string[] = [];
 
-            const response = await fetch(`${IMAGES_API}/upload`, {
-              method: 'POST',
-              body: formData,
-              credentials: 'include',
+        for (const file of validFiles) {
+          try {
+            const url = await readFileAsDataUrl(file);
+            placeholders.push({
+              file,
+              placeholder: {
+                id: generateLocalImageId(),
+                url,
+                label: file.name,
+                uploadedAt: new Date().toISOString(),
+              },
             });
+          } catch (error) {
+            console.error('Unable to read image file', error);
+            failedReads.push(file.name);
+          }
+        }
 
-            if (!response.ok) {
-              const message = await response.text().catch(() => '');
-              throw new Error(message || `Upload failed with status ${response.status}`);
+        if (failedReads.length > 0) {
+          toast({
+            title:
+              failedReads.length === 1
+                ? `${failedReads[0]} could not be processed`
+                : 'Some images could not be processed',
+            description: 'Please try selecting the files again or choose different images.',
+            variant: 'destructive',
+          });
+        }
+
+        if (placeholders.length > 0) {
+          setStoredImages(prev => {
+            const existing = new Map(prev.map(image => [image.id, image] as const));
+            for (const entry of placeholders) {
+              existing.set(entry.placeholder.id, entry.placeholder);
             }
+            return sortStoredImages(Array.from(existing.values()));
+          });
 
-            const payload = await response.json();
-            const image = normaliseStoredImage(payload?.image);
-            if (!image) {
-              throw new Error('Upload succeeded but no image metadata was returned.');
+          const firstPlaceholder = placeholders[0].placeholder;
+          setSelectedImage({ url: firstPlaceholder.url, label: firstPlaceholder.label, source: 'upload' });
+        }
+
+        if (!projectContext) {
+          if (placeholders.length > 0) {
+            toast({
+              title: placeholders.length > 1 ? 'Images ready' : 'Image ready',
+              description: 'The images have been added and can now be placed on the slide.',
+            });
+          }
+          return;
+        }
+
+        if (placeholders.length === 0) {
+          return;
+        }
+
+        const uploads = await Promise.all(
+          placeholders.map(async ({ file }) => {
+            try {
+              const formData = new FormData();
+              formData.append('file', file);
+              formData.append('client_name', projectContext.client_name);
+              formData.append('app_name', projectContext.app_name);
+              formData.append('project_name', projectContext.project_name);
+
+              const response = await fetch(`${IMAGES_API}/upload`, {
+                method: 'POST',
+                body: formData,
+                credentials: 'include',
+              });
+
+              if (!response.ok) {
+                const message = await response.text().catch(() => '');
+                throw new Error(message || `Upload failed with status ${response.status}`);
+              }
+
+              const payload = await response.json();
+              const image = normaliseStoredImage(payload?.image);
+              return image ?? null;
+            } catch (error) {
+              console.error('Image upload failed', error);
+              return null;
             }
-
-            return image;
           }),
         );
 
-        if (uploads.length > 0) {
+        const successful = uploads.filter((image): image is StoredImage => Boolean(image));
+
+        if (successful.length > 0) {
           setStoredImages(prev => {
             const existing = new Map(prev.map(image => [image.id, image] as const));
-            for (const image of uploads) {
+            for (const entry of placeholders) {
+              existing.delete(entry.placeholder.id);
+            }
+            for (const image of successful) {
               existing.set(image.id, image);
             }
-            return Array.from(existing.values()).sort((a, b) => {
-              const aTime = a.uploadedAt ? Date.parse(a.uploadedAt) : 0;
-              const bTime = b.uploadedAt ? Date.parse(b.uploadedAt) : 0;
-              return bTime - aTime;
-            });
+            return sortStoredImages(Array.from(existing.values()));
           });
 
-          const first = uploads[0];
+          const first = successful[0];
           setSelectedImage({ url: first.url, label: first.label, source: 'upload' });
-          toast({ title: 'Images uploaded', description: 'Your images are ready to use.' });
+          toast({
+            title: successful.length > 1 ? 'Images uploaded' : 'Image uploaded',
+            description: 'Your images are ready to use.',
+          });
+          hasRemoteSuccess = true;
+        } else if (placeholders.length > 0) {
+          toast({
+            title: placeholders.length > 1 ? 'Images ready locally' : 'Image ready locally',
+            description: 'Uploads to storage failed, but you can still place these images on the slide.',
+            variant: 'destructive',
+          });
         }
       } catch (error) {
         console.error('Image upload failed', error);
         toast({
           title: 'Upload failed',
-          description: 'We were unable to upload one or more images. Please try again.',
+          description: 'We were unable to process one or more images. Please try again.',
           variant: 'destructive',
         });
       } finally {
         setIsUploading(false);
-        await fetchStoredImages();
+        if (projectContext && hasRemoteSuccess) {
+          await fetchStoredImages();
+        }
       }
     },
     [canEdit, projectContext, toast, fetchStoredImages],
@@ -386,7 +481,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
               <div className="space-y-2">
                 <p className="text-sm font-medium text-foreground">Upload images</p>
                 <p className="text-xs text-muted-foreground">
-                  Add JPEG or PNG images to use them as slide accents.
+                  Add JPEG or PNG images to place them anywhere on the slide.
                 </p>
                 {uploadsPath ? (
                   <p className="text-[11px] text-muted-foreground">
@@ -394,7 +489,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                   </p>
                 ) : (
                   <p className="text-[11px] text-muted-foreground">
-                    Select a project to enable uploads.
+                    Connect to a project to sync uploads to shared storage.
                   </p>
                 )}
               </div>
@@ -413,7 +508,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                   className="flex h-20 w-full items-center justify-center"
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={!canEdit || !projectContext || isUploading}
+                  disabled={!canEdit || isUploading}
                 >
                   {isUploading ? (
                     <>
@@ -436,60 +531,54 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                 {isLoadingImages && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
               </div>
 
-              {projectContext ? (
-                isLoadingImages ? (
-                  <div className="flex h-32 items-center justify-center rounded-lg border border-dashed border-border/70 text-xs text-muted-foreground">
-                    Loading images…
-                  </div>
-                ) : storedImages.length > 0 ? (
-                  <div className="max-h-48 overflow-y-auto pr-1">
-                    <div className="grid grid-cols-2 gap-3">
-                      {storedImages.map(image => {
-                        const isSelected = selectedImage?.url === image.url;
-                        return (
-                          <button
-                            key={image.id}
-                            type="button"
-                            onClick={() =>
-                              handleImageClick({
-                                url: image.url,
-                                label: image.label,
-                                source: 'upload',
-                              })
-                            }
-                            className={cn(
-                              'group relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all',
-                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                              canEdit && 'hover:scale-[1.02] hover:border-primary/40',
-                              isSelected ? SELECTED_CLASSES : 'border-border/60',
-                              !canEdit && 'cursor-not-allowed opacity-50',
-                            )}
-                            disabled={!canEdit}
-                          >
-                            <img src={image.url} alt={image.label} className="h-full w-full object-cover" />
-                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                              <p className="truncate text-[11px] font-medium text-white">{image.label}</p>
-                            </div>
-                            {isSelected && (
-                              <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
-                                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
-                                  <Check className="h-4 w-4 text-primary-foreground" />
-                                </div>
+              {isLoadingImages ? (
+                <div className="flex h-32 items-center justify-center rounded-lg border border-dashed border-border/70 text-xs text-muted-foreground">
+                  Loading images…
+                </div>
+              ) : storedImages.length > 0 ? (
+                <div className="max-h-48 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-2 gap-3">
+                    {storedImages.map(image => {
+                      const isSelected = selectedImage?.url === image.url;
+                      return (
+                        <button
+                          key={image.id}
+                          type="button"
+                          onClick={() =>
+                            handleImageClick({
+                              url: image.url,
+                              label: image.label,
+                              source: 'upload',
+                            })
+                          }
+                          className={cn(
+                            'group relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                            canEdit && 'hover:scale-[1.02] hover:border-primary/40',
+                            isSelected ? SELECTED_CLASSES : 'border-border/60',
+                            !canEdit && 'cursor-not-allowed opacity-50',
+                          )}
+                          disabled={!canEdit}
+                        >
+                          <img src={image.url} alt={image.label} className="h-full w-full object-cover" />
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                            <p className="truncate text-[11px] font-medium text-white">{image.label}</p>
+                          </div>
+                          {isSelected && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
+                                <Check className="h-4 w-4 text-primary-foreground" />
                               </div>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
-                ) : (
-                  <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
-                    Upload images to see them here.
-                  </div>
-                )
+                </div>
               ) : (
                 <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
-                  Connect to a project to view uploaded images.
+                  Upload images to see them here. {projectContext ? '' : 'Connect to a project to sync them for future sessions.'}
                 </div>
               )}
             </section>

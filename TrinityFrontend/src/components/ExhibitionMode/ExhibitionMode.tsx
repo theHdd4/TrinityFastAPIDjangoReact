@@ -34,6 +34,10 @@ import { createTextBoxSlideObject } from './components/operationsPalette/textBox
 import { createTableSlideObject } from './components/operationsPalette/tables/constants';
 import { ShapesPanel, createShapeSlideObject, type ShapeDefinition } from './components/operationsPalette/shapes';
 import {
+  createImageSlideObject,
+  generateImageObjectId,
+} from './components/operationsPalette/images/constants';
+import {
   buildChartRendererPropsFromManifest,
   buildTableDataFromManifest,
   clonePlain,
@@ -1277,17 +1281,35 @@ const ExhibitionMode = () => {
         return;
       }
 
-      const merged: PresentationSettings = {
-        ...DEFAULT_PRESENTATION_SETTINGS,
-        ...targetCard.presentationSettings,
-        accentImage: imageUrl,
-        accentImageName: metadata.title ?? (metadata.source === 'upload' ? 'Uploaded image' : 'Selected image'),
-      };
+      const slideObjects = slideObjectsByCardId[targetCard.id] ?? [];
+      const nextZIndex = slideObjects.reduce((max, object) => {
+        const value = typeof object.zIndex === 'number' ? object.zIndex : 1;
+        return value > max ? value : max;
+      }, 1);
 
-      handlePresentationChange(merged, targetCard.id);
+      const imageObject = createImageSlideObject(
+        generateImageObjectId(),
+        imageUrl,
+        {
+          name: metadata.title ?? null,
+          source: metadata.source,
+        },
+        {
+          zIndex: nextZIndex + 1,
+        },
+      );
+
+      addSlideObject(targetCard.id, imageObject);
       setOperationsPanelState(prev => (prev?.type === 'images' ? null : prev));
     },
-    [canEdit, currentSlide, exhibitedCards, handlePresentationChange],
+    [
+      addSlideObject,
+      canEdit,
+      currentSlide,
+      exhibitedCards,
+      generateImageObjectId,
+      slideObjectsByCardId,
+    ],
   );
 
   const handleRemoveAccentImage = useCallback(() => {
