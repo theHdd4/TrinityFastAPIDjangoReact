@@ -172,6 +172,21 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
 
   const handleStrokeWidthSliderChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const next = clampStrokeWidth(Number(event.target.value));
+
+    if (Number.isNaN(next)) {
+      return;
+    }
+
+    if (next <= 0) {
+      handleNoOutline();
+      return;
+    }
+
+    if (stroke === 'transparent') {
+      const fallbackColor = supportsFill && fill !== 'transparent' ? fill : '#111827';
+      onStrokeChange(fallbackColor);
+    }
+
     onStrokeWidthChange(next);
   };
 
