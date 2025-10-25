@@ -497,8 +497,9 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                 </PopoverTrigger>
                 <PopoverContent
                   side={layoutPopoverSide}
-                  align="end"
+                  align="center"
                   sideOffset={12}
+                  collisionPadding={24}
                   className="z-[3000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
                 >
                   <div className="space-y-4">
@@ -560,8 +561,9 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                 </PopoverTrigger>
                 <PopoverContent
                   side={backgroundPopoverSide}
-                  align="end"
+                  align="center"
                   sideOffset={12}
+                  collisionPadding={24}
                   className="z-[3000] w-[380px] rounded-3xl border border-border/70 bg-background/95 p-4 shadow-2xl"
                 >
                   <div className="space-y-4">
