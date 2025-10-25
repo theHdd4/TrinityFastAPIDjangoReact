@@ -220,10 +220,10 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
       <PopoverContent
         side="top"
         align="center"
-        className="z-[4000] w-60 rounded-2xl border border-border/70 bg-background/95 p-3 shadow-2xl"
+        className="z-[4000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
         data-text-toolbar-root
       >
-        <div className="flex flex-col gap-3">
+        <div className="w-[360px] space-y-4 p-4">
           <ColorTray
             sections={SHAPE_FILL_SECTIONS}
             selectedId={normalizedFillId}
@@ -241,8 +241,6 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
                 onFillChange(`#${option.id.slice(6)}`);
               }
             }}
-            swatchSize="sm"
-            optionClassName="min-h-[3.25rem]"
             disabled={!supportsFill || !onFillChange}
             defaultSectionId="solids"
           />
@@ -252,7 +250,7 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
               value={fill || '#111827'}
               disabled={!supportsFill || !onFillChange}
               onChange={event => onFillChange?.(event.target.value)}
-              className="h-10 w-full cursor-pointer rounded-xl border border-border"
+              className="h-11 w-full cursor-pointer rounded-2xl border border-border"
             />
             <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Custom</span>
           </div>
@@ -287,63 +285,65 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
       <PopoverContent
         side="top"
         align="start"
-        className="z-[4000] w-72 rounded-2xl border border-border/70 bg-background/95 p-3 shadow-2xl"
+        className="z-[4000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
         data-text-toolbar-root
       >
-        <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Outline</p>
-        <div className="mt-2 flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            {OUTLINE_STYLE_OPTIONS.map(option => {
-              const isActive = option.id === 'none'
-                ? isOutlineDisabled
-                : !isOutlineDisabled && activeStrokeStyle === option.style;
+        <div className="w-[360px] space-y-4 p-4">
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Outline style</p>
+            <div className="grid grid-cols-5 gap-2">
+              {OUTLINE_STYLE_OPTIONS.map(option => {
+                const isActive = option.id === 'none'
+                  ? isOutlineDisabled
+                  : !isOutlineDisabled && activeStrokeStyle === option.style;
 
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  onMouseDown={handleToolbarMouseDown}
-                  onClick={() => handleOutlineStyleSelect(option.id)}
-                  className={cn(
-                    'flex h-9 w-9 items-center justify-center rounded-xl border border-border/60 bg-background transition-colors hover:border-primary/60 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                    isActive && 'border-primary bg-primary/10 text-primary shadow-sm',
-                  )}
-                  aria-label={option.label}
-                >
-                  {option.id === 'none' ? (
-                    <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
-                      <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.4" fill="none" />
-                      <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.4" strokeLinecap="round" />
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 32 18" className="h-5 w-6" aria-hidden>
-                      <line
-                        x1="4"
-                        y1="9"
-                        x2="28"
-                        y2="9"
-                        stroke={outlineIndicatorColor}
-                        strokeWidth={2.6}
-                        strokeLinecap="round"
-                        strokeDasharray={
-                          option.style === 'dashed'
-                            ? '8 6'
-                            : option.style === 'dash-dot'
-                            ? '10 6 3 6'
-                            : option.style === 'dotted'
-                            ? '2 6'
-                            : undefined
-                        }
-                      />
-                    </svg>
-                  )}
-                </button>
-              );
-            })}
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onMouseDown={handleToolbarMouseDown}
+                    onClick={() => handleOutlineStyleSelect(option.id)}
+                    className={cn(
+                      'flex h-11 items-center justify-center rounded-2xl border border-border/60 bg-background transition-colors hover:border-primary/60 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                      isActive && 'border-primary bg-primary/10 text-primary shadow-sm',
+                    )}
+                    aria-label={option.label}
+                  >
+                    {option.id === 'none' ? (
+                      <svg viewBox="0 0 20 20" className="h-5 w-5" aria-hidden>
+                        <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.4" fill="none" />
+                        <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.4" strokeLinecap="round" />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 32 18" className="h-5 w-6" aria-hidden>
+                        <line
+                          x1="4"
+                          y1="9"
+                          x2="28"
+                          y2="9"
+                          stroke={outlineIndicatorColor}
+                          strokeWidth={2.6}
+                          strokeLinecap="round"
+                          strokeDasharray={
+                            option.style === 'dashed'
+                              ? '8 6'
+                              : option.style === 'dash-dot'
+                              ? '10 6 3 6'
+                              : option.style === 'dotted'
+                              ? '2 6'
+                              : undefined
+                          }
+                        />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <span className="text-[11px] font-semibold text-muted-foreground">Color</span>
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Outline color</p>
             <ColorTray
               sections={OUTLINE_COLOR_SECTIONS}
               selectedId={isOutlineDisabled ? 'transparent' : normalizedOutlineId}
@@ -361,8 +361,6 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
                   handleOutlineColorSelect(`#${option.id.slice(6)}`);
                 }
               }}
-              swatchSize="sm"
-              optionClassName="min-h-[3.25rem]"
               defaultSectionId="solids"
             />
             <div className="flex items-center gap-2">
@@ -371,13 +369,13 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
                 value={stroke === 'transparent' ? '#111827' : stroke}
                 onChange={event => handleOutlineColorSelect(event.target.value)}
                 onMouseDown={handleToolbarMouseDown}
-                className="h-10 w-full cursor-pointer rounded-xl border border-border"
+                className="h-11 w-full cursor-pointer rounded-2xl border border-border"
               />
               <Button
                 variant="ghost"
                 size="sm"
                 type="button"
-                className="h-8 rounded-full px-3 text-[11px] font-medium"
+                className="h-9 rounded-full px-3 text-[11px] font-medium"
                 onMouseDown={handleToolbarMouseDown}
                 onClick={handleResetOutline}
               >
@@ -386,20 +384,26 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span className="font-semibold">Stroke weight</span>
-              <span>{displayedStrokeWidth} px</span>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <span>Outline width</span>
+              <span className="text-foreground">{displayedStrokeWidth} px</span>
             </div>
-            <input
-              type="range"
-              min={0}
-              max={60}
-              value={displayedStrokeWidth}
-              onChange={handleStrokeWidthSliderChange}
-              onMouseDown={handleToolbarMouseDown}
-              className="h-1.5 w-full cursor-pointer accent-primary"
-            />
+            <div className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-medium text-muted-foreground">0</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={60}
+                  value={displayedStrokeWidth}
+                  onChange={handleStrokeWidthSliderChange}
+                  onMouseDown={handleToolbarMouseDown}
+                  className="h-1.5 w-full cursor-pointer accent-primary"
+                />
+                <span className="text-xs font-medium text-muted-foreground">60</span>
+              </div>
+            </div>
           </div>
         </div>
       </PopoverContent>
