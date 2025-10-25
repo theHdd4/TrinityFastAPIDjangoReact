@@ -10,7 +10,6 @@ import {
   Sparkles,
   TrendingUp,
   Wand2,
-  X,
   Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -270,9 +269,6 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
               <p className="text-sm text-muted-foreground">Craft a beautiful data story for your slide.</p>
             </div>
           </div>
-          <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl" onClick={onClose}>
-            <X className="h-5 w-5" />
-          </Button>
         </div>
 
         <ScrollArea className="h-[620px]">
@@ -292,21 +288,13 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                       type="button"
                       onClick={() => handleChartTypeChange(type.id)}
                       className={cn(
-                        'group relative flex flex-col items-center gap-3 rounded-2xl border-2 p-5 transition-all duration-300',
+                        'group relative flex flex-col items-center gap-3 rounded-2xl border-2 p-5 transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
                         isSelected
-                          ? 'scale-[1.02] border-primary bg-gradient-to-br from-primary/20 to-primary/5 shadow-2xl ring-4 ring-primary/20'
+                          ? 'border-primary shadow-2xl ring-2 ring-primary/20'
                           : 'border-border/50 bg-card hover:scale-[1.03] hover:border-primary/40 hover:shadow-xl',
                       )}
                     >
-                      <div
-                        className={cn(
-                          'relative flex h-12 w-12 items-center justify-center rounded-xl transition-transform',
-                          isSelected ? 'scale-110 bg-primary/20' : 'bg-muted/40 group-hover:bg-muted/60',
-                        )}
-                      >
-                        {isSelected && <Zap className="absolute -right-2 -top-2 h-4 w-4 text-primary" />}
-                        <Icon className={cn('h-6 w-6', isSelected ? 'text-primary' : type.colorClass)} />
-                      </div>
+                      <Icon className={cn('h-6 w-6 transition-colors duration-200', isSelected ? 'text-primary' : type.colorClass)} />
                       <span className={cn('text-sm font-semibold', isSelected ? 'text-foreground' : 'text-muted-foreground')}>
                         {type.name}
                       </span>
