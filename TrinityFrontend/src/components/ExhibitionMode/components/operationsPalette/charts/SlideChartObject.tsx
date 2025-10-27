@@ -234,7 +234,7 @@ export const SlideChartObject = forwardRef<SlideChartObjectHandle, SlideChartObj
       />
     </>
   );
-};
+});
 
 SlideChartObject.displayName = 'SlideChartObject';
 
