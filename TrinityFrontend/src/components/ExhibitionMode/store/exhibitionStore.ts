@@ -18,6 +18,10 @@ import {
   isSolidToken,
   isGradientToken,
 } from '@/templates/color-tray';
+import {
+  DEFAULT_EXHIBITION_THEME,
+  type ExhibitionTheme,
+} from '../themes';
 
 export type CardColor = GradientColorId | SolidColorToken;
 export type SlideBackgroundPreset =
@@ -266,6 +270,7 @@ interface ExhibitionStore {
   catalogueEntries: ExhibitionAtomPayload[];
   lastLoadedContext: ProjectContext | null;
   slideObjectsByCardId: Record<string, SlideObject[]>;
+  activeTheme: ExhibitionTheme;
   loadSavedConfiguration: (context?: ProjectContext | null) => Promise<void>;
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => void;
   addBlankSlide: (afterSlideIndex?: number) => LayoutCard | null;
@@ -282,6 +287,7 @@ interface ExhibitionStore {
   sendSlideObjectsToBack: (cardId: string, objectIds: string[]) => void;
   sendSlideObjectsBackward: (cardId: string, objectIds: string[]) => void;
   groupSlideObjects: (cardId: string, objectIds: string[], groupId: string | null) => void;
+  applyTheme: (theme: ExhibitionTheme) => void;
   reset: () => void;
 }
 
@@ -1045,6 +1051,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   catalogueEntries: [],
   lastLoadedContext: null,
   slideObjectsByCardId: {},
+  activeTheme: DEFAULT_EXHIBITION_THEME,
 
   loadSavedConfiguration: async (explicitContext?: ProjectContext | null) => {
     let loadedCards: LayoutCard[] = [];
@@ -1560,6 +1567,64 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       };
     });
   },
+  applyTheme: (theme: ExhibitionTheme) => {
+    set(state => {
+      const previousTheme = state.activeTheme ?? DEFAULT_EXHIBITION_THEME;
+      const defaultFonts = new Set(
+        [
+          'Comic Sans',
+          previousTheme?.fonts.heading,
+          previousTheme?.fonts.body,
+        ].filter((value): value is string => Boolean(value)),
+      );
+      const defaultColors = new Set(
+        [
+          '#111827',
+          previousTheme?.colors.foreground,
+        ].filter((value): value is string => Boolean(value)),
+      );
+
+      const slideObjectsByCardId = Object.entries(state.slideObjectsByCardId).reduce(
+        (acc, [cardId, objects]) => {
+          if (!Array.isArray(objects) || objects.length === 0) {
+            acc[cardId] = objects ?? [];
+            return acc;
+          }
+
+          const titleId = buildSlideTitleObjectId(cardId);
+          acc[cardId] = objects.map(object => {
+            if (object.type !== 'text-box') {
+              return { ...object };
+            }
+
+            const props = { ...(object.props ?? {}) } as Record<string, unknown>;
+            const currentFont = typeof props.fontFamily === 'string' ? props.fontFamily : '';
+            if (!currentFont || defaultFonts.has(currentFont)) {
+              props.fontFamily = object.id === titleId ? theme.fonts.heading : theme.fonts.body;
+            }
+
+            const currentColor = typeof props.color === 'string' ? props.color : '';
+            if (!currentColor || defaultColors.has(currentColor)) {
+              props.color = theme.colors.foreground;
+            }
+
+            return {
+              ...object,
+              props,
+            };
+          });
+
+          return acc;
+        },
+        {} as Record<string, SlideObject[]>,
+      );
+
+      return {
+        activeTheme: theme,
+        slideObjectsByCardId,
+      };
+    });
+  },
   reset: () => {
     set({
       cards: [],
@@ -1568,6 +1633,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       catalogueEntries: [],
       lastLoadedContext: null,
       slideObjectsByCardId: {},
+      activeTheme: DEFAULT_EXHIBITION_THEME,
     });
   },
 }));
