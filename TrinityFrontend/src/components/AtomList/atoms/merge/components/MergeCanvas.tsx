@@ -960,7 +960,7 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
       )}
 
       {/* Current Selection (Configuration) */}
-      <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm mb-6 overflow-hidden">
+      {/* <Card className="border-0 shadow-xl bg-white/80 backdrop-blur-sm mb-6 overflow-hidden">
         <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-1">
           <div className="bg-white rounded-sm">
             <div className="p-6">
@@ -1051,7 +1051,7 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
             </div>
           </div>
         </div>
-      </Card>
+      </Card> */}
 
       {/* Merge Results */}
       {!resultFilePath && !unsavedData ? (

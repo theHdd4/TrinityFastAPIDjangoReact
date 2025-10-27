@@ -190,6 +190,7 @@ class ChartTrace(BaseModel):
     aggregation: Optional[Literal["sum", "mean", "count", "min", "max"]] = "sum"
     filters: Optional[dict] = None  # Trace-specific filters
     color: Optional[str] = None  # Trace-specific color
+    legend_field: Optional[str] = None  # Field to segregate values by (like channel, region, etc.)
 
 class ChartRequest(BaseModel):
     file_id: str

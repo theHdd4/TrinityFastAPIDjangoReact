@@ -12,8 +12,10 @@ minio
 redis
 pymongo
 python-dotenv
-langchain
-langchain-community
+# langchain
+# langchain-community
+langchain>=0.0.300,<1.0.0
+langchain-community>=0.0.20
 ollama
 jsonschema
 polars>=0.20.0

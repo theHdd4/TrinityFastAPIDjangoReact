@@ -487,6 +487,8 @@ export interface ChartMakerConfig {
   xAxis: string;
   yAxis: string;
   filters: Record<string, string[]>;
+  aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
+  legendField?: string;
   chartConfig?: any;
   filteredData?: Record<string, any>[];
   chartRendered?: boolean;
@@ -494,6 +496,37 @@ export interface ChartMakerConfig {
   lastUpdateTime?: number;
   isAdvancedMode?: boolean;
   traces?: ChartTraceConfig[];
+}
+
+// ChartMaker Exhibition Types
+export type ChartMakerExhibitionComponentType = 'chart';
+
+export interface ChartMakerExhibitionSelectionChartState {
+  chartType: string;
+  xAxis: string;
+  yAxis: string;
+  filters: Record<string, string[]>;
+  aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
+  legendField?: string;
+  isAdvancedMode?: boolean;
+  traces?: ChartTraceConfig[];
+}
+
+export interface ChartMakerExhibitionSelectionContext {
+  dataSource?: string;
+  uploadedData?: ChartData | null;
+  chartConfig?: any; // Include chartConfig to preserve processed data
+}
+
+export interface ChartMakerExhibitionSelection {
+  key: string;
+  chartId: string;
+  chartTitle: string;
+  componentType?: ChartMakerExhibitionComponentType;
+  chartState?: ChartMakerExhibitionSelectionChartState;
+  chartContext?: ChartMakerExhibitionSelectionContext;
+  capturedAt?: string;
+  manifestId?: string;
 }
 
 export interface ChartMakerSettings {
@@ -509,6 +542,7 @@ export interface ChartMakerSettings {
     filtering: boolean;
   };
   error?: string;
+  exhibitionSelections?: ChartMakerExhibitionSelection[];
 }
 
 export interface SelectModelsFeatureSettings {
@@ -533,6 +567,44 @@ export interface SelectModelsFeatureSettings {
   aggregationLevel: string;
   combinationStatus?: any;
   combinationStatusMinimized?: boolean;
+}
+
+// EvaluateModelsFeature Exhibition Types
+export type EvaluateModelsFeatureExhibitionComponentType = 'graph';
+
+export interface EvaluateModelsFeatureExhibitionSelectionGraphState {
+  graphType: string;
+  graphName: string;
+  graphId: string;
+  selected: boolean;
+  combinationName?: string; // Add combination name for individual graph tracking
+  chartTypePreference?: string; // Store chart type preference (bar_chart, line_chart, etc.)
+}
+
+export interface EvaluateModelsFeatureExhibitionSelectionContext {
+  selectedDataframe?: string;
+  scope?: string;
+  selectedCombinations?: string[];
+  identifiers?: Array<{
+    id: string;
+    name: string;
+    selected: boolean;
+  }>;
+  modelResults?: any[];
+  identifiersData?: {[key: string]: {column_name: string | null, unique_values: string[]}};
+  selectedIdentifierValues?: {[key: string]: string[]};
+  chartData?: Array<{name: string; value: number}>;
+}
+
+export interface EvaluateModelsFeatureExhibitionSelection {
+  key: string;
+  graphId: string;
+  graphTitle: string;
+  componentType?: EvaluateModelsFeatureExhibitionComponentType;
+  graphState?: EvaluateModelsFeatureExhibitionSelectionGraphState;
+  graphContext?: EvaluateModelsFeatureExhibitionSelectionContext;
+  capturedAt?: string;
+  manifestId?: string;
 }
 
 export interface EvaluateModelsFeatureSettings {
@@ -566,6 +638,7 @@ export interface EvaluateModelsFeatureSettings {
     chartHeight: number;
     autoRefresh: boolean;
   };
+  exhibitionSelections?: EvaluateModelsFeatureExhibitionSelection[];
 }
 
 export const DEFAULT_EVALUATE_MODELS_FEATURE_SETTINGS: EvaluateModelsFeatureSettings = {
@@ -596,7 +669,8 @@ export const DEFAULT_EVALUATE_MODELS_FEATURE_SETTINGS: EvaluateModelsFeatureSett
     showLegend: true,
     chartHeight: 300,
     autoRefresh: false
-  }
+  },
+  exhibitionSelections: [],
 };
 
 export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
@@ -612,6 +686,8 @@ export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
       xAxis: '',
       yAxis: '',
       filters: {},
+      aggregation: 'sum',
+      legendField: 'aggregate',
       chartRendered: false,
       chartLoading: false,
       isAdvancedMode: false,
@@ -625,6 +701,7 @@ export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
     filtering: false,
   },
   error: undefined,
+  exhibitionSelections: [],
 };
 
 export interface ClusteringData {
@@ -1457,6 +1534,80 @@ export interface LayoutCard {
   moleculeId?: string;
   moleculeTitle?: string;
 }
+
+// GroupBy Atom Settings
+export interface GroupByAtomSettings {
+  // Data source and validation
+  dataSource?: string;
+  validator_atom_id?: string;
+  allColumns?: Array<{ column: string; data_type: string; unique_count?: number }>;
+  
+  // Identifiers and measures
+  identifiers?: string[];
+  measures?: string[];
+  selectedIdentifiers?: string[];
+  selectedMeasures?: Array<{ field: string; aggregator: string; weight_by?: string; rename_to?: string }>;
+  selectedMeasureNames?: string[];
+  selectedAggregationMethods?: string[];
+  
+  // Draggable lists for settings tab
+  identifierList?: string[];
+  measureList?: string[];
+  
+  // Configuration panel state
+  configCollapsed?: boolean;
+  
+  // Pagination state
+  currentPage?: number;
+  
+  // Results filtering and sorting
+  resultsSortColumn?: string;
+  resultsSortDirection?: 'asc' | 'desc';
+  resultsColumnFilters?: Record<string, string[]>;
+  
+  // Cardinality view filtering and sorting
+  sortColumn?: string;
+  sortDirection?: 'asc' | 'desc';
+  columnFilters?: Record<string, string[]>;
+  
+  // GroupBy results
+  groupbyResults?: {
+    result_file?: string;
+    result_shape?: [number, number];
+    row_count?: number;
+    columns?: string[];
+    unsaved_data?: Record<string, any>[];
+  };
+}
+
+export const DEFAULT_GROUPBY_ATOM_SETTINGS: GroupByAtomSettings = {
+  dataSource: '',
+  validator_atom_id: '',
+  allColumns: [],
+  identifiers: [],
+  measures: [],
+  selectedIdentifiers: [],
+  selectedMeasures: [],
+  selectedMeasureNames: [],
+  selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
+  identifierList: [],
+  measureList: [],
+  configCollapsed: false,
+  currentPage: 1,
+  resultsSortColumn: '',
+  resultsSortDirection: 'asc',
+  resultsColumnFilters: {},
+  sortColumn: 'unique_count',
+  sortDirection: 'desc',
+  columnFilters: {},
+  groupbyResults: {
+    result_file: '',
+    result_shape: [0, 0],
+    row_count: 0,
+    columns: [],
+    unsaved_data: []
+  }
+};
 
 interface LaboratoryStore {
   cards: LayoutCard[];

@@ -73,17 +73,13 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  // Collapse state for configuration panel
-  const [configCollapsed, setConfigCollapsed] = useState(false);
-  
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize] = useState(20);
-  
-  // Filtering and sorting state for results (reusing cardinality state)
-  const [resultsSortColumn, setResultsSortColumn] = useState<string>('');
-  const [resultsSortDirection, setResultsSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [resultsColumnFilters, setResultsColumnFilters] = useState<{ [key: string]: string[] }>({});
+  // Get configuration state from global store
+  const configCollapsed = settings.configCollapsed || false;
+  const currentPage = settings.currentPage || 1;
+  const pageSize = 20;
+  const resultsSortColumn = settings.resultsSortColumn || '';
+  const resultsSortDirection = settings.resultsSortDirection || 'asc';
+  const resultsColumnFilters = settings.resultsColumnFilters || {};
 
   // Helper to convert results to CSV
   const resultsToCSV = (data: Record<string, any>[]): string => {
@@ -255,10 +251,10 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const [cardinalityLoading, setCardinalityLoading] = useState(false);
   const [cardinalityError, setCardinalityError] = useState<string | null>(null);
   
-  // Sorting and filtering state for Cardinality View
-  const [sortColumn, setSortColumn] = useState<string>('unique_count');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  // Get cardinality view state from global store
+  const sortColumn = settings.sortColumn || 'unique_count';
+  const sortDirection = settings.sortDirection || 'desc';
+  const columnFilters = settings.columnFilters || {};
 
   // Fetch cardinality data
   const fetchCardinalityData = async () => {
@@ -352,30 +348,28 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const handleSort = (column: string, direction?: 'asc' | 'desc') => {
     if (sortColumn === column) {
       if (sortDirection === 'asc') {
-        setSortDirection('desc');
+        updateSettings(atomId, { sortDirection: 'desc' });
       } else if (sortDirection === 'desc') {
-        setSortColumn('');
-        setSortDirection('asc');
+        updateSettings(atomId, { sortColumn: '', sortDirection: 'asc' });
       }
     } else {
-      setSortColumn(column);
-      setSortDirection(direction || 'asc');
+      updateSettings(atomId, { sortColumn: column, sortDirection: direction || 'asc' });
     }
   };
 
   const handleColumnFilter = (column: string, values: string[]) => {
-    setColumnFilters(prev => ({
-      ...prev,
-      [column]: values
-    }));
+    updateSettings(atomId, {
+      columnFilters: {
+        ...columnFilters,
+        [column]: values
+      }
+    });
   };
 
   const clearColumnFilter = (column: string) => {
-    setColumnFilters(prev => {
-      const cpy = { ...prev };
-      delete cpy[column];
-      return cpy;
-    });
+    const newFilters = { ...columnFilters };
+    delete newFilters[column];
+    updateSettings(atomId, { columnFilters: newFilters });
   };
 
   const FilterMenu = ({ column }: { column: string }) => {
@@ -508,7 +502,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           setTotalRows(allRows.length);
           setAllResults(allRows);
           setResults(allRows);
-          setCurrentPage(1); // Reset to first page when new data is loaded
+          updateSettings(atomId, { currentPage: 1 }); // Reset to first page when new data is loaded
           
           // Determine identifiers that have >1 unique value
           const idWithVariety = selectedIdentifiers.filter((id: string) => {
@@ -566,7 +560,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                 setTotalRows(rows.length);
                 setAllResults(rows);
                 setResults(rows);
-                setCurrentPage(1); // Reset to first page when new data is loaded
+                updateSettings(atomId, { currentPage: 1 }); // Reset to first page when new data is loaded
                 setResultsHeaders(headers);
                 
                 updateSettings(atomId, {
@@ -687,36 +681,34 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const totalPages = Math.ceil(allFilteredData.length / pageSize);
 
   const handlePageChange = (page: number) => {
-    setCurrentPage(page);
+    updateSettings(atomId, { currentPage: page });
   };
 
   const handleResultsSort = (column: string, direction?: 'asc' | 'desc') => {
     if (resultsSortColumn === column) {
       if (resultsSortDirection === 'asc') {
-        setResultsSortDirection('desc');
+        updateSettings(atomId, { resultsSortDirection: 'desc' });
       } else if (resultsSortDirection === 'desc') {
-        setResultsSortColumn('');
-        setResultsSortDirection('asc');
+        updateSettings(atomId, { resultsSortColumn: '', resultsSortDirection: 'asc' });
       }
     } else {
-      setResultsSortColumn(column);
-      setResultsSortDirection(direction || 'asc');
+      updateSettings(atomId, { resultsSortColumn: column, resultsSortDirection: direction || 'asc' });
     }
   };
 
   const handleResultsColumnFilter = (column: string, values: string[]) => {
-    setResultsColumnFilters(prev => ({
-      ...prev,
-      [column]: values
-    }));
+    updateSettings(atomId, {
+      resultsColumnFilters: {
+        ...resultsColumnFilters,
+        [column]: values
+      }
+    });
   };
 
   const clearResultsColumnFilter = (column: string) => {
-    setResultsColumnFilters(prev => {
-      const cpy = { ...prev };
-      delete cpy[column];
-      return cpy;
-    });
+    const newFilters = { ...resultsColumnFilters };
+    delete newFilters[column];
+    updateSettings(atomId, { resultsColumnFilters: newFilters });
   };
 
   const getResultsUniqueColumnValues = (column: string): string[] => {
@@ -756,7 +748,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
 
     const apply = () => {
       handleResultsColumnFilter(column, temp);
-      setCurrentPage(1); // Reset to first page when filtering
+      updateSettings(atomId, { currentPage: 1 }); // Reset to first page when filtering
     };
 
     return (
@@ -1025,7 +1017,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           </div>
           <button
             className="p-1 rounded hover:bg-green-100 transition-colors"
-            onClick={() => setConfigCollapsed(v => !v)}
+            onClick={() => updateSettings(atomId, { configCollapsed: !configCollapsed })}
             aria-label={configCollapsed ? 'Expand configuration' : 'Collapse configuration'}
           >
             {configCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}

@@ -10,7 +10,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Plus, Minus, BarChart3, Filter, X, Layers, LineChart } from 'lucide-react';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Plus, Minus, BarChart3, Filter, X, Layers, LineChart, ChevronDown, ChevronUp } from 'lucide-react';
 import { ChartMakerSettings, ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
 import TraceManager from './TraceManager';
 import { migrateLegacyChart, toggleChartMode, validateChart } from '../utils/traceUtils';
@@ -31,6 +32,22 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
   
   // Local state for title inputs to prevent overwriting during typing
   const [localTitles, setLocalTitles] = useState<Record<number, string>>({});
+  
+  // Track which chart is expanded (accordion - only one at a time)
+  const [expandedChart, setExpandedChart] = useState<number>(-1);
+  
+  // Track chart deletion confirmation dialog
+  const [chartToDelete, setChartToDelete] = useState<number | null>(null);
+  
+  // Watch for selectedChartIndex from canvas click
+  useEffect(() => {
+    const selectedChartIndex = (settings as any).selectedChartIndex;
+    if (selectedChartIndex !== undefined && selectedChartIndex >= 0) {
+      setExpandedChart(selectedChartIndex);
+      // Clear the selectedChartIndex after expanding
+      onSettingsChange({ selectedChartIndex: undefined } as any);
+    }
+  }, [(settings as any).selectedChartIndex]);
 
   // Initialize local titles when settings change
   useEffect(() => {
@@ -76,28 +93,11 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
   };
   const handleNumberOfChartsChange = (change: number) => {
     const newNumber = Math.max(1, Math.min(2, settings.numberOfCharts + change));
-    const newCharts = [...settings.charts];
     
-    if (newNumber > settings.numberOfCharts) {
-      // Add new charts
-      for (let i = settings.numberOfCharts; i < newNumber; i++) {
-        newCharts.push({
-          id: (i + 1).toString(),
-          title: `Chart ${i + 1}`,
-          type: 'line',
-          xAxis: '',
-          yAxis: '',
-          filters: {}
-        });
-      }
-    } else {
-      // Remove charts
-      newCharts.splice(newNumber);
-    }
-    
+    // Only update the layout setting, don't add or remove charts
+    // Charts are now added via the + button in the canvas
     onSettingsChange({
-      numberOfCharts: newNumber,
-      charts: newCharts
+      numberOfCharts: newNumber
     });
   };
 
@@ -159,13 +159,43 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     const toggledChart = toggleChartMode(chart);
     updateChart(chartIndex, toggledChart);
   };
+  
+  const handleConfirmDelete = () => {
+    if (chartToDelete === null) return;
+    
+    const newCharts = settings.charts
+      .filter((_, i) => i !== chartToDelete)
+      .map((chart, newIndex) => ({
+        ...chart,
+        // Update chart IDs and titles to reflect new positions
+        id: (newIndex + 1).toString(),
+        title: chart.title.match(/^Chart \d+$/) ? `Chart ${newIndex + 1}` : chart.title
+      }));
+    
+    // Adjust expanded chart index if needed
+    if (expandedChart === chartToDelete) {
+      setExpandedChart(-1);
+    } else if (expandedChart > chartToDelete) {
+      setExpandedChart(expandedChart - 1);
+    }
+    onSettingsChange({ charts: newCharts });
+    setChartToDelete(null);
+  };
 
   const getAvailableColumns = () => {
     if (!settings.uploadedData) return { numeric: [], categorical: [] };
     
+    const numeric = settings.uploadedData.numericColumns || [];
+    const categorical = settings.uploadedData.categoricalColumns || [];
+    const allColumns = settings.uploadedData.allColumns || [];
+    
+    // Find any columns that aren't categorized and add them to categorical
+    const categorizedColumns = new Set([...numeric, ...categorical]);
+    const uncategorizedColumns = allColumns.filter(col => !categorizedColumns.has(col));
+    
     return {
-      numeric: settings.uploadedData.numericColumns || [],
-      categorical: settings.uploadedData.categoricalColumns || [],
+      numeric,
+      categorical: [...categorical, ...uncategorizedColumns],
     };
   };
 
@@ -237,21 +267,15 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     onSettingsChange({ charts: newCharts });
   };
 
-  // Exclude columns with only one unique value, and those selected as xAxis or yAxis
+  // Return ALL columns for filtering
   const getAvailableFilterColumns = () => {
     if (!settings.uploadedData) return [];
-    const allCategorical = getCategoricalColumns();
-    return allCategorical.filter(column => {
-      // Exclude if only one unique value
-      const uniqueVals = getUniqueValues(column);
-      if (uniqueVals.length <= 1) return false;
-      // Exclude if selected as xAxis or yAxis
-      if (settings.charts.some(chart => chart.xAxis === column || chart.yAxis === column)) return false;
-      return true;
-    });
+    // Return all columns (both numeric and categorical)
+    return settings.uploadedData.allColumns || 
+           [...(settings.uploadedData.numericColumns || []), ...(settings.uploadedData.categoricalColumns || [])];
   };
 
-  // Remove filters for columns that are now excluded (e.g., selected as xAxis/yAxis)
+  // Remove filters for columns that no longer exist in the dataset
   React.useEffect(() => {
     settings.charts.forEach((chart, chartIndex) => {
       const available = getAvailableFilterColumns();
@@ -284,7 +308,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
         <CardContent>
           <div className="space-y-4">
             <div>
-              <Label className="text-xs">Number of Charts (Max 2)</Label>
+              <Label className="text-xs">Charts Per Row (max 2)</Label>
               <div className="flex items-center gap-2 mt-1">
                 <Button
                   variant="outline"
@@ -304,6 +328,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                   <Plus className="w-3 h-3" />
                 </Button>
               </div>
+              <p className="text-xs text-muted-foreground mt-1">Use the + button in canvas to add more charts</p>
             </div>
           </div>
         </CardContent>
@@ -312,17 +337,17 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
       <div className="flex-1 overflow-hidden">
         <ScrollArea className="w-full">
           <div className="space-y-4 pr-4 w-full">
-            {settings.charts.slice(0, settings.numberOfCharts).map((chart, index) => {
+            {settings.charts.map((chart, index) => {
               // Migrate legacy chart format
               const migratedChart = migrateLegacyChart(chart);
 
               return (
-                <Card key={chart.id} className="w-full">
+                <Card key={chart.id} className="w-full" data-chart-settings={index}>
                   <CardHeader>
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-sm">Chart {index + 1}</CardTitle>
+                      <CardTitle className="text-sm">{chart.title}</CardTitle>
                       <div className="flex items-center gap-2">
-                        <TooltipProvider>
+                        {/* <TooltipProvider>
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
@@ -353,92 +378,204 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                               </p>
                             </TooltipContent>
                           </Tooltip>
-                        </TooltipProvider>
+                        </TooltipProvider> */}
+                        
+                        {/* Collapse/Expand Icon */}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0"
+                          onClick={() => setExpandedChart(expandedChart === index ? -1 : index)}
+                        >
+                          {expandedChart === index ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        </Button>
+                        
+                        {/* Remove Chart Icon */}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 hover:bg-red-100 hover:text-red-600"
+                          onClick={() => setChartToDelete(index)}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
                       </div>
                     </div>
                     {/* Mode description */}
-                    <div className="text-xs text-muted-foreground">
+                    {/* <div className="text-xs text-muted-foreground">
                       {migratedChart.isAdvancedMode 
                         ? "Multi-Series: Create multiple data series with individual filters"
                         : "Simple: Single Y-axis with basic filtering"
                       }
-                    </div>
+                    </div> */}
                   </CardHeader>
+                  {expandedChart === index && (
                   <CardContent className="space-y-4">
-                    {/* Basic Chart Settings */}
-                    <div className="space-y-3">
-                      <div>
-                        <Label className="text-xs">Chart Title</Label>
-                        <Input
-                          value={localTitles[index] ?? chart.title}
-                          onChange={(e) => handleTitleChange(index, e.target.value)}
-                          className="mt-1"
-                          placeholder="Enter chart title"
-                        />
-                      </div>
+                    {/* Mode-specific Configuration */}
+                    {migratedChart.isAdvancedMode ? (
+                      // Advanced Mode - Multiple Traces
+                      <>
+                        {/* Basic Chart Settings */}
+                        <div className="space-y-3">
+                          <div>
+                            <Label className="text-xs">Chart Title</Label>
+                            <Input
+                              value={localTitles[index] ?? chart.title}
+                              onChange={(e) => handleTitleChange(index, e.target.value)}
+                              className="mt-1"
+                              placeholder="Enter chart title"
+                            />
+                          </div>
 
-                      <div>
-                        <Label className="text-xs">Chart Type</Label>
-                        <Select 
-                          value={chart.type} 
-                          onValueChange={(value) => updateChart(index, { type: value as any })}
-                        >
+                          <div>
+                            <Label className="text-xs">Chart Type</Label>
+                            <Select 
+                              value={chart.type} 
+                              onValueChange={(value) => updateChart(index, { type: value as any })}
+                            >
+                              <SelectTrigger className="mt-1">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="line">Line Chart</SelectItem>
+                                <SelectItem value="bar">Bar Chart</SelectItem>
+                                <SelectItem value="area">Area Chart</SelectItem>
+                                <SelectItem value="scatter">Scatter Plot</SelectItem>
+                                <SelectItem value="pie">Pie Chart</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div>
+                            <Label className="text-xs">X-Axis</Label>
+                            <Select 
+                              value={chart.xAxis} 
+                              onValueChange={(value) => updateChart(index, { xAxis: value })}
+                            >
+                              <SelectTrigger className="mt-1">
+                                <SelectValue placeholder="Select X-axis column" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {(settings.uploadedData.allColumns || settings.uploadedData.columns).map((column) => (
+                                  <SelectItem key={column} value={column}>{column}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        <div className="border-t pt-4 w-full">
+                          <TraceManager
+                            chart={migratedChart}
+                            onUpdateChart={(updates) => updateChart(index, updates)}
+                            availableColumns={getAvailableColumns()}
+                            getUniqueValues={getUniqueValues}
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      // Simple Mode - Single Y-axis and Filters
+                      <>
+                        {/* Chart Title and Chart Type in one row */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label className="text-xs">Chart Title</Label>
+                            <Input
+                              value={localTitles[index] ?? chart.title}
+                              onChange={(e) => handleTitleChange(index, e.target.value)}
+                              className="mt-1"
+                              placeholder="Enter chart title"
+                            />
+                          </div>
+
+                          <div>
+                            <Label className="text-xs">Chart Type</Label>
+                            <Select 
+                              value={chart.type} 
+                              onValueChange={(value) => updateChart(index, { type: value as any })}
+                            >
+                              <SelectTrigger className="mt-1">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="line">Line Chart</SelectItem>
+                                <SelectItem value="bar">Bar Chart</SelectItem>
+                                <SelectItem value="area">Area Chart</SelectItem>
+                                <SelectItem value="scatter">Scatter Plot</SelectItem>
+                                <SelectItem value="pie">Pie Chart</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        {/* X-Axis and Y-Axis in one row */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <Label className="text-xs">X-Axis</Label>
+                            <Select 
+                              value={chart.xAxis} 
+                              onValueChange={(value) => updateChart(index, { xAxis: value })}
+                            >
+                              <SelectTrigger className="mt-1">
+                                <SelectValue placeholder="Select X-axis column" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {(settings.uploadedData.allColumns || settings.uploadedData.columns).map((column) => (
+                                  <SelectItem key={column} value={column}>{column}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div>
+                            <Label className="text-xs">Y-Axis</Label>
+                            <Select 
+                              value={chart.yAxis} 
+                              onValueChange={(value) => updateChart(index, { yAxis: value })}
+                            >
+                              <SelectTrigger className="mt-1">
+                                <SelectValue placeholder="Select Y-axis column" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {(settings.uploadedData.numericColumns || settings.uploadedData.columns).map((column) => (
+                                  <SelectItem key={column} value={column}>{column}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <Label className="text-xs">Aggregation</Label>
+                          <Select 
+                            value={chart.aggregation || 'sum'} 
+                            onValueChange={(value: 'sum' | 'mean' | 'count' | 'min' | 'max') => updateChart(index, { aggregation: value })}
+                          >
                           <SelectTrigger className="mt-1">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="line">Line Chart</SelectItem>
-                            <SelectItem value="bar">Bar Chart</SelectItem>
-                            <SelectItem value="area">Area Chart</SelectItem>
-                            <SelectItem value="scatter">Scatter Plot</SelectItem>
-                            <SelectItem value="pie">Pie Chart</SelectItem>
+                            <SelectItem value="sum">Sum</SelectItem>
+                            <SelectItem value="mean">Average</SelectItem>
+                            <SelectItem value="count">Count</SelectItem>
+                            <SelectItem value="min">Minimum</SelectItem>
+                            <SelectItem value="max">Maximum</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
 
-                      <div>
-                        <Label className="text-xs">X-Axis</Label>
-                        <Select 
-                          value={chart.xAxis} 
-                          onValueChange={(value) => updateChart(index, { xAxis: value })}
-                        >
-                          <SelectTrigger className="mt-1">
-                            <SelectValue placeholder="Select X-axis column" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(settings.uploadedData.allColumns || settings.uploadedData.columns).map((column) => (
-                              <SelectItem key={column} value={column}>{column}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                    {/* Mode-specific Configuration */}
-                    {migratedChart.isAdvancedMode ? (
-                      // Advanced Mode - Multiple Traces
-                      <div className="border-t pt-4 w-full">
-                        <TraceManager
-                          chart={migratedChart}
-                          onUpdateChart={(updates) => updateChart(index, updates)}
-                          availableColumns={getAvailableColumns()}
-                          getUniqueValues={getUniqueValues}
-                        />
-                      </div>
-                    ) : (
-                      // Simple Mode - Single Y-axis and Filters
-                      <>
                         <div>
-                          <Label className="text-xs">Y-Axis</Label>
+                          <Label className="text-xs">Segregate Field Values</Label>
                           <Select 
-                            value={chart.yAxis} 
-                            onValueChange={(value) => updateChart(index, { yAxis: value })}
+                            value={chart.legendField || 'aggregate'} 
+                            onValueChange={(value) => updateChart(index, { legendField: value })}
                           >
                           <SelectTrigger className="mt-1">
-                            <SelectValue placeholder="Select Y-axis column" />
+                            <SelectValue placeholder="Show Aggregate" />
                           </SelectTrigger>
                           <SelectContent>
-                            {(settings.uploadedData.numericColumns || settings.uploadedData.columns).map((column) => (
+                            <SelectItem value="aggregate">Show Aggregate</SelectItem>
+                            {getCategoricalColumns().map((column) => (
                               <SelectItem key={column} value={column}>{column}</SelectItem>
                             ))}
                           </SelectContent>
@@ -477,9 +614,9 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                               </PopoverTrigger>
                                <PopoverContent className="w-64" align="start">
                                  <div className="space-y-3">
-                                   <Label className="text-xs font-medium">Select Categorical Column to Filter</Label>
+                                   <Label className="text-xs font-medium">Select Column to Filter</Label>
                                    {getAvailableFilterColumns().length === 0 ? (
-                                     <p className="text-xs text-muted-foreground">No categorical columns available for filtering</p>
+                                     <p className="text-xs text-muted-foreground">No columns available for filtering</p>
                                    ) : (
                                      <div style={{ maxHeight: '224px', overflowY: 'auto' }}>
                                        {getAvailableFilterColumns().map((column) => (
@@ -490,7 +627,9 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                                              className="w-full justify-start"
                                              onClick={() => {
                                                if (!chart.filters[column]) {
-                                                 updateFilter(index, column, []);
+                                                 // Initialize with ALL unique values selected by default
+                                                 const allValues = getUniqueValues(column);
+                                                 updateFilter(index, column, allValues);
                                                }
                                              }}
                                              disabled={!!chart.filters[column]}
@@ -509,6 +648,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                       </>
                     )}
                   </CardContent>
+                  )}
                 </Card>
               );
             })}
@@ -516,7 +656,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
         </ScrollArea>
       </div>
 
-      <div className="pt-4 border-t">
+      <div className="sticky bottom-0 pt-4 border-t bg-white z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]">
         <Button 
           onClick={onRenderCharts} 
           className="w-full"
@@ -526,6 +666,24 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
           Render Charts
         </Button>
       </div>
+      
+      {/* Chart Deletion Confirmation Dialog */}
+      <AlertDialog open={chartToDelete !== null} onOpenChange={(open) => !open && setChartToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove Chart?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to remove {chartToDelete !== null ? `Chart ${chartToDelete + 1}` : 'this chart'}? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setChartToDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDelete} className="bg-red-600 hover:bg-red-700">
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

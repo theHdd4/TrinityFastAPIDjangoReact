@@ -1,11 +1,34 @@
+# services:
+#   cloudflared:
+#     image: cloudflare/cloudflared:latest
+#     command: tunnel --config /etc/cloudflared/config.yml run
+#     volumes:
+#       - ./tunnelCreds:/etc/cloudflared:ro
+#     networks:
+#       - trinity-net
+#     restart: always
+
+# networks:
+#   trinity-net:
+#     external: true
+#     name: trinity-net
+version: '3.8'
+
 services:
   cloudflared:
     image: cloudflare/cloudflared:latest
+    container_name: cloudflared-trinity
     command: tunnel --config /etc/cloudflared/config.yml run
     volumes:
       - ./tunnelCreds:/etc/cloudflared:ro
     networks:
       - trinity-net
+    restart: always
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "info"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 networks:
   trinity-net:

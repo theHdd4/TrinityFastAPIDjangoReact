@@ -19,6 +19,60 @@ from .schemas import (
 router = APIRouter(prefix="/chart-maker", tags=["chart-maker"])
 
 
+def get_dataframe_with_reload(file_id: str):
+    """
+    Get dataframe by file_id, reloading from saved source if not in memory.
+    Returns tuple of (dataframe, file_id) - file_id may be updated if reloaded.
+    """
+    if file_id in chart_service.file_storage:
+        return chart_service.get_file(file_id), file_id
+    
+    # File not in memory - try to reload from the file_id directly (it might be a full path)
+    print(f"⚠️ File {file_id} not in memory storage, trying to reload directly...")
+    
+    # Extract filename from path if it's a full path
+    filename = file_id.split('/')[-1] if '/' in file_id else file_id
+    print(f"🔄 Attempting to reload from filename: {filename}")
+    
+    try:
+        new_file_id = chart_service.load_saved_dataframe(filename)
+        df = chart_service.get_file(new_file_id)
+        print(f"✅ Dataframe reloaded: {len(df)} rows, {len(df.columns)} columns")
+        return df, new_file_id
+    except Exception as reload_error:
+        print(f"❌ Failed to reload from filename: {reload_error}")
+        
+        # If the filename approach fails, try the original file_id as a fallback
+        if filename != file_id:
+            print(f"🔄 Trying original file_id as fallback: {file_id}")
+            try:
+                new_file_id = chart_service.load_saved_dataframe(file_id)
+                df = chart_service.get_file(new_file_id)
+                print(f"✅ Dataframe reloaded from original file_id: {len(df)} rows, {len(df.columns)} columns")
+                return df, new_file_id
+            except Exception as fallback_error:
+                print(f"❌ Fallback also failed: {fallback_error}")
+        
+        # Final fallback: check metadata to see if it has a saved source
+        print(f"⚠️ Trying metadata approach for: {file_id}")
+        try:
+            metadata = chart_service.get_file_metadata(file_id)
+            
+            if metadata.get("data_source") in ["arrow_flight", "minio_fallback"]:
+                # Reload from the saved file
+                print(f"🔄 Reloading from saved source: {metadata.get('filename')}")
+                new_file_id = chart_service.load_saved_dataframe(metadata.get("filename"))
+                df = chart_service.get_file(new_file_id)
+                print(f"✅ Dataframe reloaded: {len(df)} rows, {len(df.columns)} columns")
+                return df, new_file_id
+            else:
+                print(f"❌ File {file_id} not found and no saved source available")
+                raise HTTPException(status_code=404, detail=f"File {file_id} not found")
+        except Exception as metadata_error:
+            print(f"❌ Metadata approach also failed: {metadata_error}")
+            raise HTTPException(status_code=404, detail=f"File not found in memory and failed to reload: {str(reload_error)}")
+
+
 @router.post("/upload-csv", response_model=CSVUploadResponse)
 async def upload_csv(file: UploadFile = File(...)):
     """
@@ -141,7 +195,7 @@ async def load_saved_dataframe(request: LoadSavedDataframeRequest):
 async def get_all_columns(file_id: str):
     """Get all column names for a stored file"""
     try:
-        df = chart_service.get_file(file_id)
+        df, _ = get_dataframe_with_reload(file_id)
         columns = chart_service.get_all_columns(df)
         return AllColumnsResponse(columns=columns)
     except HTTPException:
@@ -154,7 +208,7 @@ async def get_all_columns(file_id: str):
 async def get_columns(file_id: str):
     """Get numeric and categorical columns for a stored file"""
     try:
-        df = chart_service.get_file(file_id)
+        df, _ = get_dataframe_with_reload(file_id)
         column_types = chart_service.get_column_types(df)
         return ColumnResponse(
             numeric_columns=column_types["numeric_columns"],
@@ -170,7 +224,7 @@ async def get_columns(file_id: str):
 async def get_unique_values(file_id: str, columns: List[str]):
     """Get unique values for specified columns"""
     try:
-        df = chart_service.get_file(file_id)
+        df, _ = get_dataframe_with_reload(file_id)
         unique_values = chart_service.get_unique_values(df, columns)
         return {"values": unique_values}
     except HTTPException:
@@ -183,7 +237,7 @@ async def get_unique_values(file_id: str, columns: List[str]):
 async def filter_data(file_id: str, filters: Dict[str, List[str]]):
     """Apply filters to stored file data"""
     try:
-        df = chart_service.get_file(file_id)
+        df, _ = get_dataframe_with_reload(file_id)
         filtered_df = chart_service.apply_filters(df, filters)
         
         return FilterResponse(
@@ -199,7 +253,7 @@ async def filter_data(file_id: str, filters: Dict[str, List[str]]):
 async def get_sample_data(file_id: str, n: int = 10):
     """Get sample data from stored file"""
     try:
-        df = chart_service.get_file(file_id)
+        df, _ = get_dataframe_with_reload(file_id)
         sample_data = chart_service.get_sample_data(df, n)
         return {"sample_data": sample_data}
     except HTTPException:
@@ -239,11 +293,12 @@ async def generate_chart(request: ChartRequest):
         print(f"📝 Title: {request.title}")
         print(f"🔍 ===== END REQUEST LOG =====")
         
-        # Validate that the file exists
+        # Validate that the file exists and get the correct file_id
         try:
-            df = chart_service.get_file(request.file_id)
+            df, actual_file_id = get_dataframe_with_reload(request.file_id)
             print(f"✅ File loaded successfully: {len(df)} rows, {len(df.columns)} columns")
             print(f"📊 Available columns: {list(df.columns)}")
+            print(f"🆔 Using file_id: {actual_file_id}")
         except Exception as e:
             print(f"❌ File loading failed: {e}")
             raise HTTPException(status_code=404, detail=f"File with id {request.file_id} not found: {str(e)}")
@@ -258,8 +313,10 @@ async def generate_chart(request: ChartRequest):
                 raise HTTPException(status_code=400, detail=f"Y-column '{trace.y_column}' not found in file. Available columns: {list(df.columns)}")
             print(f"✅ Trace {i+1}: X='{trace.x_column}', Y='{trace.y_column}' - columns found")
         
-        # Generate chart configuration
+        # Generate chart configuration with the correct file_id
         print("🚀 Generating chart configuration...")
+        # Update the request with the actual file_id that was loaded
+        request.file_id = actual_file_id
         chart_response = chart_service.generate_chart_config(request)
         print(f"✅ Chart configuration generated successfully")
         print(f"📊 Chart data rows: {len(chart_response.chart_config.data)}")
@@ -489,21 +546,35 @@ async def get_column_summary(object_name: str):
     - Data type
     - Unique count
     - Sample unique values
+    
+    Accepts either:
+    - file_id (UUID) - will reload from saved source if not in memory
+    - Arrow filename (e.g., "default_client/file.arrow") - will load directly from Arrow Flight
     """
     try:
         print(f"🔍 ===== COLUMN SUMMARY REQUEST =====")
         print(f"📥 Object name: {object_name}")
         print(f"🔍 ===== END REQUEST LOG =====")
         
-        # Check if the file exists in chart maker's in-memory storage
-        if object_name not in chart_service.file_storage:
-            print(f"❌ File {object_name} not found in chart maker storage")
-            raise HTTPException(status_code=404, detail=f"File {object_name} not found in chart maker storage")
+        # Check if object_name looks like an Arrow file path (contains .arrow)
+        if object_name.endswith('.arrow') or '/' in object_name:
+            # This is an Arrow filename - load directly from Arrow Flight
+            print(f"📂 Detected Arrow filename, loading directly from Arrow Flight...")
+            try:
+                file_id = chart_service.load_saved_dataframe(object_name)
+                df = chart_service.get_file(file_id)
+                print(f"✅ Loaded from Arrow Flight: {len(df)} rows, {len(df.columns)} columns")
+                # Update object_name to the new file_id for metadata retrieval later
+                object_name = file_id
+            except Exception as arrow_error:
+                print(f"❌ Failed to load from Arrow Flight: {arrow_error}")
+                raise HTTPException(status_code=404, detail=f"Failed to load Arrow file {object_name}: {str(arrow_error)}")
+        else:
+            # This is a file_id (UUID) - use helper to get or reload
+            print(f"🔑 Detected file_id (UUID), attempting to get or reload...")
+            df, object_name = get_dataframe_with_reload(object_name)
         
-        # Get the dataframe from chart maker's in-memory storage
-        print("🚀 Loading dataframe from chart maker storage...")
-        df = chart_service.get_file(object_name)
-        print(f"✅ Dataframe loaded: {len(df)} rows, {len(df.columns)} columns")
+        print(f"📊 Processing dataframe: {len(df)} rows, {len(df.columns)} columns")
         
         # Generate column summary
         summary = []

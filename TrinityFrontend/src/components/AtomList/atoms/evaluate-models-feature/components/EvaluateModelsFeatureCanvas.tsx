@@ -65,6 +65,14 @@ import { EvaluateModelsFeatureData } from '../EvaluateModelsFeatureAtom';
 import { EvaluateModelsFeatureSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { EVALUATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useToast } from '@/hooks/use-toast';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import type {
+  EvaluateModelsFeatureExhibitionComponentType,
+  EvaluateModelsFeatureExhibitionSelection,
+  EvaluateModelsFeatureExhibitionSelectionGraphState,
+  EvaluateModelsFeatureExhibitionSelectionContext,
+} from '@/components/LaboratoryMode/store/laboratoryStore';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -149,6 +157,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   onDataUpload,
   onClose
 }) => {
+  // Get atom from store for exhibition functionality
+  const atom = useLaboratoryStore(state => state.getAtom(atomId));
+  
   // Get input file name for clickable subtitle
   const inputFileName = data.selectedDataframe || '';
 
@@ -338,35 +349,382 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     averages: true,
     's-curve': true
   });
-  const [selectedIdentifierValues, setSelectedIdentifierValues] = useState<{[key: string]: string[]}>({});
+  // Initialize from store if available, otherwise empty
+  const [selectedIdentifierValues, setSelectedIdentifierValues] = useState<{[key: string]: string[]}>(
+    data.selectedIdentifierValues || {}
+  );
+
+  // Exhibition functionality
+  const { toast } = useToast();
+  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  const exhibitionSelections = React.useMemo<EvaluateModelsFeatureExhibitionSelection[]>(() => {
+    return Array.isArray(atom?.settings?.exhibitionSelections)
+      ? atom.settings.exhibitionSelections
+      : [];
+  }, [atom?.settings?.exhibitionSelections]);
+
+  // Deep clone utility function
+  const cloneDeep = (obj: any): any => {
+    if (obj === null || typeof obj !== 'object') return obj;
+    if (obj instanceof Date) return new Date(obj.getTime());
+    if (obj instanceof Array) return obj.map(item => cloneDeep(item));
+    if (typeof obj === 'object') {
+      const cloned: any = {};
+      for (const key in obj) {
+        if (obj.hasOwnProperty(key)) {
+          cloned[key] = cloneDeep(obj[key]);
+        }
+      }
+      return cloned;
+    }
+    return obj;
+  };
+
+  // Create selection descriptor for exhibition
+  const createSelectionDescriptor = (
+    graph: { id: string; name: string; type: string; selected: boolean },
+    componentType: EvaluateModelsFeatureExhibitionComponentType,
+    combinationName?: string,
+  ) => {
+    const key = combinationName ? `graph-${graph.id}-${combinationName}` : `graph-${graph.id}`;
+    const label = combinationName ? `${graph.name} - ${combinationName}` : graph.name;
+    return { key, label };
+  };
+
+  // Update exhibition selection
+  // Helper function to get the current chart type for a graph/combination (matches render logic)
+  const getCurrentChartType = (graphType: string, combinationName: string): string => {
+    switch (graphType) {
+      case 'waterfall':
+        return waterfallChartTypes[combinationName] || 'bar_chart';
+      case 'elasticity':
+        return elasticityChartTypes[combinationName] || 'bar_chart';
+      case 'contribution':
+        return contributionChartTypes[combinationName] || 'pie_chart';
+      case 'roi':
+        return roiChartTypes[combinationName] || 'line_chart';
+      case 'beta':
+        return betaCoefficientsChartTypes[combinationName] || 'bar_chart';
+      case 'actual-vs-predicted':
+        return actualVsPredictedChartTypes[combinationName] || 'line_chart';
+      case 'averages':
+        return averagesChartTypes[combinationName] || 'bar_chart';
+      case 's-curve':
+        return 'line_chart'; // S-curves are always line charts
+      default:
+        return 'bar_chart';
+    }
+  };
+
+  const updateExhibitionSelection = React.useCallback(
+    (
+      graph: { id: string; name: string; type: string; selected: boolean },
+      componentType: EvaluateModelsFeatureExhibitionComponentType,
+      checked: boolean | "indeterminate",
+      combinationName?: string,
+    ) => {
+      const descriptor = createSelectionDescriptor(graph, componentType, combinationName);
+      const existingIndex = exhibitionSelections.findIndex((entry) => entry.key === descriptor.key);
+      const nextChecked = checked === true;
+
+      if (nextChecked) {
+        // Get the CURRENT chart type (what's actually rendered right now)
+        const chartTypePreference = combinationName ? getCurrentChartType(graph.type, combinationName) : 'bar_chart';
+        
+        console.log('📊 Capturing CURRENT chart type for', graph.type, combinationName, ':', chartTypePreference);
+
+        const graphStateSnapshot: EvaluateModelsFeatureExhibitionSelectionGraphState = {
+          graphType: graph.type,
+          graphName: graph.name,
+          graphId: combinationName ? `${graph.id}-${combinationName}` : graph.id,
+          selected: graph.selected,
+          combinationName: combinationName,
+          chartTypePreference: chartTypePreference,
+        };
+
+        // Generate chart data for the specific combination based on graph type
+        let chartData = [];
+        if (combinationName) {
+          // Handle different graph types
+          switch (graph.type) {
+            case 'waterfall':
+              if (yoyGrowthData) {
+                const yoyData = yoyGrowthData.find(item => item.combination_id === combinationName);
+                if (yoyData && yoyData.waterfall) {
+                  chartData = yoyData.waterfall.labels.map((label: string, index: number) => ({
+                    name: label,
+                    value: yoyData.waterfall.values[index] || 0
+                  }));
+                }
+              }
+              break;
+            
+            case 'elasticity':
+              if (elasticityData[combinationName]?.elasticity_data) {
+                chartData = elasticityData[combinationName].elasticity_data.map((item: any) => ({
+                  name: item.name,
+                  value: item.value
+                }));
+              }
+              break;
+            
+            case 'contribution':
+              if (contributionData[combinationName]) {
+                chartData = contributionData[combinationName].map((item: any) => ({
+                  name: item.name || item.label || item.x,
+                  value: item.value || item.y || 0
+                }));
+              }
+              break;
+            
+            case 'roi':
+              if (roiData[combinationName]?.roi_data) {
+                chartData = roiData[combinationName].roi_data.map((item: any) => ({
+                  name: item.name || item.label,
+                  value: item.value || item.roi || 0
+                }));
+              }
+              break;
+            
+            case 'beta':
+              if (betaData[combinationName]?.beta_data) {
+                chartData = betaData[combinationName].beta_data.map((item: any) => ({
+                  name: item.name || item.label,
+                  value: item.value || item.beta || 0
+                }));
+              }
+              break;
+            
+            case 'actual-vs-predicted':
+              if (actualVsPredictedData[combinationName]?.actual_values && actualVsPredictedData[combinationName]?.predicted_values) {
+                const combinationData = actualVsPredictedData[combinationName];
+                chartData = combinationData.actual_values.map((actual: number, index: number) => ({
+                  actual: actual,
+                  predicted: combinationData.predicted_values[index] || 0
+                })).sort((a, b) => a.actual - b.actual);
+              }
+              break;
+            
+            case 's-curve':
+              if (sCurveData[combinationName]?.curve_data) {
+                chartData = sCurveData[combinationName].curve_data.map((item: any) => ({
+                  name: item.name || item.x,
+                  value: item.value || item.y || 0
+                }));
+              }
+              break;
+            
+            case 'averages':
+              if (averagesData[combinationName]?.averages_data) {
+                chartData = averagesData[combinationName].averages_data.map((item: any) => ({
+                  name: item.name,
+                  value: item.value
+                }));
+              }
+              break;
+            
+            default:
+              console.warn(`Unknown graph type: ${graph.type}`);
+          }
+        }
+
+        const graphContextSnapshot: EvaluateModelsFeatureExhibitionSelectionContext = {
+          selectedDataframe: data.selectedDataframe,
+          scope: data.scope,
+          selectedCombinations: data.selectedCombinations ? cloneDeep(data.selectedCombinations) : undefined,
+          identifiers: data.identifiers ? cloneDeep(data.identifiers) : undefined,
+          modelResults: data.modelResults ? cloneDeep(data.modelResults) : undefined,
+          identifiersData: data.identifiersData ? cloneDeep(data.identifiersData) : undefined,
+          selectedIdentifierValues: data.selectedIdentifierValues ? cloneDeep(data.selectedIdentifierValues) : undefined,
+          chartData: chartData,
+          chartConfig: combinationName ? getChartConfigForGraphType(graph.type, combinationName) : undefined,
+        };
+
+        const selectionSnapshot: EvaluateModelsFeatureExhibitionSelection = {
+          key: descriptor.key,
+          graphId: combinationName ? `${graph.id}-${combinationName}` : graph.id,
+          graphTitle: combinationName ? `${graph.name} - ${combinationName}` : graph.name,
+          componentType,
+          graphState: graphStateSnapshot,
+          graphContext: graphContextSnapshot,
+          capturedAt: new Date().toISOString(),
+        };
+
+        const nextSelections = [...exhibitionSelections];
+        if (existingIndex >= 0) {
+          nextSelections[existingIndex] = {
+            ...nextSelections[existingIndex],
+            ...selectionSnapshot,
+          };
+        } else {
+          nextSelections.push(selectionSnapshot);
+        }
+        updateSettings(atomId, { exhibitionSelections: nextSelections });
+      } else if (existingIndex >= 0) {
+        const nextSelections = exhibitionSelections.filter((entry) => entry.key !== descriptor.key);
+        updateSettings(atomId, { exhibitionSelections: nextSelections });
+      }
+    },
+    [exhibitionSelections, data, atomId, updateSettings, yoyGrowthData, elasticityData, contributionData, roiData, betaData, actualVsPredictedData, sCurveData, averagesData],
+  );
+
+  // Stage selection for exhibition
+  // Function to get current chart configuration for a graph type and combination
+  const getChartConfigForGraphType = (graphType: string, combinationName: string) => {
+    switch (graphType) {
+      case 'waterfall':
+        return {
+          theme: settings[`waterfallChartThemes_${combinationName}`] || waterfallChartThemes[combinationName] || 'default',
+          showGrid: settings[`waterfallChartGridToggle_${combinationName}`] !== undefined ? settings[`waterfallChartGridToggle_${combinationName}`] : (waterfallChartGridToggle[combinationName] !== undefined ? waterfallChartGridToggle[combinationName] : true),
+          showLegend: settings[`waterfallChartLegendToggle_${combinationName}`] !== undefined ? settings[`waterfallChartLegendToggle_${combinationName}`] : (waterfallChartLegendToggle[combinationName] !== undefined ? waterfallChartLegendToggle[combinationName] : false),
+          showAxisLabels: settings[`waterfallChartAxisLabelsToggle_${combinationName}`] !== undefined ? settings[`waterfallChartAxisLabelsToggle_${combinationName}`] : (waterfallChartAxisLabelsToggle[combinationName] !== undefined ? waterfallChartAxisLabelsToggle[combinationName] : true),
+          showDataLabels: settings[`waterfallChartDataLabels_${combinationName}`] !== undefined ? settings[`waterfallChartDataLabels_${combinationName}`] : (waterfallChartDataLabels[combinationName] !== undefined ? waterfallChartDataLabels[combinationName] : true),
+          sortOrder: settings[`waterfallChartSortOrder_${combinationName}`] || waterfallChartSortOrder[combinationName] || null,
+          chartType: settings[`waterfallChartTypes_${combinationName}`] || waterfallChartTypes[combinationName] || 'bar_chart',
+        };
+      case 'contribution':
+        return {
+          theme: settings[`contributionChartThemes_${combinationName}`] || contributionChartThemes[combinationName] || 'default',
+          showGrid: settings[`contributionChartGridToggle_${combinationName}`] !== undefined ? settings[`contributionChartGridToggle_${combinationName}`] : (contributionChartGridToggle[combinationName] !== undefined ? contributionChartGridToggle[combinationName] : true),
+          showLegend: settings[`contributionChartLegendToggle_${combinationName}`] !== undefined ? settings[`contributionChartLegendToggle_${combinationName}`] : (contributionChartLegendToggle[combinationName] !== undefined ? contributionChartLegendToggle[combinationName] : false),
+          showAxisLabels: settings[`contributionChartAxisLabelsToggle_${combinationName}`] !== undefined ? settings[`contributionChartAxisLabelsToggle_${combinationName}`] : (contributionChartAxisLabelsToggle[combinationName] !== undefined ? contributionChartAxisLabelsToggle[combinationName] : true),
+          showDataLabels: settings[`contributionChartDataLabels_${combinationName}`] !== undefined ? settings[`contributionChartDataLabels_${combinationName}`] : (contributionChartDataLabels[combinationName] !== undefined ? contributionChartDataLabels[combinationName] : false),
+          sortOrder: settings[`contributionChartSortOrder_${combinationName}`] || contributionChartSortOrder[combinationName] || null,
+          chartType: settings[`contributionChartTypes_${combinationName}`] || contributionChartTypes[combinationName] || 'pie_chart',
+        };
+      case 'actual-vs-predicted':
+        return {
+          theme: settings[`actualVsPredictedChartThemes_${combinationName}`] || actualVsPredictedChartThemes[combinationName] || 'default',
+          showGrid: settings[`actualVsPredictedChartGridToggle_${combinationName}`] !== undefined ? settings[`actualVsPredictedChartGridToggle_${combinationName}`] : (actualVsPredictedChartGridToggle[combinationName] !== undefined ? actualVsPredictedChartGridToggle[combinationName] : true),
+          showLegend: settings[`actualVsPredictedChartLegendToggle_${combinationName}`] !== undefined ? settings[`actualVsPredictedChartLegendToggle_${combinationName}`] : (actualVsPredictedChartLegendToggle[combinationName] !== undefined ? actualVsPredictedChartLegendToggle[combinationName] : false),
+          showAxisLabels: settings[`actualVsPredictedChartAxisLabelsToggle_${combinationName}`] !== undefined ? settings[`actualVsPredictedChartAxisLabelsToggle_${combinationName}`] : (actualVsPredictedChartAxisLabelsToggle[combinationName] !== undefined ? actualVsPredictedChartAxisLabelsToggle[combinationName] : true),
+          showDataLabels: settings[`actualVsPredictedChartDataLabels_${combinationName}`] !== undefined ? settings[`actualVsPredictedChartDataLabels_${combinationName}`] : (actualVsPredictedChartDataLabels[combinationName] !== undefined ? actualVsPredictedChartDataLabels[combinationName] : false),
+          sortOrder: settings[`actualVsPredictedChartSortOrder_${combinationName}`] || actualVsPredictedChartSortOrder[combinationName] || null,
+          chartType: settings[`actualVsPredictedChartTypes_${combinationName}`] || actualVsPredictedChartTypes[combinationName] || 'scatter_chart',
+        };
+      case 'elasticity':
+        return {
+          theme: settings[`elasticityChartThemes_${combinationName}`] || elasticityChartThemes[combinationName] || 'default',
+          showGrid: settings[`elasticityChartGridToggle_${combinationName}`] !== undefined ? settings[`elasticityChartGridToggle_${combinationName}`] : (elasticityChartGridToggle[combinationName] !== undefined ? elasticityChartGridToggle[combinationName] : true),
+          showLegend: settings[`elasticityChartLegendToggle_${combinationName}`] !== undefined ? settings[`elasticityChartLegendToggle_${combinationName}`] : (elasticityChartLegendToggle[combinationName] !== undefined ? elasticityChartLegendToggle[combinationName] : false),
+          showAxisLabels: settings[`elasticityChartAxisLabelsToggle_${combinationName}`] !== undefined ? settings[`elasticityChartAxisLabelsToggle_${combinationName}`] : (elasticityChartAxisLabelsToggle[combinationName] !== undefined ? elasticityChartAxisLabelsToggle[combinationName] : true),
+          showDataLabels: settings[`elasticityChartDataLabels_${combinationName}`] !== undefined ? settings[`elasticityChartDataLabels_${combinationName}`] : (elasticityChartDataLabels[combinationName] !== undefined ? elasticityChartDataLabels[combinationName] : true),
+          sortOrder: settings[`elasticityChartSortOrder_${combinationName}`] || elasticityChartSortOrder[combinationName] || null,
+          chartType: settings[`elasticityChartTypes_${combinationName}`] || elasticityChartTypes[combinationName] || 'bar_chart',
+        };
+      case 'roi':
+        return {
+          theme: settings[`roiChartThemes_${combinationName}`] || roiChartThemes[combinationName] || 'default',
+          showGrid: settings[`roiChartGridToggle_${combinationName}`] !== undefined ? settings[`roiChartGridToggle_${combinationName}`] : (roiChartGridToggle[combinationName] !== undefined ? roiChartGridToggle[combinationName] : true),
+          showLegend: settings[`roiChartLegendToggle_${combinationName}`] !== undefined ? settings[`roiChartLegendToggle_${combinationName}`] : (roiChartLegendToggle[combinationName] !== undefined ? roiChartLegendToggle[combinationName] : false),
+          showAxisLabels: settings[`roiChartAxisLabelsToggle_${combinationName}`] !== undefined ? settings[`roiChartAxisLabelsToggle_${combinationName}`] : (roiChartAxisLabelsToggle[combinationName] !== undefined ? roiChartAxisLabelsToggle[combinationName] : true),
+          showDataLabels: settings[`roiChartDataLabels_${combinationName}`] !== undefined ? settings[`roiChartDataLabels_${combinationName}`] : (roiChartDataLabels[combinationName] !== undefined ? roiChartDataLabels[combinationName] : false),
+          sortOrder: settings[`roiChartSortOrder_${combinationName}`] || roiChartSortOrder[combinationName] || null,
+          chartType: settings[`roiChartTypes_${combinationName}`] || roiChartTypes[combinationName] || 'bar_chart',
+        };
+      case 'beta':
+        return {
+          theme: settings[`betaCoefficientsChartThemes_${combinationName}`] || betaCoefficientsChartThemes[combinationName] || 'default',
+          showGrid: settings[`betaCoefficientsChartGridToggle_${combinationName}`] !== undefined ? settings[`betaCoefficientsChartGridToggle_${combinationName}`] : (betaCoefficientsChartGridToggle[combinationName] !== undefined ? betaCoefficientsChartGridToggle[combinationName] : true),
+          showLegend: settings[`betaCoefficientsChartLegendToggle_${combinationName}`] !== undefined ? settings[`betaCoefficientsChartLegendToggle_${combinationName}`] : (betaCoefficientsChartLegendToggle[combinationName] !== undefined ? betaCoefficientsChartLegendToggle[combinationName] : false),
+          showAxisLabels: settings[`betaCoefficientsChartAxisLabelsToggle_${combinationName}`] !== undefined ? settings[`betaCoefficientsChartAxisLabelsToggle_${combinationName}`] : (betaCoefficientsChartAxisLabelsToggle[combinationName] !== undefined ? betaCoefficientsChartAxisLabelsToggle[combinationName] : true),
+          showDataLabels: settings[`betaCoefficientsChartDataLabels_${combinationName}`] !== undefined ? settings[`betaCoefficientsChartDataLabels_${combinationName}`] : (betaCoefficientsChartDataLabels[combinationName] !== undefined ? betaCoefficientsChartDataLabels[combinationName] : true),
+          sortOrder: settings[`betaCoefficientsChartSortOrder_${combinationName}`] || betaCoefficientsChartSortOrder[combinationName] || null,
+          chartType: settings[`betaCoefficientsChartTypes_${combinationName}`] || betaCoefficientsChartTypes[combinationName] || 'bar_chart',
+        };
+      case 'averages':
+        return {
+          theme: settings[`averagesChartThemes_${combinationName}`] || averagesChartThemes[combinationName] || 'default',
+          showGrid: settings[`averagesChartGridToggle_${combinationName}`] !== undefined ? settings[`averagesChartGridToggle_${combinationName}`] : (averagesChartGridToggle[combinationName] !== undefined ? averagesChartGridToggle[combinationName] : true),
+          showLegend: settings[`averagesChartLegendToggle_${combinationName}`] !== undefined ? settings[`averagesChartLegendToggle_${combinationName}`] : (averagesChartLegendToggle[combinationName] !== undefined ? averagesChartLegendToggle[combinationName] : false),
+          showAxisLabels: settings[`averagesChartAxisLabelsToggle_${combinationName}`] !== undefined ? settings[`averagesChartAxisLabelsToggle_${combinationName}`] : (averagesChartAxisLabelsToggle[combinationName] !== undefined ? averagesChartAxisLabelsToggle[combinationName] : true),
+          showDataLabels: settings[`averagesChartDataLabels_${combinationName}`] !== undefined ? settings[`averagesChartDataLabels_${combinationName}`] : (averagesChartDataLabels[combinationName] !== undefined ? averagesChartDataLabels[combinationName] : true),
+          sortOrder: settings[`averagesChartSortOrder_${combinationName}`] || averagesChartSortOrder[combinationName] || null,
+          chartType: settings[`averagesChartTypes_${combinationName}`] || averagesChartTypes[combinationName] || 'bar_chart',
+        };
+      default:
+        return {
+          theme: 'default',
+          showGrid: true,
+          showLegend: false,
+          showAxisLabels: true,
+          showDataLabels: false,
+          sortOrder: null,
+          chartType: 'bar_chart',
+        };
+    }
+  };
+
+  const stageSelectionForExhibition = React.useCallback(
+    (
+      graph: { id: string; name: string; type: string; selected: boolean },
+      componentType: EvaluateModelsFeatureExhibitionComponentType,
+      combinationName?: string,
+    ) => {
+      updateExhibitionSelection(graph, componentType, true, combinationName);
+      toast({
+        title: 'Graph staged for exhibition',
+        description: combinationName ? `${graph.name} - ${combinationName} has been staged for exhibition.` : `${graph.name} has been staged for exhibition.`,
+      });
+    },
+    [updateExhibitionSelection, toast],
+  );
   
   // State for contribution chart types and themes (similar to explore atom)
   const [contributionChartTypes, setContributionChartTypes] = useState<{[key: string]: string}>({});
   const [contributionChartThemes, setContributionChartThemes] = useState<{[key: string]: string}>({});
+  const [contributionChartGridToggle, setContributionChartGridToggle] = useState<{[key: string]: boolean}>({});
+  const [contributionChartLegendToggle, setContributionChartLegendToggle] = useState<{[key: string]: boolean}>({});
+  const [contributionChartAxisLabelsToggle, setContributionChartAxisLabelsToggle] = useState<{[key: string]: boolean}>({});
   
   // State for actual vs predicted chart types and themes
   const [actualVsPredictedChartTypes, setActualVsPredictedChartTypes] = useState<{[key: string]: string}>({});
   const [actualVsPredictedChartThemes, setActualVsPredictedChartThemes] = useState<{[key: string]: string}>({});
+  const [actualVsPredictedChartGridToggle, setActualVsPredictedChartGridToggle] = useState<{[key: string]: boolean}>({});
+  const [actualVsPredictedChartLegendToggle, setActualVsPredictedChartLegendToggle] = useState<{[key: string]: boolean}>({});
+  const [actualVsPredictedChartAxisLabelsToggle, setActualVsPredictedChartAxisLabelsToggle] = useState<{[key: string]: boolean}>({});
   
   // State for beta coefficients chart types and themes
   const [betaCoefficientsChartTypes, setBetaCoefficientsChartTypes] = useState<{[key: string]: string}>({});
   const [betaCoefficientsChartThemes, setBetaCoefficientsChartThemes] = useState<{[key: string]: string}>({});
+  const [betaCoefficientsChartGridToggle, setBetaCoefficientsChartGridToggle] = useState<{[key: string]: boolean}>({});
+  const [betaCoefficientsChartLegendToggle, setBetaCoefficientsChartLegendToggle] = useState<{[key: string]: boolean}>({});
+  const [betaCoefficientsChartAxisLabelsToggle, setBetaCoefficientsChartAxisLabelsToggle] = useState<{[key: string]: boolean}>({});
   
   // State for elasticity chart types and themes
   const [elasticityChartTypes, setElasticityChartTypes] = useState<{[key: string]: string}>({});
   const [elasticityChartThemes, setElasticityChartThemes] = useState<{[key: string]: string}>({});
+  const [elasticityChartGridToggle, setElasticityChartGridToggle] = useState<{[key: string]: boolean}>({});
+  const [elasticityChartLegendToggle, setElasticityChartLegendToggle] = useState<{[key: string]: boolean}>({});
+  const [elasticityChartAxisLabelsToggle, setElasticityChartAxisLabelsToggle] = useState<{[key: string]: boolean}>({});
   
   // State for ROI chart types and themes
   const [roiChartTypes, setRoiChartTypes] = useState<{[key: string]: string}>({});
   const [roiChartThemes, setRoiChartThemes] = useState<{[key: string]: string}>({});
+  const [roiChartGridToggle, setRoiChartGridToggle] = useState<{[key: string]: boolean}>({});
+  const [roiChartLegendToggle, setRoiChartLegendToggle] = useState<{[key: string]: boolean}>({});
+  const [roiChartAxisLabelsToggle, setRoiChartAxisLabelsToggle] = useState<{[key: string]: boolean}>({});
   
   // State for averages chart types and themes
   const [averagesChartTypes, setAveragesChartTypes] = useState<{[key: string]: string}>({});
   const [averagesChartThemes, setAveragesChartThemes] = useState<{[key: string]: string}>({});
+  const [averagesChartGridToggle, setAveragesChartGridToggle] = useState<{[key: string]: boolean}>({});
+  const [averagesChartLegendToggle, setAveragesChartLegendToggle] = useState<{[key: string]: boolean}>({});
+  const [averagesChartAxisLabelsToggle, setAveragesChartAxisLabelsToggle] = useState<{[key: string]: boolean}>({});
   
   // State for waterfall chart types and themes
   const [waterfallChartTypes, setWaterfallChartTypes] = useState<{[key: string]: string}>({});
   const [waterfallChartThemes, setWaterfallChartThemes] = useState<{[key: string]: string}>({});
+  const [waterfallChartGridToggle, setWaterfallChartGridToggle] = useState<{[key: string]: boolean}>({});
+  const [waterfallChartLegendToggle, setWaterfallChartLegendToggle] = useState<{[key: string]: boolean}>({});
+  const [waterfallChartAxisLabelsToggle, setWaterfallChartAxisLabelsToggle] = useState<{[key: string]: boolean}>({});
+  
+  // State for S-curve chart types and themes
+  const [sCurveChartTypes, setSCurveChartTypes] = useState<{[key: string]: string}>({});
+  const [sCurveChartThemes, setSCurveChartThemes] = useState<{[key: string]: string}>({});
+  const [sCurveChartGridToggle, setSCurveChartGridToggle] = useState<{[key: string]: boolean}>({});
+  const [sCurveChartLegendToggle, setSCurveChartLegendToggle] = useState<{[key: string]: boolean}>({});
+  const [sCurveChartAxisLabelsToggle, setSCurveChartAxisLabelsToggle] = useState<{[key: string]: boolean}>({});
   
   // State for data labels for each chart type
   const [contributionChartDataLabels, setContributionChartDataLabels] = useState<{[key: string]: boolean}>({});
@@ -905,9 +1263,43 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     fetchIdentifiers();
   }, [data.selectedDataframe]);
 
-  // Initialize selected identifier values with "Select All" when identifiers data changes
+  // Re-fetch combinations when identifier values change
   useEffect(() => {
-    if (Object.keys(identifiersData).length > 0) {
+    const fetchFilteredCombinations = async () => {
+      const key = data.selectedDataframe;
+      if (!key) return;
+      
+      let url = `${EVALUATE_API}/get-combinations?object_name=${encodeURIComponent(key)}`;
+      
+      // Add identifier values as query parameter if available
+      if (selectedIdentifierValues && Object.keys(selectedIdentifierValues).length > 0) {
+        url += `&identifier_values=${encodeURIComponent(JSON.stringify(selectedIdentifierValues))}`;
+      }
+      
+      try {
+        const response = await fetch(url);
+        const result = await response.json();
+        
+        if (result.combinations && Array.isArray(result.combinations)) {
+          console.log('🔍 Re-fetched combinations based on identifier filters:', result.combinations);
+          // Update the selected combinations to match the filtered ones
+          onDataChange({ selectedCombinations: result.combinations });
+        }
+      } catch (error) {
+        console.error('Error fetching filtered combinations:', error);
+      }
+    };
+    
+    // Only fetch if we have a dataframe and identifier values have been set
+    if (data.selectedDataframe && Object.keys(selectedIdentifierValues).length > 0) {
+      fetchFilteredCombinations();
+    }
+  }, [data.selectedDataframe, selectedIdentifierValues]);
+
+  // Initialize selected identifier values with "Select All" when identifiers data changes
+  // Only initialize if not already set in the store
+  useEffect(() => {
+    if (Object.keys(identifiersData).length > 0 && !data.selectedIdentifierValues) {
       const initialSelectedValues: {[key: string]: string[]} = {};
       Object.entries(identifiersData).forEach(([identifierName, identifierInfo]) => {
         const info = identifierInfo as IdentifierInfo;
@@ -920,7 +1312,14 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       // Also store in main data so settings component can access it
       onDataChange({ selectedIdentifierValues: initialSelectedValues });
     }
-    }, [identifiersData]);
+    }, [identifiersData, data.selectedIdentifierValues]);
+  
+  // Sync local state with store when store changes (for expanded mode sync)
+  useEffect(() => {
+    if (data.selectedIdentifierValues) {
+      setSelectedIdentifierValues(data.selectedIdentifierValues);
+    }
+  }, [data.selectedIdentifierValues]);
 
 
 
@@ -928,38 +1327,38 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   const toggleIdentifierValue = (identifierName: string, value: string, checked: boolean) => {
     const currentSelectedValues = selectedIdentifierValues[identifierName] || [];
     
+    console.log('🔍 Toggling identifier value:', { identifierName, value, checked, currentSelectedValues });
+    
     if (checked) {
       // Add value if not already selected
       if (!currentSelectedValues.includes(value)) {
         const newSelectedValues = [...currentSelectedValues, value];
-        setSelectedIdentifierValues(prev => ({
-          ...prev,
+        const updatedAllValues = {
+          ...selectedIdentifierValues,
           [identifierName]: newSelectedValues
-        }));
+        };
+        
+        setSelectedIdentifierValues(updatedAllValues);
         
         // Update main data so settings component can access it
-        onDataChange({ 
-          selectedIdentifierValues: {
-            ...data.selectedIdentifierValues,
-            [identifierName]: newSelectedValues
-          }
-        });
+        onDataChange({ selectedIdentifierValues: updatedAllValues });
+        
+        console.log('🔍 Updated selectedIdentifierValues (added):', updatedAllValues);
       }
     } else {
       // Remove value if selected
       const newSelectedValues = currentSelectedValues.filter(v => v !== value);
-      setSelectedIdentifierValues(prev => ({
-        ...prev,
+      const updatedAllValues = {
+        ...selectedIdentifierValues,
         [identifierName]: newSelectedValues
-      }));
+      };
+      
+      setSelectedIdentifierValues(updatedAllValues);
       
       // Update main data so settings component can access it
-      onDataChange({ 
-        selectedIdentifierValues: {
-          ...data.selectedIdentifierValues,
-          [identifierName]: newSelectedValues
-        }
-      });
+      onDataChange({ selectedIdentifierValues: updatedAllValues });
+      
+      console.log('🔍 Updated selectedIdentifierValues (removed):', updatedAllValues);
     }
   };
 
@@ -1079,6 +1478,198 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     setWaterfallChartThemes(prev => ({
       ...prev,
       [combinationName]: newTheme
+    }));
+  };
+
+  // Handle waterfall chart grid toggle
+  const handleWaterfallChartGridToggle = (combinationName: string, enabled: boolean) => {
+    setWaterfallChartGridToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle waterfall chart legend toggle
+  const handleWaterfallChartLegendToggle = (combinationName: string, enabled: boolean) => {
+    setWaterfallChartLegendToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle waterfall chart axis labels toggle
+  const handleWaterfallChartAxisLabelsToggle = (combinationName: string, enabled: boolean) => {
+    setWaterfallChartAxisLabelsToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle contribution chart grid toggle
+  const handleContributionChartGridToggle = (combinationName: string, enabled: boolean) => {
+    setContributionChartGridToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle contribution chart legend toggle
+  const handleContributionChartLegendToggle = (combinationName: string, enabled: boolean) => {
+    setContributionChartLegendToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle contribution chart axis labels toggle
+  const handleContributionChartAxisLabelsToggle = (combinationName: string, enabled: boolean) => {
+    setContributionChartAxisLabelsToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle actual vs predicted chart grid toggle
+  const handleActualVsPredictedChartGridToggle = (combinationName: string, enabled: boolean) => {
+    setActualVsPredictedChartGridToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle actual vs predicted chart legend toggle
+  const handleActualVsPredictedChartLegendToggle = (combinationName: string, enabled: boolean) => {
+    setActualVsPredictedChartLegendToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle actual vs predicted chart axis labels toggle
+  const handleActualVsPredictedChartAxisLabelsToggle = (combinationName: string, enabled: boolean) => {
+    setActualVsPredictedChartAxisLabelsToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle beta coefficients chart grid toggle
+  const handleBetaCoefficientsChartGridToggle = (combinationName: string, enabled: boolean) => {
+    setBetaCoefficientsChartGridToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle beta coefficients chart legend toggle
+  const handleBetaCoefficientsChartLegendToggle = (combinationName: string, enabled: boolean) => {
+    setBetaCoefficientsChartLegendToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle beta coefficients chart axis labels toggle
+  const handleBetaCoefficientsChartAxisLabelsToggle = (combinationName: string, enabled: boolean) => {
+    setBetaCoefficientsChartAxisLabelsToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle elasticity chart grid toggle
+  const handleElasticityChartGridToggle = (combinationName: string, enabled: boolean) => {
+    setElasticityChartGridToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle elasticity chart legend toggle
+  const handleElasticityChartLegendToggle = (combinationName: string, enabled: boolean) => {
+    setElasticityChartLegendToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle elasticity chart axis labels toggle
+  const handleElasticityChartAxisLabelsToggle = (combinationName: string, enabled: boolean) => {
+    setElasticityChartAxisLabelsToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle ROI chart grid toggle
+  const handleRoiChartGridToggle = (combinationName: string, enabled: boolean) => {
+    setRoiChartGridToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle ROI chart legend toggle
+  const handleRoiChartLegendToggle = (combinationName: string, enabled: boolean) => {
+    setRoiChartLegendToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle ROI chart axis labels toggle
+  const handleRoiChartAxisLabelsToggle = (combinationName: string, enabled: boolean) => {
+    setRoiChartAxisLabelsToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle averages chart grid toggle
+  const handleAveragesChartGridToggle = (combinationName: string, enabled: boolean) => {
+    setAveragesChartGridToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle averages chart legend toggle
+  const handleAveragesChartLegendToggle = (combinationName: string, enabled: boolean) => {
+    setAveragesChartLegendToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle averages chart axis labels toggle
+  const handleAveragesChartAxisLabelsToggle = (combinationName: string, enabled: boolean) => {
+    setAveragesChartAxisLabelsToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle S-curve chart grid toggle
+  const handleSCurveChartGridToggle = (combinationName: string, enabled: boolean) => {
+    setSCurveChartGridToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle S-curve chart legend toggle
+  const handleSCurveChartLegendToggle = (combinationName: string, enabled: boolean) => {
+    setSCurveChartLegendToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
+    }));
+  };
+
+  // Handle S-curve chart axis labels toggle
+  const handleSCurveChartAxisLabelsToggle = (combinationName: string, enabled: boolean) => {
+    setSCurveChartAxisLabelsToggle(prev => ({
+      ...prev,
+      [combinationName]: enabled
     }));
   };
 
@@ -1213,7 +1804,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     dropdownCombinations: data.selectedCombinations || []
   });
   
-  // Use all selected combinations since we removed the filter dropdown
+  // Combinations are already filtered by the backend based on selectedIdentifierValues
+  // The Settings component re-fetches combinations when identifier values change
   const filteredCombinations = selectedCombinations;
 
   const addComment = (chartId: string) => {
@@ -1292,6 +1884,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     const chartTheme = waterfallChartThemes[combinationName] || 'default';
     const showDataLabels = waterfallChartDataLabels[combinationName] !== undefined ? waterfallChartDataLabels[combinationName] : true;
     const sortOrder = waterfallChartSortOrder[combinationName] || null;
+    const showGrid = waterfallChartGridToggle[combinationName] !== undefined ? waterfallChartGridToggle[combinationName] : true;
+    const showLegend = waterfallChartLegendToggle[combinationName] !== undefined ? waterfallChartLegendToggle[combinationName] : (chartType === 'pie_chart');
+    const showAxisLabels = waterfallChartAxisLabelsToggle[combinationName] !== undefined ? waterfallChartAxisLabelsToggle[combinationName] : true;
     const isExpanded = !collapsedGraphs.waterfall;
     
     const rendererProps = {
@@ -1309,19 +1904,53 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       width: isExpanded ? 400 : 500,
       height: isExpanded ? 350 : 400,
       showDataLabels: showDataLabels,
-      showLegend: chartType === 'pie_chart',
+      showLegend: showLegend,
+      showGrid: showGrid,
+      showAxisLabels: showAxisLabels,
       sortOrder: sortOrder,
-      onThemeChange: (newTheme: string) => handleWaterfallChartThemeChange(combinationName, newTheme),
+      onThemeChange: (newTheme: string) => {
+        handleWaterfallChartThemeChange(combinationName, newTheme);
+        // Save to global settings for exhibition
+        updateSettings(atomId, { 
+          [`waterfallChartThemes_${combinationName}`]: newTheme 
+        });
+      },
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleWaterfallChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleWaterfallChartDataLabelsChange(combinationName, newShowDataLabels),
-      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleWaterfallChartSortOrderChange(combinationName, newSortOrder)
+      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleWaterfallChartSortOrderChange(combinationName, newSortOrder),
+      onGridToggle: (enabled: boolean) => handleWaterfallChartGridToggle(combinationName, enabled),
+      onLegendToggle: (enabled: boolean) => handleWaterfallChartLegendToggle(combinationName, enabled),
+      onAxisLabelsToggle: (enabled: boolean) => handleWaterfallChartAxisLabelsToggle(combinationName, enabled)
     };
+
+    // Check if this combination is selected for exhibition
+    const waterfallGraphDef = data.graphs?.find(g => g.type === 'waterfall');
+    const waterfallDescriptor = waterfallGraphDef ? createSelectionDescriptor(waterfallGraphDef, 'graph', combinationName) : null;
+    const isWaterfallSelected = waterfallDescriptor ? exhibitionSelections.some((entry) => entry.key === waterfallDescriptor.key) : false;
     
     return (
-      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
-        <h5 className="text-sm font-medium text-orange-800 mb-3">
-          {combinationName} 
-        </h5>
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border-2 ${
+        isWaterfallSelected ? 'border-amber-400 bg-amber-50/30' : 'border-orange-100/50'
+      } hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <h5 className="text-sm font-medium text-orange-800 mb-3 cursor-pointer hover:text-orange-600 transition-colors">
+              {combinationName} 
+            </h5>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+            <ContextMenuItem
+              onClick={() => {
+                const graph = data.graphs?.find(g => g.type === 'waterfall');
+                if (graph) {
+                  stageSelectionForExhibition(graph, 'graph', combinationName);
+                }
+              }}
+            >
+              Exhibit this component
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
         <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
           <RechartsChartRenderer {...rendererProps} />
         </div>
@@ -1373,6 +2002,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     const chartTheme = contributionChartThemes[combinationName] || 'default';
     const showDataLabels = contributionChartDataLabels[combinationName] !== undefined ? contributionChartDataLabels[combinationName] : false;
     const sortOrder = contributionChartSortOrder[combinationName] || null;
+    const showGrid = contributionChartGridToggle[combinationName] !== undefined ? contributionChartGridToggle[combinationName] : true;
+    const showLegend = contributionChartLegendToggle[combinationName] !== undefined ? contributionChartLegendToggle[combinationName] : (chartType === 'pie_chart');
+    const showAxisLabels = contributionChartAxisLabelsToggle[combinationName] !== undefined ? contributionChartAxisLabelsToggle[combinationName] : true;
     const isExpanded = !collapsedGraphs.contribution;
     
     // Prepare props for RechartsChartRenderer
@@ -1391,19 +2023,47 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       width: isExpanded ? 400 : 500,
       height: isExpanded ? 350 : 400,
       showDataLabels: showDataLabels,
-      showLegend: chartType === 'pie_chart',
+      showLegend: showLegend,
+      showGrid: showGrid,
+      showAxisLabels: showAxisLabels,
       sortOrder: sortOrder,
       onThemeChange: (newTheme: string) => handleContributionChartThemeChange(combinationName, newTheme),
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleContributionChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleContributionChartDataLabelsChange(combinationName, newShowDataLabels),
-      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleContributionChartSortOrderChange(combinationName, newSortOrder)
+      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleContributionChartSortOrderChange(combinationName, newSortOrder),
+      onGridToggle: (enabled: boolean) => handleContributionChartGridToggle(combinationName, enabled),
+      onLegendToggle: (enabled: boolean) => handleContributionChartLegendToggle(combinationName, enabled),
+      onAxisLabelsToggle: (enabled: boolean) => handleContributionChartAxisLabelsToggle(combinationName, enabled)
     };
+
+    // Check if this combination is selected for exhibition
+    const contributionGraphDef = data.graphs?.find(g => g.type === 'contribution');
+    const contributionDescriptor = contributionGraphDef ? createSelectionDescriptor(contributionGraphDef, 'graph', combinationName) : null;
+    const isContributionSelected = contributionDescriptor ? exhibitionSelections.some((entry) => entry.key === contributionDescriptor.key) : false;
     
     return (
-      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
-        <h5 className="text-sm font-medium text-orange-800 mb-3">
-          {combinationName} 
-        </h5>
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border-2 ${
+        isContributionSelected ? 'border-amber-400 bg-amber-50/30' : 'border-orange-100/50'
+      } hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <h5 className="text-sm font-medium text-orange-800 mb-3 cursor-pointer hover:text-orange-600 transition-colors">
+              {combinationName} 
+            </h5>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+            <ContextMenuItem
+              onClick={() => {
+                const graph = data.graphs?.find(g => g.type === 'contribution');
+                if (graph) {
+                  stageSelectionForExhibition(graph, 'graph', combinationName);
+                }
+              }}
+            >
+              Exhibit this component
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
         <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
           <RechartsChartRenderer {...rendererProps} />
         </div>
@@ -1454,6 +2114,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     const chartTheme = roiChartThemes[combinationName] || 'default';
     const showDataLabels = roiChartDataLabels[combinationName] !== undefined ? roiChartDataLabels[combinationName] : false;
     const sortOrder = roiChartSortOrder[combinationName] || null;
+    const showGrid = roiChartGridToggle[combinationName] !== undefined ? roiChartGridToggle[combinationName] : true;
+    const showLegend = roiChartLegendToggle[combinationName] !== undefined ? roiChartLegendToggle[combinationName] : (chartType === 'pie_chart');
+    const showAxisLabels = roiChartAxisLabelsToggle[combinationName] !== undefined ? roiChartAxisLabelsToggle[combinationName] : true;
     const isExpanded = !collapsedGraphs.roi;
     
     // Prepare props for RechartsChartRenderer
@@ -1472,19 +2135,47 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       width: isExpanded ? 400 : 500,
       height: isExpanded ? 350 : 400,
       showDataLabels: showDataLabels,
-      showLegend: chartType === 'pie_chart',
+      showLegend: showLegend,
+      showGrid: showGrid,
+      showAxisLabels: showAxisLabels,
       sortOrder: sortOrder,
       onThemeChange: (newTheme: string) => handleRoiChartThemeChange(combinationName, newTheme),
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleRoiChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleRoiChartDataLabelsChange(combinationName, newShowDataLabels),
-      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleRoiChartSortOrderChange(combinationName, newSortOrder)
+      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleRoiChartSortOrderChange(combinationName, newSortOrder),
+      onGridToggle: (enabled: boolean) => handleRoiChartGridToggle(combinationName, enabled),
+      onLegendToggle: (enabled: boolean) => handleRoiChartLegendToggle(combinationName, enabled),
+      onAxisLabelsToggle: (enabled: boolean) => handleRoiChartAxisLabelsToggle(combinationName, enabled)
     };
+
+    // Check if this combination is selected for exhibition
+    const roiGraphDef = data.graphs?.find(g => g.type === 'roi');
+    const roiDescriptor = roiGraphDef ? createSelectionDescriptor(roiGraphDef, 'graph', combinationName) : null;
+    const isRoiSelected = roiDescriptor ? exhibitionSelections.some((entry) => entry.key === roiDescriptor.key) : false;
     
     return (
-      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-purple-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
-        <h5 className="text-sm font-medium text-purple-800 mb-3">
-          {combinationName} 
-        </h5>
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border-2 ${
+        isRoiSelected ? 'border-amber-400 bg-amber-50/30' : 'border-purple-100/50'
+      } hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <h5 className="text-sm font-medium text-purple-800 mb-3 cursor-pointer hover:text-purple-600 transition-colors">
+              {combinationName} 
+            </h5>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+            <ContextMenuItem
+              onClick={() => {
+                const graph = data.graphs?.find(g => g.type === 'roi');
+                if (graph) {
+                  stageSelectionForExhibition(graph, 'graph', combinationName);
+                }
+              }}
+            >
+              Exhibit this component
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
         <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
           <RechartsChartRenderer {...rendererProps} />
         </div>
@@ -1540,6 +2231,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     const chartTheme = actualVsPredictedChartThemes[combinationName] || 'default';
     const showDataLabels = actualVsPredictedChartDataLabels[combinationName] !== undefined ? actualVsPredictedChartDataLabels[combinationName] : false;
     const sortOrder = actualVsPredictedChartSortOrder[combinationName] || null;
+    const showGrid = actualVsPredictedChartGridToggle[combinationName] !== undefined ? actualVsPredictedChartGridToggle[combinationName] : true;
+    const showLegend = actualVsPredictedChartLegendToggle[combinationName] !== undefined ? actualVsPredictedChartLegendToggle[combinationName] : (chartType === 'pie_chart');
+    const showAxisLabels = actualVsPredictedChartAxisLabelsToggle[combinationName] !== undefined ? actualVsPredictedChartAxisLabelsToggle[combinationName] : true;
     const isExpanded = !collapsedGraphs['actual-vs-predicted'];
     
     // Prepare props for RechartsChartRenderer
@@ -1558,19 +2252,47 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       width: isExpanded ? 400 : 500,
       height: isExpanded ? 350 : 400,
       showDataLabels: showDataLabels,
-      showLegend: chartType === 'pie_chart',
+      showLegend: showLegend,
+      showGrid: showGrid,
+      showAxisLabels: showAxisLabels,
       sortOrder: sortOrder,
       onThemeChange: (newTheme: string) => handleActualVsPredictedChartThemeChange(combinationName, newTheme),
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleActualVsPredictedChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleActualVsPredictedChartDataLabelsChange(combinationName, newShowDataLabels),
-      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleActualVsPredictedChartSortOrderChange(combinationName, newSortOrder)
+      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleActualVsPredictedChartSortOrderChange(combinationName, newSortOrder),
+      onGridToggle: (enabled: boolean) => handleActualVsPredictedChartGridToggle(combinationName, enabled),
+      onLegendToggle: (enabled: boolean) => handleActualVsPredictedChartLegendToggle(combinationName, enabled),
+      onAxisLabelsToggle: (enabled: boolean) => handleActualVsPredictedChartAxisLabelsToggle(combinationName, enabled)
     };
+
+    // Check if this combination is selected for exhibition
+    const actualVsPredictedGraphDef = data.graphs?.find(g => g.type === 'actual-vs-predicted');
+    const actualVsPredictedDescriptor = actualVsPredictedGraphDef ? createSelectionDescriptor(actualVsPredictedGraphDef, 'graph', combinationName) : null;
+    const isActualVsPredictedSelected = actualVsPredictedDescriptor ? exhibitionSelections.some((entry) => entry.key === actualVsPredictedDescriptor.key) : false;
     
     return (
-      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
-        <h5 className="text-sm font-medium text-orange-800 mb-3">
-          {combinationName} 
-        </h5>
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border-2 ${
+        isActualVsPredictedSelected ? 'border-amber-400 bg-amber-50/30' : 'border-orange-100/50'
+      } hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <h5 className="text-sm font-medium text-orange-800 mb-3 cursor-pointer hover:text-orange-600 transition-colors">
+              {combinationName} 
+            </h5>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+            <ContextMenuItem
+              onClick={() => {
+                const graph = data.graphs?.find(g => g.type === 'actual-vs-predicted');
+                if (graph) {
+                  stageSelectionForExhibition(graph, 'graph', combinationName);
+                }
+              }}
+            >
+              Exhibit this component
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
         <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
           <RechartsChartRenderer {...rendererProps} />
         </div>
@@ -1623,6 +2345,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     const chartTheme = betaCoefficientsChartThemes[combinationName] || 'default';
     const showDataLabels = betaCoefficientsChartDataLabels[combinationName] !== undefined ? betaCoefficientsChartDataLabels[combinationName] : true;
     const sortOrder = betaCoefficientsChartSortOrder[combinationName] || null;
+    const showGrid = betaCoefficientsChartGridToggle[combinationName] !== undefined ? betaCoefficientsChartGridToggle[combinationName] : true;
+    const showLegend = betaCoefficientsChartLegendToggle[combinationName] !== undefined ? betaCoefficientsChartLegendToggle[combinationName] : (chartType === 'pie_chart');
+    const showAxisLabels = betaCoefficientsChartAxisLabelsToggle[combinationName] !== undefined ? betaCoefficientsChartAxisLabelsToggle[combinationName] : true;
     const isExpanded = !collapsedGraphs.beta;
     
     const rendererProps = {
@@ -1640,17 +2365,47 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       width: isExpanded ? 400 : 500,
       height: isExpanded ? 350 : 400,
       showDataLabels: showDataLabels,
-      showLegend: chartType === 'pie_chart',
+      showLegend: showLegend,
+      showGrid: showGrid,
+      showAxisLabels: showAxisLabels,
       sortOrder: sortOrder,
       onThemeChange: (newTheme: string) => handleBetaCoefficientsChartThemeChange(combinationName, newTheme),
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleBetaCoefficientsChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleBetaCoefficientsChartDataLabelsChange(combinationName, newShowDataLabels),
-      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleBetaCoefficientsChartSortOrderChange(combinationName, newSortOrder)
+      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleBetaCoefficientsChartSortOrderChange(combinationName, newSortOrder),
+      onGridToggle: (enabled: boolean) => handleBetaCoefficientsChartGridToggle(combinationName, enabled),
+      onLegendToggle: (enabled: boolean) => handleBetaCoefficientsChartLegendToggle(combinationName, enabled),
+      onAxisLabelsToggle: (enabled: boolean) => handleBetaCoefficientsChartAxisLabelsToggle(combinationName, enabled)
     };
+
+    // Check if this combination is selected for exhibition
+    const betaGraphDef = data.graphs?.find(g => g.type === 'beta');
+    const betaDescriptor = betaGraphDef ? createSelectionDescriptor(betaGraphDef, 'graph', combinationName) : null;
+    const isBetaSelected = betaDescriptor ? exhibitionSelections.some((entry) => entry.key === betaDescriptor.key) : false;
     
     return (
-      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
-        <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border-2 ${
+        isBetaSelected ? 'border-amber-400 bg-amber-50/30' : 'border-orange-100/50'
+      } hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <h5 className="text-sm font-medium text-orange-800 mb-3 cursor-pointer hover:text-orange-600 transition-colors">
+              {combinationName}
+            </h5>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+            <ContextMenuItem
+              onClick={() => {
+                const graph = data.graphs?.find(g => g.type === 'beta');
+                if (graph) {
+                  stageSelectionForExhibition(graph, 'graph', combinationName);
+                }
+              }}
+            >
+              Exhibit this component
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
         <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
           <RechartsChartRenderer {...rendererProps} />
         </div>
@@ -1698,6 +2453,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     const chartTheme = elasticityChartThemes[combinationName] || 'default';
     const showDataLabels = elasticityChartDataLabels[combinationName] !== undefined ? elasticityChartDataLabels[combinationName] : true;
     const sortOrder = elasticityChartSortOrder[combinationName] || null;
+    const showGrid = elasticityChartGridToggle[combinationName] !== undefined ? elasticityChartGridToggle[combinationName] : true;
+    const showLegend = elasticityChartLegendToggle[combinationName] !== undefined ? elasticityChartLegendToggle[combinationName] : (chartType === 'pie_chart');
+    const showAxisLabels = elasticityChartAxisLabelsToggle[combinationName] !== undefined ? elasticityChartAxisLabelsToggle[combinationName] : true;
     const isExpanded = !collapsedGraphs.elasticity;
     
     const rendererProps = {
@@ -1715,17 +2473,47 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       width: isExpanded ? 400 : 500,
       height: isExpanded ? 350 : 400,
       showDataLabels: showDataLabels,
-      showLegend: chartType === 'pie_chart',
+      showLegend: showLegend,
+      showGrid: showGrid,
+      showAxisLabels: showAxisLabels,
       sortOrder: sortOrder,
       onThemeChange: (newTheme: string) => handleElasticityChartThemeChange(combinationName, newTheme),
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleElasticityChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleElasticityChartDataLabelsChange(combinationName, newShowDataLabels),
-      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleElasticityChartSortOrderChange(combinationName, newSortOrder)
+      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleElasticityChartSortOrderChange(combinationName, newSortOrder),
+      onGridToggle: (enabled: boolean) => handleElasticityChartGridToggle(combinationName, enabled),
+      onLegendToggle: (enabled: boolean) => handleElasticityChartLegendToggle(combinationName, enabled),
+      onAxisLabelsToggle: (enabled: boolean) => handleElasticityChartAxisLabelsToggle(combinationName, enabled)
     };
+
+    // Check if this combination is selected for exhibition
+    const elasticityGraphDef = data.graphs?.find(g => g.type === 'elasticity');
+    const elasticityDescriptor = elasticityGraphDef ? createSelectionDescriptor(elasticityGraphDef, 'graph', combinationName) : null;
+    const isElasticitySelected = elasticityDescriptor ? exhibitionSelections.some((entry) => entry.key === elasticityDescriptor.key) : false;
     
     return (
-      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
-        <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border-2 ${
+        isElasticitySelected ? 'border-amber-400 bg-amber-50/30' : 'border-orange-100/50'
+      } hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <h5 className="text-sm font-medium text-orange-800 mb-3 cursor-pointer hover:text-orange-600 transition-colors">
+              {combinationName}
+            </h5>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+            <ContextMenuItem
+              onClick={() => {
+                const graph = data.graphs?.find(g => g.type === 'elasticity');
+                if (graph) {
+                  stageSelectionForExhibition(graph, 'graph', combinationName);
+                }
+              }}
+            >
+              Exhibit this component
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
         <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
           <RechartsChartRenderer {...rendererProps} />
         </div>
@@ -1812,10 +2600,35 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     }
     
     const isExpanded = !collapsedGraphs['s-curve'];
+
+    // Check if this combination is selected for exhibition
+    const sCurveGraphDef = data.graphs?.find(g => g.type === 's-curve');
+    const sCurveDescriptor = sCurveGraphDef ? createSelectionDescriptor(sCurveGraphDef, 'graph', combinationName) : null;
+    const isSCurveSelected = sCurveDescriptor ? exhibitionSelections.some((entry) => entry.key === sCurveDescriptor.key) : false;
     
     return (
-      <div key={chartId} className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 min-w-[800px]">
-        <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border-2 ${
+        isSCurveSelected ? 'border-amber-400 bg-amber-50/30' : 'border-orange-100/50'
+      } hover:shadow-md transition-all duration-200 min-w-[800px]`}>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <h5 className="text-sm font-medium text-orange-800 mb-3 cursor-pointer hover:text-orange-600 transition-colors">
+              {combinationName}
+            </h5>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+            <ContextMenuItem
+              onClick={() => {
+                const graph = data.graphs?.find(g => g.type === 's-curve');
+                if (graph) {
+                  stageSelectionForExhibition(graph, 'graph', combinationName);
+                }
+              }}
+            >
+              Exhibit this component
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
         <div className="grid grid-cols-2 gap-6">
           {variables.map((variable, index) => {
             const curveData = sCurves[variable];
@@ -1824,22 +2637,41 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
               volume: curveData.total_volumes[idx] || 0
             }));
             
+            // Get chart configuration for this combination and variable
+            const chartKey = `${combinationName}_${variable}`;
+            const chartType = sCurveChartTypes[chartKey] || 'line_chart';
+            const chartTheme = sCurveChartThemes[chartKey] || 'default';
+            const showGrid = sCurveChartGridToggle[chartKey] !== undefined ? sCurveChartGridToggle[chartKey] : true;
+            const showLegend = sCurveChartLegendToggle[chartKey] !== undefined ? sCurveChartLegendToggle[chartKey] : false;
+            const showAxisLabels = sCurveChartAxisLabelsToggle[chartKey] !== undefined ? sCurveChartAxisLabelsToggle[chartKey] : true;
+            
             return (
               <div key={`${variable}-${index}`} className="border border-gray-200 rounded-lg p-4 min-w-[350px]">
                 <div className="w-full h-[400px]">
                   <RechartsChartRenderer
-                    type="line_chart"
+                    type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
                     data={chartData}
                     xField="percentage"
                     yField="volume"
                     xAxisLabel="Percentage Change (%)"
                     yAxisLabel="Volume"
-                    theme="default"
+                    theme={chartTheme}
                     enableScroll={false}
                     width="100%"
                     height="100%"
                     showDataLabels={false}
-                    showLegend={false}
+                    showLegend={showLegend}
+                    showGrid={showGrid}
+                    showAxisLabels={showAxisLabels}
+                    onThemeChange={(newTheme: string) => {
+                      setSCurveChartThemes(prev => ({ ...prev, [chartKey]: newTheme }));
+                    }}
+                    onChartTypeChange={(newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
+                      setSCurveChartTypes(prev => ({ ...prev, [chartKey]: newType }));
+                    }}
+                    onGridToggle={(enabled: boolean) => handleSCurveChartGridToggle(chartKey, enabled)}
+                    onLegendToggle={(enabled: boolean) => handleSCurveChartLegendToggle(chartKey, enabled)}
+                    onAxisLabelsToggle={(enabled: boolean) => handleSCurveChartAxisLabelsToggle(chartKey, enabled)}
                   />
                 </div>
                 <div className="mt-2 text-center">
@@ -1893,6 +2725,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     const chartTheme = averagesChartThemes[combinationName] || 'default';
     const showDataLabels = averagesChartDataLabels[combinationName] !== undefined ? averagesChartDataLabels[combinationName] : true;
     const sortOrder = averagesChartSortOrder[combinationName] || null;
+    const showGrid = averagesChartGridToggle[combinationName] !== undefined ? averagesChartGridToggle[combinationName] : true;
+    const showLegend = averagesChartLegendToggle[combinationName] !== undefined ? averagesChartLegendToggle[combinationName] : (chartType === 'pie_chart');
+    const showAxisLabels = averagesChartAxisLabelsToggle[combinationName] !== undefined ? averagesChartAxisLabelsToggle[combinationName] : true;
     const isExpanded = !collapsedGraphs.averages;
     
     const rendererProps = {
@@ -1910,17 +2745,47 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       width: isExpanded ? 400 : 500,
       height: isExpanded ? 350 : 400,
       showDataLabels: showDataLabels,
-      showLegend: chartType === 'pie_chart',
+      showLegend: showLegend,
+      showGrid: showGrid,
+      showAxisLabels: showAxisLabels,
       sortOrder: sortOrder,
       onThemeChange: (newTheme: string) => handleAveragesChartThemeChange(combinationName, newTheme),
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleAveragesChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleAveragesChartDataLabelsChange(combinationName, newShowDataLabels),
-      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleAveragesChartSortOrderChange(combinationName, newSortOrder)
+      onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleAveragesChartSortOrderChange(combinationName, newSortOrder),
+      onGridToggle: (enabled: boolean) => handleAveragesChartGridToggle(combinationName, enabled),
+      onLegendToggle: (enabled: boolean) => handleAveragesChartLegendToggle(combinationName, enabled),
+      onAxisLabelsToggle: (enabled: boolean) => handleAveragesChartAxisLabelsToggle(combinationName, enabled)
     };
+
+    // Check if this combination is selected for exhibition
+    const averagesGraphDef = data.graphs?.find(g => g.type === 'averages');
+    const averagesDescriptor = averagesGraphDef ? createSelectionDescriptor(averagesGraphDef, 'graph', combinationName) : null;
+    const isAveragesSelected = averagesDescriptor ? exhibitionSelections.some((entry) => entry.key === averagesDescriptor.key) : false;
     
     return (
-      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
-        <h5 className="text-sm font-medium text-orange-800 mb-3">{combinationName}</h5>
+      <div key={chartId} className={`bg-white rounded-lg p-4 shadow-sm border-2 ${
+        isAveragesSelected ? 'border-amber-400 bg-amber-50/30' : 'border-orange-100/50'
+      } hover:shadow-md transition-all duration-200 ${isExpanded ? 'min-w-[500px]' : 'min-w-[600px]'}`}>
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <h5 className="text-sm font-medium text-orange-800 mb-3 cursor-pointer hover:text-orange-600 transition-colors">
+              {combinationName}
+            </h5>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-48 bg-white border border-gray-200 shadow-lg rounded-md">
+            <ContextMenuItem
+              onClick={() => {
+                const graph = data.graphs?.find(g => g.type === 'averages');
+                if (graph) {
+                  stageSelectionForExhibition(graph, 'graph', combinationName);
+                }
+              }}
+            >
+              Exhibit this component
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
         <div className={`w-full ${isExpanded ? 'h-[350px]' : 'h-[400px]'}`}>
           <RechartsChartRenderer {...rendererProps} />
         </div>
@@ -2434,36 +3299,35 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
                                   <Checkbox
                                     checked={selectedValues.length === info.unique_values.length}
                                     onCheckedChange={(checked) => {
+                                      console.log('🔍 Select All toggled:', { identifierName, checked, uniqueValues: info.unique_values });
                                       if (checked) {
                                         // Select all
                                         const newSelectedValues = [...info.unique_values];
-                                        setSelectedIdentifierValues(prev => ({
-                                          ...prev,
+                                        const updatedAllValues = {
+                                          ...selectedIdentifierValues,
                                           [identifierName]: newSelectedValues
-                                        }));
+                                        };
+                                        
+                                        setSelectedIdentifierValues(updatedAllValues);
                                         
                                         // Update main data
-                                        onDataChange({ 
-                                          selectedIdentifierValues: {
-                                            ...data.selectedIdentifierValues,
-                                            [identifierName]: newSelectedValues
-                                          }
-                                        });
+                                        onDataChange({ selectedIdentifierValues: updatedAllValues });
+                                        
+                                        console.log('🔍 Selected all values for', identifierName, ':', updatedAllValues);
                                       } else {
                                         // Deselect all
                                         const newSelectedValues: string[] = [];
-                                        setSelectedIdentifierValues(prev => ({
-                                          ...prev,
+                                        const updatedAllValues = {
+                                          ...selectedIdentifierValues,
                                           [identifierName]: newSelectedValues
-                                        }));
+                                        };
+                                        
+                                        setSelectedIdentifierValues(updatedAllValues);
                                         
                                         // Update main data
-                                        onDataChange({ 
-                                          selectedIdentifierValues: {
-                                            ...data.selectedIdentifierValues,
-                                            [identifierName]: newSelectedValues
-                                          }
-                                        });
+                                        onDataChange({ selectedIdentifierValues: updatedAllValues });
+                                        
+                                        console.log('🔍 Deselected all values for', identifierName, ':', updatedAllValues);
                                       }
                                     }}
                                   />
@@ -2506,6 +3370,11 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
             </div>
           )}
         </Card>
+
+        {/* Instructional text for exhibition */}
+        <div className="mt-6 text-center">
+          <p className="text-sm text-gray-600">Right-click a combination name to stage it for exhibition.</p>
+        </div>
 
         {/* Waterfall Charts Section */}
         {selectedGraphs.some(g => g.type === 'waterfall') && data.selectedDataframe && (
@@ -2936,3 +3805,5 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
 };
 
 export default EvaluateModelsFeatureCanvas;
+
+

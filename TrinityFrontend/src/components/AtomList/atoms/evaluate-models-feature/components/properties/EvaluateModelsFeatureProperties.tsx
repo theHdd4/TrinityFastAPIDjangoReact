@@ -175,4 +175,3 @@ const EvaluateModelsFeatureProperties: React.FC<Props> = (props) => {
 
 export default EvaluateModelsFeatureProperties;
 
-

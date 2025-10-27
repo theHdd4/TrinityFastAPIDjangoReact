@@ -83,7 +83,7 @@ CORS_ALLOW_METHODS = list(default_methods)
 CORS_PREFLIGHT_MAX_AGE = 86400            # 24h cache for pre-flight
 
 # Debug CORS configuration
-print(f"🔧 CORS Configuration:")
+print(f"CORS Configuration:")
 print(f"   HOST_IP: {HOST_IP}")
 print(f"   FRONTEND_PORT: {FRONTEND_PORT}")
 print(f"   _frontend_origin: {_frontend_origin}")
@@ -116,14 +116,27 @@ SHARED_APPS = [
     "rest_framework",
     "guardian",
     "simple_history",
+    
+    # UseCase app - stores app definitions in public schema
+    "apps.usecase",
+    
+    # Molecules app - stores molecule definitions in public schema
+    "apps.molecules",
+    
+    # Trinity V1 Atoms app - stores atom definitions in public schema
+    "apps.trinity_v1_atoms",
 ]
 
 TENANT_APPS = [
-    "apps.atoms",                 # Add this line
+    # Workflows are tenant-specific (saved in tenant schema)
+    "apps.workflows",
+    
+    # Other tenant-specific apps
+    "apps.atoms",
     "apps.registry",
     "apps.subscriptions",
-    "apps.workflows",
     "apps.atom_configs",
+    "apps.custom_molecules",  # Custom molecules stored in tenant schema
     "apps.config_store",
     "apps.permissions",
     "apps.orchestration",
@@ -242,6 +255,14 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.BasicAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+    ],
+    "DEFAULT_PARSER_CLASSES": [
+        "rest_framework.parsers.JSONParser",
+        "rest_framework.parsers.FormParser",
+        "rest_framework.parsers.MultiPartParser",
+    ],
 }
 
 # ------------------------------------------------------------------

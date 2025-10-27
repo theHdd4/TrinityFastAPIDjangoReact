@@ -40,6 +40,12 @@ export interface FeatureOverviewSkuStatisticsSettings {
 
 export type FeatureOverviewViewType = 'statistical_summary' | 'trend_analysis';
 
+export interface FeatureOverviewExhibitionControls {
+  enableComponentTitle?: boolean;
+  allowEditInExhibition?: boolean;
+  transparentBackground?: boolean;
+}
+
 export interface FeatureOverviewMetadata {
   metric?: string;
   combination?: Record<string, unknown>;
@@ -56,6 +62,7 @@ export interface FeatureOverviewMetadata {
   chart_config?: unknown;
   chartConfig?: unknown;
   viewType?: FeatureOverviewViewType;
+  exhibitionControls?: FeatureOverviewExhibitionControls;
 }
 
 export interface FeatureOverviewComponentProps {

@@ -3,6 +3,7 @@ import { X, StickyNote } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { POSITION_PANEL_WIDTH } from './operationsPalette';
 
 interface SlideNotesProps {
   currentSlide: number;
@@ -28,8 +29,15 @@ export const SlideNotes: React.FC<SlideNotesProps> = ({
   };
 
   return (
-    <div className="flex h-full w-80 flex-shrink-0 flex-col bg-background border-l border-border shadow-xl animate-slide-in-right">
-      <div className="flex items-center justify-between p-4 border-b border-border bg-muted/30">
+    <div
+      className="flex h-full w-full max-w-[var(--notes-panel-width)] flex-shrink-0 flex-col overflow-hidden rounded-3xl border border-border/70 bg-background/95 shadow-2xl"
+      style={{
+        // provide explicit width so the panel mirrors the other operations drawers
+        // while still allowing responsive adjustments when POSITION_PANEL_WIDTH changes
+        ['--notes-panel-width' as '--notes-panel-width']: POSITION_PANEL_WIDTH,
+      }}
+    >
+      <div className="flex items-center justify-between rounded-t-3xl border-b border-border/60 bg-muted/30 px-5 py-4">
         <div className="flex items-center gap-2">
           <StickyNote className="h-5 w-5 text-primary" />
           <h3 className="font-semibold text-lg">Speaker Notes</h3>
@@ -40,8 +48,8 @@ export const SlideNotes: React.FC<SlideNotesProps> = ({
       </div>
 
       <ScrollArea className="flex-1">
-        <div className="p-4 space-y-4">
-          <div className="text-sm text-muted-foreground">Slide {currentSlide + 1} Notes</div>
+        <div className="space-y-4 px-5 py-4">
+          <div className="text-sm font-medium text-muted-foreground/90">Slide {currentSlide + 1} Notes</div>
           <Textarea
             value={localNotes}
             onChange={e => setLocalNotes(e.target.value)}
@@ -49,9 +57,9 @@ export const SlideNotes: React.FC<SlideNotesProps> = ({
             placeholder="Add speaker notes for this slide..."
             className="min-h-[200px] resize-none"
           />
-          <div className="p-3 bg-muted/50 rounded-lg border border-border">
-            <h4 className="text-xs font-semibold mb-2 text-muted-foreground uppercase">Tips</h4>
-            <ul className="text-xs text-muted-foreground space-y-1">
+          <div className="rounded-xl border border-border bg-muted/50 p-3">
+            <h4 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Tips</h4>
+            <ul className="space-y-1 text-xs text-muted-foreground">
               <li>• Use notes to remember key points</li>
               <li>• Notes are visible only to you</li>
               <li>• Navigate slides to see their notes</li>

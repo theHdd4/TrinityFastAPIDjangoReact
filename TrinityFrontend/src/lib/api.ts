@@ -63,6 +63,14 @@ export const REGISTRY_API =
   normalizeUrl(import.meta.env.VITE_REGISTRY_API) ||
   `${backendOrigin}${djangoPrefix}/registry`;
 
+export const USECASES_API =
+  normalizeUrl(import.meta.env.VITE_USECASES_API) ||
+  `${backendOrigin}${djangoPrefix}/usecases`;
+
+export const TRINITY_V1_ATOMS_API =
+  normalizeUrl(import.meta.env.VITE_TRINITY_V1_ATOMS_API) ||
+  `${backendOrigin}${djangoPrefix}`;
+
 export const TENANTS_API =
   normalizeUrl(import.meta.env.VITE_TENANTS_API) ||
   `${backendOrigin}${djangoPrefix}/tenants`;
@@ -79,6 +87,10 @@ export const SUBSCRIPTIONS_API =
   normalizeUrl(import.meta.env.VITE_SUBSCRIPTIONS_API) ||
   `${backendOrigin}${djangoPrefix}/subscriptions`;
 
+export const WORKFLOWS_API =
+  normalizeUrl(import.meta.env.VITE_WORKFLOWS_API) ||
+  `${backendOrigin}${djangoPrefix}/workflows`;
+
 export const SIGNUPS_API =
   normalizeUrl(import.meta.env.VITE_SIGNUPS_API) ||
   `${backendOrigin}${djangoPrefix}/signups`;
@@ -90,6 +102,18 @@ export const VALIDATE_API =
 export const EXHIBITION_API =
   normalizeUrl(import.meta.env.VITE_EXHIBITION_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/exhibition`;
+
+export const IMAGES_API =
+  normalizeUrl(import.meta.env.VITE_IMAGES_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/images`;
+
+export const LABORATORY_PROJECT_STATE_API =
+  normalizeUrl(import.meta.env.VITE_LABORATORY_PROJECT_STATE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/laboratory-project-state`;
+
+export const EXHIBITION_PROJECT_STATE_API =
+  normalizeUrl(import.meta.env.VITE_EXHIBITION_PROJECT_STATE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/exhibition-project-state`;
 
 export const CONCAT_API =
   normalizeUrl(import.meta.env.VITE_CONCAT_API) ||
@@ -177,6 +201,33 @@ export const EXPLORE_API =
 export const EVALUATE_API =
   normalizeUrl(import.meta.env.VITE_EVALUATE_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/evaluate`;
+
+export const MOLECULES_API =
+  normalizeUrl(import.meta.env.VITE_MOLECULES_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/molecules`;
+
+export const CUSTOM_MOLECULES_API =
+  normalizeUrl(import.meta.env.VITE_CUSTOM_MOLECULES_API) ||
+  `${backendOrigin}${djangoPrefix}/custom-molecules`;
+
+const shouldLogApiConfig =
+  typeof window !== 'undefined' &&
+  (import.meta.env.DEV || import.meta.env.VITE_SHOW_API_DEBUG === 'true');
+
+if (shouldLogApiConfig) {
+  const fastapiOrigin = backendOrigin.replace(
+    new RegExp(`:${djangoPort}$`),
+    `:${fastapiPort}`,
+  );
+
+  console.info('[Trinity API] Resolved backend endpoints', {
+    windowOrigin: window.location.origin,
+    backendOrigin,
+    fastapiOrigin,
+    exhibitionApi: EXHIBITION_API,
+    laboratoryApi: LABORATORY_API,
+  });
+}
 
 // Signup API function
 export const submitSignup = async (data: {

@@ -5,9 +5,9 @@ import CreateColumnProperties from './components/properties/CreateColumnProperti
 
 export default {
   id: 'create-column',
-  title: 'Create and Transform Columns',
+  title: 'Create and Transform Features',
   category: 'Data Processing',
-  description: 'Create or Transform new columns using arithmetic operations on dataframe columns',
+  description: 'Create or Transform new features using arithmetic operations on dataframe columns',
   tags: ['feature', 'transform', 'create'],
   color: 'bg-green-500',
   icon: Plus,

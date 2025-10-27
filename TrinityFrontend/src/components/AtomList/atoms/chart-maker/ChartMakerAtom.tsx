@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useMemo } from 'react';
+import React, { useRef, useEffect } from 'react';
 import ChartMakerCanvas from './components/ChartMakerCanvas';
 import { useLaboratoryStore, DEFAULT_CHART_MAKER_SETTINGS, ChartMakerSettings as SettingsType, ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { chartMakerApi } from './services/chartMakerApi';
@@ -33,23 +33,8 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
   const chartLoadingTimers = useRef<Record<string, NodeJS.Timeout | number | null>>({});
   const initialMount = useRef(true);
 
-  // Memoize chart properties that should trigger auto-rendering to prevent infinite loops
-  const chartAutoRenderDeps = useMemo(() => 
-    settings.charts.map(chart => ({
-      id: chart.id,
-      xAxis: chart.xAxis,
-      yAxis: chart.yAxis,
-      traces: chart.traces?.map(trace => ({
-        yAxis: trace.yAxis,
-        filters: Object.keys(trace.filters || {}),
-        filterValues: Object.values(trace.filters || {}).map(vals => vals.length)
-      })),
-      filters: Object.keys(chart.filters || {}),
-      filterValues: Object.values(chart.filters || {}).map(vals => vals.length),
-      chartRendered: chart.chartRendered,
-      isAdvancedMode: chart.isAdvancedMode
-    }))
-  , [settings.charts]);
+  // Track previous chart auto-render dependencies to detect which specific chart changed
+  const prevChartDepsRef = useRef<any[]>([]);
 
   const handleChartTypeChange = async (chartId: string, newType: ChartConfig['type']) => {
     // Start debounce timer for loading spinner
@@ -85,7 +70,7 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
             const legacyFilters = updatedChart.isAdvancedMode ? {} : mergeTraceFilters(updatedChart);
             
             const chartRequest = {
-              file_id: settings.fileId,
+              file_id: (settings as any).dataSource || settings.fileId,
               chart_type: newType,
               traces: traces,
               title: updatedChart.title,
@@ -160,7 +145,7 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
             const legacyFilters = updatedChart.isAdvancedMode ? {} : mergeTraceFilters(updatedChart);
             
             const chartRequest = {
-              file_id: settings.fileId,
+              file_id: (settings as any).dataSource || settings.fileId,
               chart_type: chart.type,
               traces: traces,
               title: chart.title,
@@ -245,7 +230,7 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
             const legacyFilters = updatedChart.isAdvancedMode ? {} : mergeTraceFilters(updatedChart);
             
             const chartRequest = {
-              file_id: settings.fileId,
+              file_id: (settings as any).dataSource || settings.fileId,
               chart_type: chart.type,
               traces: traces,
               title: chart.title,
@@ -313,10 +298,47 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
   // Auto-render charts based on chartRendered status and different conditions for single/multi-series
   useEffect(() => {
     if (!settings.fileId || !settings.uploadedData) return;
+    
+    // Calculate current dependencies fresh (don't use memoized version to avoid stale comparisons)
+    const currentChartDeps = settings.charts.map(chart => ({
+      id: chart.id,
+      xAxis: chart.xAxis,
+      yAxis: chart.yAxis,
+      aggregation: chart.aggregation,
+      legendField: chart.legendField,
+      traces: chart.traces?.map(trace => ({
+        yAxis: trace.yAxis,
+        filters: Object.keys(trace.filters || {}),
+        filterValues: Object.values(trace.filters || {}).map(vals => (vals as string[]).length)
+      })),
+      filters: Object.keys(chart.filters || {}),
+      filterValues: Object.values(chart.filters || {}).map(vals => vals.length),
+      chartRendered: chart.chartRendered,
+      isAdvancedMode: chart.isAdvancedMode
+    }));
+    
+    // Detect which charts actually changed by comparing with previous dependencies
+    const changedChartIds = new Set<string>();
+    currentChartDeps.forEach((currentDeps, index) => {
+      const prevDeps = prevChartDepsRef.current[index];
+      
+      // Check if this specific chart changed (not on initial mount)
+      if (!initialMount.current && prevDeps) {
+        const currentStr = JSON.stringify(currentDeps);
+        const prevStr = JSON.stringify(prevDeps);
+        if (currentStr !== prevStr) {
+          changedChartIds.add(currentDeps.id);
+        }
+      }
+    });
+    
     settings.charts.forEach(async (chart) => {
       if (initialMount.current && chart.chartRendered && chart.chartConfig) return;
       // Skip if chart is already loading to prevent infinite loops
       if (chart.chartLoading) return;
+      
+      // ONLY auto-render if this specific chart changed, or if it's the initial mount
+      if (!initialMount.current && !changedChartIds.has(chart.id)) return;
       
       const migratedChart = migrateLegacyChart(chart);
       let shouldAutoRender = false;
@@ -391,7 +413,7 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
           const legacyFilters = migratedChart.isAdvancedMode ? {} : mergeTraceFilters(migratedChart);
           
           const chartRequest = {
-            file_id: settings.fileId,
+            file_id: (settings as any).dataSource || settings.fileId,
             chart_type: chart.type,
             traces: traces,
             title: chart.title,
@@ -433,8 +455,11 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
         }
       }
     });
+    
+    // Update previous dependencies AFTER processing all charts
+    prevChartDepsRef.current = currentChartDeps;
     initialMount.current = false;
-  }, [settings.fileId, settings.uploadedData, atomId, updateSettings, chartAutoRenderDeps]);
+  }, [settings.fileId, settings.uploadedData, atomId, updateSettings, settings.charts]);
 
   // Only show rendered charts if they've been marked as rendered
   const chartsToShow = settings.charts;

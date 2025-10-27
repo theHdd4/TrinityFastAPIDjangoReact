@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils';
 import TextBoxToolbar from './TextBoxToolbar';
 import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from './constants';
-import type { TextBoxFormatting } from './types';
+import { resolveFontFamily } from './fontLoading';
+import type { TextBoxFormatting, TextStylePreset } from './types';
 
 interface SlideTextBoxObjectProps {
   id: string;
@@ -19,9 +20,118 @@ interface SlideTextBoxObjectProps {
   onDelete?: () => void;
   onInteract: () => void;
   onToolbarStateChange: (objectId: string, toolbar: React.ReactNode | null) => void;
+  onRequestPositionPanel?: () => void;
 }
 
 const clampFontSize = (value: number) => Math.min(Math.max(value, 8), 200);
+
+const LIST_LINE_SEPARATOR = /\r?\n/;
+const BULLET_PATTERN = /^\s*[•-]\s+/;
+const NUMBERED_PATTERN = /^\s*\d+[.)]?\s+/;
+
+const decodeHtmlEntities = (value: string): string => {
+  if (typeof window === 'undefined') {
+    return value;
+  }
+
+  const textarea = window.document.createElement('textarea');
+  textarea.innerHTML = value;
+  return textarea.value;
+};
+
+const htmlToPlainText = (rawValue: string): string => {
+  if (!rawValue) {
+    return '';
+  }
+
+  let working = rawValue
+    .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/(div|p|li)>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '')
+    .replace(/<div[^>]*>/gi, '')
+    .replace(/<p[^>]*>/gi, '')
+    .replace(/<span[^>]*>/gi, '')
+    .replace(/<\/span>/gi, '')
+    .replace(/<\/ul>/gi, '\n')
+    .replace(/<\/ol>/gi, '\n')
+    .replace(/<[^>]+>/g, '');
+
+  working = working.replace(/\u00a0/g, ' ');
+  working = decodeHtmlEntities(working);
+
+  while (working.endsWith('\n')) {
+    working = working.slice(0, -1);
+  }
+
+  return working;
+};
+
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const plainTextToHtml = (value: string): string => {
+  if (!value) {
+    return '';
+  }
+
+  return value
+    .split(LIST_LINE_SEPARATOR)
+    .map(line => {
+      if (line.length === 0) {
+        return '<div><br></div>';
+      }
+      return `<div>${escapeHtml(line)}</div>`;
+    })
+    .join('');
+};
+
+const stripListPrefix = (line: string): string => {
+  if (BULLET_PATTERN.test(line)) {
+    return line.replace(BULLET_PATTERN, '');
+  }
+  if (NUMBERED_PATTERN.test(line)) {
+    return line.replace(NUMBERED_PATTERN, '');
+  }
+  return line;
+};
+
+const toggleBulletedListContent = (value: string): string => {
+  const lines = value.split(LIST_LINE_SEPARATOR);
+  const isBulleted = lines.every(line => line.trim().length === 0 || BULLET_PATTERN.test(line));
+
+  if (isBulleted) {
+    return lines.map(line => line.replace(BULLET_PATTERN, '')).join('\n');
+  }
+
+  return lines
+    .map(line => {
+      const base = stripListPrefix(line).trimStart();
+      return base.length > 0 ? `• ${base}` : '• ';
+    })
+    .join('\n');
+};
+
+const toggleNumberedListContent = (value: string): string => {
+  const lines = value.split(LIST_LINE_SEPARATOR);
+  const isNumbered = lines.every(line => line.trim().length === 0 || NUMBERED_PATTERN.test(line));
+
+  if (isNumbered) {
+    return lines.map(line => line.replace(NUMBERED_PATTERN, '')).join('\n');
+  }
+
+  return lines
+    .map((line, index) => {
+      const base = stripListPrefix(line).trimStart();
+      const prefix = `${index + 1}. `;
+      return base.length > 0 ? `${prefix}${base}` : prefix;
+    })
+    .join('\n');
+};
 
 export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   id,
@@ -38,6 +148,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   onDelete,
   onInteract,
   onToolbarStateChange,
+  onRequestPositionPanel,
 }) => {
   const textRef = useRef<HTMLDivElement | null>(null);
   const selectionRangeRef = useRef<Range | null>(null);
@@ -167,6 +278,75 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     [isEditing, runCommand, updateFormatting],
   );
 
+  const focusEditableSurface = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      const node = textRef.current;
+      if (!node) {
+        return;
+      }
+
+      node.focus();
+
+      const selection = window.getSelection();
+      if (!selection) {
+        return;
+      }
+
+      const range = window.document.createRange();
+      range.selectNodeContents(node);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      selectionRangeRef.current = range;
+    });
+  }, []);
+
+  const applyListTransformation = useCallback(
+    (transformer: (value: string) => string) => {
+      const source = isEditing ? editingValue : localFormatting.text;
+      const plain = htmlToPlainText(source);
+      const transformed = transformer(plain);
+      const nextValue = plainTextToHtml(transformed);
+
+      if (nextValue === source) {
+        return;
+      }
+
+      if (isEditing) {
+        onInteract();
+        if (textRef.current) {
+          textRef.current.innerHTML = nextValue;
+        }
+        onEditingChange(nextValue);
+        focusEditableSurface();
+        return;
+      }
+
+      updateFormatting({ text: nextValue });
+    },
+    [
+      editingValue,
+      focusEditableSurface,
+      isEditing,
+      localFormatting.text,
+      onEditingChange,
+      onInteract,
+      updateFormatting,
+    ],
+  );
+
+  const handleBulletedList = useCallback(() => {
+    applyListTransformation(toggleBulletedListContent);
+  }, [applyListTransformation]);
+
+  const handleNumberedList = useCallback(() => {
+    applyListTransformation(toggleNumberedListContent);
+  }, [applyListTransformation]);
+
   const handleFontFamily = useCallback(
     (fontFamily: string) => {
       updateFormatting({ fontFamily });
@@ -189,6 +369,30 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     updateFormatting({ fontSize: clampFontSize(localFormatting.fontSize - 2) });
   }, [localFormatting.fontSize, updateFormatting]);
 
+  const handleApplyTextStyle = useCallback(
+    (preset: TextStylePreset) => {
+      const updates: Partial<TextBoxFormatting> = {
+        fontSize: clampFontSize(preset.fontSize),
+      };
+
+      if (typeof preset.bold === 'boolean') {
+        updates.bold = preset.bold;
+      }
+      if (typeof preset.italic === 'boolean') {
+        updates.italic = preset.italic;
+      }
+      if (typeof preset.underline === 'boolean') {
+        updates.underline = preset.underline;
+      }
+      if (typeof preset.strikethrough === 'boolean') {
+        updates.strikethrough = preset.strikethrough;
+      }
+
+      updateFormatting(updates);
+    },
+    [updateFormatting],
+  );
+
   const handleDoubleClick = () => {
     if (!canEdit) {
       return;
@@ -208,6 +412,11 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     }
   };
 
+  const cssFontFamily = useMemo(
+    () => resolveFontFamily(localFormatting.fontFamily),
+    [localFormatting.fontFamily],
+  );
+
   const toolbar = useMemo(
     () => (
       <TextBoxToolbar
@@ -216,6 +425,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         fontSize={localFormatting.fontSize}
         onIncreaseFontSize={handleIncreaseFontSize}
         onDecreaseFontSize={handleDecreaseFontSize}
+        onApplyTextStyle={handleApplyTextStyle}
         bold={localFormatting.bold}
         italic={localFormatting.italic}
         underline={localFormatting.underline}
@@ -226,21 +436,24 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         onToggleStrikethrough={() => handleToggle('strikethrough')}
         align={localFormatting.align}
         onAlign={handleAlign}
-        onBulletedList={() => runCommand('insertUnorderedList')}
-        onNumberedList={() => runCommand('insertOrderedList')}
+        onBulletedList={handleBulletedList}
+        onNumberedList={handleNumberedList}
         color={localFormatting.color}
         onColorChange={handleColor}
         onRequestEffects={() => {}}
         onRequestAnimate={() => {}}
-        onRequestPosition={() => {}}
+        onRequestPosition={() => onRequestPositionPanel?.()}
         onDelete={onDelete}
       />
     ),
     [
       handleAlign,
+      handleBulletedList,
       handleColor,
       handleDecreaseFontSize,
+      handleApplyTextStyle,
       handleFontFamily,
+      handleNumberedList,
       handleIncreaseFontSize,
       handleToggle,
       localFormatting.align,
@@ -251,6 +464,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
       localFormatting.italic,
       localFormatting.strikethrough,
       localFormatting.underline,
+      onRequestPositionPanel,
       onDelete,
       runCommand,
     ],
@@ -275,9 +489,8 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   const content = (
     <div
       className={cn(
-        'h-full w-full overflow-hidden rounded-2xl border border-transparent bg-background/95 p-3 transition-colors',
-        canEdit && !isEditing && 'hover:border-border/80',
-        isEditing && 'border-primary shadow-lg',
+        'h-full w-full overflow-hidden rounded-[22px] border border-transparent bg-transparent px-3 py-2 transition-colors',
+        isEditing ? 'border-yellow-400 shadow-lg' : 'focus-within:border-yellow-400 focus-within:shadow-lg',
       )}
       onDoubleClick={handleDoubleClick}
       onPointerDown={event => {
@@ -294,8 +507,9 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
       <div
         ref={textRef}
         className={cn(
-          'h-full w-full overflow-auto outline-none empty:before:absolute empty:before:left-3 empty:before:top-3 empty:before:text-sm empty:before:text-muted-foreground/70 empty:before:content-[attr(data-placeholder)]',
+          'relative h-full w-full outline-none empty:before:absolute empty:before:left-3 empty:before:top-2 empty:before:text-sm empty:before:text-muted-foreground/70 empty:before:content-[attr(data-placeholder)]',
           canEdit ? 'cursor-text' : 'cursor-default select-none',
+          canEdit && (isSelected || isEditing) ? 'overflow-auto' : 'overflow-hidden',
         )}
         contentEditable={canEdit && isEditing}
         suppressContentEditableWarning
@@ -304,9 +518,10 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
         data-placeholder={DEFAULT_TEXT_BOX_TEXT}
+        data-textbox-editable={canEdit && isEditing ? 'true' : undefined}
         style={{
           fontSize: `${localFormatting.fontSize}px`,
-          fontFamily: localFormatting.fontFamily,
+          fontFamily: cssFontFamily,
           fontWeight: localFormatting.bold ? 'bold' : 'normal',
           fontStyle: localFormatting.italic ? 'italic' : 'normal',
           textDecoration: `${localFormatting.underline ? 'underline' : ''} ${
@@ -315,6 +530,8 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
           textAlign: localFormatting.align,
           color: localFormatting.color,
           whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          overflowWrap: 'anywhere',
         }}
       />
       {!canEdit && localFormatting.text.trim().length === 0 && (

@@ -4,8 +4,9 @@ import { safeStringify } from '@/utils/safeStringify';
 import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Eye, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon } from 'lucide-react';
+import { Plus, Grid3X3, Trash2, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon, GripVertical } from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
+import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { molecules } from '@/components/MoleculeList/data';
 import {
@@ -40,6 +41,8 @@ import EvaluateModelsFeatureAtom from '@/components/AtomList/atoms/evaluate-mode
 import AutoRegressiveModelsAtom from '@/components/AtomList/atoms/auto-regressive-models/AutoRegressiveModelsAtom';
 import SelectModelsAutoRegressiveAtom from '@/components/AtomList/atoms/select-models-auto-regressive/SelectModelsAutoRegressiveAtom';
 import EvaluateModelsAutoRegressiveAtom from '@/components/AtomList/atoms/evaluate-models-auto-regressive/EvaluateModelsAutoRegressiveAtom';
+import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAtom';
+import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/ScenarioPlannerAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -124,13 +127,19 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
 }) => {
   const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings } = useLaboratoryStore();
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
-  const [activeTab, setActiveTab] = useState<string>('');
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
+  const [collapsedMolecules, setCollapsedMolecules] = useState<Record<string, boolean>>({});
   const [addDragTarget, setAddDragTarget] = useState<string | null>(null);
+  const [draggedCardId, setDraggedCardId] = useState<string | null>(null);
+  const [draggedMoleculeId, setDraggedMoleculeId] = useState<string | null>(null);
+  const [dragOverCardId, setDragOverCardId] = useState<string | null>(null);
+  const [dragOverMoleculeId, setDragOverMoleculeId] = useState<string | null>(null);
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [showAtomSuggestion, setShowAtomSuggestion] = useState<Record<string, boolean>>({});
   const [isCanvasLoading, setIsCanvasLoading] = useState(true);
+  const [moleculeToDelete, setMoleculeToDelete] = useState<{moleculeId: string, moleculeTitle: string} | null>(null);
+  const [deleteMoleculeDialogOpen, setDeleteMoleculeDialogOpen] = useState(false);
   const loadingMessages = useMemo(
     () => [
       'Loading project canvas',
@@ -307,7 +316,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     let layoutCandidate: Candidate = null;
 
     if (Array.isArray(layoutCards)) {
-      outer: for (let i = layoutCards.length - 1; i >= 0; i--) {
+      outer: for (let i = (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1; i >= 0; i--) {
         const card = layoutCards[i];
         for (let j = card.atoms.length - 1; j >= 0; j--) {
           const a = card.atoms[j];
@@ -763,25 +772,41 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
 
       const normalizedCards = Array.isArray(cards) ? cards : [];
       setLayoutCards(normalizedCards);
-      const workflow = workflowOverride ?? deriveWorkflowMolecules(normalizedCards);
+      
+      // Check for saved workflowMolecules in localStorage if no override provided
+      let workflow = workflowOverride;
+      if (!workflow) {
+        const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+        if (storedWorkflowMolecules) {
+          try {
+            workflow = JSON.parse(storedWorkflowMolecules);
+          } catch (e) {
+            console.error('Failed to parse stored workflow molecules', e);
+            workflow = deriveWorkflowMolecules(normalizedCards);
+          }
+        } else {
+          workflow = deriveWorkflowMolecules(normalizedCards);
+        }
+      }
+      
       setWorkflowMolecules(workflow);
-      setActiveTab(prevTab => {
-        if (workflow.length === 0) {
-          return '';
-        }
 
-        if (prevTab && workflow.some(molecule => molecule.moleculeId === prevTab)) {
-          return prevTab;
-        }
-
-        return workflow[0].moleculeId;
-      });
+      // Set all workflow molecules as collapsed by default
+      if (workflow.length > 0) {
+        const initialCollapsedState: Record<string, boolean> = {};
+        workflow.forEach(molecule => {
+          initialCollapsedState[molecule.moleculeId] = true; // true = collapsed
+        });
+        setCollapsedMolecules(initialCollapsedState);
+      }
 
       hasAppliedInitialCards = true;
       markLoadingComplete();
     };
 
+    // Check for both workflow-selected-atoms and workflow-data
     const storedAtoms = localStorage.getItem('workflow-selected-atoms');
+    const storedWorkflowData = localStorage.getItem('workflow-data');
     let workflowAtoms: {
       atomName: string;
       moleculeId: string;
@@ -849,6 +874,87 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         console.error('Failed to parse workflow atoms', e);
         workflowAtoms = [];
       }
+    } else if (storedWorkflowData) {
+      // Handle workflow-data format from handleRenderWorkflow
+      try {
+        const workflowData = JSON.parse(storedWorkflowData);
+        console.log('Processing workflow-data:', workflowData);
+        
+        if (workflowData.molecules && Array.isArray(workflowData.molecules)) {
+          // Convert workflow-data format to workflowAtoms format
+          workflowAtoms = [];
+          workflowData.molecules.forEach((molecule: any, moleculeIndex: number) => {
+            if (molecule.atoms && Array.isArray(molecule.atoms)) {
+              molecule.atoms.forEach((atomId: string, atomIndex: number) => {
+                workflowAtoms.push({
+                  atomName: atomId,
+                  moleculeId: molecule.id,
+                  moleculeTitle: molecule.title,
+                  order: atomIndex
+                });
+              });
+            }
+          });
+
+          const moleculeMap = new Map<string, WorkflowMolecule>();
+          workflowAtoms.forEach(atom => {
+            if (!moleculeMap.has(atom.moleculeId)) {
+              moleculeMap.set(atom.moleculeId, {
+                moleculeId: atom.moleculeId,
+                moleculeTitle: atom.moleculeTitle,
+                atoms: [],
+              });
+            }
+            moleculeMap.get(atom.moleculeId)!.atoms.push({
+              atomName: atom.atomName,
+              order: atom.order,
+            });
+          });
+
+          moleculeMap.forEach(molecule => {
+            molecule.atoms.sort((a, b) => a.order - b.order);
+          });
+
+          const molecules = Array.from(moleculeMap.values());
+          if (molecules.length > 0) {
+            initialWorkflow = molecules;
+            // Save the molecules to workflow-molecules localStorage for future switches
+            localStorage.setItem('workflow-molecules', JSON.stringify(molecules));
+          }
+
+          const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
+          initialCards = workflowAtoms.map(atom => {
+            const atomInfo =
+              allAtoms.find(
+                a =>
+                  normalize(a.id) === normalize(atom.atomName) ||
+                  normalize(a.title) === normalize(atom.atomName),
+              ) || ({} as any);
+            const atomId = atomInfo.id || atom.atomName;
+            const dropped: DroppedAtom = {
+              id: `${atom.atomName}-${Date.now()}-${Math.random()}`,
+              atomId,
+              title: atomInfo.title || atom.atomName,
+              category: atomInfo.category || 'Atom',
+              color: atomInfo.color || 'bg-gray-400',
+              source: 'manual',
+              llm: LLM_MAP[atomId],
+            };
+            return {
+              id: `card-${atom.atomName}-${Date.now()}-${Math.random()}`,
+              atoms: [dropped],
+              isExhibited: false,
+              moleculeId: atom.moleculeId,
+              moleculeTitle: atom.moleculeTitle,
+            } as LayoutCard;
+          });
+
+          localStorage.removeItem('workflow-data');
+        }
+      } catch (e) {
+        console.error('Failed to parse workflow-data', e);
+        localStorage.removeItem('workflow-data');
+      }
     }
 
     if (!workflowAtoms.length) {
@@ -903,8 +1009,18 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
                     );
                   }
 
+                  // Check for workflowMolecules in the project state
+                  if (data.state.workflowMolecules && Array.isArray(data.state.workflowMolecules)) {
+                    localStorage.setItem('workflow-molecules', safeStringify(data.state.workflowMolecules));
+                  }
+
                   const cardsFromConfig = hydrateLayoutCards(cfg.cards);
-                  applyInitialCards(cardsFromConfig);
+                  // Check for workflowMolecules in the project state before applying cards
+                  let projectWorkflow = initialWorkflow;
+                  if (data.state.workflowMolecules && Array.isArray(data.state.workflowMolecules) && !projectWorkflow) {
+                    projectWorkflow = data.state.workflowMolecules;
+                  }
+                  applyInitialCards(cardsFromConfig, projectWorkflow);
                 }
               })
               .catch(() => {
@@ -921,9 +1037,41 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     }
 
     if (initialCards) {
+      // If no initialWorkflow was set from workflow atoms/data, check for saved workflow molecules
+      if (!initialWorkflow) {
+        const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+        if (storedWorkflowMolecules) {
+          try {
+            initialWorkflow = JSON.parse(storedWorkflowMolecules);
+          } catch (e) {
+            console.error('Failed to parse stored workflow molecules during layout load', e);
+          }
+        }
+      }
       applyInitialCards(initialCards, initialWorkflow);
     } else if (!hasPendingAsyncLoad && !hasAppliedInitialCards) {
+      // Even if no initialCards, check if we need to restore workflow molecules from saved layout
+      const storedLayout = localStorage.getItem(STORAGE_KEY);
+      const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+      
+      if (storedLayout && storedLayout !== 'undefined' && storedWorkflowMolecules) {
+        try {
+          const raw = JSON.parse(storedLayout);
+          const layoutCards = hydrateLayoutCards(raw);
+          const workflowMolecules = JSON.parse(storedWorkflowMolecules);
+          
+          if (layoutCards && layoutCards.length > 0 && workflowMolecules && workflowMolecules.length > 0) {
+            applyInitialCards(layoutCards, workflowMolecules);
+          } else {
       markLoadingComplete();
+          }
+        } catch (e) {
+          console.error('Failed to parse stored layout or workflow molecules', e);
+          markLoadingComplete();
+        }
+      } else {
+        markLoadingComplete();
+      }
     }
 
     return () => {
@@ -968,11 +1116,16 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
       if (current) {
         try {
           const proj = JSON.parse(current);
+          // Include workflowMolecules in the state being saved
+          const stateWithMolecules = {
+            ...prevLayout.current,
+            workflowMolecules: workflowMolecules
+          };
           fetch(`${LAB_ACTIONS_API}/`, {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ project: proj.id, state: prevLayout.current }),
+            body: JSON.stringify({ project: proj.id, state: stateWithMolecules }),
           }).catch(() => {});
         } catch {
           /* ignore */
@@ -982,12 +1135,51 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         ? layoutCards.map(c => ({ ...c, atoms: [...c.atoms] }))
         : [];
     }
-  }, [layoutCards]);
+  }, [layoutCards, workflowMolecules]);
 
   // Sync cards with exhibition store
   useEffect(() => {
     setCards(layoutCards);
   }, [layoutCards, setCards]);
+
+  // Persist workflowMolecules to localStorage
+  useEffect(() => {
+    if (workflowMolecules.length > 0) {
+      localStorage.setItem('workflow-molecules', JSON.stringify(workflowMolecules));
+    }
+  }, [workflowMolecules]);
+
+  // Ensure workflow molecules are restored when layout cards exist but workflow molecules are missing
+  useEffect(() => {
+    // Only run after initial loading is complete
+    if (isCanvasLoading) return;
+    
+    // Check if we have layout cards but no workflow molecules
+    const hasCardsWithMoleculeId = Array.isArray(layoutCards) && 
+      layoutCards.some(card => card.moleculeId);
+    
+    if (hasCardsWithMoleculeId && workflowMolecules.length === 0) {
+      // Try to restore workflow molecules from localStorage
+      const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+      if (storedWorkflowMolecules) {
+        try {
+          const molecules = JSON.parse(storedWorkflowMolecules);
+          if (Array.isArray(molecules) && molecules.length > 0) {
+            setWorkflowMolecules(molecules);
+            
+            // Set collapsed state for restored molecules
+            const initialCollapsedState: Record<string, boolean> = {};
+            molecules.forEach((molecule: any) => {
+              initialCollapsedState[molecule.moleculeId] = true; // collapsed by default
+            });
+            setCollapsedMolecules(initialCollapsedState);
+          }
+        } catch (e) {
+          console.error('Failed to restore workflow molecules from localStorage:', e);
+        }
+      }
+    }
+  }, [layoutCards, workflowMolecules, isCanvasLoading]);
 
   const handleDragOver = (e: React.DragEvent, cardId: string) => {
     e.preventDefault();
@@ -1063,7 +1255,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     moleculeId,
     moleculeTitle: info?.title,
   };
-  if (position === undefined || position >= layoutCards.length) {
+  if (position === undefined || position >= (Array.isArray(layoutCards) ? layoutCards.length : 0)) {
     setLayoutCards([...(Array.isArray(layoutCards) ? layoutCards : []), newCard]);
   } else {
     const arr = Array.isArray(layoutCards) ? layoutCards : [];
@@ -1205,6 +1397,14 @@ const addNewCardWithAtom = async (
     position === undefined || position >= arr.length ? arr.length : position;
 
   try {
+    if (typeof window !== 'undefined') {
+      console.info('[Laboratory API] Creating card', {
+        endpoint: `${LABORATORY_API}/cards`,
+        origin: window.location.origin,
+        payload: { atomId, moleculeId },
+      });
+    }
+
     const response = await fetch(`${LABORATORY_API}/cards`, {
       method: 'POST',
       credentials: 'include',
@@ -1212,6 +1412,13 @@ const addNewCardWithAtom = async (
       body: JSON.stringify({ atomId, moleculeId }),
     });
     if (!response.ok) {
+      if (typeof window !== 'undefined') {
+        console.error('[Laboratory API] Create card request failed', {
+          endpoint: `${LABORATORY_API}/cards`,
+          status: response.status,
+          statusText: response.statusText,
+        });
+      }
       throw new Error(`Request failed with status ${response.status}`);
     }
     const payload = (await response.json()) as CardPayload;
@@ -1256,6 +1463,7 @@ const handleDropNewCard = async (
   await addNewCardWithAtom(atom.id, moleculeId, position);
 };
 
+
 const handleAddDragEnter = (e: React.DragEvent, targetId: string) => {
   e.preventDefault();
   setAddDragTarget(targetId);
@@ -1264,6 +1472,101 @@ const handleAddDragEnter = (e: React.DragEvent, targetId: string) => {
 const handleAddDragLeave = (e: React.DragEvent) => {
   e.preventDefault();
   setAddDragTarget(null);
+};
+
+// Card reordering handlers
+const handleCardDragStart = (e: React.DragEvent, cardId: string) => {
+  if (!canEdit) return;
+  setDraggedCardId(cardId);
+  e.dataTransfer.setData('text/plain', ''); // Required for drag to work
+  e.dataTransfer.effectAllowed = 'move';
+};
+
+const handleCardDragOver = (e: React.DragEvent, targetCardId: string) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  setDragOverCardId(targetCardId);
+};
+
+const handleCardDragLeave = (e: React.DragEvent) => {
+  e.preventDefault();
+  setDragOverCardId(null);
+};
+
+const handleCardDrop = (e: React.DragEvent, targetCardId: string) => {
+  e.preventDefault();
+  setDragOverCardId(null);
+  
+  if (!draggedCardId || draggedCardId === targetCardId) {
+    setDraggedCardId(null);
+    return;
+  }
+  
+  const arr = Array.isArray(layoutCards) ? layoutCards : [];
+  const draggedIndex = arr.findIndex(card => card.id === draggedCardId);
+  const targetIndex = arr.findIndex(card => card.id === targetCardId);
+  
+  if (draggedIndex === -1 || targetIndex === -1) {
+    setDraggedCardId(null);
+    return;
+  }
+  
+  // Reorder cards
+  const newCards = [...arr];
+  const [draggedCard] = newCards.splice(draggedIndex, 1);
+  newCards.splice(targetIndex, 0, draggedCard);
+  
+  setLayoutCards(newCards);
+  setCards(newCards);
+  setDraggedCardId(null);
+};
+
+// Molecule reordering handlers
+const handleMoleculeDragStart = (e: React.DragEvent, moleculeId: string) => {
+  if (!canEdit) return;
+  setDraggedMoleculeId(moleculeId);
+  e.dataTransfer.setData('text/plain', ''); // Required for drag to work
+  e.dataTransfer.effectAllowed = 'move';
+};
+
+const handleMoleculeDragOver = (e: React.DragEvent, targetMoleculeId: string) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  setDragOverMoleculeId(targetMoleculeId);
+};
+
+const handleMoleculeDragLeave = (e: React.DragEvent) => {
+  e.preventDefault();
+  setDragOverMoleculeId(null);
+};
+
+const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
+  e.preventDefault();
+  setDragOverMoleculeId(null);
+  
+  if (!draggedMoleculeId || draggedMoleculeId === targetMoleculeId) {
+    setDraggedMoleculeId(null);
+    return;
+  }
+  
+  const arr = [...workflowMolecules];
+  const draggedIndex = arr.findIndex(mol => mol.moleculeId === draggedMoleculeId);
+  const targetIndex = arr.findIndex(mol => mol.moleculeId === targetMoleculeId);
+  
+  if (draggedIndex === -1 || targetIndex === -1) {
+    setDraggedMoleculeId(null);
+    return;
+  }
+  
+  // Reorder molecules
+  const newMolecules = [...arr];
+  const [draggedMolecule] = newMolecules.splice(draggedIndex, 1);
+  newMolecules.splice(targetIndex, 0, draggedMolecule);
+  
+  setWorkflowMolecules(newMolecules);
+  // Update localStorage
+  localStorage.setItem('workflow-molecules', JSON.stringify(newMolecules));
+  setDraggedMoleculeId(null);
 };
 
   const removeAtom = (cardId: string, atomId: string) => {
@@ -1410,6 +1713,115 @@ const handleAddDragLeave = (e: React.DragEvent) => {
     setExpandedCard(expandedCard === id ? null : id);
   };
 
+  const toggleMoleculeCollapse = (moleculeId: string) => {
+    setCollapsedMolecules(prev => ({ ...prev, [moleculeId]: !prev[moleculeId] }));
+  };
+
+  const requestDeleteMoleculeContainer = (moleculeId: string, moleculeTitle: string) => {
+    setMoleculeToDelete({ moleculeId, moleculeTitle });
+    setDeleteMoleculeDialogOpen(true);
+  };
+
+  const confirmDeleteMoleculeContainer = async () => {
+    if (!moleculeToDelete) return;
+    await deleteMoleculeContainer(moleculeToDelete.moleculeId);
+    setDeleteMoleculeDialogOpen(false);
+    setMoleculeToDelete(null);
+  };
+
+  const cancelDeleteMoleculeContainer = () => {
+    setDeleteMoleculeDialogOpen(false);
+    setMoleculeToDelete(null);
+  };
+
+  const handleDeleteMoleculeDialogOpenChange = (open: boolean) => {
+    if (open) {
+      setDeleteMoleculeDialogOpen(true);
+    } else {
+      cancelDeleteMoleculeContainer();
+    }
+  };
+
+  const deleteMoleculeContainer = async (moleculeId: string) => {
+    // Get all cards associated with this molecule BEFORE updating state
+    const arr = Array.isArray(layoutCards) ? layoutCards : [];
+    const moleculeCards = arr.filter(card => card.moleculeId === moleculeId);
+    
+    // Remove cards from layoutCards state immediately
+    const updatedCards = arr.filter(card => card.moleculeId !== moleculeId);
+    setLayoutCards(updatedCards);
+    setCards(updatedCards);
+    
+    // Handle backend deletion for each card without calling deleteCard (to avoid state conflicts)
+    for (const card of moleculeCards) {
+      if (card) {
+        // Handle atom-specific backend deletions
+        card.atoms.forEach(atom => {
+          if (atom.atomId === 'text-box') {
+            fetch(`${TEXT_API}/text/${atom.id}`, { method: 'DELETE' }).catch(() => {});
+          } else if (atom.atomId === 'data-upload-validate') {
+            const vid = (atom.settings as DataUploadSettings)?.validatorId;
+            if (vid) {
+              fetch(`${VALIDATE_API}/delete_validator_atom/${vid}`, { method: 'DELETE' }).catch(() => {});
+            }
+          }
+        });
+        
+        // Archive the card
+        fetch(`${CARD_API}/cards/archive`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(card)
+        }).catch(() => {});
+      }
+      
+      // Remove from collapsed cards state
+      setCollapsedCards(prev => {
+        const copy = { ...prev };
+        delete copy[card.id];
+        return copy;
+      });
+    }
+    
+    // Update project state with the new cards list (excluding deleted cards)
+    const current = localStorage.getItem('current-project');
+    if (current) {
+      try {
+        const proj = JSON.parse(current);
+        const sanitized = sanitizeLabConfig({ cards: updatedCards });
+        await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: { laboratory_config: sanitized } }),
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+    
+    // Remove the molecule from workflowMolecules and update localStorage
+    setWorkflowMolecules(prev => {
+      const updatedMolecules = prev.filter(mol => mol.moleculeId !== moleculeId);
+      
+      // Update localStorage
+      if (updatedMolecules.length > 0) {
+        localStorage.setItem('workflow-molecules', JSON.stringify(updatedMolecules));
+      } else {
+        localStorage.removeItem('workflow-molecules');
+      }
+      
+      return updatedMolecules;
+    });
+    
+    // Clear collapsed state for this molecule
+    setCollapsedMolecules(prev => {
+      const copy = { ...prev };
+      delete copy[moleculeId];
+      return copy;
+    });
+  };
+
   const refreshCardAtoms = async (cardId: string) => {
     const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
     if (!card) return;
@@ -1434,38 +1846,105 @@ const handleAddDragLeave = (e: React.DragEvent) => {
 
   if (workflowMolecules.length > 0) {
     return (
+      <>
+        <ConfirmationDialog
+          open={deleteMoleculeDialogOpen}
+          onOpenChange={handleDeleteMoleculeDialogOpenChange}
+          onConfirm={confirmDeleteMoleculeContainer}
+          onCancel={cancelDeleteMoleculeContainer}
+          title="Delete molecule container?"
+          description={`Deleting "${moleculeToDelete?.moleculeTitle || ''}" will remove the container and all its associated atoms. This action cannot be undone.`}
+          icon={<Trash2 className="w-6 h-6 text-white" />}
+          iconBgClass="bg-red-500"
+          confirmLabel="Yes, delete"
+          cancelLabel="Cancel"
+          confirmButtonClass="bg-red-500 hover:bg-red-600"
+        />
       <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
         <div className={canEdit ? '' : 'pointer-events-none'}>
-          <div className="p-6">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <div className="mb-6 bg-white rounded-lg border border-gray-200 p-1 shadow-sm">
-              <TabsList className="grid auto-cols-fr grid-flow-col w-full h-12 bg-transparent p-0 gap-1">
-                {workflowMolecules.map((molecule) => (
-                  <TabsTrigger
-                    key={molecule.moleculeId}
-                    value={molecule.moleculeId}
-                    className="px-6 py-3 text-sm font-medium rounded-md transition-all duration-200 \
-                             data-[state=active]:bg-[#458EE2] data-[state=active]:text-white data-[state=active]:shadow-md\
-                             data-[state=inactive]:bg-transparent data-[state=inactive]:text-gray-600 \
-                             data-[state=inactive]:hover:bg-gray-50 data-[state=inactive]:hover:text-gray-900\
-                             border-0 ring-0 focus:ring-0 focus-visible:ring-0"
-                  >
-                    {molecule.moleculeTitle}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </div>
+          <div className="p-6 space-y-6">
+            {workflowMolecules.map((molecule) => {
+              const isCollapsed = collapsedMolecules[molecule.moleculeId];
+              const moleculeCards = Array.isArray(layoutCards) 
+                ? layoutCards.filter(card => card.moleculeId === molecule.moleculeId)
+                : [];
+              const atomCount = moleculeCards.reduce((sum, card) => sum + (card.atoms?.length || 0), 0);
 
-            {workflowMolecules.map((molecule) => (
-              <TabsContent key={molecule.moleculeId} value={molecule.moleculeId} className="mt-0">
-                <div className="space-y-6">
-                  <div className="flex items-center mb-6">
-                    <h3 className="text-xl font-semibold text-gray-900">
-                      {molecule.moleculeTitle} Atoms
-                    </h3>
+              return (
+              <Card 
+                key={molecule.moleculeId} 
+                className={`bg-white border-2 shadow-lg rounded-xl overflow-hidden transition-all duration-200 ${
+                  dragOverMoleculeId === molecule.moleculeId 
+                    ? 'border-blue-500 bg-blue-50' 
+                    : draggedMoleculeId === molecule.moleculeId
+                    ? 'opacity-50'
+                    : 'border-gray-200'
+                }`}
+                draggable={canEdit}
+                onDragStart={(e) => handleMoleculeDragStart(e, molecule.moleculeId)}
+                onDragOver={(e) => handleMoleculeDragOver(e, molecule.moleculeId)}
+                onDragLeave={handleMoleculeDragLeave}
+                onDrop={(e) => handleMoleculeDrop(e, molecule.moleculeId)}
+              >
+                {/* Collapsible Molecule Header */}
+                <div 
+                  className="flex items-center justify-between p-3 bg-white border-b border-gray-200 cursor-pointer hover:bg-gray-50 transition-all duration-200"
+                  onClick={() => toggleMoleculeCollapse(molecule.moleculeId)}
+                >
+                  <div className="flex items-center space-x-3">
+                    {canEdit && (
+                      <div 
+                        className="cursor-move p-1 hover:bg-gray-100 rounded"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        title="Drag to reorder"
+                      >
+                        <GripVertical className="w-4 h-4 text-gray-400" />
+                      </div>
+                    )}
+                    <div className="flex items-center space-x-2">
+                      <div className="w-2 h-8 bg-yellow-400 rounded-full shadow-sm"></div>
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900 tracking-tight">
+                        {molecule.moleculeTitle}
+                      </h3>
+                      <div className="flex items-center space-x-3 mt-1">
+                        <div className="flex items-center space-x-1">
+                          <span className="text-xs font-medium text-black">
+                            {atomCount} atom{atomCount !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
+                  <div className="flex items-center space-x-2">
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        requestDeleteMoleculeContainer(molecule.moleculeId, molecule.moleculeTitle);
+                      }}
+                      className="p-2 hover:bg-red-50 rounded-lg transition-all duration-200 hover:shadow-sm"
+                      title="Delete Container"
+                    >
+                      <Trash2 className="w-4 h-4 text-gray-600 hover:text-red-600" />
+                    </button>
+                  <button 
+                    className="p-2 hover:bg-white/50 rounded-lg transition-all duration-200 hover:shadow-sm"
+                    onClick={() => toggleMoleculeCollapse(molecule.moleculeId)}
+                    title={isCollapsed ? 'Expand molecule' : 'Collapse molecule'}
+                  >
+                    <ChevronDown 
+                      className={`w-5 h-5 text-gray-700 transition-transform duration-300 ${
+                        isCollapsed ? '-rotate-90' : 'rotate-0'
+                      }`}
+                    />
+                  </button>
+                  </div>
+                </div>
 
-                  <div className="space-y-6 w-full">
+                {/* Molecule Content */}
+                {!isCollapsed && (
+                <div className="p-6 space-y-6 w-full bg-gradient-to-br from-gray-50 to-white">
                     {Array.isArray(layoutCards) &&
                       layoutCards
                         .filter(card => card.moleculeId === molecule.moleculeId)
@@ -1482,17 +1961,40 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                           key={card.id}
                           data-card-id={card.id}
                           className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
-                            dragOver === card.id
+                            dragOverCardId === card.id
+                              ? 'border-blue-500 bg-blue-50 shadow-lg'
+                              : draggedCardId === card.id
+                              ? 'opacity-50'
+                              : dragOver === card.id
                               ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
                               : 'border-gray-200 shadow-sm hover:shadow-md'
                           }`}
-                          onDragOver={e => handleDragOver(e, card.id)}
-                          onDragLeave={handleDragLeave}
-                          onDrop={e => handleDrop(e, card.id)}
+                          draggable={canEdit}
+                          onDragStart={(e) => handleCardDragStart(e, card.id)}
+                          onDragOver={(e) => {
+                            handleCardDragOver(e, card.id);
+                            handleDragOver(e, card.id); // Keep existing functionality
+                          }}
+                          onDragLeave={(e) => {
+                            handleCardDragLeave(e);
+                            handleDragLeave(e); // Keep existing functionality
+                          }}
+                          onDrop={(e) => {
+                            handleCardDrop(e, card.id);
+                            handleDrop(e, card.id); // Keep existing functionality
+                          }}
                         >
                           <div className="flex items-center justify-between p-4 border-b border-gray-100">
                             <div className="flex items-center space-x-2">
-                              <Eye className={`w-4 h-4 ${card.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
+                              {canEdit && (
+                                <div 
+                                  className="cursor-move p-1 hover:bg-gray-100 rounded"
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  title="Drag to reorder"
+                                >
+                                  <GripVertical className="w-3 h-3 text-gray-400" />
+                                </div>
+                              )}
                               <span className="text-sm font-medium text-gray-700">
                                 {cardTitle}
                               </span>
@@ -1520,10 +2022,24 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                               >
                                 <Maximize2 className="w-4 h-4 text-gray-400" />
                               </button>
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  toggleCardCollapse(card.id);
+                                }}
+                                className="p-1 hover:bg-gray-100 rounded"
+                                title="Toggle Card"
+                              >
+                                {collapsedCards[card.id] ? (
+                                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                                ) : (
+                                  <Minus className="w-4 h-4 text-gray-400" />
+                                )}
+                              </button>
                             </div>
                           </div>
 
-                          <div className="flex-1 flex flex-col p-4 overflow-y-auto">
+                          <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
                             {card.atoms.length === 0 ? (
                               <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mb-4">
                                 <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
@@ -1581,10 +2097,38 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                                       <DataUploadValidateAtom atomId={atom.id} />
                                     ) : atom.atomId === 'feature-overview' ? (
                                       <FeatureOverviewAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'explore' ? (
+                                      <ExploreAtom atomId={atom.id} />
                                     ) : atom.atomId === 'chart-maker' ? (
                                       <ChartMakerAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'concat' ? (
+                                      <ConcatAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'merge' ? (
+                                      <MergeAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'column-classifier' ? (
+                                      <ColumnClassifierAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'dataframe-operations' ? (
+                                      <DataFrameOperationsAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'create-column' ? (
+                                      <CreateColumnAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'groupby-wtg-avg' ? (
+                                      <GroupByAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'build-model-feature-based' ? (
+                                      <BuildModelFeatureBasedAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'select-models-feature' ? (
+                                      <SelectModelsFeatureAtom atomId={atom.id} />
                                     ) : atom.atomId === 'evaluate-models-feature' ? (
                                       <EvaluateModelsFeatureAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'scope-selector' ? (
+                                      <ScopeSelectorAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'correlation' ? (
+                                      <CorrelationAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'auto-regressive-models' ? (
+                                      <AutoRegressiveModelsAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'select-models-auto-regressive' ? (
+                                      <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                                      <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
                                     ) : (
                                       <div>
                                         <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -1601,18 +2145,242 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         );
                       })}
 
-                    <div className="flex justify-center">
-                      <button
-                        onClick={() => addNewCard(molecule.moleculeId)}
-                        onDragEnter={e => handleAddDragEnter(e, `m-${molecule.moleculeId}`)}
+                </div>
+                )}
+              </Card>
+            );
+            })}
+            
+            {/* Cards without moleculeId (standalone cards) */}
+            {(() => {
+              const standaloneCards = Array.isArray(layoutCards) 
+                ? layoutCards.filter(card => !card.moleculeId)
+                : [];
+              
+              if (standaloneCards.length > 0) {
+                return (
+                  <div className="space-y-6">
+                    <div className="text-center">
+                      <h3 className="text-lg font-semibold text-gray-700 mb-4">Independent Atoms</h3>
+                    </div>
+                    {standaloneCards.map((card) => {
+                      const cardTitle = card.moleculeTitle
+                        ? card.atoms.length > 0
+                          ? `${card.moleculeTitle} - ${card.atoms[0].title}`
+                          : card.moleculeTitle
+                        : card.atoms.length > 0
+                          ? card.atoms[0].title
+                          : 'Card';
+                      return (
+                        <Card
+                          key={card.id}
+                          data-card-id={card.id}
+                          className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
+                            dragOverCardId === card.id
+                              ? 'border-blue-500 bg-blue-50 shadow-lg'
+                              : draggedCardId === card.id
+                              ? 'opacity-50'
+                              : dragOver === card.id
+                              ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
+                              : 'border-gray-200 shadow-sm hover:shadow-md'
+                          }`}
+                          draggable={canEdit}
+                          onDragStart={(e) => handleCardDragStart(e, card.id)}
+                          onDragOver={(e) => {
+                            handleCardDragOver(e, card.id);
+                            handleDragOver(e, card.id); // Keep existing functionality
+                          }}
+                          onDragLeave={(e) => {
+                            handleCardDragLeave(e);
+                            handleDragLeave(e); // Keep existing functionality
+                          }}
+                          onDrop={(e) => {
+                            handleCardDrop(e, card.id);
+                            handleDrop(e, card.id); // Keep existing functionality
+                          }}
+                        >
+                          <div className="flex items-center justify-between p-4 border-b border-gray-100">
+                            <div className="flex items-center space-x-2">
+                              {canEdit && (
+                                <div 
+                                  className="cursor-move p-1 hover:bg-gray-100 rounded"
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  title="Drag to reorder"
+                                >
+                                  <GripVertical className="w-3 h-3 text-gray-400" />
+                                </div>
+                              )}
+                              <span className="text-sm font-medium text-gray-700">
+                                {cardTitle}
+                              </span>
+                              <AIChatBot
+                                cardId={card.id}
+                                cardTitle={cardTitle}
+                                onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                                disabled={card.atoms.length > 0}
+                              />
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <button
+                                onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
+                                className="p-1 hover:bg-gray-100 rounded"
+                              >
+                                <Trash2 className="w-4 h-4 text-gray-400" />
+                              </button>
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  toggleCardExpand(card.id);
+                                }}
+                                className="p-1 hover:bg-gray-100 rounded"
+                                title="Expand Card"
+                              >
+                                <Maximize2 className="w-4 h-4 text-gray-400" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
+                            {card.atoms.length === 0 ? (
+                              <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mb-4">
+                                <AtomSuggestion
+                                  cardId={card.id}
+                                  isVisible={true}
+                                  onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
+                                  onAddAtom={handleAddAtomFromSuggestion}
+                                />
+                              </div>
+                            ) : (
+                              <div
+                                className={`grid gap-4 w-full ${
+                                  card.atoms.length === 1
+                                    ? 'grid-cols-1'
+                                    : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
+                                }`}
+                              >
+                                {card.atoms.map((atom) => (
+                                  <AtomBox
+                                    key={atom.id}
+                                    className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
+                                    onClick={(e) => handleAtomClick(e, atom.id)}
+                                  >
+                                    {/* Atom Header */}
+                                    <div className="flex items-center justify-between mb-3">
+                                      <div className="flex items-center space-x-1">
+                                        <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                        <AtomAIChatBot
+                                          atomId={atom.id}
+                                          atomType={atom.atomId}
+                                          atomTitle={atom.title}
+                                          disabled={!LLM_MAP[atom.atomId]}
+                                          className="transition-transform hover:scale-110"
+                                        />
+                                        <button
+                                          onClick={e => handleAtomSettingsClick(e, atom.id)}
+                                          className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                                          title="Atom Settings"
+                                        >
+                                          <Settings className="w-4 h-4 text-gray-400" />
+                                        </button>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (onAtomSelect) {
+                                              onAtomSelect(atom.id);
+                                            }
+                                            onToggleHelpPanel?.();
+                                          }}
+                                          className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                                          title="Help"
+                                        >
+                                          <span className="w-4 h-4 text-gray-400 text-base font-bold flex items-center justify-center">?</span>
+                                        </button>
+                                      </div>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          removeAtom(card.id, atom.id);
+                                        }}
+                                        className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                                      >
+                                        <Trash2 className="w-4 h-4 text-gray-400" />
+                                      </button>
+                                    </div>
+                                    
+                                    {/* Atom Content */}
+                                    {atom.atomId === 'text-box' ? (
+                                      <TextBoxEditor textId={atom.id} />
+                                    ) : atom.atomId === 'data-upload-validate' ? (
+                                      <DataUploadValidateAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'feature-overview' ? (
+                                      <FeatureOverviewAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'explore' ? (
+                                      <ExploreAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'chart-maker' ? (
+                                      <ChartMakerAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'concat' ? (
+                                      <ConcatAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'merge' ? (
+                                      <MergeAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'column-classifier' ? (
+                                      <ColumnClassifierAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'dataframe-operations' ? (
+                                      <DataFrameOperationsAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'create-column' ? (
+                                      <CreateColumnAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'groupby-wtg-avg' ? (
+                                      <GroupByAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'build-model-feature-based' ? (
+                                      <BuildModelFeatureBasedAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'select-models-feature' ? (
+                                      <SelectModelsFeatureAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'evaluate-models-feature' ? (
+                                      <EvaluateModelsFeatureAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'scope-selector' ? (
+                                      <ScopeSelectorAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'correlation' ? (
+                                      <CorrelationAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'auto-regressive-models' ? (
+                                      <AutoRegressiveModelsAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'select-models-auto-regressive' ? (
+                                      <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                                      <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                                    ) : (
+                                      <div>
+                                        <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
+                                        <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
+                                        <p className="text-xs text-gray-500">Configure this atom for your application</p>
+                                      </div>
+                                    )}
+                                  </AtomBox>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                );
+              }
+              return null;
+            })()}
+            
+            {/* Add New Card Button - Outside of molecule containers */}
+            <div className="flex justify-center mt-6">
+              <button
+                onClick={() => addNewCard()}
+                onDragEnter={e => handleAddDragEnter(e, 'workflow-outside')}
                         onDragLeave={handleAddDragLeave}
                         onDragOver={e => e.preventDefault()}
                         onDrop={e => {
-                          void handleDropNewCard(e, molecule.moleculeId);
+                  void handleDropNewCard(e);
                         }}
-                        className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `m-${molecule.moleculeId}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
+                className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === 'workflow-outside' ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
+                title="Add new card outside molecule containers"
                       >
-                        <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `m-${molecule.moleculeId}` ? 'scale-125 mb-2' : ''}`} />
+                <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === 'workflow-outside' ? 'scale-125 mb-2' : ''}`} />
                         <span
                           className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
                         >
@@ -1620,14 +2388,10 @@ const handleAddDragLeave = (e: React.DragEvent) => {
                         </span>
                       </button>
                     </div>
-                  </div>
                 </div>
-              </TabsContent>
-            ))}
-          </Tabs>
+          </div>
         </div>
-      </div>
-      </div>
+      </>
     );
   }
 
@@ -1636,7 +2400,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
       <div className={canEdit ? '' : 'pointer-events-none'}>
       {/* Layout Cards Container */}
       <div className="p-6 space-y-6 w-full">
-        {Array.isArray(layoutCards) && layoutCards.map((card, index) => {
+        {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards.map((card, index) => {
           const cardTitle = card.moleculeTitle
             ? (card.atoms.length > 0 ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
             : card.atoms.length > 0
@@ -1656,10 +2420,8 @@ const handleAddDragLeave = (e: React.DragEvent) => {
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, card.id)}
           >
-            {/* Card Header */}
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <div className="flex items-center space-x-2">
-                <Eye className={`w-4 h-4 ${card.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                 <span className="text-sm font-medium text-gray-700">
                   {cardTitle}
                 </span>
@@ -1845,7 +2607,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
               )}
             </div>
           </Card>
-          {index < layoutCards.length - 1 && (
+          {index < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (
             <div className="flex justify-center my-4">
               <button
                 onClick={() => addNewCard(undefined, index + 1)}
@@ -1908,13 +2670,11 @@ const handleAddDragLeave = (e: React.DragEvent) => {
               onClick={() => setExpandedCard(null)}
             />
             <div className="relative flex h-full w-full flex-col bg-gray-50 shadow-2xl pointer-events-auto">
-              {/* Fullscreen Header */}
               <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
                 <div className="flex items-center space-x-2">
-                <Eye className={`w-4 h-4 ${layoutCards.find(c => c.id === expandedCard)?.isExhibited ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                 <span className="text-lg font-semibold text-gray-900">
                   {(() => {
-                    const card = layoutCards.find(c => c.id === expandedCard);
+                    const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
                     if (!card) return 'Card';
                     return card.moleculeTitle
                       ? (card.atoms.length > 0 ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
@@ -1938,7 +2698,7 @@ const handleAddDragLeave = (e: React.DragEvent) => {
               {/* Fullscreen Content */}
               <div className="flex-1 flex flex-col px-8 py-4 space-y-4 overflow-auto">
                 {(() => {
-                const card = layoutCards.find(c => c.id === expandedCard);
+                const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
                 if (!card) return null;
 
                 return card.atoms.length === 0 ? (

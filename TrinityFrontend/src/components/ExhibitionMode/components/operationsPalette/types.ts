@@ -1,7 +1,7 @@
-import type { LucideIcon } from 'lucide-react';
+import type { ComponentType } from 'react';
 
 export interface PaletteOperation {
-  icon: LucideIcon;
+  icon: ComponentType<{ className?: string }>;
   label: string;
   colorClass?: string;
   onSelect?: () => void;
@@ -11,5 +11,7 @@ export interface PaletteOperation {
 export interface OperationFactoryDeps {
   onCreateTextBox?: () => void;
   onCreateTable?: () => void;
+  onOpenShapesPanel?: () => void;
+  onOpenImagesPanel?: () => void;
   canEdit?: boolean;
 }

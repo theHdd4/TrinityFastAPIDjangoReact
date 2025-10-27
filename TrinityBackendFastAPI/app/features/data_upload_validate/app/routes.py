@@ -3631,3 +3631,175 @@ async def rename_dataframe(object_name: str = Form(...), new_filename: str = For
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+@router.post("/file-metadata")
+async def get_file_metadata(request: Request):
+    """
+    Get metadata for a file including column dtypes, missing values, and sample data.
+    Expects JSON body with 'file_path' key.
+    """
+    try:
+        body = await request.json()
+        file_path = body.get("file_path")
+        
+        if not file_path:
+            raise HTTPException(status_code=400, detail="file_path is required")
+        
+        # Read file from MinIO
+        data = read_minio_object(file_path)
+        filename = Path(file_path).name
+        
+        # Parse based on file type
+        if filename.lower().endswith(".csv"):
+            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+        elif filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+        
+        df = df_pl.to_pandas()
+        
+        # Collect column metadata
+        columns_info = []
+        for col in df.columns:
+            col_data = df[col]
+            missing_count = int(col_data.isna().sum())
+            total_rows = len(df)
+            missing_percentage = (missing_count / total_rows * 100) if total_rows > 0 else 0
+            
+            # Get sample values (non-null)
+            sample_values = col_data.dropna().head(5).tolist()
+            
+            columns_info.append({
+                "name": str(col),
+                "dtype": str(col_data.dtype),
+                "missing_count": missing_count,
+                "missing_percentage": round(missing_percentage, 2),
+                "sample_values": sample_values,
+            })
+        
+        return {
+            "columns": columns_info,
+            "total_rows": len(df),
+            "total_columns": len(df.columns),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting file metadata: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/apply-data-transformations")
+async def apply_data_transformations(request: Request):
+    """
+    Apply dtype changes and missing value strategies to a file.
+    Expects JSON body with:
+    - file_path: str
+    - dtype_changes: dict[str, str] (column_name -> new_dtype)
+    - missing_value_strategies: dict[str, dict] (column_name -> {strategy: str, value?: str})
+    """
+    try:
+        body = await request.json()
+        file_path = body.get("file_path")
+        dtype_changes = body.get("dtype_changes", {})
+        missing_value_strategies = body.get("missing_value_strategies", {})
+        
+        if not file_path:
+            raise HTTPException(status_code=400, detail="file_path is required")
+        
+        # Read file from MinIO
+        data = read_minio_object(file_path)
+        filename = Path(file_path).name
+        
+        # Parse based on file type
+        if filename.lower().endswith(".csv"):
+            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+        elif filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+        
+        df = df_pl.to_pandas()
+        
+        # Apply missing value strategies first
+        for col_name, strategy_config in missing_value_strategies.items():
+            if col_name not in df.columns:
+                continue
+                
+            strategy = strategy_config.get("strategy", "none")
+            
+            if strategy == "none":
+                continue
+            elif strategy == "drop":
+                df = df.dropna(subset=[col_name])
+            elif strategy == "mean":
+                if pd.api.types.is_numeric_dtype(df[col_name]):
+                    df[col_name].fillna(df[col_name].mean(), inplace=True)
+            elif strategy == "median":
+                if pd.api.types.is_numeric_dtype(df[col_name]):
+                    df[col_name].fillna(df[col_name].median(), inplace=True)
+            elif strategy == "mode":
+                mode_val = df[col_name].mode()
+                if len(mode_val) > 0:
+                    df[col_name].fillna(mode_val[0], inplace=True)
+            elif strategy == "zero":
+                df[col_name].fillna(0, inplace=True)
+            elif strategy == "empty":
+                df[col_name].fillna("", inplace=True)
+            elif strategy == "custom":
+                custom_value = strategy_config.get("value", "")
+                df[col_name].fillna(custom_value, inplace=True)
+        
+        # Apply dtype changes
+        for col_name, new_dtype in dtype_changes.items():
+            if col_name not in df.columns:
+                continue
+                
+            try:
+                if new_dtype == "int64":
+                    df[col_name] = pd.to_numeric(df[col_name], errors='coerce').astype('Int64')
+                elif new_dtype == "float64":
+                    df[col_name] = pd.to_numeric(df[col_name], errors='coerce')
+                elif new_dtype == "string":
+                    df[col_name] = df[col_name].astype(str)
+                elif new_dtype == "datetime64":
+                    df[col_name] = pd.to_datetime(df[col_name], errors='coerce')
+                elif new_dtype == "bool":
+                    df[col_name] = df[col_name].astype(bool)
+            except Exception as e:
+                logger.warning(f"Could not convert {col_name} to {new_dtype}: {str(e)}")
+        
+        # Save back to MinIO (overwrite the temp file)
+        buffer = io.BytesIO()
+        if filename.lower().endswith(".csv"):
+            df.to_csv(buffer, index=False)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            df.to_excel(buffer, index=False)
+        elif filename.lower().endswith(".arrow"):
+            df_pl_updated = pl.from_pandas(df)
+            df_pl_updated.write_ipc(buffer)
+        
+        buffer.seek(0)
+        
+        # Upload back to MinIO
+        minio_client.put_object(
+            MINIO_BUCKET,
+            file_path,
+            buffer,
+            length=buffer.getbuffer().nbytes,
+            content_type="application/octet-stream",
+        )
+        
+        return {
+            "status": "success",
+            "message": "Transformations applied successfully",
+            "rows_affected": len(df),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error applying transformations: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -195,22 +195,22 @@ class ChartMakerService:
         if not data:
             return data
         
-        # Check if we have date columns
+        # Check if we have date columns - only check for columns named exactly 'date'
         date_columns = []
         
         # Check x_column
         if x_column:
             sample_value = data[0].get(x_column) if data else None
-            # Check if sample value is a date type or if column name suggests it's a date
+            # Check if sample value is a date type or if column name is exactly 'date'
             if sample_value is not None and (
                 isinstance(sample_value, (datetime, date, pd.Timestamp)) or
-                x_column.lower().find('date') != -1
+                x_column.lower() == 'date'
             ):
                 date_columns.append(x_column)
         
-        # Also check other columns that might be dates
+        # Also check other columns that might be dates - only check for exact 'date' name
         for key in data[0].keys() if data else []:
-            if key not in date_columns and key.lower().find('date') != -1:
+            if key not in date_columns and key.lower() == 'date':
                 date_columns.append(key)
         
         # Convert date values in identified date columns
@@ -241,7 +241,7 @@ class ChartMakerService:
         # Create a copy of traces to avoid modifying the original request
         traces_copy = []
         for i, trace in enumerate(request.traces):
-            print(f"📊 Trace {i+1}: X='{trace.x_column}', Y='{trace.y_column}', Type='{trace.chart_type}', Agg='{trace.aggregation}'")
+            print(f"📊 Trace {i+1}: X='{trace.x_column}', Y='{trace.y_column}', Type='{trace.chart_type}', Agg='{trace.aggregation}', LegendField='{trace.legend_field}'")
             trace_copy = ChartTrace(
                 x_column=trace.x_column,
                 y_column=trace.y_column,
@@ -250,7 +250,8 @@ class ChartMakerService:
                 aggregation=trace.aggregation,
                 filters=trace.filters,
                 color=trace.color,
-                style=trace.style
+                style=trace.style,
+                legend_field=trace.legend_field
             )
             traces_copy.append(trace_copy)
         
@@ -433,6 +434,37 @@ class ChartMakerService:
         
         return self._convert_numpy_types(result)
 
+    def _process_chart_data_with_legend(self, df: pd.DataFrame, traces: List[ChartTrace], x_column: str, legend_field: str) -> List[Dict[str, Any]]:
+        """Process chart data with legend field segregation (e.g., sales by brand, segregated by channel)"""
+        primary_trace = traces[0]
+        y_column = primary_trace.y_column
+        aggregation = primary_trace.aggregation or 'sum'
+        
+        print(f"🎨 Processing with legend field: {legend_field}")
+        print(f"📊 X-column: {x_column}, Y-column: {y_column}, Aggregation: {aggregation}")
+        
+        # Group by both x_column and legend_field, then aggregate the y_column
+        # This creates a "long format" dataset suitable for RechartsChartRenderer with legendField
+        grouped = df.groupby([x_column, legend_field])[y_column].agg(aggregation).reset_index()
+        
+        # Rename columns to match expected format
+        grouped.columns = [x_column, legend_field, y_column]
+        
+        # Convert to list of dictionaries
+        result = grouped.to_dict('records')
+        
+        print(f"✅ Processed {len(result)} rows with legend field")
+        if len(result) > 0:
+            print(f"📊 Sample rows: {result[:3]}")
+        
+        # DON'T modify traces - keep the original trace
+        # RechartsChartRenderer will handle legendField internally to create grouped bars
+        
+        # Convert date columns to ISO format
+        result = self._convert_dates_to_iso(result, x_column)
+        
+        return self._convert_numpy_types(result)
+
     def _process_chart_data(self, data: List[Dict[str, Any]], traces: List[ChartTrace]) -> List[Dict[str, Any]]:
         """Process and aggregate chart data based on traces"""
         if not data or not traces:
@@ -443,9 +475,15 @@ class ChartMakerService:
         # Group by x_column and aggregate y_columns
         primary_trace = traces[0]
         x_column = primary_trace.x_column
+        legend_field = primary_trace.legend_field
         
         if x_column not in df.columns:
             return data
+        
+        # Check if we need to segregate by legend_field
+        if legend_field and legend_field in df.columns:
+            print(f"🎨 Segregating by legend field: {legend_field}")
+            return self._process_chart_data_with_legend(df, traces, x_column, legend_field)
         
         # Check if aggregation is needed
         if df[x_column].duplicated().any():
