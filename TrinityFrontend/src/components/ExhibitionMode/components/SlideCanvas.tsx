@@ -2825,7 +2825,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   <span
                     key={definition.handle}
                     className={cn(
-                      'absolute z-40 h-3 w-3 rounded-full border border-background bg-primary shadow',
+                      'absolute z-40 h-3 w-3 rounded-full border border-yellow-200 bg-yellow-400 shadow',
                       definition.className,
                     )}
                     style={{ cursor: definition.cursor }}
