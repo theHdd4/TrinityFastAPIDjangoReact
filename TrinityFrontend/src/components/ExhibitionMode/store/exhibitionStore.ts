@@ -189,6 +189,7 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   backgroundColor: 'default',
   slideshowDuration: 8,
   slideshowTransition: 'fade',
+  backgroundLocked: false,
 };
 
 export interface PresentationSettings {
@@ -202,6 +203,7 @@ export interface PresentationSettings {
   backgroundColor: SlideBackgroundColor;
   slideshowDuration: number;
   slideshowTransition: SlideshowTransition;
+  backgroundLocked?: boolean;
 }
 
 export interface DroppedAtom {

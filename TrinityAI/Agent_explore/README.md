@@ -267,8 +267,4 @@ For issues or questions:
 
 ---
 
-<<<<<<< HEAD
 **Note**: This enhanced explore agent is designed to work seamlessly with the existing Trinity AI infrastructure and provides the **exact same robust functionality** as the Chart Maker agent, ensuring consistency across all AI agents in the system.
-=======
-**Note**: This enhanced explore agent is designed to work seamlessly with the existing Trinity AI infrastructure and provides the **exact same robust functionality** as the Chart Maker agent, ensuring consistency across all AI agents in the system.
->>>>>>> 150810c1b5794effe92101434eba656c97730ac5

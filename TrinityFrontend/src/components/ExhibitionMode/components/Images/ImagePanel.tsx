@@ -18,6 +18,7 @@ export interface ImageSelectionMetadata {
 interface StoredImage {
   id: string;
   url: string;
+  displayUrl: string;
   label: string;
   uploadedAt?: string | null;
 }
@@ -29,11 +30,16 @@ interface SelectedImage {
   source: ImagePanelSource;
 }
 
+export type ImageSelectionRequest = {
+  imageUrl: string;
+  metadata: ImageSelectionMetadata;
+};
+
 export interface ImagePanelProps {
   currentImage?: string | null;
   currentImageName?: string | null;
   onClose: () => void;
-  onImageSelect: (imageUrl: string, metadata: ImageSelectionMetadata) => void;
+  onImageSelect: (selections: ImageSelectionRequest[]) => void;
   onRemoveImage?: () => void;
   canEdit?: boolean;
 }
@@ -75,21 +81,72 @@ export const stockImages: ReadonlyArray<{ url: string; title: string }> = [
 
 const SELECTED_CLASSES = 'border-primary ring-2 ring-primary/20';
 
-const normaliseStoredImage = (image: any): StoredImage | null => {
-  const objectName: string | undefined = image?.object_name ?? image?.objectName;
-  const url: string | undefined = image?.url;
+const buildDisplayUrl = (objectName: string): string => {
+  const encoded = encodeURIComponent(objectName);
+  return `${IMAGES_API}/content?object_name=${encoded}`;
+};
 
-  if (!objectName || !url) {
+const normaliseStoredImage = (image: any): StoredImage | null => {
+  const resolveString = (...values: Array<unknown>): string | null => {
+    for (const value of values) {
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return value.trim();
+      }
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return String(value);
+      }
+    }
+    return null;
+  };
+
+  const objectName = resolveString(
+    image?.object_name,
+    image?.objectName,
+    image?.key,
+    image?.path,
+    image?.id,
+  );
+  const rawUrl = resolveString(
+    image?.url,
+    image?.image_url,
+    image?.imageUrl,
+    image?.public_url,
+    image?.publicUrl,
+    image?.signed_url,
+    image?.signedUrl,
+  );
+
+  if (!objectName && !rawUrl) {
     return null;
   }
 
-  const label: string =
-    image?.filename ?? image?.name ?? objectName.split('/').pop() ?? 'Uploaded image';
-  const uploadedAt: string | null = image?.uploaded_at ?? image?.uploadedAt ?? null;
+  const label =
+    resolveString(
+      image?.filename,
+      image?.file_name,
+      image?.original_filename,
+      image?.originalFilename,
+      image?.name,
+      image?.title,
+    ) ??
+    (objectName?.split('/').pop() ?? rawUrl?.split('/').pop() ?? 'Uploaded image');
+
+  const uploadedAt =
+    resolveString(
+      image?.uploaded_at,
+      image?.uploadedAt,
+      image?.created_at,
+      image?.createdAt,
+      image?.last_modified,
+      image?.lastModified,
+    ) ?? null;
+
+  const displayUrl = objectName ? buildDisplayUrl(objectName) : rawUrl!;
 
   return {
-    id: objectName,
-    url,
+    id: objectName ?? displayUrl,
+    url: rawUrl ?? displayUrl,
+    displayUrl,
     label,
     uploadedAt,
   };
@@ -143,12 +200,16 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
   const [isLoadingImages, setIsLoadingImages] = useState(false);
   const [isProcessingUpload, setIsProcessingUpload] = useState(false);
   const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
+  const [selectedUploads, setSelectedUploads] = useState<Map<string, SelectedImage>>(
+    new Map<string, SelectedImage>(),
+  );
 
   useEffect(() => {
     setProjectContext(getActiveProjectContext());
   }, []);
 
   useEffect(() => {
+    setSelectedUploads(prev => (prev.size === 0 ? prev : new Map<string, SelectedImage>()));
     if (currentImage) {
       setSelectedImage({
         url: currentImage,
@@ -208,12 +269,37 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
     void fetchStoredImages();
   }, [fetchStoredImages]);
 
+  const handleUploadToggle = useCallback(
+    (image: StoredImage) => {
+      if (!canEdit) {
+        return;
+      }
+
+      setSelectedUploads(prev => {
+        const next = new Map(prev);
+        if (next.has(image.id)) {
+          next.delete(image.id);
+        } else {
+          next.set(image.id, {
+            url: image.displayUrl,
+            label: image.label,
+            source: 'upload',
+          });
+        }
+        return next;
+      });
+      setSelectedImage(null);
+    },
+    [canEdit],
+  );
+
   const handleImageClick = useCallback(
     (image: SelectedImage) => {
       if (!canEdit) {
         return;
       }
 
+      setSelectedUploads(prev => (prev.size === 0 ? prev : new Map<string, SelectedImage>()));
       setSelectedImage(image);
     },
     [canEdit],
@@ -296,7 +382,16 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
           return sortStoredImages(Array.from(unique.values()));
         });
 
-        setSelectedImage({ url: uploadedImage.url, label: uploadedImage.label, source: 'upload' });
+        setSelectedUploads(prev => {
+          const next = new Map(prev);
+          next.set(uploadedImage.id, {
+            url: uploadedImage.displayUrl,
+            label: uploadedImage.label,
+            source: 'upload',
+          });
+          return next;
+        });
+        setSelectedImage(null);
         toast({
           title: 'Image uploaded',
           description: 'The image has been added to your uploads.',
@@ -319,27 +414,59 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
   );
 
   const handleInsertImage = useCallback(() => {
-    if (!selectedImage || !canEdit || isProcessingUpload) {
+    if (!canEdit || isProcessingUpload) {
       return;
     }
 
-    if (selectedImage.source === 'existing' && selectedImage.url === currentImage) {
+    const uploads = Array.from(selectedUploads.values());
+    const selections =
+      uploads.length > 0
+        ? uploads
+        : selectedImage
+        ? [selectedImage]
+        : [];
+
+    if (selections.length === 0) {
+      return;
+    }
+
+    if (
+      uploads.length === 0 &&
+      selections[0]?.source === 'existing' &&
+      selections[0]?.url === currentImage
+    ) {
       onClose();
       return;
     }
 
-    onImageSelect(selectedImage.url, {
-      title: resolveSelectionTitle(selectedImage),
-      source: selectedImage.source,
-    });
+    const payload = selections.map<ImageSelectionRequest>(selection => ({
+      imageUrl: selection.url,
+      metadata: {
+        title: resolveSelectionTitle(selection),
+        source: selection.source,
+      },
+    }));
+
+    onImageSelect(payload);
+    setSelectedUploads(new Map<string, SelectedImage>());
+    setSelectedImage(null);
     onClose();
-  }, [canEdit, currentImage, isProcessingUpload, onClose, onImageSelect, selectedImage]);
+  }, [
+    canEdit,
+    currentImage,
+    isProcessingUpload,
+    onClose,
+    onImageSelect,
+    selectedImage,
+    selectedUploads,
+  ]);
 
   const handleRemove = useCallback(() => {
     if (!canEdit || isProcessingUpload) {
       return;
     }
     onRemoveImage?.();
+    setSelectedUploads(new Map<string, SelectedImage>());
     setSelectedImage(null);
   }, [canEdit, isProcessingUpload, onRemoveImage]);
 
@@ -347,9 +474,18 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
 
   const availableUploads = storedImages;
 
+  const selectedUploadCount = selectedUploads.size;
+  const hasUploadSelections = selectedUploadCount > 0;
   const insertDisabled =
-    !selectedImage || !canEdit || isProcessingUpload ||
-    (selectedImage.source === 'existing' && selectedImage.url === currentImage);
+    (!hasUploadSelections && !selectedImage) ||
+    !canEdit ||
+    isProcessingUpload ||
+    (hasUploadSelections
+      ? false
+      : selectedImage?.source === 'existing' && selectedImage.url === currentImage);
+  const insertLabel = hasUploadSelections && selectedUploadCount > 1
+    ? `Insert ${selectedUploadCount} images`
+    : 'Insert image';
 
   return (
     <div className="flex h-full w-full max-w-[22rem] flex-col rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
@@ -431,46 +567,46 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                   Loading images…
                 </div>
               ) : availableUploads.length > 0 ? (
-                <div className="max-h-48 overflow-y-auto pr-1">
-                  <div className="grid grid-cols-2 gap-3">
-                    {availableUploads.map(image => {
-                      const isSelected = selectedImage?.url === image.url;
-                      return (
-                        <button
-                          key={image.id}
-                          type="button"
-                          onClick={() =>
-                            handleImageClick({
-                              url: image.url,
-                              label: image.label,
-                              source: 'upload',
-                            })
-                          }
-                          className={cn(
-                            'group relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all',
-                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                            canEdit && 'hover:scale-[1.02] hover:border-primary/40',
-                            isSelected ? SELECTED_CLASSES : 'border-border/60',
-                            !canEdit && 'cursor-not-allowed opacity-50',
-                          )}
-                          disabled={!canEdit}
-                        >
-                          <img src={image.url} alt={image.label} className="h-full w-full object-cover" />
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                            <p className="truncate text-[11px] font-medium text-white">{image.label}</p>
-                          </div>
-                          {isSelected && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
-                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
-                                <Check className="h-4 w-4 text-primary-foreground" />
-                              </div>
+                <>
+                  <p className="text-[11px] text-muted-foreground">
+                    Tip: Click multiple uploads to insert them together.
+                  </p>
+                  <div className="max-h-48 overflow-y-auto pr-1">
+                    <div className="grid grid-cols-2 gap-3">
+                      {availableUploads.map(image => {
+                        const isSelected = selectedUploads.has(image.id);
+                        return (
+                          <button
+                            key={image.id}
+                            type="button"
+                            onClick={() => handleUploadToggle(image)}
+                            className={cn(
+                              'group relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all',
+                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                              canEdit && 'hover:scale-[1.02] hover:border-primary/40',
+                              isSelected ? SELECTED_CLASSES : 'border-border/60',
+                              !canEdit && 'cursor-not-allowed opacity-50',
+                            )}
+                            disabled={!canEdit}
+                            aria-pressed={isSelected}
+                          >
+                            <img src={image.displayUrl} alt={image.label} className="h-full w-full object-cover" />
+                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                              <p className="truncate text-[11px] font-medium text-white">{image.label}</p>
                             </div>
-                          )}
-                        </button>
-                      );
-                    })}
+                            {isSelected && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
+                                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
+                                  <Check className="h-4 w-4 text-primary-foreground" />
+                                </div>
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
+                </>
               ) : (
                 <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
                   Upload images to see them here during this session. Connect to a project to access shared uploads.
@@ -544,7 +680,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                 Cancel
               </Button>
               <Button type="button" onClick={handleInsertImage} disabled={insertDisabled} className="h-9 px-4 text-xs">
-                Insert image
+                {insertLabel}
               </Button>
             </div>
           </div>

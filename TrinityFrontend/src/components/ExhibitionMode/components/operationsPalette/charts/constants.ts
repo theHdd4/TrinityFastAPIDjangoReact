@@ -278,6 +278,33 @@ export const COLOR_SCHEMES: ChartColorScheme[] = [
   },
 ];
 
+const clamp = (value: number, min: number, max: number): number => {
+  if (Number.isNaN(value)) {
+    return min;
+  }
+  if (value < min) {
+    return min;
+  }
+  if (value > max) {
+    return max;
+  }
+  return value;
+};
+
+export const applyAlphaToHex = (hex: string, alpha: number): string => {
+  if (typeof hex !== 'string' || !hex.startsWith('#')) {
+    return hex;
+  }
+
+  const normalizedAlpha = clamp(alpha, 0, 1);
+  const hexWithoutAlpha = hex.length === 9 ? hex.slice(0, 7) : hex.slice(0, 7);
+  const channel = Math.round(normalizedAlpha * 255)
+    .toString(16)
+    .padStart(2, '0');
+
+  return `${hexWithoutAlpha}${channel}`;
+};
+
 export const LEGEND_POSITIONS: { id: ChartConfig['legendPosition']; name: string }[] = [
   { id: 'top', name: 'Top' },
   { id: 'bottom', name: 'Bottom' },
@@ -296,6 +323,9 @@ export const normalizeChartType = (type?: string): ChartType => {
     case 'area':
     case 'pie':
     case 'donut':
+    case 'blank':
+    case 'calendar':
+    case 'gantt':
       return type;
     case 'column':
       return 'verticalBar';

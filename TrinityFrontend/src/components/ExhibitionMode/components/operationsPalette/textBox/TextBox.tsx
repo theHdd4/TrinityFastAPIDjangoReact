@@ -21,6 +21,7 @@ interface SlideTextBoxObjectProps {
   onInteract: () => void;
   onToolbarStateChange: (objectId: string, toolbar: React.ReactNode | null) => void;
   onRequestPositionPanel?: () => void;
+  onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
 }
 
 const clampFontSize = (value: number) => Math.min(Math.max(value, 8), 200);
@@ -499,9 +500,10 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         }
       }}
       onContextMenu={event => {
-        if (canEdit) {
-          event.preventDefault();
+        if (!canEdit) {
+          return;
         }
+        onContextMenu?.(event);
       }}
     >
       <div
