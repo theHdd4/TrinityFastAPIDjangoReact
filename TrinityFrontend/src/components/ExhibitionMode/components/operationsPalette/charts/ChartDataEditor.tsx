@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AreaChart,
   BarChart3,
@@ -10,6 +10,8 @@ import {
   Trash2,
   TrendingUp,
   X,
+  Table as TableIcon,
+  Palette as PaletteIcon,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -31,33 +33,22 @@ import type { ChartConfig, ChartDataRow, ChartType } from './types';
 interface ChartDataEditorProps {
   open: boolean;
   onClose: () => void;
-  onSave: (rows: ChartDataRow[], config: ChartConfig) => void;
+  onSave: (data: ChartDataRow[], config: ChartConfig) => void;
   initialData?: ChartDataRow[];
   initialConfig?: ChartConfig;
-  onApply?: (rows: ChartDataRow[], config: ChartConfig) => void;
+  onApply?: (data: ChartDataRow[], config: ChartConfig) => void;
 }
 
-const chartTypeOptions: { id: ChartType; name: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: 'verticalBar', name: 'Vertical bar', icon: Columns3 },
-  { id: 'horizontalBar', name: 'Horizontal bar', icon: BarChart3 },
-  { id: 'line', name: 'Line', icon: LineChart },
-  { id: 'area', name: 'Area', icon: AreaChart },
-  { id: 'pie', name: 'Pie', icon: PieChart },
-  { id: 'donut', name: 'Donut', icon: Circle },
+const chartTypes: { id: ChartType; icon: React.ComponentType<{ className?: string }>; name: string }[] = [
+  { id: 'verticalBar', icon: Columns3, name: 'Column' },
+  { id: 'horizontalBar', icon: BarChart3, name: 'Bar' },
+  { id: 'line', icon: LineChart, name: 'Line' },
+  { id: 'area', icon: AreaChart, name: 'Area' },
+  { id: 'pie', icon: PieChart, name: 'Pie' },
+  { id: 'donut', icon: Circle, name: 'Donut' },
 ];
 
-const cloneRows = (rows: ChartDataRow[]): ChartDataRow[] => rows.map(row => ({ ...row }));
-
-const sanitiseRowValue = (value: string): number => {
-  if (value.trim() === '') {
-    return 0;
-  }
-
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
-
-const ensureRows = (rows?: ChartDataRow[]): ChartDataRow[] => {
+const sanitiseRows = (rows?: ChartDataRow[]): ChartDataRow[] => {
   const source = rows && rows.length > 0 ? rows : DEFAULT_CHART_DATA;
   return source.map(row => ({
     label: row.label ?? '',
@@ -65,7 +56,7 @@ const ensureRows = (rows?: ChartDataRow[]): ChartDataRow[] => {
   }));
 };
 
-const ensureConfig = (config?: ChartConfig): ChartConfig => {
+const sanitiseConfig = (config?: ChartConfig): ChartConfig => {
   const merged = { ...DEFAULT_CHART_CONFIG, ...(config ?? {}) };
   return {
     ...merged,
@@ -87,126 +78,155 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   initialConfig,
   onApply,
 }) => {
-  const [rows, setRows] = useState<ChartDataRow[]>(() => ensureRows(initialData));
-  const [config, setConfig] = useState<ChartConfig>(() => ensureConfig(initialConfig));
-
-  const palette = useMemo(
-    () => COLOR_SCHEMES.find(scheme => scheme.id === config.colorScheme) ?? COLOR_SCHEMES[0],
-    [config.colorScheme],
-  );
+  const [chartData, setChartData] = useState<ChartDataRow[]>(() => sanitiseRows(initialData));
+  const [config, setConfig] = useState<ChartConfig>(() => sanitiseConfig(initialConfig));
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
-    setRows(ensureRows(initialData));
-    setConfig(ensureConfig(initialConfig));
+    setChartData(sanitiseRows(initialData));
+    setConfig(sanitiseConfig(initialConfig));
   }, [open, initialData, initialConfig]);
 
-  const handleAddRow = useCallback(() => {
-    setRows(current => [...current, { label: `Item ${current.length + 1}`, value: 0 }]);
-  }, []);
+  useEffect(() => {
+    if (!open || !onApply) {
+      return;
+    }
 
-  const handleRowChange = useCallback((index: number, key: keyof ChartDataRow, value: string) => {
-    setRows(current =>
+    const payloadRows = chartData.map(row => ({ label: row.label, value: Number(row.value) || 0 }));
+    const payloadConfig: ChartConfig = { ...config, type: normalizeChartType(config.type) };
+    onApply(payloadRows, payloadConfig);
+  }, [chartData, config, onApply, open]);
+
+  const palette = useMemo(
+    () => COLOR_SCHEMES.find(scheme => scheme.id === config.colorScheme) ?? COLOR_SCHEMES[0],
+    [config.colorScheme],
+  );
+
+  const addRow = () => {
+    setChartData(current => [...current, { label: 'New Item', value: 0 }]);
+  };
+
+  const updateRow = (index: number, field: keyof ChartDataRow, value: string) => {
+    setChartData(current =>
       current.map((row, rowIndex) => {
         if (rowIndex !== index) {
           return row;
         }
 
-        if (key === 'value') {
-          return { ...row, value: sanitiseRowValue(value) };
+        if (field === 'value') {
+          const parsed = Number(value);
+          return { ...row, value: Number.isFinite(parsed) ? parsed : 0 };
         }
 
         return { ...row, label: value };
       }),
     );
-  }, []);
+  };
 
-  const handleDeleteRow = useCallback((index: number) => {
-    setRows(current => (current.length <= 1 ? current : current.filter((_, rowIndex) => rowIndex !== index)));
-  }, []);
+  const deleteRow = (index: number) => {
+    setChartData(current => (current.length <= 1 ? current : current.filter((_, rowIndex) => rowIndex !== index)));
+  };
 
-  const handleConfigChange = useCallback((patch: Partial<ChartConfig>) => {
-    setConfig(current => ({
-      ...current,
-      ...patch,
-      type: patch.type ? normalizeChartType(patch.type) : current.type,
+  const handleSave = () => {
+    const payloadRows = chartData.map(row => ({
+      label: row.label,
+      value: Number.isFinite(row.value) ? row.value : 0,
     }));
-  }, []);
+    const payloadConfig: ChartConfig = { ...config, type: normalizeChartType(config.type) };
 
-  const commit = useCallback(
-    (callback?: (nextRows: ChartDataRow[], nextConfig: ChartConfig) => void, shouldClose?: boolean) => {
-      if (!callback) {
-        if (shouldClose) {
-          onClose();
-        }
-        return;
-      }
-
-      const payloadRows = cloneRows(rows);
-      const payloadConfig: ChartConfig = { ...config, type: normalizeChartType(config.type) };
-      callback(payloadRows, payloadConfig);
-
-      if (shouldClose) {
-        onClose();
-      }
-    },
-    [rows, config, onClose],
-  );
-
-  const handleApply = useCallback(() => {
-    commit(onApply);
-  }, [commit, onApply]);
-
-  const handleSave = useCallback(() => {
-    commit(onSave, true);
-  }, [commit, onSave]);
-
-  const handleCancel = useCallback(() => {
+    onApply?.(payloadRows, payloadConfig);
+    onSave(payloadRows, payloadConfig);
     onClose();
-  }, [onClose]);
+  };
 
-  const renderPreview = () => {
+  const handleLegendChange = (value: ChartConfig['legendPosition']) => {
+    setConfig(current => ({ ...current, legendPosition: value }));
+  };
+
+  const renderLegendWithChart = (chart: React.ReactNode) => {
+    const legend = (
+      <div
+        className={cn('flex flex-wrap gap-4 text-sm font-medium text-foreground', {
+          'justify-center': config.legendPosition === 'top' || config.legendPosition === 'bottom',
+          'flex-col items-start': config.legendPosition === 'left',
+          'flex-col items-end': config.legendPosition === 'right',
+        })}
+      >
+        {chartData.map((item, index) => (
+          <div key={`${item.label}-${index}`} className="flex items-center gap-2">
+            <div
+              className="h-3 w-3 rounded-sm"
+              style={{ backgroundColor: palette.colors[index % palette.colors.length] ?? COLOR_SCHEMES[0].colors[0] }}
+            />
+            <span>{item.label}</span>
+          </div>
+        ))}
+      </div>
+    );
+
+    if (config.legendPosition === 'left' || config.legendPosition === 'right') {
+      return (
+        <div className="flex w-full items-center justify-center gap-6">
+          {config.legendPosition === 'left' && legend}
+          {chart}
+          {config.legendPosition === 'right' && legend}
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex w-full flex-col items-center">
+        {config.legendPosition === 'top' && <div className="mb-6 w-full">{legend}</div>}
+        {chart}
+        {config.legendPosition === 'bottom' && <div className="mt-6 w-full">{legend}</div>}
+      </div>
+    );
+  };
+
+  const renderChartPreview = () => {
+    const colors = palette.colors.length > 0 ? palette.colors : COLOR_SCHEMES[0].colors;
     const type = normalizeChartType(config.type);
 
     if (type === 'pie' || type === 'donut') {
-      const total = rows.reduce((sum, item) => sum + item.value, 0) || 1;
-      let currentAngle = -90;
+      const total = chartData.reduce((sum, item) => sum + item.value, 0) || 1;
+      let currentAngle = 0;
 
-      return (
+      const chart = (
         <div className="relative flex h-64 w-full items-center justify-center">
-          <svg width="220" height="220" viewBox="0 0 220 220" className="-rotate-90">
-            {rows.map((item, index) => {
+          <svg width="200" height="200" viewBox="0 0 200 200" className="-rotate-90">
+            {chartData.map((item, index) => {
               const percentage = (item.value / total) * 360;
               const startAngle = currentAngle;
               currentAngle += percentage;
               const endAngle = currentAngle;
-              const outerRadius = 90;
-              const innerRadius = type === 'donut' ? 48 : 0;
-              const largeArc = percentage > 180 ? 1 : 0;
 
-              const startX = 110 + outerRadius * Math.cos((startAngle * Math.PI) / 180);
-              const startY = 110 + outerRadius * Math.sin((startAngle * Math.PI) / 180);
-              const endX = 110 + outerRadius * Math.cos((endAngle * Math.PI) / 180);
-              const endY = 110 + outerRadius * Math.sin((endAngle * Math.PI) / 180);
+              const outerRadius = 80;
+              const innerRadius = type === 'donut' ? 40 : 0;
+              const largeArcFlag = percentage > 180 ? 1 : 0;
 
-              const innerStartX = 110 + innerRadius * Math.cos((startAngle * Math.PI) / 180);
-              const innerStartY = 110 + innerRadius * Math.sin((startAngle * Math.PI) / 180);
-              const innerEndX = 110 + innerRadius * Math.cos((endAngle * Math.PI) / 180);
-              const innerEndY = 110 + innerRadius * Math.sin((endAngle * Math.PI) / 180);
+              const startX = 100 + outerRadius * Math.cos((startAngle * Math.PI) / 180);
+              const startY = 100 + outerRadius * Math.sin((startAngle * Math.PI) / 180);
+              const endX = 100 + outerRadius * Math.cos((endAngle * Math.PI) / 180);
+              const endY = 100 + outerRadius * Math.sin((endAngle * Math.PI) / 180);
 
-              const path =
+              const innerStartX = 100 + innerRadius * Math.cos((startAngle * Math.PI) / 180);
+              const innerStartY = 100 + innerRadius * Math.sin((startAngle * Math.PI) / 180);
+              const innerEndX = 100 + innerRadius * Math.cos((endAngle * Math.PI) / 180);
+              const innerEndY = 100 + innerRadius * Math.sin((endAngle * Math.PI) / 180);
+
+              const pathData =
                 type === 'donut'
-                  ? `M ${startX} ${startY} A 90 90 0 ${largeArc} 1 ${endX} ${endY} L ${innerEndX} ${innerEndY} A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${innerStartX} ${innerStartY} Z`
-                  : `M 110 110 L ${startX} ${startY} A 90 90 0 ${largeArc} 1 ${endX} ${endY} Z`;
+                  ? `M ${startX} ${startY} A 80 80 0 ${largeArcFlag} 1 ${endX} ${endY} L ${innerEndX} ${innerEndY} A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${innerStartX} ${innerStartY} Z`
+                  : `M 100 100 L ${startX} ${startY} A 80 80 0 ${largeArcFlag} 1 ${endX} ${endY} Z`;
 
               return (
                 <path
                   key={`${item.label}-${index}`}
-                  d={path}
-                  fill={palette.colors[index % palette.colors.length]}
+                  d={pathData}
+                  fill={colors[index % colors.length]}
                   className="transition-all duration-300 hover:opacity-80"
                 />
               );
@@ -214,241 +234,221 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
           </svg>
         </div>
       );
+
+      return renderLegendWithChart(chart);
     }
 
     if (type === 'verticalBar' || type === 'horizontalBar') {
-      const maxValue = Math.max(...rows.map(item => item.value), 1);
+      const maxValue = Math.max(...chartData.map(item => item.value), 1);
       const isHorizontal = type === 'horizontalBar';
 
-      return (
+      const chart = (
         <div
           className={cn(
             'flex h-64 w-full gap-4 p-4',
             isHorizontal ? 'flex-col justify-center' : 'items-end justify-center',
           )}
         >
-          {rows.map((item, index) => {
+          {chartData.map((item, index) => {
             const ratio = maxValue === 0 ? 0 : item.value / maxValue;
-            const sizePercent = `${Math.max(ratio * 100, item.value > 0 ? 6 : 0)}%`;
-
-            if (isHorizontal) {
-              return (
-                <div key={`${item.label}-${index}`} className="flex w-full items-center gap-3">
-                  {config.showLabels && <span className="w-20 text-sm font-medium text-muted-foreground">{item.label}</span>}
-                  <div className="flex h-4 flex-1 items-center overflow-hidden rounded-2xl bg-muted/20">
-                    <div
-                      className="h-full rounded-r-2xl transition-all duration-300"
-                      style={{
-                        backgroundColor: palette.colors[index % palette.colors.length],
-                        width: sizePercent,
-                      }}
-                    />
-                  </div>
-                  {config.showValues && (
-                    <span className="min-w-[2ch] text-right text-sm font-semibold text-foreground">{item.value}</span>
-                  )}
-                </div>
-              );
-            }
-
             return (
-              <div key={`${item.label}-${index}`} className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
-                <div className="flex h-44 w-10 items-end overflow-hidden rounded-2xl bg-muted/20">
-                  <div
-                    className="w-full rounded-t-2xl transition-all duration-300"
-                    style={{
-                      backgroundColor: palette.colors[index % palette.colors.length],
-                      height: sizePercent,
-                    }}
-                  />
-                </div>
-                {config.showLabels && <span className="font-medium">{item.label}</span>}
-                {config.showValues && <span className="font-semibold text-foreground">{item.value}</span>}
+              <div
+                key={`${item.label}-${index}`}
+                className={cn(
+                  'flex gap-2',
+                  isHorizontal ? 'flex-row items-center' : 'flex-col items-center justify-end',
+                )}
+              >
+                <div
+                  className="rounded-lg transition-all duration-300 hover:opacity-80"
+                  style={{
+                    backgroundColor: colors[index % colors.length],
+                    [isHorizontal ? 'width' : 'height']: `${Math.max(ratio * 100, 0)}%`,
+                    [isHorizontal ? 'height' : 'width']: '40px',
+                    [isHorizontal ? 'minWidth' : 'minHeight']: '20px',
+                  }}
+                />
+                <span className="text-xs font-medium text-muted-foreground">{item.label}</span>
               </div>
             );
           })}
         </div>
       );
+
+      return renderLegendWithChart(chart);
     }
 
     if (type === 'line' || type === 'area') {
-      const maxValue = Math.max(...rows.map(item => item.value), 1);
-      const points = rows
+      const maxValue = Math.max(...chartData.map(item => item.value), 1);
+      const points = chartData
         .map((item, index) => {
-          const x = (index / Math.max(rows.length - 1, 1)) * 300;
-          const y = 200 - (item.value / maxValue) * 180;
+          const x = chartData.length <= 1 ? 0 : (index / (chartData.length - 1)) * 300;
+          const y = 200 - (maxValue === 0 ? 0 : (item.value / maxValue) * 180);
           return `${x},${y}`;
         })
         .join(' ');
 
-      return (
+      const chart = (
         <div className="flex h-64 w-full items-center justify-center">
           <svg width="320" height="220" viewBox="0 0 320 220">
             {type === 'area' && (
-              <polygon points={`0,200 ${points} 320,200`} fill={`${palette.colors[0]}33`} stroke="none" />
+              <polygon points={`0,200 ${points} 300,200`} fill={`${colors[0]}33`} stroke="none" />
             )}
             <polyline
               points={points}
               fill="none"
-              stroke={palette.colors[0]}
+              stroke={colors[0]}
               strokeWidth={3}
               className="transition-all duration-300"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             />
-            {rows.map((item, index) => {
-              const x = (index / Math.max(rows.length - 1, 1)) * 300;
-              const y = 200 - (item.value / maxValue) * 180;
+            {chartData.map((item, index) => {
+              const x = chartData.length <= 1 ? 0 : (index / (chartData.length - 1)) * 300;
+              const y = 200 - (maxValue === 0 ? 0 : (item.value / maxValue) * 180);
               return (
-                <g key={`${item.label}-${index}`}>
-                  <circle
-                    cx={x}
-                    cy={y}
-                    r={5}
-                    fill={palette.colors[index % palette.colors.length]}
-                    className="transition-all duration-300 hover:r-7"
-                  />
-                  {config.showValues && (
-                    <text x={x} y={y - 12} textAnchor="middle" className="fill-foreground text-xs font-semibold">
-                      {item.value}
-                    </text>
-                  )}
-                  {config.showLabels && (
-                    <text x={x} y={210} textAnchor="middle" className="fill-muted-foreground text-xs">
-                      {item.label}
-                    </text>
-                  )}
-                </g>
+                <circle
+                  key={`${item.label}-${index}`}
+                  cx={x}
+                  cy={y}
+                  r="5"
+                  fill={colors[index % colors.length]}
+                  className="transition-all duration-300 hover:r-7"
+                />
               );
             })}
           </svg>
         </div>
       );
+
+      return renderLegendWithChart(chart);
     }
 
     return null;
   };
 
   return (
-    <Dialog open={open} onOpenChange={value => !value && onClose()}>
-      <DialogContent className="h-[85vh] max-w-5xl gap-0 overflow-hidden border-2 border-border/50 bg-gradient-to-br from-background via-background/95 to-primary/5 p-0">
-        <DialogHeader className="relative border-b border-border/50 px-8 py-6">
+    <Dialog open={open} onOpenChange={isOpen => !isOpen && onClose()}>
+      <DialogContent className="h-[85vh] max-w-6xl gap-0 overflow-hidden border-2 border-border/50 bg-gradient-to-br from-background via-background/98 to-primary/5 p-0 shadow-2xl">
+        <DialogHeader className="relative overflow-hidden border-b border-border/50 bg-gradient-to-br from-primary/5 via-transparent to-transparent px-8 pb-6 pt-8">
           <div className="absolute inset-0 bg-grid-white/5 [mask-image:linear-gradient(0deg,transparent,black)]" />
-          <div className="relative flex items-start justify-between gap-4">
+          <div className="relative flex items-start justify-between">
             <div className="flex items-center gap-4">
               <div className="relative">
                 <div className="absolute inset-0 animate-pulse rounded-2xl bg-gradient-to-br from-blue-500 to-purple-500 opacity-30 blur-xl" />
-                <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 ring-2 ring-blue-500/30">
-                  <TrendingUp className="h-7 w-7 text-blue-500" />
+                <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 ring-2 ring-blue-500/30 backdrop-blur-xl">
+                  <TableIcon className="h-7 w-7 text-blue-500" />
                 </div>
               </div>
               <div>
-                <DialogTitle className="flex items-center gap-3 text-2xl font-bold">
-                  Edit chart data
-                  {React.createElement(
-                    chartTypeOptions.find(option => option.id === normalizeChartType(config.type))?.icon ?? Columns3,
-                    { className: 'h-5 w-5 text-primary' },
-                  )}
+                <DialogTitle className="mb-1 flex items-center gap-3 text-2xl font-bold">
+                  Edit Chart Data
+                  <PaletteIcon className="h-5 w-5 text-blue-500 animate-pulse" />
                 </DialogTitle>
-                <p className="text-sm text-muted-foreground">Update your dataset and visual settings</p>
+                <p className="text-sm text-muted-foreground">Customize your chart data and appearance</p>
               </div>
             </div>
-            <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl" onClick={handleCancel}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-xl transition-all hover:bg-destructive/10 hover:text-destructive"
+              onClick={onClose}
+            >
               <X className="h-5 w-5" />
             </Button>
           </div>
         </DialogHeader>
 
-        <div className="flex h-full divide-x divide-border/50">
-          <div className="flex w-1/2 flex-col">
-            <div className="border-b border-border/50 bg-muted/10 p-6">
-              <h3 className="flex items-center gap-2 text-lg font-semibold">
-                <TrendingUp className="h-4 w-4 text-primary" /> Dataset
+        <div className="flex flex-1 overflow-hidden">
+          <div className="flex w-1/2 flex-col border-r border-border/50">
+            <div className="border-b border-border/50 bg-gradient-to-br from-muted/20 to-transparent p-6">
+              <h3 className="mb-2 flex items-center gap-2 text-lg font-bold">
+                <TableIcon className="h-5 w-5 text-primary" />
+                Chart Data
               </h3>
-              <p className="text-sm text-muted-foreground">Edit the values that power your chart</p>
+              <p className="text-sm text-muted-foreground">Enter your data values below</p>
             </div>
+
             <ScrollArea className="flex-1">
-              <div className="space-y-4 p-6">
-                <div className="grid grid-cols-[1fr,120px,48px] items-center gap-3 border-b border-border/40 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <span>Label</span>
-                  <span className="text-right">Value</span>
-                  <span className="text-center">Actions</span>
+              <div className="space-y-3 p-6">
+                <div className="grid grid-cols-[1fr,140px,48px] gap-3 border-b-2 border-border/50 pb-2">
+                  <Label className="text-sm font-bold text-foreground">Label</Label>
+                  <Label className="text-sm font-bold text-foreground">Value</Label>
+                  <div />
                 </div>
-                {rows.map((row, index) => (
-                  <div key={`${row.label}-${index}`} className="grid grid-cols-[1fr,120px,48px] items-center gap-3">
+
+                {chartData.map((row, index) => (
+                  <div key={`${row.label}-${index}`} className="group grid animate-fade-in grid-cols-[1fr,140px,48px] gap-3">
                     <Input
                       value={row.label}
-                      onChange={event => handleRowChange(index, 'label', event.target.value)}
-                      className="h-11 rounded-xl border-2 border-border/50 bg-card/60 focus:border-primary"
+                      onChange={event => updateRow(index, 'label', event.target.value)}
+                      className="h-11 rounded-xl border-2 border-border/50 bg-card/50 transition-all hover:border-primary/50 focus:border-primary"
+                      placeholder="Enter label"
                     />
                     <Input
                       type="number"
-                      value={row.value}
-                      onChange={event => handleRowChange(index, 'value', event.target.value)}
-                      className="h-11 rounded-xl border-2 border-border/50 bg-card/60 text-right focus:border-primary"
+                      value={Number.isFinite(row.value) ? row.value : 0}
+                      onChange={event => updateRow(index, 'value', event.target.value)}
+                      className="h-11 rounded-xl border-2 border-border/50 bg-card/50 transition-all hover:border-primary/50 focus:border-primary"
+                      placeholder="0"
                     />
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-10 w-10 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() => handleDeleteRow(index)}
-                      disabled={rows.length <= 1}
+                      onClick={() => deleteRow(index)}
+                      className="h-11 w-11 rounded-xl opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                      disabled={chartData.length <= 1}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 ))}
+
                 <Button
                   variant="outline"
-                  className="h-11 w-full rounded-xl border-2 border-dashed border-border/60"
-                  onClick={handleAddRow}
+                  onClick={addRow}
+                  className="mt-2 h-12 w-full rounded-xl border-2 border-dashed border-border/50 transition-all hover:border-primary/50 hover:bg-primary/5"
                 >
-                  <Plus className="mr-2 h-4 w-4" /> Add row
+                  <Plus className="mr-2 h-5 w-5" />
+                  Add Row
                 </Button>
               </div>
             </ScrollArea>
           </div>
 
           <div className="flex w-1/2 flex-col">
-            <div className="border-b border-border/50 bg-muted/10 p-6">
-              <h3 className="flex items-center gap-2 text-lg font-semibold">
-                <TrendingUp className="h-4 w-4 text-primary" /> Preview
+            <div className="border-b border-border/50 bg-gradient-to-br from-muted/20 to-transparent p-6">
+              <h3 className="mb-2 flex items-center gap-2 text-lg font-bold">
+                <TrendingUp className="h-5 w-5 text-primary" />
+                Preview
               </h3>
-              <p className="text-sm text-muted-foreground">Visualise how your chart will look</p>
+              <p className="text-sm text-muted-foreground">Live preview of your chart</p>
             </div>
+
             <ScrollArea className="flex-1">
               <div className="space-y-6 p-6">
-                <div className="rounded-2xl border border-border/40 bg-card/60 p-6 shadow-inner">
-                  {renderPreview()}
-                  <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-xs font-medium text-muted-foreground">
-                    {rows.map((row, index) => (
-                      <span key={`${row.label}-${index}`} className="flex items-center gap-2">
-                        <span
-                          className="h-3 w-3 rounded-sm"
-                          style={{ backgroundColor: palette.colors[index % palette.colors.length] }}
-                        />
-                        {row.label}
-                      </span>
-                    ))}
-                  </div>
+                <div className="rounded-2xl border-2 border-border/50 bg-gradient-to-br from-card/50 to-muted/20 p-6">
+                  {renderChartPreview()}
                 </div>
 
                 <div className="space-y-3">
-                  <Label className="text-sm font-semibold">Chart type</Label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {chartTypeOptions.map(type => {
+                  <Label className="text-sm font-bold">Chart Type</Label>
+                  <div className="flex gap-2">
+                    {chartTypes.map(type => {
                       const Icon = type.icon;
-                      const isSelected = normalizeChartType(config.type) === type.id;
+                      const isSelected = config.type === type.id;
                       return (
                         <Button
                           key={type.id}
                           variant={isSelected ? 'default' : 'outline'}
                           size="icon"
                           className={cn(
-                            'h-12 w-12 rounded-xl border-2',
+                            'h-12 w-12 rounded-xl border-2 transition-all',
                             isSelected
-                              ? 'border-primary bg-primary text-primary-foreground shadow-lg'
-                              : 'border-border/50 text-muted-foreground hover:border-primary/50 hover:text-primary',
+                              ? 'scale-110 border-primary bg-primary text-primary-foreground shadow-lg'
+                              : 'border-border/50 hover:border-primary/30 hover:bg-muted',
                           )}
-                          onClick={() => handleConfigChange({ type: type.id })}
+                          onClick={() => setConfig(current => ({ ...current, type: type.id }))}
                         >
                           <Icon className="h-5 w-5" />
                         </Button>
@@ -458,24 +458,23 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                 </div>
 
                 <div className="space-y-3">
-                  <Label className="text-sm font-semibold">Color scheme</Label>
+                  <Label className="text-sm font-bold">Color Scheme</Label>
                   <Select
                     value={config.colorScheme}
-                    onValueChange={value => handleConfigChange({ colorScheme: value })}
+                    onValueChange={value => setConfig(current => ({ ...current, colorScheme: value }))}
                   >
-                    <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/60">
+                    <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/50 hover:border-primary/50">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent className="rounded-xl border border-border/40 bg-popover/90 backdrop-blur">
+                    <SelectContent className="rounded-xl">
                       {COLOR_SCHEMES.map(scheme => (
                         <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
                           <div className="flex items-center gap-3">
-                            {scheme.icon && <span className="text-lg">{scheme.icon}</span>}
                             <div className="flex gap-1.5">
-                              {scheme.colors.map(color => (
-                                <span
-                                  key={color}
-                                  className="h-4 w-4 rounded border border-border/50"
+                              {scheme.colors.map((color, index) => (
+                                <div
+                                  key={`${scheme.id}-${color}-${index}`}
+                                  className="h-4 w-4 rounded-md border-2 border-border/50"
                                   style={{ backgroundColor: color }}
                                 />
                               ))}
@@ -489,40 +488,36 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="flex items-center justify-between rounded-xl border border-border/40 bg-muted/20 p-4">
-                    <Label htmlFor="show-labels" className="text-sm font-medium">
-                      Show labels
+                  <div className="flex items-center justify-between rounded-xl border border-border/50 bg-gradient-to-br from-muted/40 to-muted/20 p-4">
+                    <Label htmlFor="show-labels-editor" className="cursor-pointer text-sm font-semibold">
+                      Show Labels
                     </Label>
                     <Switch
-                      id="show-labels"
+                      id="show-labels-editor"
                       checked={config.showLabels}
-                      onCheckedChange={checked => handleConfigChange({ showLabels: checked })}
+                      onCheckedChange={checked => setConfig(current => ({ ...current, showLabels: checked }))}
                     />
                   </div>
-                  <div className="flex items-center justify-between rounded-xl border border-border/40 bg-muted/20 p-4">
-                    <Label htmlFor="show-values" className="text-sm font-medium">
-                      Show values
+
+                  <div className="flex items-center justify-between rounded-xl border border-border/50 bg-gradient-to-br from-muted/40 to-muted/20 p-4">
+                    <Label htmlFor="show-values-editor" className="cursor-pointer text-sm font-semibold">
+                      Show Values
                     </Label>
                     <Switch
-                      id="show-values"
+                      id="show-values-editor"
                       checked={config.showValues}
-                      onCheckedChange={checked => handleConfigChange({ showValues: checked })}
+                      onCheckedChange={checked => setConfig(current => ({ ...current, showValues: checked }))}
                     />
                   </div>
                 </div>
 
                 <div className="space-y-3">
-                  <Label className="text-sm font-semibold">Legend position</Label>
-                  <Select
-                    value={config.legendPosition}
-                    onValueChange={value =>
-                      handleConfigChange({ legendPosition: value as ChartConfig['legendPosition'] })
-                    }
-                  >
-                    <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/60">
+                  <Label className="text-sm font-bold">Legend Position</Label>
+                  <Select value={config.legendPosition} onValueChange={value => handleLegendChange(value as ChartConfig['legendPosition'])}>
+                    <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/50 hover:border-primary/50">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent className="rounded-xl border border-border/40 bg-popover/90 backdrop-blur">
+                    <SelectContent className="rounded-xl">
                       {LEGEND_POSITIONS.map(position => (
                         <SelectItem key={position.id} value={position.id} className="rounded-lg">
                           {position.name}
@@ -536,30 +531,22 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-4 border-t border-border/50 bg-muted/10 px-8 py-5">
+        <div className="flex items-center justify-between gap-4 border-t border-border/50 bg-gradient-to-r from-muted/5 via-transparent to-primary/5 px-8 py-5">
           <Button
             variant="outline"
-            className="h-11 flex-1 rounded-xl border-2 border-border/50"
-            onClick={handleCancel}
+            onClick={onClose}
+            className="h-12 flex-1 rounded-xl border-2 border-border/50 font-semibold transition-all hover:border-border hover:bg-muted"
           >
             Cancel
           </Button>
-          {typeof onApply === 'function' && (
-            <Button
-              variant="outline"
-              className="h-11 flex-1 rounded-xl border-2 border-border/40 bg-card/40 hover:bg-card/60"
-              onClick={handleApply}
-            >
-              Apply
-            </Button>
-          )}
           <Button
-            className="relative h-11 flex-1 overflow-hidden rounded-xl bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 font-semibold text-white shadow-lg transition-transform hover:scale-[1.02]"
             onClick={handleSave}
+            className="group relative h-12 flex-1 overflow-hidden rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 font-semibold shadow-lg transition-all hover:from-blue-600 hover:to-purple-600 hover:shadow-2xl hover:scale-105"
           >
-            <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 hover:translate-x-full" />
+            <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-white/0 via-white/20 to-white/0 transition-transform duration-700 group-hover:translate-x-full" />
             <span className="relative z-10 flex items-center justify-center gap-2">
-              <TrendingUp className="h-4 w-4" /> Save data
+              <TrendingUp className="h-5 w-5" />
+              Save Chart
             </span>
           </Button>
         </div>
