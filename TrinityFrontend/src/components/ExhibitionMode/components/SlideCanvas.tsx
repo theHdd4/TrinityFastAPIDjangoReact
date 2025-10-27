@@ -2625,10 +2625,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               {isSelected && !(isTextBoxObject && isEditingTextBox) && (
                 <div
                   className={cn(
-                  'pointer-events-none absolute inset-0 border border-yellow-400 transition-all duration-200',
-                  suppressCardChrome || isShapeObject || isTextBoxObject || isTableObject || isChartObject
-                    ? 'rounded-[22px]'
-                    : 'rounded-[32px]'
+                    'pointer-events-none absolute inset-0 border border-dotted border-yellow-400 transition-all duration-200',
+                    suppressCardChrome || isShapeObject || isTextBoxObject || isTableObject || isChartObject
+                      ? 'rounded-[22px]'
+                      : 'rounded-[32px]'
                   )}
                   aria-hidden="true"
                 />
@@ -2650,7 +2650,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       !isShapeObject &&
                       !(isTextBoxObject || isTableObject || isChartObject);
 
-                    if (!shouldShowCardChrome) {
+                    if (!shouldShowCardChrome || isSelected) {
                       return 'border-transparent';
                     }
 
@@ -2825,7 +2825,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   <span
                     key={definition.handle}
                     className={cn(
-                      'absolute z-40 h-3 w-3 rounded-full border border-background bg-primary shadow',
+                      'absolute z-40 h-3 w-3 rounded-full border border-background bg-black shadow',
                       definition.className,
                     )}
                     style={{ cursor: definition.cursor }}
