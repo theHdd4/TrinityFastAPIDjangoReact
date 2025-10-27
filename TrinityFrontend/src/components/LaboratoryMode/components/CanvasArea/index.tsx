@@ -1954,7 +1954,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         <Card
                           key={card.id}
                           data-card-id={card.id}
-                          className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
+                          className={`w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
                             dragOverCardId === card.id
                               ? 'border-blue-500 bg-blue-50 shadow-lg'
                               : draggedCardId === card.id
@@ -2401,6 +2401,156 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 </div>
           </div>
         </div>
+
+        {/* Fullscreen Card Modal */}
+        {expandedCard &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-40 pointer-events-none"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div
+                className="absolute inset-0 bg-black/40 pointer-events-auto"
+                aria-hidden="true"
+                onClick={() => setExpandedCard(null)}
+              />
+              <div className="relative flex h-full w-full flex-col bg-gray-50 shadow-2xl pointer-events-auto">
+                {/* Fullscreen Header */}
+                <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
+                  <div className="flex items-center space-x-2">
+                <Eye className={`w-4 h-4 ${Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard)?.isExhibited : false ? 'text-[#458EE2]' : 'text-gray-400'}`} />
+                  <span className="text-lg font-semibold text-gray-900">
+                    {(() => {
+                      const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
+                      if (!card) return 'Card';
+                      return card.moleculeTitle
+                        ? (card.atoms.length > 0 ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
+                        : card.atoms.length > 0
+                          ? card.atoms[0].title
+                          : 'Card';
+                    })()}
+                  </span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                  <span className="text-sm text-gray-500">Exhibit the Card</span>
+                  <Switch
+                    checked={Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard)?.isExhibited || false : false}
+                    onCheckedChange={(checked) => handleExhibitionToggle(expandedCard, checked)}
+                    className="data-[state=checked]:bg-[#458EE2]"
+                  />
+                  <button
+                    onClick={() => setExpandedCard(null)}
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                    title="Close Fullscreen"
+                  >
+                    <X className="w-5 h-5 text-gray-500" />
+                  </button>
+                  </div>
+                </div>
+
+                {/* Fullscreen Content */}
+                <div className="flex-1 flex flex-col px-8 py-4 space-y-4 overflow-auto">
+                {(() => {
+                const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
+                if (!card) return null;
+
+                  return card.atoms.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[400px]">
+                      <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-6">
+                        <Grid3X3 className="w-10 h-10 text-gray-400" />
+                      </div>
+                      <p className="text-gray-500 text-lg mb-2">No atoms in this section</p>
+                      <p className="text-sm text-gray-400">Configure this atom for your application</p>
+                    </div>
+                  ) : (
+                    <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
+                      {card.atoms.map((atom) => (
+                        <AtomBox
+                          key={`${atom.id}-expanded`}
+                          className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
+                        >
+                          {/* Atom Header */}
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center space-x-2">
+                              <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                              <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeAtom(card.id, atom.id);
+                              }}
+                              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4 text-gray-400" />
+                            </button>
+                          </div>
+
+                          {/* Atom Content */}
+                          <div className="w-full flex-1 overflow-visible">
+                            {atom.atomId === 'text-box' ? (
+                              <TextBoxEditor textId={atom.id} />
+                            ) : atom.atomId === 'data-upload-validate' ? (
+                              <DataUploadValidateAtom atomId={atom.id} />
+                            ) : atom.atomId === 'feature-overview' ? (
+                              <FeatureOverviewAtom atomId={atom.id} />
+                            ) : atom.atomId === 'clustering' ? (
+                              <ClusteringAtom atomId={atom.id} />
+                            ) : atom.atomId === 'explore' ? (
+                              <ExploreAtom atomId={atom.id} />
+                            ) : atom.atomId === 'chart-maker' ? (
+                              <ChartMakerAtom atomId={atom.id} />
+                            ) : atom.atomId === 'concat' ? (
+                              <ConcatAtom atomId={atom.id} />
+                            ) : atom.atomId === 'merge' ? (
+                              <MergeAtom atomId={atom.id} />
+                            ) : atom.atomId === 'column-classifier' ? (
+                              <ColumnClassifierAtom atomId={atom.id} />
+                            ) : atom.atomId === 'dataframe-operations' ? (
+                              <DataFrameOperationsAtom atomId={atom.id} />
+                            ) : atom.atomId === 'create-column' ? (
+                              <CreateColumnAtom atomId={atom.id} />
+                            ) : atom.atomId === 'groupby-wtg-avg' ? (
+                              <GroupByAtom atomId={atom.id} />
+                            ) : atom.atomId === 'build-model-feature-based' ? (
+                              <BuildModelFeatureBasedAtom atomId={atom.id} />
+                            ) : atom.atomId === 'scenario-planner' ? (
+                              <ScenarioPlannerAtom atomId={atom.id} />
+                            ) : atom.atomId === 'select-models-feature' ? (
+                              <SelectModelsFeatureAtom atomId={atom.id} />
+                            ) : atom.atomId === 'evaluate-models-feature' ? (
+                              <EvaluateModelsFeatureAtom atomId={atom.id} />
+                            ) : atom.atomId === 'scope-selector' ? (
+                              <ScopeSelectorAtom atomId={atom.id} />
+                            ) : atom.atomId === 'correlation' ? (
+                              <CorrelationAtom atomId={atom.id} />
+                            ) : atom.atomId === 'auto-regressive-models' ? (
+                              <AutoRegressiveModelsAtom atomId={atom.id} />
+                            ) : atom.atomId === 'select-models-auto-regressive' ? (
+                              <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                            ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                              <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                            ) : (
+                              <div>
+                                <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
+                                <p className="text-sm text-gray-600 mb-3">{atom.category}</p>
+                                <p className="text-sm text-gray-500">
+                                  Configure this atom for your application
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </AtomBox>
+                      ))}
+                    </div>
+                  );
+                })()}
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )}
       </>
     );
   }

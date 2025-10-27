@@ -328,17 +328,17 @@ def save_workflow_to_mongo(
     custom_molecules: List[Dict[str, Any]],
     *,
     user_id: str = "",
-    client_id: str = "",
-    app_id: str = "",
-    project_id: Optional[int] = None,
+    client_name: str = "",
+    app_name: str = "",
+    project_name: str = "",
 ) -> Dict[str, Any]:
     """Save workflow mode configuration to MongoDB."""
     if not check_mongodb_connection():
         return {"status": "error", "error": "MongoDB not connected"}
     
     try:
-        # Generate workflow ID based on client, app, and project
-        workflow_id = f"workflow_{client_id}_{app_id}_{project_id or 'default'}"
+        # Generate workflow ID based on client_name, app_name, and project_name
+        workflow_id = f"{client_name}/{app_name}/{project_name}"
         
         # Create document with metadata
         document = {
@@ -346,9 +346,9 @@ def save_workflow_to_mongo(
             "canvas_molecules": canvas_molecules,
             "custom_molecules": custom_molecules,
             "user_id": user_id,
-            "client_id": client_id,
-            "app_id": app_id,
-            "project_id": project_id,
+            "client_name": client_name,
+            "app_name": app_name,
+            "project_name": project_name,
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow(),
             "workflow_type": "workflow_mode_configuration"
@@ -379,28 +379,35 @@ def save_workflow_to_mongo(
 def get_workflow_from_mongo(
     *,
     user_id: Optional[str] = None,
-    client_id: Optional[str] = None,
-    project_id: Optional[int] = None,
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Get workflow configuration from MongoDB."""
     if not check_mongodb_connection():
         return None
     
     try:
-        # Build query filter
+        # Build query filter - be more flexible with matching
         query_filter = {"workflow_type": "workflow_mode_configuration"}
         
-        if user_id:
+        # Only add filters if they have meaningful values (not defaults)
+        if user_id and user_id.strip():
             query_filter["user_id"] = user_id
-        if client_id:
-            query_filter["client_id"] = client_id
-        if project_id:
-            query_filter["project_id"] = project_id
+        if client_name and client_name.strip() and client_name != 'default_client':
+            query_filter["client_name"] = client_name
+        if app_name and app_name.strip() and app_name != 'default_app':
+            query_filter["app_name"] = app_name
+        if project_name and project_name.strip() and project_name != 'default_project':
+            query_filter["project_name"] = project_name
+        
+        print(f"🔍 MongoDB query filter: {query_filter}")
         
         # Fetch workflow configuration
         doc = workflow_collection.find_one(query_filter)
         
         if not doc:
+            print(f"❌ No workflow found with filter: {query_filter}")
             return None
         
         # Convert MongoDB document back to workflow format
@@ -411,9 +418,9 @@ def get_workflow_from_mongo(
             "created_at": doc.get("created_at"),
             "updated_at": doc.get("updated_at"),
             "user_id": doc.get("user_id"),
-            "client_id": doc.get("client_id"),
-            "app_id": doc.get("app_id"),
-            "project_id": doc.get("project_id"),
+            "client_name": doc.get("client_name"),
+            "app_name": doc.get("app_name"),
+            "project_name": doc.get("project_name"),
         }
         
         print(f"📦 Retrieved workflow configuration from {WORKFLOW_COLLECTION_NAME}: {workflow_data['workflow_id']}")

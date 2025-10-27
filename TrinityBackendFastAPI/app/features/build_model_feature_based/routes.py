@@ -473,11 +473,7 @@ async def train_models_direct(request: dict):
                     status_code=400,
                     detail="stack_models_to_run is required when stack_modeling is enabled"
                 )
-            if not pool_by_identifiers:
-                raise HTTPException(
-                    status_code=400,
-                    detail="pool_by_identifiers is required when stack_modeling is enabled"
-                )
+            # pool_by_identifiers is optional - can be empty list for individual modeling
             if apply_clustering and not numerical_columns_for_clustering:
                 raise HTTPException(
                     status_code=400,
@@ -2167,8 +2163,7 @@ async def prepare_stack_model_data(request: dict):
             raise HTTPException(status_code=400, detail="scope_number is required")
         if not combinations:
             raise HTTPException(status_code=400, detail="combinations list is required")
-        if not pool_by_identifiers:
-            raise HTTPException(status_code=400, detail="pool_by_identifiers list is required")
+        # pool_by_identifiers is optional - can be empty list
         if not x_variables:
             raise HTTPException(status_code=400, detail="x_variables list is required")
         if not y_variable:
@@ -2318,8 +2313,7 @@ async def train_models_for_stacked_data(request: dict):
             raise HTTPException(status_code=400, detail="scope_number is required")
         if not combinations:
             raise HTTPException(status_code=400, detail="combinations list is required")
-        if not pool_by_identifiers:
-            raise HTTPException(status_code=400, detail="pool_by_identifiers list is required")
+        # pool_by_identifiers is optional - can be empty list
         if not x_variables:
             raise HTTPException(status_code=400, detail="x_variables list is required")
         if not y_variable:
@@ -2738,11 +2732,7 @@ async def train_mmm_models(request: dict):
                     status_code=400,
                     detail="stack_models_to_run is required when stack_modeling is enabled"
                 )
-            if not pool_by_identifiers:
-                raise HTTPException(
-                    status_code=400,
-                    detail="pool_by_identifiers is required when stack_modeling is enabled"
-                )
+            # pool_by_identifiers is optional - can be empty list for individual modeling
             if apply_clustering and not numerical_columns_for_clustering:
                 raise HTTPException(
                     status_code=400,
