@@ -1690,6 +1690,31 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [selectedObjects],
     );
 
+    const resolveTargetIds = useCallback(
+      (explicitIds?: string[] | null) => {
+        if (explicitIds && explicitIds.length > 0) {
+          return Array.from(new Set(explicitIds));
+        }
+        return selectedIds;
+      },
+      [selectedIds],
+    );
+
+    const resolveTargetObjects = useCallback(
+      (explicitIds?: string[] | null) => {
+        const ids = resolveTargetIds(explicitIds);
+        const targets: SlideObject[] = [];
+        ids.forEach(id => {
+          const object = objectsMap.get(id);
+          if (object) {
+            targets.push(object);
+          }
+        });
+        return targets;
+      },
+      [objectsMap, resolveTargetIds],
+    );
+
     const captureColorStyle = useCallback((object: SlideObject | null | undefined) => {
       if (!object) {
         return null;
@@ -1719,95 +1744,112 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [],
     );
 
-    const handleCopySelection = useCallback(() => {
-      if (selectedObjects.length === 0) {
+    const handleCopySelection = useCallback(
+      (explicitIds?: string[] | null) => {
+        const targetIds = resolveTargetIds(explicitIds);
+        const targets = resolveTargetObjects(explicitIds);
+        if (targets.length === 0) {
+          toast({
+            title: 'Nothing to copy',
+            description: 'Select an object to copy before copying.',
+          });
+          return;
+        }
+
+        const snapshots = targets.map(object => ({
+          ...object,
+          props: cloneValue(object.props ?? {}),
+        }));
+
+        setClipboard(snapshots);
+        if (explicitIds && explicitIds.length > 0) {
+          setSelectedIds(targetIds);
+        }
+        focusCanvas();
         toast({
-          title: 'Nothing to copy',
-          description: 'Select an object to copy before copying.',
+          title: snapshots.length === 1 ? 'Object copied' : 'Objects copied',
+          description:
+            snapshots.length === 1
+              ? 'Copied the selected object.'
+              : `Copied ${snapshots.length} objects to the clipboard.`,
         });
-        return;
-      }
+      },
+      [focusCanvas, resolveTargetIds, resolveTargetObjects],
+    );
 
-      const snapshots = selectedObjects.map(object => ({
-        ...object,
-        props: cloneValue(object.props ?? {}),
-      }));
+    const handleCutSelection = useCallback(
+      (explicitIds?: string[] | null) => {
+        const targets = resolveTargetObjects(explicitIds);
+        if (targets.length === 0) {
+          toast({
+            title: 'Nothing to cut',
+            description: 'Select an object before attempting to cut it.',
+          });
+          return;
+        }
 
-      setClipboard(snapshots);
-      toast({
-        title: snapshots.length === 1 ? 'Object copied' : 'Objects copied',
-        description:
-          snapshots.length === 1
-            ? 'Copied the selected object.'
-            : `Copied ${snapshots.length} objects to the clipboard.`,
-      });
-    }, [selectedObjects]);
+        const unlockedTargets = targets.filter(object => !isSlideObjectLocked(object));
+        if (unlockedTargets.length === 0) {
+          toast({
+            title: 'Selection locked',
+            description: 'Unlock the selected object before cutting it.',
+          });
+          return;
+        }
 
-    const handleCutSelection = useCallback(() => {
-      if (selectedObjects.length === 0) {
-        toast({
-          title: 'Nothing to cut',
-          description: 'Select an object before attempting to cut it.',
-        });
-        return;
-      }
+        const snapshots = unlockedTargets.map(object => ({
+          ...object,
+          props: cloneValue(object.props ?? {}),
+        }));
 
-      if (unlockedSelectedObjects.length === 0) {
-        toast({
-          title: 'Selection locked',
-          description: 'Unlock the selected object before cutting it.',
-        });
-        return;
-      }
+        setClipboard(snapshots);
+        onInteract();
 
-      const snapshots = unlockedSelectedObjects.map(object => ({
-        ...object,
-        props: cloneValue(object.props ?? {}),
-      }));
+        const removedIds = new Set(unlockedTargets.map(object => object.id));
 
-      setClipboard(snapshots);
-      onInteract();
-
-      unlockedSelectedObjects.forEach(object => {
-        if (isAtomObject(object) && onRemoveAtom) {
-          const atomId = (object.props as { atom?: DroppedAtom } | undefined)?.atom?.id;
-          if (atomId) {
-            onRemoveAtom(atomId);
+        unlockedTargets.forEach(object => {
+          if (isAtomObject(object) && onRemoveAtom) {
+            const atomId = (object.props as { atom?: DroppedAtom } | undefined)?.atom?.id;
+            if (atomId) {
+              onRemoveAtom(atomId);
+            }
+            return;
           }
-          return;
-        }
 
-        if (!onRemoveObject) {
-          return;
-        }
+          if (!onRemoveObject) {
+            return;
+          }
 
-        if (object.type === 'accent-image') {
-          return;
-        }
+          if (object.type === 'accent-image') {
+            return;
+          }
 
-        if (object.type === 'text-box' && titleObjectId && object.id === titleObjectId) {
-          return;
-        }
+          if (object.type === 'text-box' && titleObjectId && object.id === titleObjectId) {
+            return;
+          }
 
-        onRemoveObject(object.id);
-      });
+          onRemoveObject(object.id);
+        });
 
-      setSelectedIds([]);
-      toast({
-        title: snapshots.length === 1 ? 'Object cut' : 'Objects cut',
-        description:
-          snapshots.length === 1
-            ? 'Moved the selected object to the clipboard.'
-            : `Cut ${snapshots.length} objects to the clipboard.`,
-      });
-    }, [
-      onInteract,
-      onRemoveAtom,
-      onRemoveObject,
-      selectedObjects.length,
-      titleObjectId,
-      unlockedSelectedObjects,
-    ]);
+        setSelectedIds(prev => prev.filter(id => !removedIds.has(id)));
+        focusCanvas();
+        toast({
+          title: snapshots.length === 1 ? 'Object cut' : 'Objects cut',
+          description:
+            snapshots.length === 1
+              ? 'Moved the selected object to the clipboard.'
+              : `Cut ${snapshots.length} objects to the clipboard.`,
+        });
+      },
+      [
+        focusCanvas,
+        onInteract,
+        onRemoveAtom,
+        onRemoveObject,
+        resolveTargetObjects,
+        titleObjectId,
+      ],
+    );
 
     const handleCopyStyle = useCallback(() => {
       const primary = selectedObjects[0] ?? null;
@@ -1835,56 +1877,65 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       });
     }, [captureColorStyle, selectedObjects]);
 
-    const handleDeleteSelection = useCallback(() => {
-      if (unlockedSelectedObjects.length === 0) {
-        if (selectedObjects.length === 0) {
+    const handleDeleteSelection = useCallback(
+      (explicitIds?: string[] | null) => {
+        const targets = resolveTargetObjects(explicitIds);
+        if (targets.length === 0) {
           toast({
             title: 'Nothing to delete',
             description: 'Select an object to remove it from the slide.',
           });
-        } else {
+          return;
+        }
+
+        const unlockedTargets = targets.filter(object => !isSlideObjectLocked(object));
+        if (unlockedTargets.length === 0) {
           toast({
             title: 'Selection locked',
             description: 'Unlock the selected object before deleting it.',
           });
+          return;
         }
-        return;
-      }
 
-      onInteract();
-      unlockedSelectedObjects.forEach(object => {
-        if (isAtomObject(object) && onRemoveAtom) {
-          const atomId = (object.props as { atom?: DroppedAtom } | undefined)?.atom?.id;
-          if (atomId) {
-            onRemoveAtom(atomId);
+        onInteract();
+        const removedIds = new Set(unlockedTargets.map(object => object.id));
+
+        unlockedTargets.forEach(object => {
+          if (isAtomObject(object) && onRemoveAtom) {
+            const atomId = (object.props as { atom?: DroppedAtom } | undefined)?.atom?.id;
+            if (atomId) {
+              onRemoveAtom(atomId);
+            }
+            return;
           }
-          return;
-        }
 
-        if (!onRemoveObject) {
-          return;
-        }
+          if (!onRemoveObject) {
+            return;
+          }
 
-        if (object.type === 'accent-image') {
-          return;
-        }
+          if (object.type === 'accent-image') {
+            return;
+          }
 
-        if (object.type === 'text-box' && titleObjectId && object.id === titleObjectId) {
-          return;
-        }
+          if (object.type === 'text-box' && titleObjectId && object.id === titleObjectId) {
+            return;
+          }
 
-        onRemoveObject(object.id);
-      });
+          onRemoveObject(object.id);
+        });
 
-      setSelectedIds([]);
-      toast({
-        title: unlockedSelectedObjects.length === 1 ? 'Object deleted' : 'Objects deleted',
-        description:
-          unlockedSelectedObjects.length === 1
-            ? 'The selected object has been removed.'
-            : `${unlockedSelectedObjects.length} objects removed from the slide.`,
-      });
-    }, [onInteract, onRemoveAtom, onRemoveObject, titleObjectId, unlockedSelectedObjects, selectedObjects.length]);
+        setSelectedIds(prev => prev.filter(id => !removedIds.has(id)));
+        focusCanvas();
+        toast({
+          title: unlockedTargets.length === 1 ? 'Object deleted' : 'Objects deleted',
+          description:
+            unlockedTargets.length === 1
+              ? 'The selected object has been removed.'
+              : `${unlockedTargets.length} objects removed from the slide.`,
+        });
+      },
+      [focusCanvas, onInteract, onRemoveAtom, onRemoveObject, resolveTargetObjects, titleObjectId],
+    );
 
     const handleToggleLock = useCallback(() => {
       if (selectedObjects.length === 0) {
@@ -2865,80 +2916,84 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       onInteract,
     ]);
 
-    const handleDuplicateSelection = useCallback(() => {
-      if (!canEdit) {
-        return;
-      }
-
-      if (selectedObjects.length === 0) {
-        toast({
-          title: 'Nothing to duplicate',
-          description: 'Select at least one object before duplicating.',
-        });
-        return;
-      }
-
-      const duplicatedIds: string[] = [];
-      selectedObjects.forEach((object, index) => {
-        const baseProps = cloneValue(object.props ?? {}) as Record<string, unknown>;
-        delete baseProps.locked;
-
-        const offset = CANVAS_SNAP_GRID * 4 * (index + 1);
-        const { x, y } = clampAndSnapPosition(
-          object.x + offset,
-          object.y + offset,
-          object.width,
-          object.height,
-        );
-        const newId = generateObjectId(object.id);
-
-        if (object.type === 'atom') {
-          const atom = (object.props as { atom?: DroppedAtom } | undefined)?.atom;
-          if (atom) {
-            const clonedAtom: DroppedAtom = { ...cloneValue(atom), id: newId };
-            baseProps.atom = clonedAtom;
-            onAddAtom?.(clonedAtom);
-          }
+    const handleDuplicateSelection = useCallback(
+      (explicitIds?: string[] | null) => {
+        if (!canEdit) {
+          return;
         }
 
-        const duplicate: SlideObject = {
-          ...object,
-          id: newId,
-          x,
-          y,
-          groupId: null,
-          props: baseProps,
-        };
+        const targets = resolveTargetObjects(explicitIds);
+        if (targets.length === 0) {
+          toast({
+            title: 'Nothing to duplicate',
+            description: 'Select at least one object before duplicating.',
+          });
+          return;
+        }
 
-        onAddObject(duplicate);
-        duplicatedIds.push(newId);
-      });
+        const duplicatedIds: string[] = [];
+        targets.forEach((object, index) => {
+          const baseProps = cloneValue(object.props ?? {}) as Record<string, unknown>;
+          delete baseProps.locked;
 
-      if (duplicatedIds.length === 0) {
-        return;
-      }
+          const offset = CANVAS_SNAP_GRID * 4 * (index + 1);
+          const { x, y } = clampAndSnapPosition(
+            object.x + offset,
+            object.y + offset,
+            object.width,
+            object.height,
+          );
+          const newId = generateObjectId(object.id);
 
-      onInteract();
-      onBringToFront(duplicatedIds);
-      setSelectedIds(duplicatedIds);
-      focusCanvas();
-      toast({
-        title: duplicatedIds.length === 1 ? 'Object duplicated' : 'Objects duplicated',
-        description:
-          duplicatedIds.length === 1
-            ? 'Added a copy of the selected object.'
-            : `Added ${duplicatedIds.length} duplicated objects to the slide.`,
-      });
-    }, [
-      canEdit,
-      clampAndSnapPosition,
-      focusCanvas,
-      onAddAtom,
-      onAddObject,
-      onBringToFront,
-      onInteract,
-      selectedObjects,
-    ]);
+          if (object.type === 'atom') {
+            const atom = (object.props as { atom?: DroppedAtom } | undefined)?.atom;
+            if (atom) {
+              const clonedAtom: DroppedAtom = { ...cloneValue(atom), id: newId };
+              baseProps.atom = clonedAtom;
+              onAddAtom?.(clonedAtom);
+            }
+          }
+
+          const duplicate: SlideObject = {
+            ...object,
+            id: newId,
+            x,
+            y,
+            groupId: null,
+            props: baseProps,
+          };
+
+          onAddObject(duplicate);
+          duplicatedIds.push(newId);
+        });
+
+        if (duplicatedIds.length === 0) {
+          return;
+        }
+
+        onInteract();
+        onBringToFront(duplicatedIds);
+        setSelectedIds(duplicatedIds);
+        focusCanvas();
+        toast({
+          title: duplicatedIds.length === 1 ? 'Object duplicated' : 'Objects duplicated',
+          description:
+            duplicatedIds.length === 1
+              ? 'Added a copy of the selected object.'
+              : `Added ${duplicatedIds.length} duplicated objects to the slide.`,
+        });
+      },
+      [
+        canEdit,
+        clampAndSnapPosition,
+        focusCanvas,
+        onAddAtom,
+        onAddObject,
+        onBringToFront,
+        onInteract,
+        resolveTargetObjects,
+      ],
+    );
 
     const handleAlignSelection = useCallback(
       (alignment: AlignAction) => {
@@ -4038,6 +4093,13 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               )
             : undefined;
 
+          const contextTargetIds = isSelected ? selectedIds : [object.id];
+          const contextHasSelection = contextTargetIds.length > 0;
+          const contextHasUnlocked = contextTargetIds.some(id => {
+            const target = objectsMap.get(id);
+            return target ? !isSlideObjectLocked(target) : false;
+          });
+
           return (
             <SlideObjectContextMenu
               key={object.id}
@@ -4049,12 +4111,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               hasClipboard={hasClipboardItems}
               lockLabel={lockLabel}
               onContextMenu={event => handleContextMenuRequest(event, object.id)}
-              onCopy={handleCopySelection}
+              onCopy={() => handleCopySelection(contextTargetIds)}
               onCopyStyle={handleCopyStyle}
-              onCut={handleCutSelection}
+              onCut={() => handleCutSelection(contextTargetIds)}
               onPaste={handlePasteClipboard}
-              onDuplicate={handleDuplicateSelection}
-              onDelete={handleDeleteSelection}
+              onDuplicate={() => handleDuplicateSelection(contextTargetIds)}
+              onDelete={() => handleDeleteSelection(contextTargetIds)}
               onToggleLock={handleToggleLock}
               onBringToFront={() => handleLayerAction('front')}
               onBringForward={() => handleLayerAction('forward')}
@@ -4066,12 +4128,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               onAltText={handleAltTextSelection}
               onApplyColorsToAll={handleApplyColorsToAll}
               onInfo={handleInfo}
-              disableDelete={selectionLocked}
+              disableDelete={!contextHasUnlocked}
               disableLock={!hasSelection}
-              disableCopy={!hasSelection}
-              disableCopyStyle={!hasSelection}
-              disableCut={!canCutSelection}
-              disableDuplicate={!hasSelection}
+              disableCopy={!contextHasSelection}
+              disableCopyStyle={!contextHasSelection}
+              disableCut={!contextHasUnlocked}
+              disableDuplicate={!contextHasSelection}
               disableLink={selectionLocked}
               disableComment={selectionLocked}
               disableApplyColors={!canApplyColorsGlobally}
