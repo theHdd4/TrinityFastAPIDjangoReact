@@ -489,7 +489,6 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                           {group.schemes.map(scheme => (
                             <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
                               <div className="flex items-center gap-3">
-                                {scheme.icon && <span className="text-lg">{scheme.icon}</span>}
                                 <div className="flex gap-1.5">
                                   {scheme.colors.map((color, index) => (
                                     <span

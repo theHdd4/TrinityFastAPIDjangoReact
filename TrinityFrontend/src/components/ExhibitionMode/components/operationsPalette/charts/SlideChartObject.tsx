@@ -256,17 +256,16 @@ export const SlideChartObject: React.FC<SlideChartObjectProps> = ({
                   disabled={!canEdit}
                   className={cn('rounded-lg gap-3', safeConfig.colorScheme === scheme.id && 'bg-muted/60 text-foreground')}
                 >
-                  <span className="text-lg">{scheme.icon}</span>
                   <div className="flex gap-1.5">
-                    {scheme.colors.map(color => (
+                    {scheme.colors.map((color, index) => (
                       <span
-                        key={color}
+                        key={`${scheme.id}-${color}-${index}`}
                         className="h-3.5 w-3.5 rounded border border-border/40"
                         style={{ backgroundColor: color }}
                       />
                     ))}
                   </div>
-                  <span className="font-medium text-sm">{scheme.name}</span>
+                  <span className="text-sm font-medium">{scheme.name}</span>
                 </ContextMenuItem>
               ))}
             </ContextMenuSubContent>

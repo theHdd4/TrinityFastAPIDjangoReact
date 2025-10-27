@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AreaChart,
   BarChart3,
@@ -58,16 +58,14 @@ const legendPositions = [
   { id: 'right' as ChartConfig['legendPosition'], name: 'Right' },
 ];
 
-type ChartDataDraft = { label: string; value: string };
-
-const sanitiseData = (rows?: ChartDataRow[]): ChartDataDraft[] => {
+const sanitiseData = (rows?: ChartDataRow[]): ChartDataRow[] => {
   const source = rows && rows.length ? rows : DEFAULT_CHART_DATA;
   return source.map(row => ({
     label: row.label ?? '',
     value:
       row.value === undefined || row.value === null || Number.isNaN(Number(row.value))
-        ? '0'
-        : Number(row.value).toString(),
+        ? 0
+        : Number(row.value),
   }));
 };
 
@@ -93,14 +91,22 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   initialConfig,
   onApply,
 }) => {
-  const [chartData, setChartData] = useState<ChartDataDraft[]>(() => sanitiseData(initialData));
+  const [chartData, setChartData] = useState<ChartDataRow[]>(() => sanitiseData(initialData));
   const [config, setConfig] = useState<ChartConfig>(() => sanitiseConfig(initialConfig));
   const [isInitialised, setIsInitialised] = useState(false);
+  const configRef = useRef(config);
+
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
 
   useEffect(() => {
     if (open && !isInitialised) {
-      setChartData(sanitiseData(initialData));
-      setConfig(sanitiseConfig(initialConfig));
+      const nextData = sanitiseData(initialData);
+      const nextConfig = sanitiseConfig(initialConfig);
+      setChartData(nextData);
+      setConfig(nextConfig);
+      configRef.current = nextConfig;
       setIsInitialised(true);
       return;
     }
@@ -109,15 +115,6 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       setIsInitialised(false);
     }
   }, [open, initialData, initialConfig, isInitialised]);
-
-  const numericData = useMemo<ChartDataRow[]>(
-    () =>
-      chartData.map(item => ({
-        label: item.label,
-        value: Number.isFinite(Number.parseFloat(item.value)) ? Number.parseFloat(item.value) : 0,
-      })),
-    [chartData],
-  );
 
   const colors = useMemo(() => {
     const scheme = COLOR_SCHEMES.find(s => s.id === config.colorScheme);
@@ -140,66 +137,65 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
   const formatCategory = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
-  const emitApply = (nextData: ChartDataDraft[], nextConfig: ChartConfig) => {
-    const normalisedData = nextData.map(item => ({
-      label: item.label,
-      value: Number.isFinite(Number.parseFloat(item.value)) ? Number.parseFloat(item.value) : 0,
-    }));
-    onApply?.(normalisedData, nextConfig);
+  const emitApply = (nextData: ChartDataRow[], nextConfig: ChartConfig) => {
+    onApply?.(nextData.map(item => ({ ...item })), nextConfig);
   };
 
   const addRow = () => {
-    const next = [...chartData, { label: 'New Item', value: '0' }];
-    setChartData(next);
-    emitApply(next, config);
+    setChartData(prev => {
+      const next = [...prev, { label: 'New Item', value: 0 }];
+      emitApply(next, configRef.current);
+      return next;
+    });
   };
 
   const updateRow = (index: number, field: 'label' | 'value', value: string | number) => {
-    const next = chartData.map((row, rowIndex) => {
-      if (rowIndex !== index) {
-        return row;
-      }
-      if (field === 'value') {
-        if (typeof value === 'number') {
-          return { ...row, value: Number.isFinite(value) ? value.toString() : row.value };
+    setChartData(prev => {
+      const next = prev.map((row, rowIndex) => {
+        if (rowIndex !== index) {
+          return row;
         }
-        return { ...row, value };
-      }
-      return { ...row, label: typeof value === 'string' ? value : String(value) };
-    });
 
-    setChartData(next);
-    emitApply(next, config);
+        if (field === 'value') {
+          const numericValue = typeof value === 'number' ? value : Number.parseFloat(value);
+          return { ...row, value: Number.isFinite(numericValue) ? numericValue : 0 };
+        }
+
+        return { ...row, label: typeof value === 'string' ? value : String(value) };
+      });
+
+      emitApply(next, configRef.current);
+      return next;
+    });
   };
 
   const deleteRow = (index: number) => {
-    if (chartData.length <= 1) {
-      return;
-    }
-    const next = chartData.filter((_, rowIndex) => rowIndex !== index);
-    setChartData(next);
-    emitApply(next, config);
+    setChartData(prev => {
+      if (prev.length <= 1) {
+        return prev;
+      }
+      const next = prev.filter((_, rowIndex) => rowIndex !== index);
+      emitApply(next, configRef.current);
+      return next;
+    });
   };
 
   const handleConfigChange = (partial: Partial<ChartConfig>) => {
     const nextConfig = { ...config, ...partial };
     setConfig(nextConfig);
+    configRef.current = nextConfig;
     emitApply(chartData, nextConfig);
   };
 
   const handleSave = () => {
-    const normalisedData = chartData.map(item => ({
-      label: item.label,
-      value: Number.isFinite(Number.parseFloat(item.value)) ? Number.parseFloat(item.value) : 0,
-    }));
     const normalisedConfig: ChartConfig = { ...config };
-    onApply?.(normalisedData, normalisedConfig);
-    onSave(normalisedData, normalisedConfig);
+    onApply?.(chartData.map(item => ({ ...item })), normalisedConfig);
+    onSave(chartData.map(item => ({ ...item })), normalisedConfig);
     onClose();
   };
 
   const renderChartPreview = () => {
-    if (numericData.length === 0) {
+    if (chartData.length === 0) {
       return (
         <div className="flex h-64 w-full items-center justify-center text-sm text-muted-foreground">
           Add data to preview your chart.
@@ -208,7 +204,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     }
 
     if (config.type === 'pie' || config.type === 'donut') {
-      const total = numericData.reduce((sum, item) => sum + item.value, 0);
+      const total = chartData.reduce((sum, item) => sum + item.value, 0);
       if (total <= 0) {
         return (
           <div className="flex h-64 w-full items-center justify-center text-sm text-muted-foreground">
@@ -221,7 +217,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       return (
         <div className="relative flex h-64 w-full items-center justify-center">
           <svg width="200" height="200" viewBox="0 0 200 200" className="-rotate-90">
-            {numericData.map((item, index) => {
+            {chartData.map((item, index) => {
               const percentage = (item.value / total) * 100;
               const angle = (percentage / 100) * 360;
               const startAngle = currentAngle;
@@ -260,7 +256,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     }
 
     if (config.type === 'verticalBar' || config.type === 'horizontalBar') {
-      const maxValue = Math.max(...numericData.map(item => item.value), 0);
+      const maxValue = Math.max(...chartData.map(item => item.value), 0);
       const isBar = config.type === 'horizontalBar';
 
       return (
@@ -270,7 +266,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
             isBar ? 'flex-col justify-center' : 'items-end justify-center',
           )}
         >
-          {numericData.map((item, index) => {
+          {chartData.map((item, index) => {
             const ratio = maxValue === 0 ? 0 : (item.value / maxValue) * 100;
             return (
               <div
@@ -284,19 +280,21 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                     [isBar ? 'width' : 'height']: `${ratio}%`,
                     [isBar ? 'height' : 'width']: '40px',
                     [isBar ? 'minWidth' : 'minHeight']: '20px',
+                    minHeight: isBar ? undefined : '6px',
+                    minWidth: isBar ? '6px' : undefined,
                   }}
                 />
                 {(config.showLabels || config.showValues) && (
                   <div
                     className={cn(
-                      'flex flex-col gap-1 text-xs font-medium',
-                      isBar ? 'items-start' : 'items-center text-muted-foreground',
+                      'flex flex-col items-center gap-1 text-xs text-muted-foreground',
+                      isBar && 'items-start',
                     )}
                   >
                     {config.showValues && (
                       <span className="text-foreground">{Number.isFinite(item.value) ? item.value : 0}</span>
                     )}
-                    {config.showLabels && <span className="text-muted-foreground">{item.label || 'Label'}</span>}
+                    {config.showLabels && <span>{item.label || 'Label'}</span>}
                   </div>
                 )}
               </div>
@@ -307,10 +305,10 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     }
 
     if (config.type === 'line' || config.type === 'area') {
-      const maxValue = Math.max(...numericData.map(item => item.value), 0);
-      const points = numericData
+      const maxValue = Math.max(...chartData.map(item => item.value), 0);
+      const points = chartData
         .map((item, index) => {
-          const x = numericData.length <= 1 ? 0 : (index / (numericData.length - 1)) * 300;
+          const x = chartData.length <= 1 ? 0 : (index / (chartData.length - 1)) * 300;
           const y = 200 - (maxValue === 0 ? 0 : (item.value / maxValue) * 180);
           return `${x},${y}`;
         })
@@ -323,8 +321,8 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
               <polygon points={`0,200 ${points} 300,200`} fill={`${colors[0]}33`} stroke="none" />
             )}
             <polyline points={points} fill="none" stroke={colors[0]} strokeWidth="3" className="transition-all duration-300" />
-            {numericData.map((item, index) => {
-              const x = numericData.length <= 1 ? 0 : (index / (numericData.length - 1)) * 300;
+            {chartData.map((item, index) => {
+              const x = chartData.length <= 1 ? 0 : (index / (chartData.length - 1)) * 300;
               const y = 200 - (maxValue === 0 ? 0 : (item.value / maxValue) * 180);
               return (
                 <g key={`${item.label || 'point'}-${index}`}>
@@ -346,7 +344,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
           </svg>
           {config.showLabels && (
             <div className="flex w-full justify-between px-8 text-xs text-muted-foreground">
-              {numericData.map((item, index) => (
+              {chartData.map((item, index) => (
                 <span key={`${item.label || 'axis'}-${index}`}>{item.label || `Item ${index + 1}`}</span>
               ))}
             </div>
@@ -464,25 +462,27 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                 <div className="rounded-2xl border-2 border-border/50 bg-gradient-to-br from-card/50 to-muted/20 p-6">
                   {renderChartPreview()}
 
-                  <div
-                    className={cn('mt-6 flex flex-wrap gap-4 text-sm font-medium text-foreground', {
-                      'justify-center': config.legendPosition === 'top' || config.legendPosition === 'bottom',
-                      'flex-col items-start': config.legendPosition === 'left',
-                      'flex-col items-end': config.legendPosition === 'right',
-                    })}
-                  >
-                    {numericData.map((item, index) => (
-                      <div key={`${item.label || 'legend'}-${index}`} className="flex items-center gap-2">
-                        <div className="h-3 w-3 rounded-sm" style={{ backgroundColor: colors[index % colors.length] }} />
-                        <div className="flex flex-col text-xs">
-                          {config.showLabels && <span className="font-medium text-foreground">{item.label || `Item ${index + 1}`}</span>}
-                          {config.showValues && (
-                            <span className="text-muted-foreground">{Number.isFinite(item.value) ? item.value : 0}</span>
-                          )}
+                  {(config.showLabels || config.showValues) && (
+                    <div
+                      className={cn('mt-6 flex flex-wrap gap-4 text-sm font-medium text-foreground', {
+                        'justify-center': config.legendPosition === 'top' || config.legendPosition === 'bottom',
+                        'flex-col items-start': config.legendPosition === 'left',
+                        'flex-col items-end': config.legendPosition === 'right',
+                      })}
+                    >
+                      {chartData.map((item, index) => (
+                        <div key={`${item.label || 'legend'}-${index}`} className="flex items-center gap-2">
+                          <div className="h-3 w-3 rounded-sm" style={{ backgroundColor: colors[index % colors.length] }} />
+                          <div className="flex flex-col text-xs">
+                            {config.showLabels && <span className="font-medium text-foreground">{item.label || `Item ${index + 1}`}</span>}
+                            {config.showValues && (
+                              <span className="text-muted-foreground">{Number.isFinite(item.value) ? item.value : 0}</span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-3">
@@ -530,7 +530,6 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                             {group.schemes.map(scheme => (
                               <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
                                 <div className="flex items-center gap-3">
-                                  {scheme.icon && <span className="text-lg">{scheme.icon}</span>}
                                   <div className="flex gap-1.5">
                                     {scheme.colors.map((color, index) => (
                                       <div

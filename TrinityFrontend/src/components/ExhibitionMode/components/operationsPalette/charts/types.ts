@@ -26,7 +26,6 @@ export interface ChartConfig {
 export interface ChartColorScheme {
   id: string;
   name: string;
-  icon?: string;
   colors: string[];
   category?: string;
 }
