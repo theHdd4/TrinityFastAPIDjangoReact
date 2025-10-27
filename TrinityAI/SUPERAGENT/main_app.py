@@ -4,7 +4,7 @@ import json
 import logging
 import requests
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from pathlib import Path
 
@@ -48,6 +48,14 @@ router = APIRouter(prefix="/superagent", tags=["SuperAgent"])
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    client_name: Optional[str] = ""
+    app_name: Optional[str] = ""
+    project_name: Optional[str] = ""
+
+class OrchestrateRequest(BaseModel):
+    message: str
+    session_id: Optional[str] = None
+    workflow_json: Optional[Dict[str, Any]] = None  # Pre-generated workflow JSON
     client_name: Optional[str] = ""
     app_name: Optional[str] = ""
     project_name: Optional[str] = ""
@@ -1380,10 +1388,10 @@ async def test_connection():
     }
 
 @router.post("/orchestrate")
-async def orchestrate_agents(request: ChatRequest):
+async def orchestrate_agents(request: OrchestrateRequest):
     """
     Orchestrate multiple agents based on user prompt
-    Step 1: Generate workflow using SuperAgent's reliable workflow generation
+    Step 1: Use pre-generated workflow JSON (if provided) or generate it
     Step 2: Execute the workflow using orchestrator
     """
     try:
@@ -1394,38 +1402,48 @@ async def orchestrate_agents(request: ChatRequest):
         print("🚀 "*40)
         print(f"📝 User Request: {request.message}")
         
-        # Step 1: Generate workflow using SuperAgent (reliable keyword-based generation)
+        # Step 1: Use pre-generated workflow JSON if provided, otherwise generate it
         print("\n" + "-"*80)
-        print("STEP 1: Generating Workflow")
+        print("STEP 1: Processing Workflow")
         print("-"*80)
         
-        if workflow_agent:
-            logger.info("Using SmartWorkflowAgent to generate workflow")
-            workflow_result = workflow_agent.process_request(
-                prompt=request.message,
-                session_id=request.session_id or "orchestration_session",
-                client_name=request.client_name or "",
-                app_name=request.app_name or "",
-                project_name=request.project_name or ""
-            )
-            
-            if not workflow_result.get("success"):
-                return {
-                    "success": False,
-                    "workflow_completed": False,
-                    "steps_executed": 0,
-                    "results": {},
-                    "final_response": f"Failed to generate workflow: {workflow_result.get('error', 'Unknown error')}"
-                }
-            
-            workflow_json = workflow_result.get("workflow_json", {})
+        # Check if workflow_json is already provided (from /chat endpoint)
+        if request.workflow_json and request.workflow_json.get("workflow"):
+            logger.info("✅ Using pre-generated workflow JSON from /chat endpoint")
+            print("✅ Using pre-generated workflow JSON from /chat endpoint")
+            workflow_json = request.workflow_json
         else:
-            # Fallback to built-in generation
-            logger.info("Using built-in workflow generation")
-            workflow_json = llm_client.generate_workflow_json(
-                user_prompt=request.message,
-                available_files=[]
-            )
+            logger.info("⚠️ No pre-generated workflow JSON - generating now")
+            print("⚠️ Generating workflow JSON (no pre-generated workflow provided)")
+            
+            # Generate workflow using SuperAgent (reliable keyword-based generation)
+            if workflow_agent:
+                logger.info("Using SmartWorkflowAgent to generate workflow")
+                workflow_result = workflow_agent.process_request(
+                    prompt=request.message,
+                    session_id=request.session_id or "orchestration_session",
+                    client_name=request.client_name or "",
+                    app_name=request.app_name or "",
+                    project_name=request.project_name or ""
+                )
+                
+                if not workflow_result.get("success"):
+                    return {
+                        "success": False,
+                        "workflow_completed": False,
+                        "steps_executed": 0,
+                        "results": {},
+                        "final_response": f"Failed to generate workflow: {workflow_result.get('error', 'Unknown error')}"
+                    }
+                
+                workflow_json = workflow_result.get("workflow_json", {})
+            else:
+                # Fallback to built-in generation
+                logger.info("Using built-in workflow generation")
+                workflow_json = llm_client.generate_workflow_json(
+                    user_prompt=request.message,
+                    available_files=[]
+                )
         
         print("\n✅ Workflow Generated:")
         print(f"  Total Steps: {workflow_json.get('total_steps', 0)}")
@@ -1488,3 +1506,369 @@ async def orchestrate_agents(request: ChatRequest):
             "results": {},
             "final_response": f"Orchestration failed: {str(e)}"
         }
+
+@router.websocket("/orchestrate-ws")
+async def orchestrate_agents_websocket(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time workflow orchestration with streaming updates
+    """
+    await websocket.accept()
+    logger.info("WebSocket connection established for orchestration")
+    
+    try:
+        # Receive message from client
+        data = await websocket.receive_text()
+        request_data = json.loads(data)
+        
+        message = request_data.get("message", "")
+        session_id = request_data.get("session_id", "orchestration_session")
+        workflow_json = request_data.get("workflow_json", None)
+        client_name = request_data.get("client_name", "")
+        app_name = request_data.get("app_name", "")
+        project_name = request_data.get("project_name", "")
+        
+        logger.info(f"WebSocket orchestration request: {message}")
+        
+        # Send initial connection message
+        await websocket.send_json({
+            "type": "connected",
+            "message": "WebSocket connection established"
+        })
+        
+        # Use pre-generated workflow JSON if provided, otherwise generate it
+        if workflow_json and workflow_json.get("workflow"):
+            logger.info("✅ Using pre-generated workflow JSON from /chat endpoint")
+        else:
+            logger.info("⚠️ Generating workflow JSON")
+            
+            if workflow_agent:
+                workflow_result = workflow_agent.process_request(
+                    prompt=message,
+                    session_id=session_id,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name
+                )
+                
+                if not workflow_result.get("success"):
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"Failed to generate workflow: {workflow_result.get('error', 'Unknown error')}"
+                    })
+                    await websocket.close()
+                    return
+                
+                workflow_json = workflow_result.get("workflow_json", {})
+            else:
+                # Fallback to built-in generation
+                workflow_json = llm_client.generate_workflow_json(
+                    user_prompt=message,
+                    available_files=[]
+                )
+        
+        # Convert to WorkflowPlan
+        from agent_orchestrator import WorkflowPlan, WorkflowStep
+        
+        workflow_steps = []
+        for step_data in workflow_json.get("workflow", []):
+            workflow_steps.append(WorkflowStep(
+                step=step_data.get("step"),
+                action=step_data.get("action"),
+                agent=step_data.get("agent"),
+                prompt=step_data.get("prompt", ""),
+                endpoint=step_data.get("endpoint"),
+                depends_on=step_data.get("depends_on"),
+                payload=step_data.get("payload")
+            ))
+        
+        workflow_plan = WorkflowPlan(
+            workflow=workflow_steps,
+            total_steps=workflow_json.get("total_steps", 0),
+            is_data_science=workflow_json.get("is_data_science", True),
+            original_prompt=message
+        )
+        
+        # Build project context
+        project_context = {
+            "client_name": client_name,
+            "app_name": app_name,
+            "project_name": project_name
+        }
+        
+        logger.info(f"🔧 Project context for workflow: {project_context}")
+        
+        # Execute workflow with WebSocket streaming
+        await _execute_workflow_with_websocket(websocket, workflow_plan, session_id, project_context)
+        
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected by client")
+    except Exception as e:
+        logger.error(f"WebSocket orchestration error: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": f"Orchestration failed: {str(e)}"
+            })
+        except:
+            pass
+        await websocket.close()
+
+async def _execute_workflow_with_websocket(
+    websocket: WebSocket,
+    workflow_plan: "WorkflowPlan",
+    session_id: str,
+    project_context: dict = None
+):
+    """Execute workflow and stream updates via WebSocket"""
+    
+    import time
+    from agent_orchestrator import AgentExecutor, WorkflowOrchestrator
+    
+    start_time = time.time()
+    agent_executor = AgentExecutor()
+    
+    # Store project context in agent executor for use by all agents
+    if project_context:
+        agent_executor.session_context = project_context
+        logger.info(f"✅ Project context stored in agent executor: {project_context}")
+    
+    logger.info(f"Starting WebSocket workflow orchestration: {workflow_plan.total_steps} steps")
+    
+    await websocket.send_json({
+        "type": "workflow_started",
+        "total_steps": workflow_plan.total_steps,
+        "workflow": [
+            {
+                "step": step.step,
+                "agent": step.agent,
+                "action": getattr(step, 'action', None)
+            }
+            for step in workflow_plan.workflow
+        ]
+    })
+    
+    results = {}
+    context = {}
+    errors = []
+    steps_completed = 0
+    
+    # Sort workflow by step number
+    sorted_workflow = sorted(workflow_plan.workflow, key=lambda x: x.step)
+    
+    for step in sorted_workflow:
+        step_id = f"step_{step.step}_{step.agent}"
+        step_action = getattr(step, 'action', 'UNKNOWN')
+        
+        # Send step started event
+        await websocket.send_json({
+            "type": "step_started",
+            "step": step.step,
+            "agent": step.agent,
+            "action": step_action,
+            "total_steps": workflow_plan.total_steps
+        })
+        
+        # Build context from dependencies
+        step_context = {}
+        if step.depends_on:
+            dep_key = f"step_{step.depends_on}"
+            if dep_key in results and results[dep_key]["success"]:
+                step_context["previous_result"] = results[dep_key]["result"]
+        
+        # Execute agent
+        result = await agent_executor.execute_agent(
+            endpoint=step.endpoint,
+            prompt=step.prompt,
+            session_id=f"{session_id}_{step_id}",
+            context=step_context,
+            action=getattr(step, 'action', None),
+            payload_data=getattr(step, 'payload', None)
+        )
+        
+        results[step_id] = result
+        
+        if result["success"]:
+            steps_completed += 1
+            context[f"step_{step.step}"] = result["result"]
+            
+            # Send step completed event
+            step_result_data = {
+                "type": "step_completed",
+                "step": step.step,
+                "agent": step.agent,
+                "action": step_action,
+                "success": True,
+                "result": result.get("result", {}),
+                "summary": _summarize_step_result(result)
+            }
+            
+            await websocket.send_json(step_result_data)
+            
+            # Check if card was created
+            result_data = result.get("result", {})
+            if (step_action == "CARD_CREATION" and result_data.get("id")):
+                card_id = result_data["id"]
+                await websocket.send_json({
+                    "type": "card_created",
+                    "card_id": card_id,
+                    "card_data": result_data,  # Include full card data for frontend
+                    "step": step.step
+                })
+        else:
+            errors.append(f"Step {step.step} ({step.agent}) failed: {result.get('error')}")
+            
+            # Send step failed event
+            await websocket.send_json({
+                "type": "step_failed",
+                "step": step.step,
+                "agent": step.agent,
+                "action": step_action,
+                "error": result.get("error"),
+                "success": False
+            })
+    
+    # Workflow completed
+    workflow_completed = steps_completed == workflow_plan.total_steps
+    execution_time = time.time() - start_time
+    
+    # Build final response
+    from agent_orchestrator import WorkflowOrchestrator
+    orchestrator = WorkflowOrchestrator()
+    final_response = orchestrator._build_final_response(
+        workflow_plan=workflow_plan,
+        results=results,
+        workflow_completed=workflow_completed,
+        steps_completed=steps_completed
+    )
+    
+    # Convert results to steps_results format
+    steps_results = []
+    for step in sorted_workflow:
+        step_id = f"step_{step.step}_{step.agent}"
+        if step_id in results:
+            step_result = results[step_id]
+            steps_results.append({
+                "step": step.step,
+                "agent": step.agent,
+                "action": getattr(step, 'action', None),
+                "success": step_result["success"],
+                "result": step_result.get("result", {}),
+                "error": step_result.get("error", None)
+            })
+    
+    # Check if any card creation steps succeeded
+    created_cards = []
+    for step_result in steps_results:
+        if (step_result.get("action") == "CARD_CREATION" and 
+            step_result.get("success") and 
+            step_result.get("result", {}).get("id")):
+            created_cards.append(step_result["result"]["id"])
+    
+    # Send workflow completed event
+    has_successful_steps = steps_completed > 0
+    success = workflow_completed or has_successful_steps
+    
+    await websocket.send_json({
+        "type": "workflow_completed",
+        "success": success,
+        "workflow_completed": workflow_completed,
+        "steps_executed": steps_completed,
+        "total_steps": workflow_plan.total_steps,
+        "execution_time": execution_time,
+        "created_cards": created_cards,
+        "final_response": final_response,
+        "errors": errors if errors else None
+    })
+    
+    logger.info(f"WebSocket workflow orchestration completed: {success}")
+
+def _summarize_step_result(result: Dict[str, Any]) -> str:
+    """Create a concise summary of step result"""
+    if not result.get("success"):
+        return f"Failed: {result.get('error', 'Unknown error')}"
+    
+    result_data = result.get("result", {})
+    action = result.get("action", "")
+    
+    if action == "CARD_CREATION":
+        card_id = result_data.get("id", "unknown")
+        atom_count = len(result_data.get("atoms", []))
+        return f"Card created: {card_id} with {atom_count} atom(s)"
+    elif action == "FETCH_ATOM":
+        atom_status = result_data.get("atom_status", False)
+        match_type = result_data.get("match_type", "none")
+        return f"Atom detection: status={atom_status}, match={match_type}"
+    elif action == "AGENT_EXECUTION":
+        if isinstance(result_data, dict):
+            agent_success = result_data.get("success", False)
+            if agent_success:
+                # Try to get a meaningful response in order of preference
+                smart_response = (
+                    result_data.get("smart_response") or 
+                    result_data.get("message") or 
+                    result_data.get("reasoning")
+                )
+                
+                # Check for concat_json (what agents actually return)
+                if result_data.get("concat_json"):
+                    concat_cfg = result_data["concat_json"]
+                    file1 = concat_cfg.get("file1", "")
+                    file2 = concat_cfg.get("file2", "")
+                    if isinstance(file1, list):
+                        file1 = file1[0] if file1 else ""
+                    if isinstance(file2, list):
+                        file2 = file2[0] if file2 else ""
+                    direction = concat_cfg.get("concat_direction", "vertical")
+                    return f"Concat configured: {file1} + {file2} ({direction})"
+                
+                # Check for concat_config (alternate format)
+                elif result_data.get("concat_config"):
+                    concat_cfg = result_data["concat_config"]
+                    file1 = concat_cfg.get("file1", "")
+                    file2 = concat_cfg.get("file2", "")
+                    direction = concat_cfg.get("concat_direction", "vertical")
+                    return f"Concat configured: {file1} + {file2} ({direction})"
+                
+                # Check for merge_json
+                elif result_data.get("merge_json"):
+                    merge_cfg = result_data["merge_json"]
+                    left = merge_cfg.get("left_file", "")
+                    right = merge_cfg.get("right_file", "")
+                    if isinstance(left, list):
+                        left = left[0] if left else ""
+                    if isinstance(right, list):
+                        right = right[0] if right else ""
+                    merge_type = merge_cfg.get("merge_type", "inner")
+                    return f"Merge configured: {left} + {right} ({merge_type})"
+                
+                # Check for merge_config (alternate format)
+                elif result_data.get("merge_config"):
+                    merge_cfg = result_data["merge_config"]
+                    left = merge_cfg.get("left_file", "")
+                    right = merge_cfg.get("right_file", "")
+                    merge_type = merge_cfg.get("merge_type", "inner")
+                    return f"Merge configured: {left} + {right} ({merge_type})"
+                
+                # Check for chart_json
+                elif result_data.get("chart_json"):
+                    return f"Chart configured successfully"
+                
+                # Check for chart_config
+                elif result_data.get("chart_config"):
+                    return f"Chart configured successfully"
+                
+                # Use message/smart_response if available
+                elif smart_response:
+                    if len(smart_response) > 100:
+                        smart_response = smart_response[:100] + "..."
+                    return f"Agent executed: {smart_response}"
+                else:
+                    return f"Agent executed successfully"
+            else:
+                error = result_data.get("error", result_data.get("message", "Unknown error"))
+                return f"Agent execution failed: {error}"
+        return f"Agent executed successfully"
+    else:
+        return "Completed"

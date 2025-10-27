@@ -143,6 +143,8 @@ class AgentExecutor:
         try:
             logger.info(f"Executing INTERNAL TrinityAI endpoint: {endpoint}")
             logger.info(f"Prompt: {prompt}")
+            logger.info(f"Action: {action}")
+            logger.info(f"Session ID: {session_id}")
             
             # Import necessary modules for internal calls
             from pydantic import BaseModel
@@ -150,17 +152,63 @@ class AgentExecutor:
             
             # Handle /trinityai/chat endpoint (fetch_atom)
             if endpoint == "/trinityai/chat":
-                # Import processor from main_api
+                # Import processor from Agent_fetch_atom
                 import sys
                 from pathlib import Path
+                
+                # Try Agent_fetch_atom first
+                try:
+                    parent_dir = Path(__file__).parent
+                    fetch_atom_dir = parent_dir / "Agent_fetch_atom"
+                    if str(fetch_atom_dir) not in sys.path:
+                        sys.path.append(str(fetch_atom_dir))
+                    
+                    from single_llm_processor import SingleLLMProcessor
+                    
+                    logger.info("📞 Calling /chat processor from Agent_fetch_atom internally")
+                    logger.info(f"🔍 Processing query: '{prompt}'")
+                    
+                    # Create processor instance if not exists (with LLM config)
+                    if not hasattr(self, 'chat_processor'):
+                        # Get LLM config from environment
+                        import os
+                        ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
+                        llm_port = os.getenv("OLLAMA_PORT", "11434")
+                        api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
+                        model_name = os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b")
+                        bearer_token = os.getenv("LLM_BEARER_TOKEN", "aakash_api_key")
+                        
+                        self.chat_processor = SingleLLMProcessor(
+                            api_url=api_url,
+                            model_name=model_name,
+                            bearer_token=bearer_token
+                        )
+                    
+                    # Call processor directly with the prompt
+                    result = self.chat_processor.process_query(prompt)
+                    logger.info(f"✅ INTERNAL /chat completed successfully")
+                    logger.info(f"📦 Result keys: {list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
+                    
+                    return {
+                        "success": True,
+                        "result": result,
+                        "agent": endpoint,
+                        "action": action,
+                        "base": "TrinityAI-Internal"
+                    }
+                except Exception as e:
+                    logger.error(f"Failed to call Agent_fetch_atom processor: {e}")
+                    # Fallback to main_api processor
+                    pass
+                
+                # Fallback: Import from main_api
                 parent_dir = Path(__file__).parent
                 if str(parent_dir) not in sys.path:
                     sys.path.append(str(parent_dir))
                 
-                from single_llm_processor import SingleLLMProcessor
                 from main_api import processor, get_llm_config
                 
-                logger.info("📞 Calling /chat processor internally")
+                logger.info("📞 Calling /chat processor from main_api internally (fallback)")
                 
                 if not processor:
                     logger.error("Processor not available")
@@ -173,7 +221,7 @@ class AgentExecutor:
                 
                 # Call processor directly
                 result = processor.process_query(prompt)
-                logger.info(f"✅ INTERNAL /chat completed successfully")
+                logger.info(f"✅ INTERNAL /chat completed successfully (fallback)")
                 logger.info(f"📦 Result: {result}")
                 
                 return {
@@ -190,26 +238,181 @@ class AgentExecutor:
                 from Agent_Merge.main_app import MergeRequest
                 
                 logger.info("📞 Calling /merge agent internally")
+                logger.info(f"🔍 Processing prompt: '{prompt}'")
                 
-                # Create request object
-                request = MergeRequest(
-                    prompt=prompt,
-                    session_id=session_id,
-                    client_name=context.get("client_name", "") if context else "",
-                    app_name=context.get("app_name", "") if context else "",
-                    project_name=context.get("project_name", "") if context else ""
-                )
+                # Extract client context from session_context (set by workflow orchestrator)
+                client_name = context.get("client_name", "") if context else self.session_context.get("client_name", "")
+                app_name = context.get("app_name", "") if context else self.session_context.get("app_name", "")
+                project_name = context.get("project_name", "") if context else self.session_context.get("project_name", "")
                 
-                # Call merge agent directly
+                logger.info(f"🔧 Using project context: client={client_name}, app={app_name}, project={project_name}")
+                
+                # Call merge agent directly (like individual atom execution)
+                # Note: process_request is synchronous, so no await needed
                 result = merge_agent.process_request(
-                    request.prompt, 
-                    request.session_id,
-                    context.get("client_name", "") if context else "",
-                    context.get("app_name", "") if context else "",
-                    context.get("project_name", "") if context else ""
+                    user_prompt=prompt, 
+                    session_id=session_id,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name
                 )
+                logger.info(f"📊 Merge agent result: success={result.get('success')}, keys={list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
                 logger.info(f"✅ INTERNAL /merge completed successfully")
                 logger.info(f"📦 Result keys: {list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
+                
+                return {
+                    "success": True,
+                    "result": result,
+                    "agent": endpoint,
+                    "action": action,
+                    "base": "TrinityAI-Internal"
+                }
+            
+            # Handle other agents
+            elif endpoint == "/trinityai/concat":
+                from Agent_concat.main_app import agent as concat_agent
+                
+                logger.info("📞 Calling /concat agent internally")
+                logger.info(f"🔍 Processing prompt: '{prompt}'")
+                
+                # Extract client context from session_context (set by workflow orchestrator)
+                client_name = context.get("client_name", "") if context else self.session_context.get("client_name", "")
+                app_name = context.get("app_name", "") if context else self.session_context.get("app_name", "")
+                project_name = context.get("project_name", "") if context else self.session_context.get("project_name", "")
+                
+                logger.info(f"🔧 Using project context: client={client_name}, app={app_name}, project={project_name}")
+                
+                # Use existing agent instance from main_app
+                result = concat_agent.process_request(
+                    user_prompt=prompt,
+                    session_id=session_id,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name
+                )
+                logger.info(f"📊 Concat agent result: success={result.get('success')}, keys={list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
+                logger.info(f"✅ INTERNAL /concat completed successfully")
+                
+                return {
+                    "success": True,
+                    "result": result,
+                    "agent": endpoint,
+                    "action": action,
+                    "base": "TrinityAI-Internal"
+                }
+            
+            # Handle /trinityai/chart endpoint
+            elif endpoint == "/trinityai/chart":
+                from Agent_chartmaker.main_app import agent as chartmaker_agent
+                
+                logger.info("📞 Calling /chart agent internally")
+                logger.info(f"🔍 Processing prompt: '{prompt}'")
+                
+                result = chartmaker_agent.process_request(
+                    user_prompt=prompt,
+                    session_id=session_id
+                )
+                logger.info(f"✅ INTERNAL /chart completed successfully")
+                
+                return {
+                    "success": True,
+                    "result": result,
+                    "agent": endpoint,
+                    "action": action,
+                    "base": "TrinityAI-Internal"
+                }
+            
+            # Handle /trinityai/explore endpoint
+            elif endpoint == "/trinityai/explore":
+                from Agent_explore.main_app import agent as explore_agent
+                
+                logger.info("📞 Calling /explore agent internally")
+                logger.info(f"🔍 Processing prompt: '{prompt}'")
+                
+                # Extract client context
+                client_name = context.get("client_name", "") if context else ""
+                app_name = context.get("app_name", "") if context else ""
+                project_name = context.get("project_name", "") if context else ""
+                
+                result = explore_agent.process_request(
+                    user_prompt=prompt,
+                    session_id=session_id,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name
+                )
+                logger.info(f"✅ INTERNAL /explore completed successfully")
+                
+                return {
+                    "success": True,
+                    "result": result,
+                    "agent": endpoint,
+                    "action": action,
+                    "base": "TrinityAI-Internal"
+                }
+            
+            # Handle /trinityai/create endpoint
+            elif endpoint == "/trinityai/create":
+                from Agent_create_transform.main_app import agent as create_agent
+                
+                logger.info("📞 Calling /create agent internally")
+                logger.info(f"🔍 Processing prompt: '{prompt}'")
+                
+                # Extract client context
+                client_name = context.get("client_name", "") if context else ""
+                app_name = context.get("app_name", "") if context else ""
+                project_name = context.get("project_name", "") if context else ""
+                
+                result = create_agent.process_request(
+                    user_prompt=prompt,
+                    session_id=session_id,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name
+                )
+                logger.info(f"✅ INTERNAL /create completed successfully")
+                
+                return {
+                    "success": True,
+                    "result": result,
+                    "agent": endpoint,
+                    "action": action,
+                    "base": "TrinityAI-Internal"
+                }
+            
+            # Handle /trinityai/groupby endpoint
+            elif endpoint == "/trinityai/groupby":
+                from Agent_groupby.main_app import agent as groupby_agent
+                
+                logger.info("📞 Calling /groupby agent internally")
+                logger.info(f"🔍 Processing prompt: '{prompt}'")
+                
+                result = groupby_agent.process_request(
+                    user_prompt=prompt,
+                    session_id=session_id
+                )
+                logger.info(f"✅ INTERNAL /groupby completed successfully")
+                
+                return {
+                    "success": True,
+                    "result": result,
+                    "agent": endpoint,
+                    "action": action,
+                    "base": "TrinityAI-Internal"
+                }
+            
+            # Handle /trinityai/dataframe-operations endpoint
+            elif endpoint == "/trinityai/dataframe-operations":
+                from Agent_dataframe_operations.main_app import agent as df_ops_agent
+                
+                logger.info("📞 Calling /dataframe-operations agent internally")
+                logger.info(f"🔍 Processing prompt: '{prompt}'")
+                
+                result = df_ops_agent.process_request(
+                    user_prompt=prompt,
+                    session_id=session_id
+                )
+                logger.info(f"✅ INTERNAL /dataframe-operations completed successfully")
                 
                 return {
                     "success": True,
@@ -222,6 +425,7 @@ class AgentExecutor:
             # Add more agents as needed
             else:
                 logger.error(f"Internal execution not implemented for: {endpoint}")
+                logger.info(f"Available endpoints: /trinityai/chat, /trinityai/merge, /trinityai/concat, /trinityai/chart, /trinityai/explore, /trinityai/create, /trinityai/groupby, /trinityai/dataframe-operations")
                 return {
                     "success": False,
                     "error": f"Internal execution not implemented for: {endpoint}",
@@ -271,8 +475,13 @@ class WorkflowOrchestrator:
         
         for step in sorted_workflow:
             step_id = f"step_{step.step}_{step.agent}"
+            step_action = getattr(step, 'action', 'UNKNOWN')
             
-            logger.info(f"Executing Step {step.step}/{workflow_plan.total_steps}: {step.agent}")
+            logger.info("="*80)
+            logger.info(f"📍 Executing Step {step.step}/{workflow_plan.total_steps}: {step.agent}")
+            logger.info(f"   Action: {step_action}")
+            logger.info(f"   Endpoint: {step.endpoint}")
+            logger.info(f"   Prompt: {step.prompt[:100]}..." if len(step.prompt) > 100 else f"   Prompt: {step.prompt}")
             
             # Build context from dependencies
             step_context = {}
@@ -280,8 +489,14 @@ class WorkflowOrchestrator:
                 dep_key = f"step_{step.depends_on}_{self._find_agent_name(sorted_workflow, step.depends_on)}"
                 if dep_key in results and results[dep_key]["success"]:
                     step_context["previous_result"] = results[dep_key]["result"]
+                    logger.info(f"   Dependency: Using result from step {step.depends_on}")
             
             # Execute agent
+            print(f"\n📍 Executing Step {step.step}/{workflow_plan.total_steps}: {step.agent}")
+            print(f"   Action: {step_action}")
+            if step.prompt:
+                print(f"   Prompt: {step.prompt[:80]}..." if len(step.prompt) > 80 else f"   Prompt: {step.prompt}")
+            
             result = await self.agent_executor.execute_agent(
                 endpoint=step.endpoint,
                 prompt=step.prompt,
@@ -299,12 +514,27 @@ class WorkflowOrchestrator:
                 logger.info(f"✅ Step {step.step} completed successfully")
                 logger.info(f"📋 Step {step.step} result summary: {self._summarize_result(result)}")
                 
+                # Log detailed result info
+                result_data = result.get("result", {})
+                logger.info(f"📊 Step {step.step} result data: {list(result_data.keys()) if isinstance(result_data, dict) else result_data}")
+                
+                print(f"   ✅ Step {step.step} complete")
+                
+                # Log agent execution result for debugging
+                if step_action == "AGENT_EXECUTION":
+                    if isinstance(result_data, dict):
+                        success = result_data.get("success", False)
+                        agent_response = result_data.get("smart_response", result_data.get("message", "No message"))
+                        logger.info(f"🔍 Agent execution result - success: {success}, response: {agent_response[:100]}")
+                        print(f"   📊 Agent result: success={success}")
+                
                 # If this is a successful card creation step, trigger frontend refresh
-                if (getattr(step, 'action', None) == "CARD_CREATION" and 
-                    result.get("result", {}).get("id")):
-                    card_id = result["result"]["id"]
+                if (step_action == "CARD_CREATION" and 
+                    result_data.get("id")):
+                    card_id = result_data["id"]
                     logger.info(f"🎉 Card created successfully: {card_id}")
                     logger.info(f"🔄 Triggering frontend refresh for card: {card_id}")
+                    print(f"   🎉 Card created: {card_id}")
                     
                     # Add refresh trigger to result
                     result["_trigger_refresh"] = True
@@ -312,6 +542,7 @@ class WorkflowOrchestrator:
             else:
                 errors.append(f"Step {step.step} ({step.agent}) failed: {result.get('error')}")
                 logger.error(f"❌ Step {step.step} failed: {result.get('error')}")
+                print(f"   ❌ Step {step.step} failed: {result.get('error')}")
                 # Continue or break based on criticality
                 # For now, continue to next step
         
@@ -396,10 +627,19 @@ class WorkflowOrchestrator:
             match_type = result_data.get("match_type", "none")
             return f"Atom detection: status={atom_status}, match={match_type}"
         elif action == "AGENT_EXECUTION":
-            # For agent execution, show a brief summary
+            # For agent execution, show detailed summary
             if isinstance(result_data, dict):
-                keys = list(result_data.keys())[:3]  # Show first 3 keys
-                return f"Agent executed, response keys: {keys}"
+                agent_success = result_data.get("success", False)
+                if agent_success:
+                    # Show what the agent did
+                    smart_response = result_data.get("smart_response", "No response")
+                    # Truncate if too long
+                    if len(smart_response) > 100:
+                        smart_response = smart_response[:100] + "..."
+                    return f"Agent executed: {smart_response}"
+                else:
+                    error = result_data.get("error", result_data.get("message", "Unknown error"))
+                    return f"Agent execution failed: {error}"
             return f"Agent executed successfully"
         else:
             return "Completed"
