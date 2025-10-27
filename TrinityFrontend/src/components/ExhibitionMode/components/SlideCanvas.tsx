@@ -20,6 +20,14 @@ import {
   AlignCenter,
   AlignRight,
   BarChart3,
+  Copy,
+  Clipboard,
+  ClipboardPaste,
+  CopyPlus,
+  Scissors,
+  Lock,
+  Unlock,
+  MessageSquarePlus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -82,11 +90,15 @@ import {
   type TableCellFormatting,
 } from './operationsPalette/tables/constants';
 import {
+  ContextMenu,
+  ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuShortcut,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
+  ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import SlideObjectContextMenu, { AlignAction } from './SlideObjectContextMenu';
 
@@ -654,6 +666,26 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           return prev;
         }
 
+        const backgroundLocked = Boolean(prev.backgroundLocked);
+        if (backgroundLocked && !('backgroundLocked' in partial)) {
+          const restrictedKeys: (keyof PresentationSettings)[] = [
+            'cardColor',
+            'accentImage',
+            'accentImageName',
+            'backgroundColor',
+            'fullBleed',
+            'cardLayout',
+          ];
+          const attemptingBackgroundChange = restrictedKeys.some(key => key in partial);
+          if (attemptingBackgroundChange) {
+            toast({
+              title: 'Background locked',
+              description: 'Unlock the slide background before changing these settings.',
+            });
+            return prev;
+          }
+        }
+
         const merged = { ...prev, ...partial } as PresentationSettings;
 
         if ('cardLayout' in partial && !('cardColor' in partial)) {
@@ -674,11 +706,15 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           merged.accentImageName = null;
         }
 
+        if (typeof merged.backgroundLocked !== 'boolean') {
+          merged.backgroundLocked = Boolean(prev.backgroundLocked);
+        }
+
         onPresentationChange?.(merged, card.id);
         return merged;
       });
     },
-    [canEdit, card.id, layoutDefaultColors, onPresentationChange],
+    [canEdit, card.id, layoutDefaultColors, onPresentationChange, toast],
   );
 
   const resetSettings = useCallback(() => {
@@ -1093,6 +1129,39 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     setShowFormatPanel(false);
   }, []);
 
+  const handleShowFormatPanel = useCallback(() => {
+    if (!canEdit) {
+      return;
+    }
+    setShowFormatPanel(true);
+    setPositionPanelTarget(null);
+  }, [canEdit, setPositionPanelTarget]);
+
+  const handleToggleBackgroundLock = useCallback(() => {
+    if (!canEdit) {
+      toast({
+        title: 'Editing disabled',
+        description: 'Enable editing to modify the slide background.',
+      });
+      return;
+    }
+
+    const nextLocked = !Boolean(settings.backgroundLocked);
+    const nextSettings: PresentationSettings = {
+      ...settings,
+      backgroundLocked: nextLocked,
+    };
+
+    setSettings(nextSettings);
+    onPresentationChange?.(nextSettings, card.id);
+    toast({
+      title: nextLocked ? 'Background locked' : 'Background unlocked',
+      description: nextLocked
+        ? 'Slide background updates are now disabled until you unlock it.'
+        : 'Background updates have been re-enabled for this slide.',
+    });
+  }, [canEdit, settings, onPresentationChange, card.id]);
+
   const formatPanelNode = useMemo(() => {
     if (!canEdit || !showFormatPanel) {
       return null;
@@ -1275,6 +1344,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   onTextToolbarChange={setActiveTextToolbar}
                   onRequestPositionPanel={handleRequestPositionPanel}
                   onUndo={onUndo}
+                  backgroundLocked={Boolean(settings.backgroundLocked)}
+                  onToggleBackgroundLock={handleToggleBackgroundLock}
+                  onRequestFormatPanel={handleShowFormatPanel}
                 />
 
                 {!presentationMode && (
@@ -1535,6 +1607,9 @@ type CanvasStageProps = {
   onRequestPositionPanel?: (objectId: string) => void;
   onUndo?: () => void;
   fullBleed: boolean;
+  backgroundLocked: boolean;
+  onToggleBackgroundLock: () => void;
+  onRequestFormatPanel?: () => void;
 };
 
 const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
@@ -1568,6 +1643,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       onRequestPositionPanel,
       onUndo,
       fullBleed,
+      backgroundLocked,
+      onToggleBackgroundLock,
+      onRequestFormatPanel,
     },
     forwardedRef,
   ) => {
@@ -1664,6 +1742,72 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             : `Copied ${snapshots.length} objects to the clipboard.`,
       });
     }, [selectedObjects]);
+
+    const handleCutSelection = useCallback(() => {
+      if (selectedObjects.length === 0) {
+        toast({
+          title: 'Nothing to cut',
+          description: 'Select an object before attempting to cut it.',
+        });
+        return;
+      }
+
+      if (unlockedSelectedObjects.length === 0) {
+        toast({
+          title: 'Selection locked',
+          description: 'Unlock the selected object before cutting it.',
+        });
+        return;
+      }
+
+      const snapshots = unlockedSelectedObjects.map(object => ({
+        ...object,
+        props: cloneValue(object.props ?? {}),
+      }));
+
+      setClipboard(snapshots);
+      onInteract();
+
+      unlockedSelectedObjects.forEach(object => {
+        if (isAtomObject(object) && onRemoveAtom) {
+          const atomId = (object.props as { atom?: DroppedAtom } | undefined)?.atom?.id;
+          if (atomId) {
+            onRemoveAtom(atomId);
+          }
+          return;
+        }
+
+        if (!onRemoveObject) {
+          return;
+        }
+
+        if (object.type === 'accent-image') {
+          return;
+        }
+
+        if (object.type === 'text-box' && titleObjectId && object.id === titleObjectId) {
+          return;
+        }
+
+        onRemoveObject(object.id);
+      });
+
+      setSelectedIds([]);
+      toast({
+        title: snapshots.length === 1 ? 'Object cut' : 'Objects cut',
+        description:
+          snapshots.length === 1
+            ? 'Moved the selected object to the clipboard.'
+            : `Cut ${snapshots.length} objects to the clipboard.`,
+      });
+    }, [
+      onInteract,
+      onRemoveAtom,
+      onRemoveObject,
+      selectedObjects.length,
+      titleObjectId,
+      unlockedSelectedObjects,
+    ]);
 
     const handleCopyStyle = useCallback(() => {
       const primary = selectedObjects[0] ?? null;
@@ -2072,6 +2216,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     );
     const effectiveColorPalette = styleClipboard ?? captureColorStyle(selectedObjects[0]);
     const canApplyColorsGlobally = Boolean(effectiveColorPalette);
+    const canCutSelection = unlockedSelectedObjects.length > 0;
 
     useEffect(() => {
       setSelectedIds(prev => prev.filter(id => objectsMap.has(id)));
@@ -2649,6 +2794,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     );
 
     const handlePasteClipboard = useCallback(() => {
+      if (!canEdit) {
+        return;
+      }
+
       if (clipboard.length === 0) {
         toast({
           title: 'Clipboard empty',
@@ -2697,6 +2846,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       onInteract();
       onBringToFront(pastedIds);
       setSelectedIds(pastedIds);
+      focusCanvas();
       toast({
         title: pastedIds.length === 1 ? 'Object pasted' : 'Objects pasted',
         description:
@@ -2704,7 +2854,91 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             ? 'Added a copy of the selected object to the slide.'
             : `Added ${pastedIds.length} copied objects to the slide.`,
       });
-    }, [clipboard, clampAndSnapPosition, onAddAtom, onAddObject, onBringToFront, onInteract]);
+    }, [
+      canEdit,
+      clipboard,
+      clampAndSnapPosition,
+      focusCanvas,
+      onAddAtom,
+      onAddObject,
+      onBringToFront,
+      onInteract,
+    ]);
+
+    const handleDuplicateSelection = useCallback(() => {
+      if (!canEdit) {
+        return;
+      }
+
+      if (selectedObjects.length === 0) {
+        toast({
+          title: 'Nothing to duplicate',
+          description: 'Select at least one object before duplicating.',
+        });
+        return;
+      }
+
+      const duplicatedIds: string[] = [];
+      selectedObjects.forEach((object, index) => {
+        const baseProps = cloneValue(object.props ?? {}) as Record<string, unknown>;
+        delete baseProps.locked;
+
+        const offset = CANVAS_SNAP_GRID * 4 * (index + 1);
+        const { x, y } = clampAndSnapPosition(
+          object.x + offset,
+          object.y + offset,
+          object.width,
+          object.height,
+        );
+        const newId = generateObjectId(object.id);
+
+        if (object.type === 'atom') {
+          const atom = (object.props as { atom?: DroppedAtom } | undefined)?.atom;
+          if (atom) {
+            const clonedAtom: DroppedAtom = { ...cloneValue(atom), id: newId };
+            baseProps.atom = clonedAtom;
+            onAddAtom?.(clonedAtom);
+          }
+        }
+
+        const duplicate: SlideObject = {
+          ...object,
+          id: newId,
+          x,
+          y,
+          groupId: null,
+          props: baseProps,
+        };
+
+        onAddObject(duplicate);
+        duplicatedIds.push(newId);
+      });
+
+      if (duplicatedIds.length === 0) {
+        return;
+      }
+
+      onInteract();
+      onBringToFront(duplicatedIds);
+      setSelectedIds(duplicatedIds);
+      focusCanvas();
+      toast({
+        title: duplicatedIds.length === 1 ? 'Object duplicated' : 'Objects duplicated',
+        description:
+          duplicatedIds.length === 1
+            ? 'Added a copy of the selected object.'
+            : `Added ${duplicatedIds.length} duplicated objects to the slide.`,
+      });
+    }, [
+      canEdit,
+      clampAndSnapPosition,
+      focusCanvas,
+      onAddAtom,
+      onAddObject,
+      onBringToFront,
+      onInteract,
+      selectedObjects,
+    ]);
 
     const handleAlignSelection = useCallback(
       (alignment: AlignAction) => {
@@ -2778,18 +3012,40 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [onBulkUpdate, onInteract, selectedObjects, unlockedSelectedObjects],
     );
 
-    const handleBackgroundPointerDown = useCallback(() => {
+    const handleBackgroundPointerDown = useCallback(
+      (event: React.PointerEvent<HTMLDivElement>) => {
         if (!canEdit) {
           return;
         }
+
+        if (event.button !== 0) {
+          return;
+        }
+
         if (editingTextState) {
           commitEditingText();
         }
+
         onInteract();
         setSelectedIds([]);
         focusCanvas();
       },
       [canEdit, commitEditingText, editingTextState, focusCanvas, onInteract],
+    );
+
+    const handleBackgroundContextMenu = useCallback(
+      (event: React.MouseEvent<HTMLDivElement>) => {
+        if (!canEdit) {
+          return;
+        }
+
+        if (editingTextState) {
+          commitEditingText();
+        }
+
+        focusCanvas();
+      },
+      [canEdit, commitEditingText, editingTextState, focusCanvas],
     );
 
     const selectionCount = selectedIds.length;
@@ -2997,6 +3253,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           return;
         }
 
+        if ((event.key === 'v' || event.key === 'V') && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          handlePasteClipboard();
+          return;
+        }
+
         if (selectedIds.length === 0) {
           return;
         }
@@ -3011,9 +3273,15 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           return;
         }
 
-        if ((event.key === 'v' || event.key === 'V') && (event.metaKey || event.ctrlKey)) {
+        if ((event.key === 'x' || event.key === 'X') && (event.metaKey || event.ctrlKey)) {
           event.preventDefault();
-          handlePasteClipboard();
+          handleCutSelection();
+          return;
+        }
+
+        if ((event.key === 'd' || event.key === 'D') && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          handleDuplicateSelection();
           return;
         }
 
@@ -3049,7 +3317,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         const activeIds = activeTargets.map(object => object.id);
 
         const step = event.shiftKey ? CANVAS_SNAP_GRID * 2 : CANVAS_SNAP_GRID;
-        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        if (
+          event.key === 'ArrowLeft' ||
+          event.key === 'ArrowRight' ||
+          event.key === 'ArrowUp' ||
+          event.key === 'ArrowDown'
+        ) {
           event.preventDefault();
           const deltaX = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
           const deltaY = event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0;
@@ -3107,6 +3380,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         canEdit,
         cancelEditingText,
         clampAndSnapPosition,
+        handleCutSelection,
+        handleDuplicateSelection,
         editingTextState,
         handleCommentSelection,
         handleCopySelection,
@@ -3320,21 +3595,26 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       return fullBleed ? 'border-0' : 'border-2 border-border/60';
     })();
 
+    const backgroundLockLabel = backgroundLocked ? 'Unlock background' : 'Lock background';
+
     return (
-      <div
-        ref={setRef}
-        className={cn(
-          'relative h-full w-full overflow-hidden transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 bg-transparent',
-          canvasCornerClass,
-          canvasBorderClass,
-        )}
-        tabIndex={canEdit ? 0 : -1}
-        onPointerDown={handleBackgroundPointerDown}
-        onKeyDown={handleKeyDown}
-        onDragOver={onCanvasDragOver}
-        onDragLeave={onCanvasDragLeave}
-        onDrop={onCanvasDrop}
-      >
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            ref={setRef}
+            className={cn(
+              'relative h-full w-full overflow-hidden transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 bg-transparent',
+              canvasCornerClass,
+              canvasBorderClass,
+            )}
+            tabIndex={canEdit ? 0 : -1}
+            onPointerDown={handleBackgroundPointerDown}
+            onKeyDown={handleKeyDown}
+            onContextMenu={handleBackgroundContextMenu}
+            onDragOver={onCanvasDragOver}
+            onDragLeave={onCanvasDragLeave}
+            onDrop={onCanvasDrop}
+          >
         <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
           <LayoutOverlay
             layout={layout}
@@ -3771,7 +4051,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               onContextMenu={event => handleContextMenuRequest(event, object.id)}
               onCopy={handleCopySelection}
               onCopyStyle={handleCopyStyle}
+              onCut={handleCutSelection}
               onPaste={handlePasteClipboard}
+              onDuplicate={handleDuplicateSelection}
               onDelete={handleDeleteSelection}
               onToggleLock={handleToggleLock}
               onBringToFront={() => handleLayerAction('front')}
@@ -3788,6 +4070,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               disableLock={!hasSelection}
               disableCopy={!hasSelection}
               disableCopyStyle={!hasSelection}
+              disableCut={!canCutSelection}
+              disableDuplicate={!hasSelection}
               disableLink={selectionLocked}
               disableComment={selectionLocked}
               disableApplyColors={!canApplyColorsGlobally}
@@ -3809,7 +4093,119 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             Drop to add component
           </div>
         )}
-      </div>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-64" style={{ zIndex: 10000 }}>
+          <ContextMenuItem
+            disabled={!canEdit || !hasSelection}
+            onSelect={event => {
+              event.preventDefault();
+              handleCopySelection();
+            }}
+          >
+            <Copy className="mr-2 h-4 w-4" />
+            Copy
+            <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={!canEdit || !hasSelection}
+            onSelect={event => {
+              event.preventDefault();
+              handleCopyStyle();
+            }}
+          >
+            <Clipboard className="mr-2 h-4 w-4" />
+            Copy style
+            <ContextMenuShortcut>Ctrl+Alt+C</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={!canEdit || !canCutSelection}
+            onSelect={event => {
+              event.preventDefault();
+              handleCutSelection();
+            }}
+          >
+            <Scissors className="mr-2 h-4 w-4" />
+            Cut
+            <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={!canEdit || !hasClipboardItems}
+            onSelect={event => {
+              event.preventDefault();
+              handlePasteClipboard();
+            }}
+          >
+            <ClipboardPaste className="mr-2 h-4 w-4" />
+            Paste
+            <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={!canEdit || !hasSelection}
+            onSelect={event => {
+              event.preventDefault();
+              handleDuplicateSelection();
+            }}
+          >
+            <CopyPlus className="mr-2 h-4 w-4" />
+            Duplicate
+            <ContextMenuShortcut>Ctrl+D</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={!canEdit || selectionLocked || !hasSelection}
+            onSelect={event => {
+              event.preventDefault();
+              handleDeleteSelection();
+            }}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete
+            <ContextMenuShortcut>Del</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            disabled={!canEdit}
+            onSelect={event => {
+              event.preventDefault();
+              onToggleBackgroundLock();
+            }}
+          >
+            {backgroundLocked ? (
+              <Unlock className="mr-2 h-4 w-4" />
+            ) : (
+              <Lock className="mr-2 h-4 w-4" />
+            )}
+            {backgroundLockLabel}
+            <ContextMenuShortcut>Alt+Shift+L</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={!canEdit}
+            onSelect={event => {
+              event.preventDefault();
+              onRequestFormatPanel?.();
+              toast({
+                title: 'Transition settings',
+                description: 'Use the formatting panel to configure slide transitions.',
+              });
+            }}
+          >
+            <Sparkles className="mr-2 h-4 w-4" />
+            Add transition
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            disabled={!canEdit || !hasSelection || selectionLocked}
+            onSelect={event => {
+              event.preventDefault();
+              handleCommentSelection();
+            }}
+          >
+            <MessageSquarePlus className="mr-2 h-4 w-4" />
+            Comment
+            <ContextMenuShortcut>Ctrl+Alt+N</ContextMenuShortcut>
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
     );
   },
 );

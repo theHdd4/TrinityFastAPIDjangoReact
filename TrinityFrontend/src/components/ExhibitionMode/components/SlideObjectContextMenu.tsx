@@ -20,12 +20,14 @@ import {
   Clipboard,
   ClipboardPaste,
   Copy,
+  CopyPlus,
   Info,
   Layers,
   Link as LinkIcon,
   Lock,
   MessageSquarePlus,
   Palette,
+  Scissors,
   TextCursorInput,
   Trash2,
   Unlock,
@@ -50,7 +52,9 @@ interface SlideObjectContextMenuProps {
   onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
   onCopy: () => void;
   onCopyStyle: () => void;
+  onCut: () => void;
   onPaste: () => void;
+  onDuplicate: () => void;
   onDelete: () => void;
   onToggleLock: () => void;
   onBringToFront: () => void;
@@ -67,6 +71,8 @@ interface SlideObjectContextMenuProps {
   disableLock?: boolean;
   disableCopy?: boolean;
   disableCopyStyle?: boolean;
+  disableCut?: boolean;
+  disableDuplicate?: boolean;
   disableLink?: boolean;
   disableComment?: boolean;
   disableApplyColors?: boolean;
@@ -85,7 +91,9 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
   onContextMenu,
   onCopy,
   onCopyStyle,
+  onCut,
   onPaste,
+  onDuplicate,
   onDelete,
   onToggleLock,
   onBringToFront,
@@ -102,6 +110,8 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
   disableLock = false,
   disableCopy = false,
   disableCopyStyle = false,
+  disableCut = false,
+  disableDuplicate = false,
   disableLink = false,
   disableComment = false,
   disableApplyColors = false,
@@ -131,6 +141,14 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
           Copy style
           <ContextMenuShortcut>Ctrl+Alt+C</ContextMenuShortcut>
         </ContextMenuItem>
+        <ContextMenuItem disabled={!canEdit || disableCut} onSelect={event => {
+          event.preventDefault();
+          onCut();
+        }}>
+          <Scissors className="mr-2 h-4 w-4" />
+          Cut
+          <ContextMenuShortcut>Ctrl+X</ContextMenuShortcut>
+        </ContextMenuItem>
         <ContextMenuItem disabled={!canEdit || !hasClipboard} onSelect={event => {
           event.preventDefault();
           onPaste();
@@ -138,6 +156,14 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
           <ClipboardPaste className="mr-2 h-4 w-4" />
           Paste
           <ContextMenuShortcut>Ctrl+V</ContextMenuShortcut>
+        </ContextMenuItem>
+        <ContextMenuItem disabled={!canEdit || disableDuplicate} onSelect={event => {
+          event.preventDefault();
+          onDuplicate();
+        }}>
+          <CopyPlus className="mr-2 h-4 w-4" />
+          Duplicate
+          <ContextMenuShortcut>Ctrl+D</ContextMenuShortcut>
         </ContextMenuItem>
         <ContextMenuItem disabled={!canEdit || disableDelete} onSelect={event => {
           event.preventDefault();
