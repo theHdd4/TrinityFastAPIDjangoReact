@@ -408,6 +408,7 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ isCollapsed, onTo
               // Use environment variable or fallback to current hostname
               const wsHost = import.meta.env.VITE_TRINITY_AI_WS_HOST || window.location.hostname;
               // const wsPort = import.meta.env.VITE_TRINITY_AI_WS_PORT || '8002';
+             
               const isDevStack = window.location.port === '8081';
               const wsPort = import.meta.env.VITE_TRINITY_AI_WS_PORT || (isDevStack ? '8005' : '8002');
               const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/trinityai/superagent/orchestrate-ws`;
