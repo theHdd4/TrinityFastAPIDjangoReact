@@ -67,10 +67,11 @@ export const SlideChartObject: React.FC<SlideChartObjectProps> = ({
 
   const coerceConfig = useCallback(
     (value?: ChartConfig): ChartConfig => {
-      const merged = { ...DEFAULT_CHART_CONFIG, ...(value ?? {}) } as ChartConfig;
+      const merged = { ...DEFAULT_CHART_CONFIG, ...(value ?? {}) };
       return {
         ...merged,
         type: normalizeChartType(merged.type),
+        legendPosition: merged.legendPosition ?? DEFAULT_CHART_CONFIG.legendPosition,
       };
     },
     [],
@@ -102,7 +103,8 @@ export const SlideChartObject: React.FC<SlideChartObjectProps> = ({
       a.showLabels === b.showLabels &&
       a.showValues === b.showValues &&
       a.horizontalAlignment === b.horizontalAlignment &&
-      a.axisIncludesZero === b.axisIncludesZero
+      a.axisIncludesZero === b.axisIncludesZero &&
+      a.legendPosition === b.legendPosition
     );
   }, []);
 

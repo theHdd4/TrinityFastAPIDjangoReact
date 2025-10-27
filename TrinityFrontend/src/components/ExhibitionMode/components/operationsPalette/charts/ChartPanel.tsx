@@ -44,6 +44,15 @@ const renderSparkles = () => (
   </div>
 );
 
+const sanitiseConfig = (value?: ChartConfig): ChartConfig => {
+  const merged = { ...DEFAULT_CHART_CONFIG, ...(value ?? {}) };
+  return {
+    ...merged,
+    type: normalizeChartType(merged.type),
+    legendPosition: merged.legendPosition ?? DEFAULT_CHART_CONFIG.legendPosition,
+  };
+};
+
 export const ChartPanel: React.FC<ChartPanelProps> = ({
   onClose,
   onInsert,
@@ -54,11 +63,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
   const [chartData, setChartData] = useState<ChartDataRow[]>(() =>
     (initialData ?? DEFAULT_CHART_DATA).map(entry => ({ ...entry })),
   );
-  const [config, setConfig] = useState<ChartConfig>(() => ({
-    ...DEFAULT_CHART_CONFIG,
-    ...(initialConfig ?? {}),
-    type: normalizeChartType(initialConfig?.type),
-  }));
+  const [config, setConfig] = useState<ChartConfig>(() => sanitiseConfig(initialConfig));
   const [showDataEditor, setShowDataEditor] = useState(false);
 
   const selectedType = useMemo(() => config.type, [config.type]);
@@ -73,11 +78,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
   }, [initialData]);
 
   useEffect(() => {
-    setConfig({
-      ...DEFAULT_CHART_CONFIG,
-      ...(initialConfig ?? {}),
-      type: normalizeChartType(initialConfig?.type),
-    });
+    setConfig(sanitiseConfig(initialConfig));
   }, [initialConfig]);
 
   useEffect(() => {
@@ -90,16 +91,13 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
   const handleInsert = () => {
     onInsert({
       data: chartData.map(entry => ({ ...entry })),
-      config: { ...config, type: normalizeChartType(config.type) },
+      config: sanitiseConfig(config),
     });
   };
 
   const syncEditorState = (rows: ChartDataRow[], nextConfig: ChartConfig) => {
     setChartData(rows.map(entry => ({ ...entry })));
-    setConfig({
-      ...nextConfig,
-      type: normalizeChartType(nextConfig.type),
-    });
+    setConfig(sanitiseConfig(nextConfig));
   };
 
   const handleDataEditorSave = (rows: ChartDataRow[], nextConfig: ChartConfig) => {

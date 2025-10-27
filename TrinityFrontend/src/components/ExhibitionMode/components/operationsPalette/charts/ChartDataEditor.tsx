@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer } from 'react';
 import {
   AreaChart,
   BarChart3,
@@ -28,6 +28,7 @@ import {
   normalizeChartType,
 } from './constants';
 import type { ChartConfig, ChartDataRow } from './types';
+import { SlideChart } from './SlideChart';
 
 interface ChartDataEditorProps {
   open: boolean;
@@ -38,6 +39,18 @@ interface ChartDataEditorProps {
   onApply?: (rows: ChartDataRow[], config: ChartConfig) => void;
 }
 
+type DraftState = {
+  rows: ChartDataRow[];
+  config: ChartConfig;
+};
+
+type DraftAction =
+  | { type: 'reset'; payload: DraftState }
+  | { type: 'addRow' }
+  | { type: 'updateRow'; index: number; field: keyof ChartDataRow; value: string }
+  | { type: 'deleteRow'; index: number }
+  | { type: 'updateConfig'; patch: Partial<ChartConfig> };
+
 const iconByChartType = {
   verticalBar: Columns3,
   horizontalBar: BarChart3,
@@ -47,6 +60,112 @@ const iconByChartType = {
   donut: Circle,
 } as const;
 
+const cloneRows = (rows: ChartDataRow[]): ChartDataRow[] => rows.map(row => ({ ...row }));
+
+const sanitiseRowValue = (value: string): number => {
+  if (value.trim() === '') {
+    return 0;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const generateRowLabel = (rows: ChartDataRow[]): string => {
+  const existingLabels = new Set(rows.map(row => row.label));
+  let counter = rows.length + 1;
+  let candidate = `Item ${counter}`;
+
+  while (existingLabels.has(candidate)) {
+    counter += 1;
+    candidate = `Item ${counter}`;
+  }
+
+  return candidate;
+};
+
+const buildRows = (rows?: ChartDataRow[]): ChartDataRow[] => {
+  const source = rows && rows.length > 0 ? rows : DEFAULT_CHART_DATA;
+  return source.map(row => ({
+    label: row.label ?? '',
+    value: Number.isFinite(row.value) ? row.value : 0,
+  }));
+};
+
+const buildConfig = (config?: ChartConfig): ChartConfig => {
+  const merged = { ...DEFAULT_CHART_CONFIG, ...(config ?? {}) };
+  return {
+    ...merged,
+    type: normalizeChartType(merged.type),
+    colorScheme: merged.colorScheme ?? DEFAULT_CHART_CONFIG.colorScheme,
+    showLabels: merged.showLabels ?? DEFAULT_CHART_CONFIG.showLabels,
+    showValues: merged.showValues ?? DEFAULT_CHART_CONFIG.showValues,
+    horizontalAlignment: merged.horizontalAlignment ?? DEFAULT_CHART_CONFIG.horizontalAlignment,
+    axisIncludesZero: merged.axisIncludesZero ?? DEFAULT_CHART_CONFIG.axisIncludesZero,
+    legendPosition: merged.legendPosition ?? DEFAULT_CHART_CONFIG.legendPosition,
+  };
+};
+
+const buildState = (rows?: ChartDataRow[], config?: ChartConfig): DraftState => ({
+  rows: buildRows(rows),
+  config: buildConfig(config),
+});
+
+const reducer = (state: DraftState, action: DraftAction): DraftState => {
+  switch (action.type) {
+    case 'reset':
+      return {
+        rows: cloneRows(action.payload.rows),
+        config: { ...action.payload.config },
+      };
+    case 'addRow': {
+      return {
+        ...state,
+        rows: [...state.rows, { label: generateRowLabel(state.rows), value: 0 }],
+      };
+    }
+    case 'updateRow': {
+      const { index, field, value } = action;
+      return {
+        ...state,
+        rows: state.rows.map((row, rowIndex) => {
+          if (rowIndex !== index) {
+            return row;
+          }
+
+          if (field === 'value') {
+            return { ...row, value: sanitiseRowValue(value) };
+          }
+
+          return { ...row, label: value };
+        }),
+      };
+    }
+    case 'deleteRow': {
+      if (state.rows.length <= 1) {
+        return state;
+      }
+
+      return {
+        ...state,
+        rows: state.rows.filter((_, rowIndex) => rowIndex !== action.index),
+      };
+    }
+    case 'updateConfig': {
+      const next = { ...state.config, ...action.patch };
+      if (action.patch.type) {
+        next.type = normalizeChartType(action.patch.type);
+      }
+      return {
+        ...state,
+        config: next,
+      };
+    }
+    default:
+      return state;
+  }
+};
+
 export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   open,
   onClose,
@@ -55,217 +174,77 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   initialConfig,
   onApply,
 }) => {
-  const [chartData, setChartData] = useState<ChartDataRow[]>(() =>
-    (initialData ?? DEFAULT_CHART_DATA).map(row => ({ ...row })),
+  const hasApply = typeof onApply === 'function';
+
+  const [state, dispatch] = useReducer(reducer, undefined, () => buildState(initialData, initialConfig));
+
+  const { rows, config } = state;
+
+  const normalizedConfig = useMemo(() => ({
+    ...config,
+    type: normalizeChartType(config.type),
+  }), [config]);
+
+  const palette = useMemo(
+    () => COLOR_SCHEMES.find(scheme => scheme.id === normalizedConfig.colorScheme) ?? COLOR_SCHEMES[0],
+    [normalizedConfig.colorScheme],
   );
-  const [config, setConfig] = useState<ChartConfig>(() => ({
-    ...DEFAULT_CHART_CONFIG,
-    ...(initialConfig ?? {}),
-    type: normalizeChartType(initialConfig?.type),
-  }));
-  const [legendPosition, setLegendPosition] = useState<string>('bottom');
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
-    setChartData((initialData ?? DEFAULT_CHART_DATA).map(row => ({ ...row })));
-    setConfig({
-      ...DEFAULT_CHART_CONFIG,
-      ...(initialConfig ?? {}),
-      type: normalizeChartType(initialConfig?.type),
-    });
-    setLegendPosition('bottom');
+    dispatch({ type: 'reset', payload: buildState(initialData, initialConfig) });
   }, [open, initialData, initialConfig]);
 
-  const colorScheme = useMemo(
-    () => COLOR_SCHEMES.find(scheme => scheme.id === config.colorScheme) ?? COLOR_SCHEMES[0],
-    [config.colorScheme],
+  const handleAddRow = useCallback(() => dispatch({ type: 'addRow' }), []);
+
+  const handleRowChange = useCallback(
+    (index: number, field: keyof ChartDataRow, value: string) => {
+      dispatch({ type: 'updateRow', index, field, value });
+    },
+    [],
   );
 
-  const cloneRows = () => chartData.map(row => ({ ...row }));
-  const cloneConfig = () => ({ ...config });
-  const hasApply = typeof onApply === 'function';
+  const handleDeleteRow = useCallback((index: number) => dispatch({ type: 'deleteRow', index }), []);
 
-  const addRow = () => {
-    setChartData(prev => [...prev, { label: `Item ${prev.length + 1}`, value: 0 }]);
-  };
+  const handleConfigChange = useCallback((patch: Partial<ChartConfig>) => {
+    dispatch({ type: 'updateConfig', patch });
+  }, []);
 
-  const updateRow = (index: number, field: keyof ChartDataRow, value: string) => {
-    setChartData(prev =>
-      prev.map((row, rowIndex) => {
-        if (rowIndex !== index) {
-          return row;
-        }
-        if (field === 'value') {
-          const numeric = Number(value);
-          return { ...row, value: Number.isFinite(numeric) ? numeric : 0 };
-        }
-        return { ...row, label: value };
-      }),
-    );
-  };
+  const commitChanges = useCallback(
+    (callback: (rows: ChartDataRow[], config: ChartConfig) => void) => {
+      const payloadRows = cloneRows(rows);
+      const payloadConfig: ChartConfig = { ...normalizedConfig };
+      callback(payloadRows, payloadConfig);
+    },
+    [rows, normalizedConfig],
+  );
 
-  const deleteRow = (index: number) => {
-    setChartData(prev => (prev.length > 1 ? prev.filter((_, rowIndex) => rowIndex !== index) : prev));
-  };
-
-  const renderPreview = () => {
-    const palette = colorScheme.colors;
-
-    if (config.type === 'pie' || config.type === 'donut') {
-      const total = chartData.reduce((sum, item) => sum + item.value, 0);
-      if (total === 0) {
-        return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">Add values to preview</div>;
-      }
-
-      let currentAngle = -90;
-      return (
-        <div className="relative flex h-64 w-full items-center justify-center">
-          <svg viewBox="0 0 200 200" width={220} height={220} className="-rotate-90">
-            {chartData.map((item, index) => {
-              const percentage = (item.value / total) * 360;
-              const start = currentAngle;
-              currentAngle += percentage;
-              const end = currentAngle;
-
-              const largeArc = percentage > 180 ? 1 : 0;
-              const outerRadius = 90;
-              const innerRadius = config.type === 'donut' ? 48 : 0;
-
-              const startX = 100 + outerRadius * Math.cos((start * Math.PI) / 180);
-              const startY = 100 + outerRadius * Math.sin((start * Math.PI) / 180);
-              const endX = 100 + outerRadius * Math.cos((end * Math.PI) / 180);
-              const endY = 100 + outerRadius * Math.sin((end * Math.PI) / 180);
-
-              const innerStartX = 100 + innerRadius * Math.cos((start * Math.PI) / 180);
-              const innerStartY = 100 + innerRadius * Math.sin((start * Math.PI) / 180);
-              const innerEndX = 100 + innerRadius * Math.cos((end * Math.PI) / 180);
-              const innerEndY = 100 + innerRadius * Math.sin((end * Math.PI) / 180);
-
-              const path =
-                config.type === 'donut'
-                  ? `M ${startX} ${startY} A 90 90 0 ${largeArc} 1 ${endX} ${endY} L ${innerEndX} ${innerEndY} A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${innerStartX} ${innerStartY} Z`
-                  : `M 100 100 L ${startX} ${startY} A 90 90 0 ${largeArc} 1 ${endX} ${endY} Z`;
-
-              return <path key={item.label} d={path} fill={palette[index % palette.length]} className="transition-opacity hover:opacity-80" />;
-            })}
-          </svg>
-        </div>
-      );
-    }
-
-    if (config.type === 'line' || config.type === 'area') {
-      const maxValue = Math.max(...chartData.map(row => row.value), 1);
-      const points = chartData
-        .map((row, index) => {
-          const x = (index / Math.max(chartData.length - 1, 1)) * 260;
-          const y = 200 - (row.value / maxValue) * 170;
-          return `${x},${y}`;
-        })
-        .join(' ');
-
-      return (
-        <div className="flex h-64 w-full items-center justify-center">
-          <svg viewBox="0 0 260 220" width={280} height={220}>
-            {config.type === 'area' && (
-              <polygon
-                points={`0,200 ${points} 260,200`}
-                fill={`${colorScheme.colors[0]}33`}
-                stroke="none"
-              />
-            )}
-            <polyline points={points} fill="none" stroke={palette[0]} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
-            {chartData.map((row, index) => {
-              const x = (index / Math.max(chartData.length - 1, 1)) * 260;
-              const y = 200 - (row.value / maxValue) * 170;
-              return <circle key={row.label} cx={x} cy={y} r={5} fill={palette[index % palette.length]} className="transition-transform hover:scale-125" />;
-            })}
-          </svg>
-        </div>
-      );
-    }
-
-    const maxValue = Math.max(...chartData.map(row => row.value), 1);
-    const isBar = config.type === 'horizontalBar';
-
-    const renderVerticalBar = (row: ChartDataRow, index: number) => {
-      const ratio = maxValue === 0 ? 0 : row.value / maxValue;
-      const heightPercent = `${Math.max(ratio * 100, row.value > 0 ? 6 : 0)}%`;
-      return (
-        <div
-          key={row.label}
-          className="flex flex-col items-center gap-1.5 text-xs font-medium text-muted-foreground"
-        >
-          <div className="flex h-44 w-8 items-end overflow-hidden rounded-2xl bg-muted/20">
-            <div
-              className="w-full rounded-t-2xl transition-all duration-300"
-              style={{
-                backgroundColor: palette[index % palette.length],
-                height: heightPercent,
-              }}
-            />
-          </div>
-          {config.showLabels && <span>{row.label}</span>}
-          {config.showValues && <span className="font-semibold text-foreground">{row.value}</span>}
-        </div>
-      );
-    };
-
-    const renderHorizontalBar = (row: ChartDataRow, index: number) => {
-      const ratio = maxValue === 0 ? 0 : row.value / maxValue;
-      const widthPercent = `${Math.max(ratio * 100, row.value > 0 ? 6 : 0)}%`;
-      return (
-        <div
-          key={row.label}
-          className="flex w-full flex-row items-center gap-2 text-xs font-medium text-muted-foreground"
-        >
-          {config.showLabels && <span className="w-12 text-right">{row.label}</span>}
-          <div className="flex h-4 flex-1 items-center overflow-hidden rounded-2xl bg-muted/20">
-            <div
-              className="h-full rounded-r-2xl transition-all duration-300"
-              style={{
-                backgroundColor: palette[index % palette.length],
-                width: widthPercent,
-              }}
-            />
-          </div>
-          {config.showValues && <span className="min-w-[2ch] text-right text-foreground">{row.value}</span>}
-        </div>
-      );
-    };
-
-    return (
-      <div
-        className={cn(
-          'flex h-64 w-full gap-3 p-5',
-          isBar ? 'flex-col justify-center' : 'items-end justify-center',
-        )}
-      >
-        {chartData.map((row, index) =>
-          isBar ? renderHorizontalBar(row, index) : renderVerticalBar(row, index),
-        )}
-      </div>
-    );
-  };
-
-  const handleApply = () => {
+  const handleApply = useCallback(() => {
     if (!hasApply) {
       return;
     }
 
-    onApply?.(cloneRows(), { ...cloneConfig(), type: normalizeChartType(config.type) });
-  };
+    commitChanges((nextRows, nextConfig) => {
+      onApply?.(nextRows, nextConfig);
+    });
+  }, [commitChanges, hasApply, onApply]);
 
-  const handleSave = () => {
-    onSave(cloneRows(), { ...cloneConfig(), type: normalizeChartType(config.type) });
+  const handleSave = useCallback(() => {
+    commitChanges(onSave);
     onClose();
-  };
+  }, [commitChanges, onSave, onClose]);
+
+  const handleCancel = useCallback(() => {
+    dispatch({ type: 'reset', payload: buildState(initialData, initialConfig) });
+    onClose();
+  }, [initialData, initialConfig, onClose]);
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl h-[85vh] p-0 gap-0 overflow-hidden border-2 border-border/50 bg-gradient-to-br from-background via-background/95 to-primary/5">
+      <DialogContent className="h-[85vh] max-w-5xl gap-0 overflow-hidden border-2 border-border/50 bg-gradient-to-br from-background via-background/95 to-primary/5 p-0">
         <DialogHeader className="relative border-b border-border/50 px-8 py-6">
           <div className="absolute inset-0 bg-grid-white/5 [mask-image:linear-gradient(0deg,transparent,black)]" />
           <div className="relative flex items-start justify-between gap-4">
@@ -279,12 +258,12 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
               <div>
                 <DialogTitle className="flex items-center gap-3 text-2xl font-bold">
                   Edit chart data
-                  {React.createElement(iconByChartType[config.type], { className: 'h-5 w-5 text-primary' })}
+                  {React.createElement(iconByChartType[normalizedConfig.type], { className: 'h-5 w-5 text-primary' })}
                 </DialogTitle>
                 <p className="text-sm text-muted-foreground">Update your dataset and visual settings</p>
               </div>
             </div>
-            <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl" onClick={onClose}>
+            <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl" onClick={handleCancel}>
               <X className="h-5 w-5" />
             </Button>
           </div>
@@ -305,25 +284,25 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                   <span className="text-right">Value</span>
                   <span className="text-center">Actions</span>
                 </div>
-                {chartData.map((row, index) => (
-                  <div key={row.label + index} className="grid grid-cols-[1fr,120px,48px] items-center gap-3">
+                {rows.map((row, index) => (
+                  <div key={`${row.label}-${index}`} className="grid grid-cols-[1fr,120px,48px] items-center gap-3">
                     <Input
                       value={row.label}
-                      onChange={event => updateRow(index, 'label', event.target.value)}
+                      onChange={event => handleRowChange(index, 'label', event.target.value)}
                       className="h-11 rounded-xl border-2 border-border/50 bg-card/60 focus:border-primary"
                     />
                     <Input
                       type="number"
                       value={row.value}
-                      onChange={event => updateRow(index, 'value', event.target.value)}
+                      onChange={event => handleRowChange(index, 'value', event.target.value)}
                       className="h-11 rounded-xl border-2 border-border/50 bg-card/60 text-right focus:border-primary"
                     />
                     <Button
                       variant="ghost"
                       size="icon"
                       className="h-10 w-10 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() => deleteRow(index)}
-                      disabled={chartData.length <= 1}
+                      onClick={() => handleDeleteRow(index)}
+                      disabled={rows.length <= 1}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -332,7 +311,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                 <Button
                   variant="outline"
                   className="h-11 w-full rounded-xl border-2 border-dashed border-border/60"
-                  onClick={addRow}
+                  onClick={handleAddRow}
                 >
                   <Plus className="mr-2 h-4 w-4" /> Add row
                 </Button>
@@ -350,13 +329,13 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
             <ScrollArea className="flex-1">
               <div className="space-y-6 p-6">
                 <div className="rounded-2xl border border-border/40 bg-card/60 p-6 shadow-inner">
-                  {renderPreview()}
+                  <SlideChart data={rows} config={normalizedConfig} className="h-64 w-full" />
                   <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-xs font-medium text-muted-foreground">
-                    {chartData.map((row, index) => (
-                      <span key={row.label + index} className="flex items-center gap-2">
+                    {rows.map((row, index) => (
+                      <span key={`${row.label}-${index}`} className="flex items-center gap-2">
                         <span
                           className="h-3 w-3 rounded-sm"
-                          style={{ backgroundColor: colorScheme.colors[index % colorScheme.colors.length] }}
+                          style={{ backgroundColor: palette.colors[index % palette.colors.length] }}
                         />
                         {row.label}
                       </span>
@@ -369,7 +348,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                   <div className="grid grid-cols-3 gap-2">
                     {CHART_TYPES.map(type => {
                       const Icon = type.icon;
-                      const isSelected = config.type === type.id;
+                      const isSelected = normalizedConfig.type === type.id;
                       return (
                         <Button
                           key={type.id}
@@ -381,7 +360,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                               ? 'border-primary bg-primary text-primary-foreground shadow-lg'
                               : 'border-border/50 text-muted-foreground hover:border-primary/50 hover:text-primary',
                           )}
-                          onClick={() => setConfig(prev => ({ ...prev, type: type.id }))}
+                          onClick={() => handleConfigChange({ type: type.id })}
                         >
                           <Icon className="h-5 w-5" />
                         </Button>
@@ -393,8 +372,8 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                 <div className="space-y-3">
                   <Label className="text-sm font-semibold">Color scheme</Label>
                   <Select
-                    value={config.colorScheme}
-                    onValueChange={value => setConfig(prev => ({ ...prev, colorScheme: value }))}
+                    value={normalizedConfig.colorScheme}
+                    onValueChange={value => handleConfigChange({ colorScheme: value })}
                   >
                     <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/60">
                       <SelectValue />
@@ -428,8 +407,8 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                     </Label>
                     <Switch
                       id="show-labels"
-                      checked={config.showLabels}
-                      onCheckedChange={checked => setConfig(prev => ({ ...prev, showLabels: checked }))}
+                      checked={normalizedConfig.showLabels}
+                      onCheckedChange={checked => handleConfigChange({ showLabels: checked })}
                     />
                   </div>
                   <div className="flex items-center justify-between rounded-xl border border-border/40 bg-muted/20 p-4">
@@ -438,15 +417,20 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                     </Label>
                     <Switch
                       id="show-values"
-                      checked={config.showValues}
-                      onCheckedChange={checked => setConfig(prev => ({ ...prev, showValues: checked }))}
+                      checked={normalizedConfig.showValues}
+                      onCheckedChange={checked => handleConfigChange({ showValues: checked })}
                     />
                   </div>
                 </div>
 
                 <div className="space-y-3">
                   <Label className="text-sm font-semibold">Legend position</Label>
-                  <Select value={legendPosition} onValueChange={setLegendPosition}>
+                  <Select
+                    value={normalizedConfig.legendPosition}
+                    onValueChange={value =>
+                      handleConfigChange({ legendPosition: value as ChartConfig['legendPosition'] })
+                    }
+                  >
                     <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/60">
                       <SelectValue />
                     </SelectTrigger>
@@ -468,15 +452,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
           <Button
             variant="outline"
             className="h-11 flex-1 rounded-xl border-2 border-border/50"
-            onClick={() => {
-              setChartData((initialData ?? DEFAULT_CHART_DATA).map(row => ({ ...row })));
-              setConfig({
-                ...DEFAULT_CHART_CONFIG,
-                ...(initialConfig ?? {}),
-                type: normalizeChartType(initialConfig?.type),
-              });
-              onClose();
-            }}
+            onClick={handleCancel}
           >
             Cancel
           </Button>

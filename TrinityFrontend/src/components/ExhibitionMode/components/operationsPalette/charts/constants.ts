@@ -14,6 +14,7 @@ export const DEFAULT_CHART_CONFIG: ChartConfig = {
   showValues: false,
   horizontalAlignment: 'center',
   axisIncludesZero: true,
+  legendPosition: 'bottom',
 };
 
 export const CHART_TYPES: ChartTypeDefinition[] = [
@@ -88,12 +89,12 @@ export const COLOR_SCHEMES: ChartColorScheme[] = [
   },
 ];
 
-export const LEGEND_POSITIONS = [
+export const LEGEND_POSITIONS: { id: ChartConfig['legendPosition']; name: string }[] = [
   { id: 'top', name: 'Top' },
   { id: 'bottom', name: 'Bottom' },
   { id: 'left', name: 'Left' },
   { id: 'right', name: 'Right' },
-] as const;
+];
 
 export const DEFAULT_CHART_WIDTH = 420;
 export const DEFAULT_CHART_HEIGHT = 320;

@@ -25,6 +25,7 @@ export const createChartSlideObject = (
     ...DEFAULT_CHART_CONFIG,
     ...(options.config ?? {}),
     type: normalizeChartType(options.config?.type),
+    legendPosition: options.config?.legendPosition ?? DEFAULT_CHART_CONFIG.legendPosition,
   };
 
   return {
