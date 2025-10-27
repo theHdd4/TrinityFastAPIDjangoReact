@@ -331,6 +331,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const slideObjects = useExhibitionStore(
     useCallback(state => state.slideObjectsByCardId[card.id] ?? [], [card.id]),
   );
+  const activeTheme = useExhibitionStore(state => state.activeTheme);
   const bulkUpdateSlideObjects = useExhibitionStore(state => state.bulkUpdateSlideObjects);
   const bringSlideObjectsToFront = useExhibitionStore(state => state.bringSlideObjectsToFront);
   const bringSlideObjectsForward = useExhibitionStore(state => state.bringSlideObjectsForward);
@@ -520,6 +521,60 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     }),
     [],
   );
+
+  const themeContext = useMemo(() => {
+    if (!activeTheme) {
+      return {
+        containerStyle: undefined as React.CSSProperties | undefined,
+        backgroundStyle: undefined as React.CSSProperties | undefined,
+        accent: undefined as string | undefined,
+        borderRadius: undefined as string | undefined,
+        shadow: undefined as string | undefined,
+        foreground: undefined as string | undefined,
+      };
+    }
+
+    const backgroundValue = activeTheme.gradients.background || activeTheme.colors.background;
+    const backgroundStyle =
+      typeof backgroundValue === 'string' && backgroundValue.startsWith('linear-gradient')
+        ? { backgroundImage: backgroundValue }
+        : { backgroundColor: backgroundValue };
+
+    return {
+      containerStyle: {
+        fontFamily: activeTheme.fonts.body,
+        '--exhibition-theme-primary': activeTheme.colors.primary,
+        '--exhibition-theme-secondary': activeTheme.colors.secondary,
+        '--exhibition-theme-accent': activeTheme.colors.accent,
+        '--exhibition-theme-muted': activeTheme.colors.muted,
+        '--exhibition-theme-border': activeTheme.colors.border,
+        '--exhibition-theme-heading-font': activeTheme.fonts.heading,
+        '--exhibition-theme-body-font': activeTheme.fonts.body,
+      } as React.CSSProperties,
+      backgroundStyle,
+      accent: activeTheme.gradients.accent || activeTheme.colors.accent,
+      borderRadius: activeTheme.effects.borderRadius,
+      shadow: activeTheme.effects.shadow,
+      foreground: activeTheme.colors.foreground,
+    };
+  }, [activeTheme]);
+
+  const accentButtonStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (!themeContext.accent) {
+      return undefined;
+    }
+    const accent = themeContext.accent;
+    if (accent.startsWith('linear-gradient')) {
+      return {
+        backgroundImage: accent,
+        color: '#ffffff',
+      };
+    }
+    return {
+      backgroundColor: accent,
+      color: '#ffffff',
+    };
+  }, [themeContext.accent]);
 
   const cardWidthClass = settings.cardWidth === 'M' ? 'max-w-4xl' : 'max-w-6xl';
 
@@ -1056,7 +1111,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         );
 
   return (
-    <div className={containerClasses}>
+    <div className={containerClasses} style={themeContext.containerStyle}>
       <div
         ref={presentationMode ? presentationContainerRef : undefined}
         className={
@@ -1117,6 +1172,12 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   presentationMode
                     ? {
                         ...slideBackgroundStyle,
+                        ...(themeContext.backgroundStyle ?? {}),
+                        ...(themeContext.shadow ? { boxShadow: themeContext.shadow } : {}),
+                        ...(!settings.fullBleed && themeContext.borderRadius
+                          ? { borderRadius: themeContext.borderRadius }
+                          : {}),
+                        ...(themeContext.foreground ? { color: themeContext.foreground } : {}),
                         height:
                           (presentationBaseDimensionsRef.current?.height ?? canvasDimensions.height) ||
                           CANVAS_STAGE_HEIGHT,
@@ -1127,7 +1188,16 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                         transformOrigin: 'center center',
                         margin: '0 auto',
                       }
-                    : { height: CANVAS_STAGE_HEIGHT, ...slideBackgroundStyle }
+                    : {
+                        height: CANVAS_STAGE_HEIGHT,
+                        ...slideBackgroundStyle,
+                        ...(themeContext.backgroundStyle ?? {}),
+                        ...(themeContext.shadow ? { boxShadow: themeContext.shadow } : {}),
+                        ...(!settings.fullBleed && themeContext.borderRadius
+                          ? { borderRadius: themeContext.borderRadius }
+                          : {}),
+                        ...(themeContext.foreground ? { color: themeContext.foreground } : {}),
+                      }
                 }
                 onDragOver={presentationMode ? undefined : handleDragOver}
                 onDragLeave={presentationMode ? undefined : handleDragLeave}
@@ -1192,9 +1262,15 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                     <Button
                       size="icon"
                       variant="secondary"
-                      className="h-8 w-8 bg-gradient-to-br from-purple-500 to-pink-500 text-white shadow-lg hover:from-purple-600 hover:to-pink-600"
+                      className={cn(
+                        'h-8 w-8 shadow-lg transition-colors',
+                        accentButtonStyle
+                          ? 'text-white hover:opacity-95'
+                          : 'bg-gradient-to-br from-purple-500 to-pink-500 text-white hover:from-purple-600 hover:to-pink-600',
+                      )}
                       type="button"
                       disabled={!canEdit}
+                      style={accentButtonStyle}
                     >
                       <Sparkles className="h-4 w-4" />
                     </Button>

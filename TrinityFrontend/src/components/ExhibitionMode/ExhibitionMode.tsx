@@ -47,6 +47,7 @@ import {
   type ChartDataRow,
   type ChartPanelResult,
 } from './components/operationsPalette/charts';
+import { ThemesPanel } from './components/operationsPalette/themes';
 import {
   buildChartRendererPropsFromManifest,
   buildTableDataFromManifest,
@@ -201,6 +202,7 @@ const ExhibitionMode = () => {
     | { type: 'shapes' }
     | { type: 'images' }
     | { type: 'charts' }
+    | { type: 'themes' }
     | null
   >(null);
   const [chartPanelData, setChartPanelData] = useState<ChartDataRow[]>(DEFAULT_CHART_DATA);
@@ -1268,7 +1270,12 @@ const ExhibitionMode = () => {
     }
 
     setOperationsPanelState(prev => {
-      if (prev?.type === 'notes' || prev?.type === 'shapes' || prev?.type === 'images') {
+      if (
+        prev?.type === 'notes' ||
+        prev?.type === 'shapes' ||
+        prev?.type === 'images' ||
+        prev?.type === 'themes'
+      ) {
         return prev;
       }
       return null;
@@ -1317,6 +1324,17 @@ const ExhibitionMode = () => {
 
   const handleCloseImagesPanel = useCallback(() => {
     setOperationsPanelState(prev => (prev?.type === 'images' ? null : prev));
+  }, []);
+
+  const handleOpenThemesPanel = useCallback(() => {
+    if (!canEdit) {
+      return;
+    }
+    setOperationsPanelState(prev => (prev?.type === 'themes' ? null : { type: 'themes' }));
+  }, [canEdit]);
+
+  const handleCloseThemesPanel = useCallback(() => {
+    setOperationsPanelState(prev => (prev?.type === 'themes' ? null : prev));
   }, []);
 
   const handleImagePanelSelect = useCallback(
@@ -1648,6 +1666,10 @@ const ExhibitionMode = () => {
       );
     }
 
+    if (operationsPanelState.type === 'themes') {
+      return <ThemesPanel onClose={handleCloseThemesPanel} />;
+    }
+
     if (operationsPanelState.type === 'charts') {
       return (
         <ChartPanel
@@ -1676,6 +1698,7 @@ const ExhibitionMode = () => {
     handleCloseShapesPanel,
     handleCloseChartsPanel,
     handleCloseImagesPanel,
+    handleCloseThemesPanel,
     handleImagePanelSelect,
     handleNotesChange,
     handleShapeSelect,
@@ -1905,6 +1928,7 @@ const ExhibitionMode = () => {
             onOpenShapesPanel={handleOpenShapesPanel}
             onOpenImagesPanel={handleOpenImagesPanel}
             onOpenChartPanel={handleOpenChartsPanel}
+            onOpenThemesPanel={handleOpenThemesPanel}
             canEdit={canEdit}
             positionPanel={operationsPalettePanel}
           />
