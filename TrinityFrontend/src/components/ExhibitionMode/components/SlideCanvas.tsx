@@ -3973,7 +3973,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
           const chartHandle = chartHandlesRef.current.get(object.id);
           const renderChartExtras = isChartObject
-            ? () => (
+            ? (closeMenu: () => void) => (
                 <>
                   <ContextMenuItem
                     disabled={!canEdit}
@@ -3982,6 +3982,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       if (!canEdit) {
                         return;
                       }
+                      closeMenu();
                       chartHandle?.openDataEditor();
                     }}
                   >
@@ -4008,6 +4009,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                             if (!canEdit) {
                               return;
                             }
+                            closeMenu();
                             chartHandle?.setColorScheme(scheme.id);
                           }}
                         >
@@ -4048,6 +4050,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                               if (!canEdit) {
                                 return;
                               }
+                              closeMenu();
                               chartHandle?.setAlignment(option.value);
                             }}
                           >
@@ -4079,6 +4082,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                               if (!canEdit) {
                                 return;
                               }
+                              closeMenu();
                               chartHandle?.setChartType(type.id);
                             }}
                           >

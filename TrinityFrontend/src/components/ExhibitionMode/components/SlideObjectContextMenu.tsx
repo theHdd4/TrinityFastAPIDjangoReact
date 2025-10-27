@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -76,7 +76,7 @@ interface SlideObjectContextMenuProps {
   disableLink?: boolean;
   disableComment?: boolean;
   disableApplyColors?: boolean;
-  renderAdditionalContent?: () => React.ReactNode;
+  renderAdditionalContent?: (closeMenu: () => void) => React.ReactNode;
 }
 
 const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
@@ -117,16 +117,28 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
   disableApplyColors = false,
   renderAdditionalContent,
 }) => {
-  const handleAlign = (action: AlignAction) => () => onAlign(action);
+  const [open, setOpen] = useState(false);
+  const closeMenu = useCallback(() => setOpen(false), []);
+
+  const handleAlign = useCallback(
+    (action: AlignAction) => () => {
+      closeMenu();
+      onAlign(action);
+    },
+    [closeMenu, onAlign],
+  );
+
+  const additionalContent = renderAdditionalContent?.(closeMenu);
 
   return (
-    <ContextMenu>
+    <ContextMenu open={open} onOpenChange={setOpen}>
       <ContextMenuTrigger asChild>
         <div onContextMenu={onContextMenu}>{children}</div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-64" style={{ zIndex: 9999 }}>
         <ContextMenuItem disabled={!canEdit || disableCopy} onSelect={event => {
           event.preventDefault();
+          closeMenu();
           onCopy();
         }}>
           <Copy className="mr-2 h-4 w-4" />
@@ -135,6 +147,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
         </ContextMenuItem>
         <ContextMenuItem disabled={!canEdit || disableCopyStyle} onSelect={event => {
           event.preventDefault();
+          closeMenu();
           onCopyStyle();
         }}>
           <Clipboard className="mr-2 h-4 w-4" />
@@ -143,6 +156,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
         </ContextMenuItem>
         <ContextMenuItem disabled={!canEdit || disableCut} onSelect={event => {
           event.preventDefault();
+          closeMenu();
           onCut();
         }}>
           <Scissors className="mr-2 h-4 w-4" />
@@ -151,6 +165,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
         </ContextMenuItem>
         <ContextMenuItem disabled={!canEdit || !hasClipboard} onSelect={event => {
           event.preventDefault();
+          closeMenu();
           onPaste();
         }}>
           <ClipboardPaste className="mr-2 h-4 w-4" />
@@ -159,6 +174,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
         </ContextMenuItem>
         <ContextMenuItem disabled={!canEdit || disableDuplicate} onSelect={event => {
           event.preventDefault();
+          closeMenu();
           onDuplicate();
         }}>
           <CopyPlus className="mr-2 h-4 w-4" />
@@ -167,6 +183,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
         </ContextMenuItem>
         <ContextMenuItem disabled={!canEdit || disableDelete} onSelect={event => {
           event.preventDefault();
+          closeMenu();
           onDelete();
         }}>
           <Trash2 className="mr-2 h-4 w-4" />
@@ -176,6 +193,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!canEdit || disableLock} onSelect={event => {
           event.preventDefault();
+          closeMenu();
           onToggleLock();
         }}>
           {lockLabel === 'Lock' ? (
@@ -196,6 +214,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
               disabled={!canEdit || !canLayer}
               onSelect={event => {
                 event.preventDefault();
+                closeMenu();
                 onBringToFront();
               }}
             >
@@ -206,6 +225,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
               disabled={!canEdit || !canLayer}
               onSelect={event => {
                 event.preventDefault();
+                closeMenu();
                 onBringForward();
               }}
             >
@@ -216,6 +236,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
               disabled={!canEdit || !canLayer}
               onSelect={event => {
                 event.preventDefault();
+                closeMenu();
                 onSendBackward();
               }}
             >
@@ -226,6 +247,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
               disabled={!canEdit || !canLayer}
               onSelect={event => {
                 event.preventDefault();
+                closeMenu();
                 onSendToBack();
               }}
             >
@@ -306,6 +328,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!canEdit || disableLink} onSelect={event => {
           event.preventDefault();
+          closeMenu();
           onLink();
         }}>
           <LinkIcon className="mr-2 h-4 w-4" />
@@ -314,6 +337,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
         </ContextMenuItem>
         <ContextMenuItem disabled={!canEdit || disableComment} onSelect={event => {
           event.preventDefault();
+          closeMenu();
           onComment();
         }}>
           <MessageSquarePlus className="mr-2 h-4 w-4" />
@@ -322,6 +346,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
         </ContextMenuItem>
         <ContextMenuItem disabled={!canEdit || !canAddAltText} onSelect={event => {
           event.preventDefault();
+          closeMenu();
           onAltText();
         }}>
           <TextCursorInput className="mr-2 h-4 w-4" />
@@ -331,20 +356,22 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
           disabled={!canEdit || !canApplyColors || disableApplyColors}
           onSelect={event => {
             event.preventDefault();
+            closeMenu();
             onApplyColorsToAll();
           }}
         >
           <Palette className="mr-2 h-4 w-4" />
           Apply colors to all
         </ContextMenuItem>
-        {renderAdditionalContent ? (
+        {additionalContent ? (
           <>
             <ContextMenuSeparator />
-            {renderAdditionalContent()}
+            {additionalContent}
           </>
         ) : null}
         <ContextMenuItem onSelect={event => {
           event.preventDefault();
+          closeMenu();
           onInfo();
         }}>
           <Info className="mr-2 h-4 w-4" />

@@ -409,7 +409,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                   <Sparkles className="h-4 w-4 text-amber-400" />
                 </h3>
               </header>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {FREEFORM_DIAGRAMS.map(diagram => {
                   const Icon = diagram.icon;
                   const isSelected = selectedDiagram === diagram.id;
