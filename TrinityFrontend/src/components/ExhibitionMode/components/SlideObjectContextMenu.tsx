@@ -70,6 +70,7 @@ interface SlideObjectContextMenuProps {
   disableLink?: boolean;
   disableComment?: boolean;
   disableApplyColors?: boolean;
+  renderAdditionalContent?: () => React.ReactNode;
 }
 
 const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
@@ -104,6 +105,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
   disableLink = false,
   disableComment = false,
   disableApplyColors = false,
+  renderAdditionalContent,
 }) => {
   const handleAlign = (action: AlignAction) => () => onAlign(action);
 
@@ -112,7 +114,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
       <ContextMenuTrigger asChild>
         <div onContextMenu={onContextMenu}>{children}</div>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-64">
+      <ContextMenuContent className="w-64" style={{ zIndex: 9999 }}>
         <ContextMenuItem disabled={!canEdit || disableCopy} onSelect={event => {
           event.preventDefault();
           onCopy();
@@ -309,6 +311,12 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
           <Palette className="mr-2 h-4 w-4" />
           Apply colors to all
         </ContextMenuItem>
+        {renderAdditionalContent ? (
+          <>
+            <ContextMenuSeparator />
+            {renderAdditionalContent()}
+          </>
+        ) : null}
         <ContextMenuItem onSelect={event => {
           event.preventDefault();
           onInfo();

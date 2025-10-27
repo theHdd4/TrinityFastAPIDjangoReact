@@ -7,7 +7,20 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { User, Calendar, Sparkles, StickyNote, Settings, Trash2 } from 'lucide-react';
+import {
+  User,
+  Calendar,
+  Sparkles,
+  StickyNote,
+  Settings,
+  Trash2,
+  Edit3,
+  Palette as PaletteIcon,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  BarChart3,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
@@ -50,6 +63,9 @@ import {
   DEFAULT_CHART_DATA,
   type ChartConfig,
   type ChartDataRow,
+  type SlideChartObjectHandle,
+  CHART_TYPES,
+  COLOR_SCHEMES,
 } from './operationsPalette/charts';
 import {
   DEFAULT_TABLE_COLS,
@@ -65,6 +81,13 @@ import {
   type TableCellData,
   type TableCellFormatting,
 } from './operationsPalette/tables/constants';
+import {
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+} from '@/components/ui/context-menu';
 import SlideObjectContextMenu, { AlignAction } from './SlideObjectContextMenu';
 
 interface CanvasDropPlacement {
@@ -104,6 +127,16 @@ const COLOR_PROP_KEYS = [
   'borderColor',
   'accentColor',
 ] as const;
+
+const CHART_ALIGNMENT_OPTIONS: {
+  value: ChartConfig['horizontalAlignment'];
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
+  { value: 'left', label: 'Align left', icon: AlignLeft },
+  { value: 'center', label: 'Align center', icon: AlignCenter },
+  { value: 'right', label: 'Align right', icon: AlignRight },
+];
 
 const cloneValue = <T,>(value: T): T => {
   const structured = (globalThis as any)?.structuredClone;
@@ -1557,6 +1590,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     const [activeTextToolbar, setActiveTextToolbar] = useState<{ id: string; node: ReactNode } | null>(null);
     const [clipboard, setClipboard] = useState<SlideObject[]>([]);
     const [styleClipboard, setStyleClipboard] = useState<Record<string, string> | null>(null);
+    const chartHandlesRef = useRef<Map<string, SlideChartObjectHandle>>(new Map());
 
     const focusCanvas = useCallback(() => {
       const node = internalRef.current;
@@ -1594,6 +1628,18 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
       return Object.keys(palette).length > 0 ? palette : null;
     }, []);
+
+    const assignChartHandle = useCallback(
+      (objectId: string, handle: SlideChartObjectHandle | null) => {
+        const map = chartHandlesRef.current;
+        if (handle) {
+          map.set(objectId, handle);
+        } else {
+          map.delete(objectId);
+        }
+      },
+      [],
+    );
 
     const handleCopySelection = useCallback(() => {
       if (selectedObjects.length === 0) {
@@ -2564,7 +2610,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           return;
         }
 
-        event.preventDefault();
         event.stopPropagation();
 
         if (editingTextState) {
@@ -3521,12 +3566,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     />
                   ) : isChartObject ? (
                     <SlideChartObject
+                      ref={instance => assignChartHandle(object.id, instance)}
                       data={chartData}
                       config={chartConfig}
                       canEdit={canEdit}
                       className="h-full w-full"
                       onUpdate={updates => updateChartProps(object.id, updates)}
-                      onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
                       onInteract={onInteract}
                     />
                   ) : (
@@ -3591,6 +3636,128 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             return React.cloneElement(renderObject(), { key: object.id });
           }
 
+          const chartHandle = chartHandlesRef.current.get(object.id);
+          const renderChartExtras = isChartObject
+            ? () => (
+                <>
+                  <ContextMenuItem
+                    disabled={!canEdit}
+                    onSelect={event => {
+                      event.preventDefault();
+                      if (!canEdit) {
+                        return;
+                      }
+                      chartHandle?.openDataEditor();
+                    }}
+                  >
+                    <Edit3 className="mr-2 h-4 w-4" />
+                    Edit chart data
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger disabled={!canEdit}>
+                      <PaletteIcon className="mr-2 h-4 w-4" />
+                      Color scheme
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="w-64">
+                      {COLOR_SCHEMES.map(scheme => (
+                        <ContextMenuItem
+                          key={scheme.id}
+                          disabled={!canEdit}
+                          className={cn(
+                            'gap-2',
+                            chartConfig.colorScheme === scheme.id && 'bg-accent/80 text-accent-foreground',
+                          )}
+                          onSelect={event => {
+                            event.preventDefault();
+                            if (!canEdit) {
+                              return;
+                            }
+                            chartHandle?.setColorScheme(scheme.id);
+                          }}
+                        >
+                          <span className="text-base">{scheme.icon}</span>
+                          <div className="flex gap-1.5">
+                            {scheme.colors.map(color => (
+                              <span
+                                key={color}
+                                className="h-3.5 w-3.5 rounded-full border border-border/50"
+                                style={{ backgroundColor: color }}
+                              />
+                            ))}
+                          </div>
+                          <span className="text-sm">{scheme.name}</span>
+                        </ContextMenuItem>
+                      ))}
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger disabled={!canEdit}>
+                      <AlignCenter className="mr-2 h-4 w-4" />
+                      Align
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="w-56">
+                      {CHART_ALIGNMENT_OPTIONS.map(option => {
+                        const Icon = option.icon;
+                        return (
+                          <ContextMenuItem
+                            key={option.value}
+                            disabled={!canEdit}
+                            className={cn(
+                              'gap-2',
+                              chartConfig.horizontalAlignment === option.value &&
+                                'bg-accent/80 text-accent-foreground',
+                            )}
+                            onSelect={event => {
+                              event.preventDefault();
+                              if (!canEdit) {
+                                return;
+                              }
+                              chartHandle?.setAlignment(option.value);
+                            }}
+                          >
+                            <Icon className="mr-2 h-4 w-4" />
+                            {option.label}
+                          </ContextMenuItem>
+                        );
+                      })}
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                  <ContextMenuSub>
+                    <ContextMenuSubTrigger disabled={!canEdit}>
+                      <BarChart3 className="mr-2 h-4 w-4" />
+                      Switch type
+                    </ContextMenuSubTrigger>
+                    <ContextMenuSubContent className="w-60">
+                      {CHART_TYPES.map(type => {
+                        const Icon = type.icon;
+                        return (
+                          <ContextMenuItem
+                            key={type.id}
+                            disabled={!canEdit}
+                            className={cn(
+                              'gap-2',
+                              chartConfig.type === type.id && 'bg-accent/80 text-accent-foreground',
+                            )}
+                            onSelect={event => {
+                              event.preventDefault();
+                              if (!canEdit) {
+                                return;
+                              }
+                              chartHandle?.setChartType(type.id);
+                            }}
+                          >
+                            <Icon className="mr-2 h-4 w-4" />
+                            {type.name}
+                          </ContextMenuItem>
+                        );
+                      })}
+                    </ContextMenuSubContent>
+                  </ContextMenuSub>
+                </>
+              )
+            : undefined;
+
           return (
             <SlideObjectContextMenu
               key={object.id}
@@ -3624,6 +3791,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               disableLink={selectionLocked}
               disableComment={selectionLocked}
               disableApplyColors={!canApplyColorsGlobally}
+              renderAdditionalContent={renderChartExtras}
             >
               {renderObject()}
             </SlideObjectContextMenu>
