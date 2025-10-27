@@ -2625,7 +2625,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               {isSelected && !(isTextBoxObject && isEditingTextBox) && (
                 <div
                   className={cn(
-                    'pointer-events-none absolute inset-0 border border-dotted border-yellow-400 transition-all duration-200',
+                    'pointer-events-none absolute inset-0 z-40 border border-dotted border-yellow-400 transition-all duration-200',
                     suppressCardChrome || isShapeObject || isTextBoxObject || isTableObject || isChartObject
                       ? 'rounded-[22px]'
                       : 'rounded-[32px]'
@@ -2825,7 +2825,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   <span
                     key={definition.handle}
                     className={cn(
-                      'absolute z-40 h-3 w-3 rounded-full border border-yellow-200 bg-yellow-400 shadow',
+                      'absolute z-40 h-3 w-3 rounded-full border border-background bg-primary shadow',
                       definition.className,
                     )}
                     style={{ cursor: definition.cursor }}
