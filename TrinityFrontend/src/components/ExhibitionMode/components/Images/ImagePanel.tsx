@@ -18,6 +18,7 @@ export interface ImageSelectionMetadata {
 interface StoredImage {
   id: string;
   url: string;
+  displayUrl: string;
   label: string;
   uploadedAt?: string | null;
 }
@@ -75,6 +76,11 @@ export const stockImages: ReadonlyArray<{ url: string; title: string }> = [
 
 const SELECTED_CLASSES = 'border-primary ring-2 ring-primary/20';
 
+const buildDisplayUrl = (objectName: string): string => {
+  const encoded = encodeURIComponent(objectName);
+  return `${IMAGES_API}/content?object_name=${encoded}`;
+};
+
 const normaliseStoredImage = (image: any): StoredImage | null => {
   const objectName: string | undefined = image?.object_name ?? image?.objectName;
   const url: string | undefined = image?.url;
@@ -90,6 +96,7 @@ const normaliseStoredImage = (image: any): StoredImage | null => {
   return {
     id: objectName,
     url,
+    displayUrl: buildDisplayUrl(objectName),
     label,
     uploadedAt,
   };
@@ -296,7 +303,11 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
           return sortStoredImages(Array.from(unique.values()));
         });
 
-        setSelectedImage({ url: uploadedImage.url, label: uploadedImage.label, source: 'upload' });
+        setSelectedImage({
+          url: uploadedImage.displayUrl,
+          label: uploadedImage.label,
+          source: 'upload',
+        });
         toast({
           title: 'Image uploaded',
           description: 'The image has been added to your uploads.',
@@ -434,14 +445,14 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                 <div className="max-h-48 overflow-y-auto pr-1">
                   <div className="grid grid-cols-2 gap-3">
                     {availableUploads.map(image => {
-                      const isSelected = selectedImage?.url === image.url;
+                      const isSelected = selectedImage?.url === image.displayUrl;
                       return (
                         <button
                           key={image.id}
                           type="button"
                           onClick={() =>
                             handleImageClick({
-                              url: image.url,
+                              url: image.displayUrl,
                               label: image.label,
                               source: 'upload',
                             })
@@ -455,7 +466,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                           )}
                           disabled={!canEdit}
                         >
-                          <img src={image.url} alt={image.label} className="h-full w-full object-cover" />
+                          <img src={image.displayUrl} alt={image.label} className="h-full w-full object-cover" />
                           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2">
                             <p className="truncate text-[11px] font-medium text-white">{image.label}</p>
                           </div>
