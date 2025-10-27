@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AreaChart,
   BarChart3,
@@ -10,42 +10,78 @@ import {
   Trash2,
   TrendingUp,
   X,
+  Table as TableIcon,
+  Palette as PaletteIcon,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
-import {
-  CHART_TYPES,
-  COLOR_SCHEMES,
-  LEGEND_POSITIONS,
-  DEFAULT_CHART_CONFIG,
-  DEFAULT_CHART_DATA,
-  normalizeChartType,
-} from './constants';
-import type { ChartConfig, ChartDataRow } from './types';
+import type { ChartColorScheme, ChartConfig, ChartDataRow } from './types';
+import { COLOR_SCHEMES, DEFAULT_CHART_CONFIG, DEFAULT_CHART_DATA, normalizeChartType } from './constants';
 
 interface ChartDataEditorProps {
   open: boolean;
   onClose: () => void;
-  onSave: (rows: ChartDataRow[], config: ChartConfig) => void;
+  onSave: (data: ChartDataRow[], config: ChartConfig) => void;
   initialData?: ChartDataRow[];
   initialConfig?: ChartConfig;
-  onApply?: (rows: ChartDataRow[], config: ChartConfig) => void;
+  onApply?: (data: ChartDataRow[], config: ChartConfig) => void;
 }
 
-const iconByChartType = {
-  verticalBar: Columns3,
-  horizontalBar: BarChart3,
-  line: LineChart,
-  area: AreaChart,
-  pie: PieChart,
-  donut: Circle,
-} as const;
+const chartTypes = [
+  { id: 'verticalBar' as ChartConfig['type'], icon: Columns3, name: 'Column' },
+  { id: 'horizontalBar' as ChartConfig['type'], icon: BarChart3, name: 'Bar' },
+  { id: 'line' as ChartConfig['type'], icon: LineChart, name: 'Line' },
+  { id: 'area' as ChartConfig['type'], icon: AreaChart, name: 'Area' },
+  { id: 'pie' as ChartConfig['type'], icon: PieChart, name: 'Pie' },
+  { id: 'donut' as ChartConfig['type'], icon: Circle, name: 'Donut' },
+];
+
+const legendPositions = [
+  { id: 'top' as ChartConfig['legendPosition'], name: 'Top' },
+  { id: 'bottom' as ChartConfig['legendPosition'], name: 'Bottom' },
+  { id: 'left' as ChartConfig['legendPosition'], name: 'Left' },
+  { id: 'right' as ChartConfig['legendPosition'], name: 'Right' },
+];
+
+const sanitiseData = (rows?: ChartDataRow[]): ChartDataRow[] => {
+  const source = rows && rows.length ? rows : DEFAULT_CHART_DATA;
+  return source.map(row => ({
+    label: row.label ?? '',
+    value:
+      row.value === undefined || row.value === null || Number.isNaN(Number(row.value))
+        ? 0
+        : Number(row.value),
+  }));
+};
+
+const sanitiseConfig = (config?: ChartConfig): ChartConfig => {
+  const merged = { ...DEFAULT_CHART_CONFIG, ...(config ?? {}) };
+  return {
+    ...merged,
+    type: normalizeChartType(merged.type),
+    colorScheme: merged.colorScheme ?? DEFAULT_CHART_CONFIG.colorScheme,
+    showLabels: merged.showLabels ?? DEFAULT_CHART_CONFIG.showLabels,
+    showValues: merged.showValues ?? DEFAULT_CHART_CONFIG.showValues,
+    horizontalAlignment: merged.horizontalAlignment ?? DEFAULT_CHART_CONFIG.horizontalAlignment,
+    axisIncludesZero: merged.axisIncludesZero ?? DEFAULT_CHART_CONFIG.axisIncludesZero,
+    legendPosition: merged.legendPosition ?? DEFAULT_CHART_CONFIG.legendPosition,
+  };
+};
 
 export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   open,
@@ -55,319 +91,404 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   initialConfig,
   onApply,
 }) => {
-  const [chartData, setChartData] = useState<ChartDataRow[]>(() =>
-    (initialData ?? DEFAULT_CHART_DATA).map(row => ({ ...row })),
-  );
-  const [config, setConfig] = useState<ChartConfig>(() => ({
-    ...DEFAULT_CHART_CONFIG,
-    ...(initialConfig ?? {}),
-    type: normalizeChartType(initialConfig?.type),
-  }));
-  const [legendPosition, setLegendPosition] = useState<string>('bottom');
+  const [chartData, setChartData] = useState<ChartDataRow[]>(() => sanitiseData(initialData));
+  const [config, setConfig] = useState<ChartConfig>(() => sanitiseConfig(initialConfig));
+  const [isInitialised, setIsInitialised] = useState(false);
+  const configRef = useRef(config);
 
   useEffect(() => {
-    if (!open) {
+    configRef.current = config;
+  }, [config]);
+
+  useEffect(() => {
+    if (open && !isInitialised) {
+      const nextData = sanitiseData(initialData);
+      const nextConfig = sanitiseConfig(initialConfig);
+      setChartData(nextData);
+      setConfig(nextConfig);
+      configRef.current = nextConfig;
+      setIsInitialised(true);
       return;
     }
 
-    setChartData((initialData ?? DEFAULT_CHART_DATA).map(row => ({ ...row })));
-    setConfig({
-      ...DEFAULT_CHART_CONFIG,
-      ...(initialConfig ?? {}),
-      type: normalizeChartType(initialConfig?.type),
+    if (!open && isInitialised) {
+      setIsInitialised(false);
+    }
+  }, [open, initialData, initialConfig, isInitialised]);
+
+  const colors = useMemo(() => {
+    const scheme = COLOR_SCHEMES.find(s => s.id === config.colorScheme);
+    return scheme?.colors ?? COLOR_SCHEMES[0].colors;
+  }, [config.colorScheme]);
+
+  const colorSchemeGroups = useMemo(() => {
+    const map = new Map<string, ChartColorScheme[]>();
+    COLOR_SCHEMES.forEach(scheme => {
+      const key = scheme.category ?? 'other';
+      const existing = map.get(key);
+      if (existing) {
+        existing.push(scheme);
+      } else {
+        map.set(key, [scheme]);
+      }
     });
-    setLegendPosition('bottom');
-  }, [open, initialData, initialConfig]);
+    return Array.from(map.entries()).map(([category, schemes]) => ({ category, schemes }));
+  }, []);
 
-  const colorScheme = useMemo(
-    () => COLOR_SCHEMES.find(scheme => scheme.id === config.colorScheme) ?? COLOR_SCHEMES[0],
-    [config.colorScheme],
-  );
+  const formatCategory = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
-  const cloneRows = () => chartData.map(row => ({ ...row }));
-  const cloneConfig = () => ({ ...config });
-  const hasApply = typeof onApply === 'function';
-
-  const addRow = () => {
-    setChartData(prev => [...prev, { label: `Item ${prev.length + 1}`, value: 0 }]);
+  const emitApply = (nextData: ChartDataRow[], nextConfig: ChartConfig) => {
+    onApply?.(nextData.map(item => ({ ...item })), nextConfig);
   };
 
-  const updateRow = (index: number, field: keyof ChartDataRow, value: string) => {
-    setChartData(prev =>
-      prev.map((row, rowIndex) => {
+  const addRow = () => {
+    setChartData(prev => {
+      const next = [...prev, { label: 'New Item', value: 0 }];
+      emitApply(next, configRef.current);
+      return next;
+    });
+  };
+
+  const updateRow = (index: number, field: 'label' | 'value', value: string | number) => {
+    setChartData(prev => {
+      const next = prev.map((row, rowIndex) => {
         if (rowIndex !== index) {
           return row;
         }
+
         if (field === 'value') {
-          const numeric = Number(value);
-          return { ...row, value: Number.isFinite(numeric) ? numeric : 0 };
+          const numericValue = typeof value === 'number' ? value : Number.parseFloat(value);
+          return { ...row, value: Number.isFinite(numericValue) ? numericValue : 0 };
         }
-        return { ...row, label: value };
-      }),
-    );
+
+        return { ...row, label: typeof value === 'string' ? value : String(value) };
+      });
+
+      emitApply(next, configRef.current);
+      return next;
+    });
   };
 
   const deleteRow = (index: number) => {
-    setChartData(prev => (prev.length > 1 ? prev.filter((_, rowIndex) => rowIndex !== index) : prev));
+    setChartData(prev => {
+      if (prev.length <= 1) {
+        return prev;
+      }
+      const next = prev.filter((_, rowIndex) => rowIndex !== index);
+      emitApply(next, configRef.current);
+      return next;
+    });
   };
 
-  const renderPreview = () => {
-    const palette = colorScheme.colors;
+  const handleConfigChange = (partial: Partial<ChartConfig>) => {
+    const nextConfig = { ...config, ...partial };
+    setConfig(nextConfig);
+    configRef.current = nextConfig;
+    emitApply(chartData, nextConfig);
+  };
+
+  const handleSave = () => {
+    const normalisedConfig: ChartConfig = { ...config };
+    onApply?.(chartData.map(item => ({ ...item })), normalisedConfig);
+    onSave(chartData.map(item => ({ ...item })), normalisedConfig);
+    onClose();
+  };
+
+  const renderChartPreview = () => {
+    if (chartData.length === 0) {
+      return (
+        <div className="flex h-64 w-full items-center justify-center text-sm text-muted-foreground">
+          Add data to preview your chart.
+        </div>
+      );
+    }
 
     if (config.type === 'pie' || config.type === 'donut') {
       const total = chartData.reduce((sum, item) => sum + item.value, 0);
-      if (total === 0) {
-        return <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">Add values to preview</div>;
+      if (total <= 0) {
+        return (
+          <div className="flex h-64 w-full items-center justify-center text-sm text-muted-foreground">
+            Add values above zero to preview this chart.
+          </div>
+        );
       }
+      let currentAngle = 0;
 
-      let currentAngle = -90;
       return (
         <div className="relative flex h-64 w-full items-center justify-center">
-          <svg viewBox="0 0 200 200" width={220} height={220} className="-rotate-90">
+          <svg width="200" height="200" viewBox="0 0 200 200" className="-rotate-90">
             {chartData.map((item, index) => {
-              const percentage = (item.value / total) * 360;
-              const start = currentAngle;
-              currentAngle += percentage;
-              const end = currentAngle;
+              const percentage = (item.value / total) * 100;
+              const angle = (percentage / 100) * 360;
+              const startAngle = currentAngle;
+              currentAngle += angle;
 
-              const largeArc = percentage > 180 ? 1 : 0;
-              const outerRadius = 90;
-              const innerRadius = config.type === 'donut' ? 48 : 0;
+              const startX = 100 + 80 * Math.cos((startAngle * Math.PI) / 180);
+              const startY = 100 + 80 * Math.sin((startAngle * Math.PI) / 180);
+              const endX = 100 + 80 * Math.cos((currentAngle * Math.PI) / 180);
+              const endY = 100 + 80 * Math.sin((currentAngle * Math.PI) / 180);
 
-              const startX = 100 + outerRadius * Math.cos((start * Math.PI) / 180);
-              const startY = 100 + outerRadius * Math.sin((start * Math.PI) / 180);
-              const endX = 100 + outerRadius * Math.cos((end * Math.PI) / 180);
-              const endY = 100 + outerRadius * Math.sin((end * Math.PI) / 180);
+              const largeArcFlag = angle > 180 ? 1 : 0;
 
-              const innerStartX = 100 + innerRadius * Math.cos((start * Math.PI) / 180);
-              const innerStartY = 100 + innerRadius * Math.sin((start * Math.PI) / 180);
-              const innerEndX = 100 + innerRadius * Math.cos((end * Math.PI) / 180);
-              const innerEndY = 100 + innerRadius * Math.sin((end * Math.PI) / 180);
+              const innerRadius = config.type === 'donut' ? 40 : 0;
+              const innerStartX = 100 + innerRadius * Math.cos((startAngle * Math.PI) / 180);
+              const innerStartY = 100 + innerRadius * Math.sin((startAngle * Math.PI) / 180);
+              const innerEndX = 100 + innerRadius * Math.cos((currentAngle * Math.PI) / 180);
+              const innerEndY = 100 + innerRadius * Math.sin((currentAngle * Math.PI) / 180);
 
-              const path =
+              const pathData =
                 config.type === 'donut'
-                  ? `M ${startX} ${startY} A 90 90 0 ${largeArc} 1 ${endX} ${endY} L ${innerEndX} ${innerEndY} A ${innerRadius} ${innerRadius} 0 ${largeArc} 0 ${innerStartX} ${innerStartY} Z`
-                  : `M 100 100 L ${startX} ${startY} A 90 90 0 ${largeArc} 1 ${endX} ${endY} Z`;
+                  ? `M ${startX} ${startY} A 80 80 0 ${largeArcFlag} 1 ${endX} ${endY} L ${innerEndX} ${innerEndY} A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${innerStartX} ${innerStartY} Z`
+                  : `M 100 100 L ${startX} ${startY} A 80 80 0 ${largeArcFlag} 1 ${endX} ${endY} Z`;
 
-              return <path key={item.label} d={path} fill={palette[index % palette.length]} className="transition-opacity hover:opacity-80" />;
+              return (
+                <path
+                  key={`${item.label || 'slice'}-${index}`}
+                  d={pathData}
+                  fill={colors[index % colors.length]}
+                  className="transition-all duration-300 hover:opacity-80"
+                />
+              );
             })}
           </svg>
+        </div>
+      );
+    }
+
+    if (config.type === 'verticalBar' || config.type === 'horizontalBar') {
+      const maxValue = Math.max(...chartData.map(item => item.value), 0);
+      const isBar = config.type === 'horizontalBar';
+
+      return (
+        <div
+          className={cn(
+            'flex h-64 w-full gap-4 p-4',
+            isBar ? 'flex-col justify-center' : 'items-end justify-center',
+          )}
+        >
+          {chartData.map((item, index) => {
+            const ratio = maxValue === 0 ? 0 : (item.value / maxValue) * 100;
+            return (
+              <div
+                key={`${item.label || 'bar'}-${index}`}
+                className={cn('flex gap-2', isBar ? 'flex-row items-center' : 'flex-col items-center justify-end')}
+              >
+                <div
+                  className="rounded-lg transition-all duration-300 hover:opacity-80"
+                  style={{
+                    backgroundColor: colors[index % colors.length],
+                    [isBar ? 'width' : 'height']: `${ratio}%`,
+                    [isBar ? 'height' : 'width']: '40px',
+                    [isBar ? 'minWidth' : 'minHeight']: '20px',
+                    minHeight: isBar ? undefined : '6px',
+                    minWidth: isBar ? '6px' : undefined,
+                  }}
+                />
+                {(config.showLabels || config.showValues) && (
+                  <div
+                    className={cn(
+                      'flex flex-col items-center gap-1 text-xs text-muted-foreground',
+                      isBar && 'items-start',
+                    )}
+                  >
+                    {config.showValues && (
+                      <span className="text-foreground">{Number.isFinite(item.value) ? item.value : 0}</span>
+                    )}
+                    {config.showLabels && <span>{item.label || 'Label'}</span>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       );
     }
 
     if (config.type === 'line' || config.type === 'area') {
-      const maxValue = Math.max(...chartData.map(row => row.value), 1);
+      const maxValue = Math.max(...chartData.map(item => item.value), 0);
       const points = chartData
-        .map((row, index) => {
-          const x = (index / Math.max(chartData.length - 1, 1)) * 260;
-          const y = 200 - (row.value / maxValue) * 170;
+        .map((item, index) => {
+          const x = chartData.length <= 1 ? 0 : (index / (chartData.length - 1)) * 300;
+          const y = 200 - (maxValue === 0 ? 0 : (item.value / maxValue) * 180);
           return `${x},${y}`;
         })
         .join(' ');
 
       return (
-        <div className="flex h-64 w-full items-center justify-center">
-          <svg viewBox="0 0 260 220" width={280} height={220}>
+        <div className="flex h-64 w-full flex-col items-center justify-center gap-4">
+          <svg width="320" height="220" viewBox="0 0 320 220">
             {config.type === 'area' && (
-              <polygon
-                points={`0,200 ${points} 260,200`}
-                fill={`${colorScheme.colors[0]}33`}
-                stroke="none"
-              />
+              <polygon points={`0,200 ${points} 300,200`} fill={`${colors[0]}33`} stroke="none" />
             )}
-            <polyline points={points} fill="none" stroke={palette[0]} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" />
-            {chartData.map((row, index) => {
-              const x = (index / Math.max(chartData.length - 1, 1)) * 260;
-              const y = 200 - (row.value / maxValue) * 170;
-              return <circle key={row.label} cx={x} cy={y} r={5} fill={palette[index % palette.length]} className="transition-transform hover:scale-125" />;
+            <polyline points={points} fill="none" stroke={colors[0]} strokeWidth="3" className="transition-all duration-300" />
+            {chartData.map((item, index) => {
+              const x = chartData.length <= 1 ? 0 : (index / (chartData.length - 1)) * 300;
+              const y = 200 - (maxValue === 0 ? 0 : (item.value / maxValue) * 180);
+              return (
+                <g key={`${item.label || 'point'}-${index}`}>
+                  <circle
+                    cx={x}
+                    cy={y}
+                    r="5"
+                    fill={colors[index % colors.length]}
+                    className="transition-all duration-300 hover:r-7"
+                  />
+                  {config.showValues && (
+                    <text x={x} y={y - 12} textAnchor="middle" className="fill-foreground text-xs font-semibold">
+                      {Number.isFinite(item.value) ? item.value : 0}
+                    </text>
+                  )}
+                </g>
+              );
             })}
           </svg>
+          {config.showLabels && (
+            <div className="flex w-full justify-between px-8 text-xs text-muted-foreground">
+              {chartData.map((item, index) => (
+                <span key={`${item.label || 'axis'}-${index}`}>{item.label || `Item ${index + 1}`}</span>
+              ))}
+            </div>
+          )}
         </div>
       );
     }
 
-    const maxValue = Math.max(...chartData.map(row => row.value), 1);
-    const isBar = config.type === 'horizontalBar';
-
-    const renderVerticalBar = (row: ChartDataRow, index: number) => {
-      const ratio = maxValue === 0 ? 0 : row.value / maxValue;
-      const heightPercent = `${Math.max(ratio * 100, row.value > 0 ? 6 : 0)}%`;
-      return (
-        <div
-          key={row.label}
-          className="flex flex-col items-center gap-1.5 text-xs font-medium text-muted-foreground"
-        >
-          <div className="flex h-44 w-8 items-end overflow-hidden rounded-2xl bg-muted/20">
-            <div
-              className="w-full rounded-t-2xl transition-all duration-300"
-              style={{
-                backgroundColor: palette[index % palette.length],
-                height: heightPercent,
-              }}
-            />
-          </div>
-          {config.showLabels && <span>{row.label}</span>}
-          {config.showValues && <span className="font-semibold text-foreground">{row.value}</span>}
-        </div>
-      );
-    };
-
-    const renderHorizontalBar = (row: ChartDataRow, index: number) => {
-      const ratio = maxValue === 0 ? 0 : row.value / maxValue;
-      const widthPercent = `${Math.max(ratio * 100, row.value > 0 ? 6 : 0)}%`;
-      return (
-        <div
-          key={row.label}
-          className="flex w-full flex-row items-center gap-2 text-xs font-medium text-muted-foreground"
-        >
-          {config.showLabels && <span className="w-12 text-right">{row.label}</span>}
-          <div className="flex h-4 flex-1 items-center overflow-hidden rounded-2xl bg-muted/20">
-            <div
-              className="h-full rounded-r-2xl transition-all duration-300"
-              style={{
-                backgroundColor: palette[index % palette.length],
-                width: widthPercent,
-              }}
-            />
-          </div>
-          {config.showValues && <span className="min-w-[2ch] text-right text-foreground">{row.value}</span>}
-        </div>
-      );
-    };
-
-    return (
-      <div
-        className={cn(
-          'flex h-64 w-full gap-3 p-5',
-          isBar ? 'flex-col justify-center' : 'items-end justify-center',
-        )}
-      >
-        {chartData.map((row, index) =>
-          isBar ? renderHorizontalBar(row, index) : renderVerticalBar(row, index),
-        )}
-      </div>
-    );
-  };
-
-  const handleApply = () => {
-    if (!hasApply) {
-      return;
-    }
-
-    onApply?.(cloneRows(), { ...cloneConfig(), type: normalizeChartType(config.type) });
-  };
-
-  const handleSave = () => {
-    onSave(cloneRows(), { ...cloneConfig(), type: normalizeChartType(config.type) });
-    onClose();
+    return null;
   };
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-5xl h-[85vh] p-0 gap-0 overflow-hidden border-2 border-border/50 bg-gradient-to-br from-background via-background/95 to-primary/5">
-        <DialogHeader className="relative border-b border-border/50 px-8 py-6">
+    <Dialog open={open} onOpenChange={isOpen => !isOpen && onClose()}>
+      <DialogContent
+        hideCloseButton
+        className="h-[85vh] max-w-6xl gap-0 overflow-hidden border-2 border-border/50 bg-gradient-to-br from-background via-background/98 to-primary/5 p-0 shadow-2xl"
+      >
+        <DialogHeader className="relative overflow-hidden border-b border-border/50 bg-gradient-to-br from-primary/5 via-transparent to-transparent px-8 pb-6 pt-8">
           <div className="absolute inset-0 bg-grid-white/5 [mask-image:linear-gradient(0deg,transparent,black)]" />
-          <div className="relative flex items-start justify-between gap-4">
+          <div className="relative flex items-start justify-between">
             <div className="flex items-center gap-4">
               <div className="relative">
                 <div className="absolute inset-0 animate-pulse rounded-2xl bg-gradient-to-br from-blue-500 to-purple-500 opacity-30 blur-xl" />
-                <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 ring-2 ring-blue-500/30">
-                  <TrendingUp className="h-7 w-7 text-blue-500" />
+                <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 ring-2 ring-blue-500/30 backdrop-blur-xl">
+                  <TableIcon className="h-7 w-7 text-blue-500" />
                 </div>
               </div>
               <div>
-                <DialogTitle className="flex items-center gap-3 text-2xl font-bold">
-                  Edit chart data
-                  {React.createElement(iconByChartType[config.type], { className: 'h-5 w-5 text-primary' })}
+                <DialogTitle className="mb-1 flex items-center gap-3 text-2xl font-bold">
+                  Edit Chart Data
+                  <PaletteIcon className="h-5 w-5 text-blue-500 animate-pulse" />
                 </DialogTitle>
-                <p className="text-sm text-muted-foreground">Update your dataset and visual settings</p>
+                <p className="text-sm text-muted-foreground">Customize your chart data and appearance</p>
               </div>
             </div>
-            <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl" onClick={onClose}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-xl transition-all hover:bg-destructive/10 hover:text-destructive"
+              onClick={onClose}
+            >
               <X className="h-5 w-5" />
             </Button>
           </div>
         </DialogHeader>
 
-        <div className="flex h-full divide-x divide-border/50">
-          <div className="flex w-1/2 flex-col">
-            <div className="border-b border-border/50 bg-muted/10 p-6">
-              <h3 className="flex items-center gap-2 text-lg font-semibold">
-                <TrendingUp className="h-4 w-4 text-primary" /> Dataset
+        <div className="flex flex-1 overflow-hidden">
+          <div className="flex w-1/2 flex-col border-r border-border/50">
+            <div className="border-b border-border/50 bg-gradient-to-br from-muted/20 to-transparent p-6">
+              <h3 className="mb-2 flex items-center gap-2 text-lg font-bold">
+                <TableIcon className="h-5 w-5 text-primary" />
+                Chart Data
               </h3>
-              <p className="text-sm text-muted-foreground">Edit the values that power your chart</p>
+              <p className="text-sm text-muted-foreground">Enter your data values below</p>
             </div>
+
             <ScrollArea className="flex-1">
-              <div className="space-y-4 p-6">
-                <div className="grid grid-cols-[1fr,120px,48px] items-center gap-3 border-b border-border/40 pb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <span>Label</span>
-                  <span className="text-right">Value</span>
-                  <span className="text-center">Actions</span>
+              <div className="space-y-3 p-6">
+                <div className="grid grid-cols-[1fr,140px,48px] gap-3 border-b-2 border-border/50 pb-2">
+                  <Label className="text-sm font-bold text-foreground">Label</Label>
+                  <Label className="text-sm font-bold text-foreground">Value</Label>
+                  <div />
                 </div>
+
                 {chartData.map((row, index) => (
-                  <div key={row.label + index} className="grid grid-cols-[1fr,120px,48px] items-center gap-3">
+                  <div key={index} className="group grid animate-fade-in grid-cols-[1fr,140px,48px] gap-3">
                     <Input
                       value={row.label}
                       onChange={event => updateRow(index, 'label', event.target.value)}
-                      className="h-11 rounded-xl border-2 border-border/50 bg-card/60 focus:border-primary"
+                      className="h-11 rounded-xl border-2 border-border/50 bg-card/50 transition-all hover:border-primary/50 focus:border-primary"
+                      placeholder="Enter label"
                     />
                     <Input
                       type="number"
                       value={row.value}
                       onChange={event => updateRow(index, 'value', event.target.value)}
-                      className="h-11 rounded-xl border-2 border-border/50 bg-card/60 text-right focus:border-primary"
+                      className="h-11 rounded-xl border-2 border-border/50 bg-card/50 transition-all hover:border-primary/50 focus:border-primary"
+                      placeholder="0"
                     />
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-10 w-10 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                       onClick={() => deleteRow(index)}
+                      className="h-11 w-11 rounded-xl opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
                       disabled={chartData.length <= 1}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 ))}
+
                 <Button
                   variant="outline"
-                  className="h-11 w-full rounded-xl border-2 border-dashed border-border/60"
                   onClick={addRow}
+                  className="mt-2 h-12 w-full rounded-xl border-2 border-dashed border-border/50 transition-all hover:border-primary/50 hover:bg-primary/5"
                 >
-                  <Plus className="mr-2 h-4 w-4" /> Add row
+                  <Plus className="mr-2 h-5 w-5" />
+                  Add Row
                 </Button>
               </div>
             </ScrollArea>
           </div>
 
           <div className="flex w-1/2 flex-col">
-            <div className="border-b border-border/50 bg-muted/10 p-6">
-              <h3 className="flex items-center gap-2 text-lg font-semibold">
-                <TrendingUp className="h-4 w-4 text-primary" /> Preview
+            <div className="border-b border-border/50 bg-gradient-to-br from-muted/20 to-transparent p-6">
+              <h3 className="mb-2 flex items-center gap-2 text-lg font-bold">
+                <TrendingUp className="h-5 w-5 text-primary" />
+                Preview
               </h3>
-              <p className="text-sm text-muted-foreground">Visualise how your chart will look</p>
+              <p className="text-sm text-muted-foreground">Live preview of your chart</p>
             </div>
+
             <ScrollArea className="flex-1">
               <div className="space-y-6 p-6">
-                <div className="rounded-2xl border border-border/40 bg-card/60 p-6 shadow-inner">
-                  {renderPreview()}
-                  <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-xs font-medium text-muted-foreground">
-                    {chartData.map((row, index) => (
-                      <span key={row.label + index} className="flex items-center gap-2">
-                        <span
-                          className="h-3 w-3 rounded-sm"
-                          style={{ backgroundColor: colorScheme.colors[index % colorScheme.colors.length] }}
-                        />
-                        {row.label}
-                      </span>
-                    ))}
-                  </div>
+                <div className="rounded-2xl border-2 border-border/50 bg-gradient-to-br from-card/50 to-muted/20 p-6">
+                  {renderChartPreview()}
+
+                  {(config.showLabels || config.showValues) && (
+                    <div
+                      className={cn('mt-6 flex flex-wrap gap-4 text-sm font-medium text-foreground', {
+                        'justify-center': config.legendPosition === 'top' || config.legendPosition === 'bottom',
+                        'flex-col items-start': config.legendPosition === 'left',
+                        'flex-col items-end': config.legendPosition === 'right',
+                      })}
+                    >
+                      {chartData.map((item, index) => (
+                        <div key={`${item.label || 'legend'}-${index}`} className="flex items-center gap-2">
+                          <div className="h-3 w-3 rounded-sm" style={{ backgroundColor: colors[index % colors.length] }} />
+                          <div className="flex flex-col text-xs">
+                            {config.showLabels && <span className="font-medium text-foreground">{item.label || `Item ${index + 1}`}</span>}
+                            {config.showValues && (
+                              <span className="text-muted-foreground">{Number.isFinite(item.value) ? item.value : 0}</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-3">
-                  <Label className="text-sm font-semibold">Chart type</Label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {CHART_TYPES.map(type => {
+                  <Label className="text-sm font-bold">Chart Type</Label>
+                  <div className="flex gap-2">
+                    {chartTypes.map(type => {
                       const Icon = type.icon;
                       const isSelected = config.type === type.id;
                       return (
@@ -376,12 +497,12 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                           variant={isSelected ? 'default' : 'outline'}
                           size="icon"
                           className={cn(
-                            'h-12 w-12 rounded-xl border-2',
+                            'h-12 w-12 rounded-xl border-2 transition-all',
                             isSelected
-                              ? 'border-primary bg-primary text-primary-foreground shadow-lg'
-                              : 'border-border/50 text-muted-foreground hover:border-primary/50 hover:text-primary',
+                              ? 'scale-110 border-primary bg-primary text-primary-foreground shadow-lg'
+                              : 'border-border/50 hover:border-primary/30 hover:bg-muted',
                           )}
-                          onClick={() => setConfig(prev => ({ ...prev, type: type.id }))}
+                          onClick={() => handleConfigChange({ type: type.id })}
                         >
                           <Icon className="h-5 w-5" />
                         </Button>
@@ -391,67 +512,80 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                 </div>
 
                 <div className="space-y-3">
-                  <Label className="text-sm font-semibold">Color scheme</Label>
+                  <Label className="text-sm font-bold">Color Scheme</Label>
                   <Select
                     value={config.colorScheme}
-                    onValueChange={value => setConfig(prev => ({ ...prev, colorScheme: value }))}
+                    onValueChange={value => handleConfigChange({ colorScheme: value })}
                   >
-                    <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/60">
+                    <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/50 hover:border-primary/50">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent className="rounded-xl border border-border/40 bg-popover/90 backdrop-blur">
-                      {COLOR_SCHEMES.map(scheme => (
-                        <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
-                          <div className="flex items-center gap-3">
-                            {scheme.icon && <span className="text-lg">{scheme.icon}</span>}
-                            <div className="flex gap-1.5">
-                              {scheme.colors.map(color => (
-                                <span
-                                  key={color}
-                                  className="h-4 w-4 rounded border border-border/50"
-                                  style={{ backgroundColor: color }}
-                                />
-                              ))}
-                            </div>
-                            <span className="font-medium">{scheme.name}</span>
-                          </div>
-                        </SelectItem>
+                    <SelectContent className="rounded-xl">
+                      {colorSchemeGroups.map((group, groupIndex) => (
+                        <React.Fragment key={group.category}>
+                          <SelectGroup>
+                            <SelectLabel className="px-2 py-1 text-[0.65rem] uppercase tracking-[0.08em] text-muted-foreground">
+                              {formatCategory(group.category)}
+                            </SelectLabel>
+                            {group.schemes.map(scheme => (
+                              <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex gap-1.5">
+                                    {scheme.colors.map((color, index) => (
+                                      <div
+                                        key={`${scheme.id}-${color}-${index}`}
+                                        className="h-4 w-4 rounded-md border-2 border-border/50"
+                                        style={{ backgroundColor: color }}
+                                      />
+                                    ))}
+                                  </div>
+                                  <span className="font-medium">{scheme.name}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                          {groupIndex < colorSchemeGroups.length - 1 && <SelectSeparator className="my-2" />}
+                        </React.Fragment>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="flex items-center justify-between rounded-xl border border-border/40 bg-muted/20 p-4">
-                    <Label htmlFor="show-labels" className="text-sm font-medium">
-                      Show labels
+                  <div className="flex items-center justify-between rounded-xl border border-border/50 bg-gradient-to-br from-muted/40 to-muted/20 p-4">
+                    <Label htmlFor="show-labels-editor" className="cursor-pointer text-sm font-semibold">
+                      Show Labels
                     </Label>
                     <Switch
-                      id="show-labels"
+                      id="show-labels-editor"
                       checked={config.showLabels}
-                      onCheckedChange={checked => setConfig(prev => ({ ...prev, showLabels: checked }))}
+                      onCheckedChange={checked => handleConfigChange({ showLabels: checked })}
                     />
                   </div>
-                  <div className="flex items-center justify-between rounded-xl border border-border/40 bg-muted/20 p-4">
-                    <Label htmlFor="show-values" className="text-sm font-medium">
-                      Show values
+
+                  <div className="flex items-center justify-between rounded-xl border border-border/50 bg-gradient-to-br from-muted/40 to-muted/20 p-4">
+                    <Label htmlFor="show-values-editor" className="cursor-pointer text-sm font-semibold">
+                      Show Values
                     </Label>
                     <Switch
-                      id="show-values"
+                      id="show-values-editor"
                       checked={config.showValues}
-                      onCheckedChange={checked => setConfig(prev => ({ ...prev, showValues: checked }))}
+                      onCheckedChange={checked => handleConfigChange({ showValues: checked })}
                     />
                   </div>
                 </div>
 
                 <div className="space-y-3">
-                  <Label className="text-sm font-semibold">Legend position</Label>
-                  <Select value={legendPosition} onValueChange={setLegendPosition}>
-                    <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/60">
+                  <Label className="text-sm font-bold">Legend Position</Label>
+                  <Select
+                    value={config.legendPosition}
+                    onValueChange={value => handleConfigChange({ legendPosition: value as ChartConfig['legendPosition'] })}
+                  >
+                    <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/50 hover:border-primary/50">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent className="rounded-xl border border-border/40 bg-popover/90 backdrop-blur">
-                      {LEGEND_POSITIONS.map(position => (
+                    <SelectContent className="rounded-xl">
+                      {legendPositions.map(position => (
                         <SelectItem key={position.id} value={position.id} className="rounded-lg">
                           {position.name}
                         </SelectItem>
@@ -464,40 +598,22 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-4 border-t border-border/50 bg-muted/10 px-8 py-5">
+        <div className="flex items-center justify-between gap-4 border-t border-border/50 bg-gradient-to-r from-muted/5 via-transparent to-primary/5 px-8 py-5">
           <Button
             variant="outline"
-            className="h-11 flex-1 rounded-xl border-2 border-border/50"
-            onClick={() => {
-              setChartData((initialData ?? DEFAULT_CHART_DATA).map(row => ({ ...row })));
-              setConfig({
-                ...DEFAULT_CHART_CONFIG,
-                ...(initialConfig ?? {}),
-                type: normalizeChartType(initialConfig?.type),
-              });
-              onClose();
-            }}
+            onClick={onClose}
+            className="h-12 flex-1 rounded-xl border-2 border-border/50 font-semibold transition-all hover:border-border hover:bg-muted"
           >
             Cancel
           </Button>
           <Button
-            variant="outline"
-            className={cn(
-              'h-11 flex-1 rounded-xl border-2 border-border/40 bg-card/40 hover:bg-card/60',
-              !hasApply && 'cursor-not-allowed opacity-50 hover:bg-card/40',
-            )}
-            onClick={handleApply}
-            disabled={!hasApply}
-          >
-            Apply
-          </Button>
-          <Button
-            className="relative h-11 flex-1 overflow-hidden rounded-xl bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 font-semibold text-white shadow-lg transition-transform hover:scale-[1.02]"
             onClick={handleSave}
+            className="group relative h-12 flex-1 overflow-hidden rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 font-semibold shadow-lg transition-all hover:from-blue-600 hover:to-purple-600 hover:shadow-2xl hover:scale-105"
           >
-            <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 hover:translate-x-full" />
+            <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-white/0 via-white/20 to-white/0 transition-transform duration-700 group-hover:translate-x-full" />
             <span className="relative z-10 flex items-center justify-center gap-2">
-              <TrendingUp className="h-4 w-4" /> Save data
+              <TrendingUp className="h-5 w-5" />
+              Save Chart
             </span>
           </Button>
         </div>

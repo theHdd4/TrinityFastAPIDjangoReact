@@ -20,13 +20,14 @@ export interface ChartConfig {
   showValues: boolean;
   horizontalAlignment: 'left' | 'center' | 'right';
   axisIncludesZero: boolean;
+  legendPosition: 'top' | 'bottom' | 'left' | 'right';
 }
 
 export interface ChartColorScheme {
   id: string;
   name: string;
-  icon?: string;
   colors: string[];
+  category?: string;
 }
 
 export interface ChartTypeDefinition {
