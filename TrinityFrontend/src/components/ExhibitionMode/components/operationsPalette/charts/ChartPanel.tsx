@@ -37,6 +37,7 @@ import {
   COLOR_SCHEMES,
   DEFAULT_CHART_CONFIG,
   DEFAULT_CHART_DATA,
+  applyAlphaToHex,
   normalizeChartType,
 } from './constants';
 import type { ChartColorScheme, ChartConfig, ChartDataRow, ChartPanelResult, ChartType } from './types';
@@ -360,6 +361,19 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     );
   };
 
+  const clampDiagramValue = (value: number) => {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+    if (value < 0) {
+      return 0;
+    }
+    if (value > 100) {
+      return 100;
+    }
+    return value;
+  };
+
   const diagramSampleData = useMemo(
     () => [
       { label: 'Q1', value: 65 },
@@ -370,7 +384,17 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     [],
   );
 
+  const diagramBackgroundColor = (baseColor: string, value: number) => {
+    const intensity = clampDiagramValue(value) / 100;
+    return applyAlphaToHex(baseColor, 0.25 + intensity * 0.5);
+  };
+
   const renderDiagramPreview = () => {
+    const diagramData = (chartData.length > 0 ? chartData : diagramSampleData).map((entry, index) => ({
+      label: entry.label || `Item ${index + 1}`,
+      value: Number.isFinite(entry.value) ? entry.value : 0,
+    }));
+
     switch (selectedType) {
       case 'blank':
         return (
@@ -384,44 +408,75 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
       case 'calendar':
         return (
           <div className="flex h-56 items-center justify-center rounded-2xl border border-border/60 bg-card">
-            <div className="grid h-full w-full max-w-[19rem] grid-cols-7 gap-1 p-4 text-[0.65rem]">
-              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, dayIndex) => (
-                <div key={day} className="flex flex-col items-center gap-1">
-                  <span className="text-[0.65rem] font-semibold text-muted-foreground">{day}</span>
-                  {[...Array(4)].map((_, index) => (
-                    <span
-                      key={`${day}-${index}`}
-                      className="flex h-8 w-full items-center justify-center rounded border border-border/50 text-[0.6rem]"
-                      style={{ backgroundColor: `${palette.colors[(dayIndex + index) % palette.colors.length]}15` }}
-                    />
-                  ))}
-                </div>
-              ))}
+            <div className="grid h-full w-full max-w-[22rem] grid-cols-7 gap-1 p-4 text-[0.65rem]">
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, dayIndex) => {
+                const events = diagramData.filter((_, dataIndex) => dataIndex % 7 === dayIndex).slice(0, 4);
+                return (
+                  <div key={day} className="flex flex-col gap-1">
+                    <span className="text-[0.6rem] font-semibold uppercase tracking-wide text-muted-foreground">{day}</span>
+                    {Array.from({ length: 4 }).map((_, slotIndex) => {
+                      const event = events[slotIndex];
+                      const color = palette.colors[(dayIndex + slotIndex) % palette.colors.length];
+                      const background = event
+                        ? diagramBackgroundColor(color, event.value)
+                        : `${color}1a`;
+
+                      return (
+                        <div
+                          key={`${day}-${slotIndex}`}
+                          className="flex h-10 flex-col items-center justify-center rounded border border-border/40 px-2 text-center"
+                          style={{ backgroundColor: background }}
+                        >
+                          {event && config.showLabels !== false && (
+                            <span className="w-full truncate text-[0.6rem] font-semibold text-foreground">{event.label}</span>
+                          )}
+                          {event && config.showValues && (
+                            <span className="text-[0.55rem] text-muted-foreground">Value: {event.value}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
-      case 'gantt':
+      case 'gantt': {
+        const maxValue = Math.max(...diagramData.map(entry => entry.value), 1);
         return (
           <div className="flex h-56 items-center justify-center rounded-2xl border border-border/60 bg-card">
-            <div className="flex w-full max-w-[22rem] flex-col gap-3 p-5">
-              {diagramSampleData.map((item, index) => (
-                <div key={item.label} className="flex items-center gap-3">
-                  <span className="w-10 text-[0.65rem] font-semibold text-muted-foreground">{item.label}</span>
-                  <div className="relative h-8 flex-1 rounded-full bg-muted/40">
-                    <div
-                      className="absolute top-0 h-full rounded-full"
-                      style={{
-                        left: `${index * 10}%`,
-                        width: `${Math.max(item.value, 20)}%`,
-                        backgroundColor: palette.colors[index % palette.colors.length],
-                      }}
-                    />
+            <div className="flex w-full max-w-[24rem] flex-col gap-3 p-6">
+              {diagramData.map((item, index) => {
+                const ratio = maxValue === 0 ? 0 : item.value / maxValue;
+                const widthPercent = `${Math.max(ratio * 100, 6)}%`;
+                const offsetPercent = `${Math.min(index * 8, 80)}%`;
+
+                return (
+                  <div key={`${item.label}-${index}`} className="flex items-center gap-3">
+                    {config.showLabels !== false && (
+                      <span className="w-16 truncate text-xs font-medium text-muted-foreground">{item.label}</span>
+                    )}
+                    <div className="relative h-8 flex-1 rounded-full bg-muted/40">
+                      <div
+                        className="absolute top-1/2 h-5 -translate-y-1/2 rounded-full shadow-sm transition-all duration-300"
+                        style={{
+                          left: offsetPercent,
+                          width: widthPercent,
+                          backgroundColor: palette.colors[index % palette.colors.length],
+                        }}
+                      />
+                    </div>
+                    {config.showValues && (
+                      <span className="w-12 text-right text-xs font-semibold text-foreground">{item.value}</span>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );
+      }
       default:
         return null;
     }
@@ -676,24 +731,16 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
 
             <div className="rounded-2xl border border-dashed border-border/50 bg-muted/10 p-5 text-center">
               <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
-                <Wand2 className={cn('h-5 w-5 text-primary', isDiagramType && 'opacity-50')} />
+                <Wand2 className="h-5 w-5 text-primary" />
                 <span>
                   {isDiagramType
-                    ? 'Switch to a chart style to edit the underlying data.'
+                    ? 'Use the data editor to customise your diagram content and styling.'
                     : 'Need to fine-tune the data? Open the rich data editor for full control.'}
                 </span>
               </div>
               <Button
-                className={cn(
-                  'mt-3 w-full rounded-xl bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-sm font-semibold text-white shadow-lg transition-transform',
-                  isDiagramType ? 'cursor-not-allowed opacity-60' : 'hover:scale-105',
-                )}
-                onClick={() => {
-                  if (!isDiagramType) {
-                    setShowDataEditor(true);
-                  }
-                }}
-                disabled={isDiagramType}
+                className="mt-3 w-full rounded-xl bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-sm font-semibold text-white shadow-lg transition-transform hover:scale-105"
+                onClick={() => setShowDataEditor(true)}
               >
                 <Database className="mr-2 h-4 w-4" /> Edit chart data
                 <MousePointerClick className="ml-2 h-4 w-4 animate-pulse" />

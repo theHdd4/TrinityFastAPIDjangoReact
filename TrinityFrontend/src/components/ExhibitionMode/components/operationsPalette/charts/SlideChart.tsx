@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { cn } from '@/lib/utils';
-import { COLOR_SCHEMES, normalizeChartType } from './constants';
+import { COLOR_SCHEMES, applyAlphaToHex, normalizeChartType } from './constants';
 import type { ChartConfig, ChartDataRow } from './types';
 
 interface SlideChartProps {
@@ -19,6 +19,24 @@ export const SlideChart: React.FC<SlideChartProps> = ({ data, config, className 
   const chartType = useMemo(() => normalizeChartType(config.type), [config.type]);
   const isDiagram = chartType === 'blank' || chartType === 'calendar' || chartType === 'gantt';
 
+  const clampDiagramValue = (value: number) => {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+    if (value < 0) {
+      return 0;
+    }
+    if (value > 100) {
+      return 100;
+    }
+    return value;
+  };
+
+  const diagramBackground = (color: string, value: number) => {
+    const intensity = clampDiagramValue(value) / 100;
+    return applyAlphaToHex(color, 0.25 + intensity * 0.5);
+  };
+
   const diagramSampleData = useMemo(
     () => [
       { label: 'Q1', value: 65 },
@@ -30,6 +48,12 @@ export const SlideChart: React.FC<SlideChartProps> = ({ data, config, className 
   );
 
   const renderDiagram = () => {
+    const sourceData = dataset.length > 0 ? dataset : diagramSampleData;
+    const diagramData = sourceData.map((entry, index) => ({
+      label: entry.label || `Item ${index + 1}`,
+      value: Number.isFinite(entry.value) ? entry.value : 0,
+    }));
+
     switch (chartType) {
       case 'blank':
         return (
@@ -43,49 +67,73 @@ export const SlideChart: React.FC<SlideChartProps> = ({ data, config, className 
       case 'calendar':
         return (
           <div className="flex h-full w-full items-center justify-center bg-card">
-            <div className="grid h-full w-full max-w-[22rem] grid-cols-7 gap-1 p-4 text-xs">
-              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, dayIndex) => (
-                <div key={day} className="flex flex-col items-center gap-1">
-                  <span className="text-[0.7rem] font-semibold text-muted-foreground">{day}</span>
-                  {[...Array(4)].map((_, index) => (
-                    <span
-                      key={`${day}-${index}`}
-                      className="flex h-10 w-full items-center justify-center rounded border border-border/40"
-                      style={{ backgroundColor: `${palette.colors[(dayIndex + index) % palette.colors.length]}1f` }}
-                    />
-                  ))}
-                </div>
-              ))}
+            <div className="grid h-full w-full max-w-[24rem] grid-cols-7 gap-1 p-4 text-xs">
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, dayIndex) => {
+                const events = diagramData.filter((_, dataIndex) => dataIndex % 7 === dayIndex).slice(0, 4);
+                return (
+                  <div key={day} className="flex flex-col gap-1">
+                    <span className="text-[0.7rem] font-semibold text-muted-foreground">{day}</span>
+                    {Array.from({ length: 4 }).map((_, slotIndex) => {
+                      const event = events[slotIndex];
+                      const color = palette.colors[(dayIndex + slotIndex) % palette.colors.length];
+                      const background = event ? diagramBackground(color, event.value) : `${color}1f`;
+
+                      return (
+                        <div
+                          key={`${day}-${slotIndex}`}
+                          className="flex h-10 flex-col items-center justify-center rounded border border-border/40 px-2 text-center"
+                          style={{ backgroundColor: background }}
+                        >
+                          {event && config.showLabels !== false && (
+                            <span className="w-full truncate text-[0.6rem] font-semibold text-foreground">{event.label}</span>
+                          )}
+                          {event && config.showValues && (
+                            <span className="text-[0.55rem] text-muted-foreground">Value: {event.value}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
-      case 'gantt':
+      case 'gantt': {
+        const maxValue = Math.max(...diagramData.map(entry => entry.value), 1);
         return (
           <div className="flex h-full w-full items-center justify-center bg-card">
             <div className="flex w-full max-w-[24rem] flex-col gap-3 p-6">
-              {diagramSampleData.map((item, index) => (
-                <div key={item.label} className="flex items-center gap-3">
-                  {config.showLabels !== false && (
-                    <span className="w-12 text-xs font-medium text-muted-foreground">{item.label}</span>
-                  )}
-                  <div className="relative h-8 flex-1 rounded-full bg-muted/40">
-                    <div
-                      className="absolute left-0 top-0 h-full rounded-full"
-                      style={{
-                        left: `${index * 10}%`,
-                        width: `${Math.min(Math.max(item.value, 20), 100)}%`,
-                        backgroundColor: palette.colors[index % palette.colors.length],
-                      }}
-                    />
+              {diagramData.map((item, index) => {
+                const ratio = maxValue === 0 ? 0 : item.value / maxValue;
+                const widthPercent = `${Math.max(ratio * 100, 6)}%`;
+                const offsetPercent = `${Math.min(index * 8, 80)}%`;
+
+                return (
+                  <div key={`${item.label}-${index}`} className="flex items-center gap-3">
+                    {config.showLabels !== false && (
+                      <span className="w-16 truncate text-xs font-medium text-muted-foreground">{item.label}</span>
+                    )}
+                    <div className="relative h-8 flex-1 rounded-full bg-muted/40">
+                      <div
+                        className="absolute top-1/2 h-5 -translate-y-1/2 rounded-full shadow-sm transition-all duration-300"
+                        style={{
+                          left: offsetPercent,
+                          width: widthPercent,
+                          backgroundColor: palette.colors[index % palette.colors.length],
+                        }}
+                      />
+                    </div>
+                    {config.showValues && (
+                      <span className="w-12 text-right text-xs font-semibold text-foreground">{item.value}</span>
+                    )}
                   </div>
-                  {config.showValues && (
-                    <span className="w-10 text-right text-xs font-semibold text-foreground">{item.value}</span>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );
+      }
       default:
         return null;
     }

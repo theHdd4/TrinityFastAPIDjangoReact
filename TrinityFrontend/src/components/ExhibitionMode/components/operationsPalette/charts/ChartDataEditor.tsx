@@ -2,11 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AreaChart,
   BarChart3,
+  Calendar,
   Circle,
   Columns3,
+  GanttChartSquare,
   LineChart,
   PieChart,
   Plus,
+  Square,
   Trash2,
   TrendingUp,
   X,
@@ -31,7 +34,13 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import type { ChartColorScheme, ChartConfig, ChartDataRow } from './types';
-import { COLOR_SCHEMES, DEFAULT_CHART_CONFIG, DEFAULT_CHART_DATA, normalizeChartType } from './constants';
+import {
+  COLOR_SCHEMES,
+  DEFAULT_CHART_CONFIG,
+  DEFAULT_CHART_DATA,
+  applyAlphaToHex,
+  normalizeChartType,
+} from './constants';
 
 interface ChartDataEditorProps {
   open: boolean;
@@ -42,13 +51,26 @@ interface ChartDataEditorProps {
   onApply?: (data: ChartDataRow[], config: ChartConfig) => void;
 }
 
-const chartTypes = [
-  { id: 'verticalBar' as ChartConfig['type'], icon: Columns3, name: 'Column' },
-  { id: 'horizontalBar' as ChartConfig['type'], icon: BarChart3, name: 'Bar' },
-  { id: 'line' as ChartConfig['type'], icon: LineChart, name: 'Line' },
-  { id: 'area' as ChartConfig['type'], icon: AreaChart, name: 'Area' },
-  { id: 'pie' as ChartConfig['type'], icon: PieChart, name: 'Pie' },
-  { id: 'donut' as ChartConfig['type'], icon: Circle, name: 'Donut' },
+const chartTypeGroups = [
+  {
+    label: 'Charts',
+    types: [
+      { id: 'verticalBar' as ChartConfig['type'], icon: Columns3, name: 'Column' },
+      { id: 'horizontalBar' as ChartConfig['type'], icon: BarChart3, name: 'Bar' },
+      { id: 'line' as ChartConfig['type'], icon: LineChart, name: 'Line' },
+      { id: 'area' as ChartConfig['type'], icon: AreaChart, name: 'Area' },
+      { id: 'pie' as ChartConfig['type'], icon: PieChart, name: 'Pie' },
+      { id: 'donut' as ChartConfig['type'], icon: Circle, name: 'Donut' },
+    ],
+  },
+  {
+    label: 'Diagrams',
+    types: [
+      { id: 'blank' as ChartConfig['type'], icon: Square, name: 'Blank' },
+      { id: 'calendar' as ChartConfig['type'], icon: Calendar, name: 'Calendar' },
+      { id: 'gantt' as ChartConfig['type'], icon: GanttChartSquare, name: 'Gantt' },
+    ],
+  },
 ];
 
 const legendPositions = [
@@ -121,6 +143,24 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     return scheme?.colors ?? COLOR_SCHEMES[0].colors;
   }, [config.colorScheme]);
 
+  const clampDiagramValue = (value: number) => {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+    if (value < 0) {
+      return 0;
+    }
+    if (value > 100) {
+      return 100;
+    }
+    return value;
+  };
+
+  const diagramBackground = (color: string, value: number) => {
+    const intensity = clampDiagramValue(value) / 100;
+    return applyAlphaToHex(color, 0.25 + intensity * 0.5);
+  };
+
   const colorSchemeGroups = useMemo(() => {
     const map = new Map<string, ChartColorScheme[]>();
     COLOR_SCHEMES.forEach(scheme => {
@@ -136,6 +176,9 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   }, []);
 
   const formatCategory = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+
+  const normalizedType = useMemo(() => normalizeChartType(config.type), [config.type]);
+  const isDiagramType = normalizedType === 'blank' || normalizedType === 'calendar' || normalizedType === 'gantt';
 
   const emitApply = (nextData: ChartDataRow[], nextConfig: ChartConfig) => {
     onApply?.(nextData.map(item => ({ ...item })), nextConfig);
@@ -198,12 +241,103 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     if (chartData.length === 0) {
       return (
         <div className="flex h-64 w-full items-center justify-center text-sm text-muted-foreground">
-          Add data to preview your chart.
+          Add data to preview your chart or diagram.
         </div>
       );
     }
 
-    if (config.type === 'pie' || config.type === 'donut') {
+    const diagramData = chartData.map((item, index) => ({
+      label: item.label || `Item ${index + 1}`,
+      value: Number.isFinite(item.value) ? item.value : 0,
+    }));
+
+    if (normalizedType === 'blank') {
+      return (
+        <div className="flex h-64 w-full items-center justify-center">
+          <div className="rounded-2xl border border-dashed border-border/50 px-8 py-10 text-center">
+            <p className="text-base font-semibold text-foreground">Blank diagram</p>
+            <p className="mt-2 text-sm text-muted-foreground">Use the data table to plan or annotate your layout.</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (normalizedType === 'calendar') {
+      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      const rowsPerDay = 4;
+      const eventsByDay = days.map(() => [] as typeof diagramData);
+      diagramData.forEach((entry, index) => {
+        eventsByDay[index % days.length].push(entry);
+      });
+
+      return (
+        <div className="flex h-64 w-full items-center justify-center">
+          <div className="grid h-full w-full max-w-[26rem] grid-cols-7 gap-1 p-4 text-[0.7rem]">
+            {days.map((day, dayIndex) => (
+              <div key={day} className="flex flex-col gap-1">
+                <span className="text-[0.6rem] font-semibold uppercase tracking-wide text-muted-foreground">{day}</span>
+                {Array.from({ length: rowsPerDay }).map((_, slotIndex) => {
+                  const event = eventsByDay[dayIndex][slotIndex];
+                  const color = colors[(dayIndex + slotIndex) % colors.length];
+                  const background = event ? diagramBackground(color, event.value) : `${color}1a`;
+
+                  return (
+                    <div
+                      key={`${day}-${slotIndex}`}
+                      className="flex h-10 flex-col items-center justify-center rounded border border-border/40 px-2 text-center"
+                      style={{ backgroundColor: background }}
+                    >
+                      {event && config.showLabels && (
+                        <span className="w-full truncate text-[0.6rem] font-semibold text-foreground">{event.label}</span>
+                      )}
+                      {event && config.showValues && (
+                        <span className="text-[0.55rem] text-muted-foreground">Value: {event.value}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (normalizedType === 'gantt') {
+      const maxValue = Math.max(...diagramData.map(entry => entry.value), 1);
+
+      return (
+        <div className="flex h-64 w-full items-center justify-center">
+          <div className="flex w-full max-w-[28rem] flex-col gap-3 p-6">
+            {diagramData.map((item, index) => {
+              const ratio = maxValue === 0 ? 0 : item.value / maxValue;
+              const widthPercent = `${Math.max(ratio * 100, 6)}%`;
+              const offsetPercent = `${Math.min(index * 8, 80)}%`;
+              const color = colors[index % colors.length];
+
+              return (
+                <div key={`${item.label}-${index}`} className="flex items-center gap-3">
+                  {config.showLabels && (
+                    <span className="w-20 truncate text-xs font-medium text-muted-foreground">{item.label}</span>
+                  )}
+                  <div className="relative h-8 flex-1 rounded-full bg-muted/40">
+                    <div
+                      className="absolute top-1/2 h-5 -translate-y-1/2 rounded-full shadow-sm transition-all duration-300"
+                      style={{ left: offsetPercent, width: widthPercent, backgroundColor: color }}
+                    />
+                  </div>
+                  {config.showValues && (
+                    <span className="w-12 text-right text-xs font-semibold text-foreground">{item.value}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    if (normalizedType === 'pie' || normalizedType === 'donut') {
       const total = chartData.reduce((sum, item) => sum + item.value, 0);
       if (total <= 0) {
         return (
@@ -230,14 +364,14 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
               const largeArcFlag = angle > 180 ? 1 : 0;
 
-              const innerRadius = config.type === 'donut' ? 40 : 0;
+              const innerRadius = normalizedType === 'donut' ? 40 : 0;
               const innerStartX = 100 + innerRadius * Math.cos((startAngle * Math.PI) / 180);
               const innerStartY = 100 + innerRadius * Math.sin((startAngle * Math.PI) / 180);
               const innerEndX = 100 + innerRadius * Math.cos((currentAngle * Math.PI) / 180);
               const innerEndY = 100 + innerRadius * Math.sin((currentAngle * Math.PI) / 180);
 
               const pathData =
-                config.type === 'donut'
+                normalizedType === 'donut'
                   ? `M ${startX} ${startY} A 80 80 0 ${largeArcFlag} 1 ${endX} ${endY} L ${innerEndX} ${innerEndY} A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${innerStartX} ${innerStartY} Z`
                   : `M 100 100 L ${startX} ${startY} A 80 80 0 ${largeArcFlag} 1 ${endX} ${endY} Z`;
 
@@ -255,9 +389,9 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       );
     }
 
-    if (config.type === 'verticalBar' || config.type === 'horizontalBar') {
+    if (normalizedType === 'verticalBar' || normalizedType === 'horizontalBar') {
       const maxValue = Math.max(...chartData.map(item => item.value), 0);
-      const isBar = config.type === 'horizontalBar';
+      const isBar = normalizedType === 'horizontalBar';
 
       return (
         <div
@@ -304,7 +438,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       );
     }
 
-    if (config.type === 'line' || config.type === 'area') {
+    if (normalizedType === 'line' || normalizedType === 'area') {
       const maxValue = Math.max(...chartData.map(item => item.value), 0);
       const points = chartData
         .map((item, index) => {
@@ -317,7 +451,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       return (
         <div className="flex h-64 w-full flex-col items-center justify-center gap-4">
           <svg width="320" height="220" viewBox="0 0 320 220">
-            {config.type === 'area' && (
+            {normalizedType === 'area' && (
               <polygon points={`0,200 ${points} 300,200`} fill={`${colors[0]}33`} stroke="none" />
             )}
             <polyline points={points} fill="none" stroke={colors[0]} strokeWidth="3" className="transition-all duration-300" />
@@ -374,10 +508,10 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
               </div>
               <div>
                 <DialogTitle className="mb-1 flex items-center gap-3 text-2xl font-bold">
-                  Edit Chart Data
+                  Edit Chart or Diagram Data
                   <PaletteIcon className="h-5 w-5 text-blue-500 animate-pulse" />
                 </DialogTitle>
-                <p className="text-sm text-muted-foreground">Customize your chart data and appearance</p>
+                <p className="text-sm text-muted-foreground">Customize your data and appearance</p>
               </div>
             </div>
             <Button
@@ -462,7 +596,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                 <div className="rounded-2xl border-2 border-border/50 bg-gradient-to-br from-card/50 to-muted/20 p-6">
                   {renderChartPreview()}
 
-                  {(config.showLabels || config.showValues) && (
+                  {!isDiagramType && (config.showLabels || config.showValues) && (
                     <div
                       className={cn('mt-6 flex flex-wrap gap-4 text-sm font-medium text-foreground', {
                         'justify-center': config.legendPosition === 'top' || config.legendPosition === 'bottom',
@@ -486,28 +620,37 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                 </div>
 
                 <div className="space-y-3">
-                  <Label className="text-sm font-bold">Chart Type</Label>
-                  <div className="flex gap-2">
-                    {chartTypes.map(type => {
-                      const Icon = type.icon;
-                      const isSelected = config.type === type.id;
-                      return (
-                        <Button
-                          key={type.id}
-                          variant={isSelected ? 'default' : 'outline'}
-                          size="icon"
-                          className={cn(
-                            'h-12 w-12 rounded-xl border-2 transition-all',
-                            isSelected
-                              ? 'scale-110 border-primary bg-primary text-primary-foreground shadow-lg'
-                              : 'border-border/50 hover:border-primary/30 hover:bg-muted',
-                          )}
-                          onClick={() => handleConfigChange({ type: type.id })}
-                        >
-                          <Icon className="h-5 w-5" />
-                        </Button>
-                      );
-                    })}
+                  <Label className="text-sm font-bold">Chart or Diagram Type</Label>
+                  <div className="flex flex-col gap-3">
+                    {chartTypeGroups.map(group => (
+                      <div key={group.label} className="flex flex-col gap-2">
+                        <span className="text-[0.65rem] uppercase tracking-[0.08em] text-muted-foreground">
+                          {group.label}
+                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          {group.types.map(type => {
+                            const Icon = type.icon;
+                            const isSelected = config.type === type.id;
+                            return (
+                              <Button
+                                key={type.id}
+                                variant={isSelected ? 'default' : 'outline'}
+                                size="icon"
+                                className={cn(
+                                  'h-12 w-12 rounded-xl border-2 transition-all',
+                                  isSelected
+                                    ? 'scale-110 border-primary bg-primary text-primary-foreground shadow-lg'
+                                    : 'border-border/50 hover:border-primary/30 hover:bg-muted',
+                                )}
+                                onClick={() => handleConfigChange({ type: type.id })}
+                              >
+                                <Icon className="h-5 w-5" />
+                              </Button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
@@ -575,24 +718,26 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <Label className="text-sm font-bold">Legend Position</Label>
-                  <Select
-                    value={config.legendPosition}
-                    onValueChange={value => handleConfigChange({ legendPosition: value as ChartConfig['legendPosition'] })}
-                  >
-                    <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/50 hover:border-primary/50">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl">
-                      {legendPositions.map(position => (
-                        <SelectItem key={position.id} value={position.id} className="rounded-lg">
-                          {position.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {!isDiagramType && (
+                  <div className="space-y-3">
+                    <Label className="text-sm font-bold">Legend Position</Label>
+                    <Select
+                      value={config.legendPosition}
+                      onValueChange={value => handleConfigChange({ legendPosition: value as ChartConfig['legendPosition'] })}
+                    >
+                      <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/50 hover:border-primary/50">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl">
+                        {legendPositions.map(position => (
+                          <SelectItem key={position.id} value={position.id} className="rounded-lg">
+                            {position.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
               </div>
             </ScrollArea>
           </div>
