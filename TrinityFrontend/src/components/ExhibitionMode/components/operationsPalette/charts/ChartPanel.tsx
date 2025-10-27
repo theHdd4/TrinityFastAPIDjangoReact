@@ -4,10 +4,13 @@ import {
   AlignLeft,
   AlignRight,
   BarChart3,
+  Calendar,
   Database,
+  GanttChartSquare,
   MousePointerClick,
   Palette,
   Sparkles,
+  Square,
   TrendingUp,
   Wand2,
   Zap,
@@ -15,7 +18,16 @@ import {
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -27,7 +39,7 @@ import {
   DEFAULT_CHART_DATA,
   normalizeChartType,
 } from './constants';
-import type { ChartConfig, ChartDataRow, ChartPanelResult, ChartType } from './types';
+import type { ChartColorScheme, ChartConfig, ChartDataRow, ChartPanelResult, ChartType } from './types';
 
 interface ChartPanelProps {
   onClose: () => void;
@@ -43,6 +55,27 @@ const renderSparkles = () => (
     <div className="absolute right-6 bottom-10 h-20 w-20 rounded-full bg-purple-500/20 blur-3xl" />
   </div>
 );
+
+const FREEFORM_DIAGRAMS = [
+  {
+    id: 'blank',
+    name: 'Blank',
+    description: 'Start from a clean canvas',
+    icon: Square,
+  },
+  {
+    id: 'calendar',
+    name: 'Calendar',
+    description: 'Plan schedules visually',
+    icon: Calendar,
+  },
+  {
+    id: 'gantt',
+    name: 'Gantt',
+    description: 'Track project timelines',
+    icon: GanttChartSquare,
+  },
+];
 
 const sanitiseConfig = (value?: ChartConfig): ChartConfig => {
   const merged = { ...DEFAULT_CHART_CONFIG, ...(value ?? {}) };
@@ -65,6 +98,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
   );
   const [config, setConfig] = useState<ChartConfig>(() => sanitiseConfig(initialConfig));
   const [showDataEditor, setShowDataEditor] = useState(false);
+  const [selectedDiagram, setSelectedDiagram] = useState<string>('calendar');
 
   const selectedType = useMemo(() => config.type, [config.type]);
 
@@ -72,6 +106,22 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     () => COLOR_SCHEMES.find(scheme => scheme.id === config.colorScheme) ?? COLOR_SCHEMES[0],
     [config.colorScheme],
   );
+
+  const colorSchemeGroups = useMemo(() => {
+    const map = new Map<string, ChartColorScheme[]>();
+    COLOR_SCHEMES.forEach(scheme => {
+      const key = scheme.category ?? 'other';
+      const existing = map.get(key);
+      if (existing) {
+        existing.push(scheme);
+      } else {
+        map.set(key, [scheme]);
+      }
+    });
+    return Array.from(map.entries()).map(([category, schemes]) => ({ category, schemes }));
+  }, []);
+
+  const formatCategory = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
   useEffect(() => {
     setChartData((initialData ?? DEFAULT_CHART_DATA).map(entry => ({ ...entry })));
@@ -351,6 +401,59 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
               </div>
             </section>
 
+            <section className="space-y-3">
+              <header className="flex items-center gap-2">
+                <div className="h-7 w-1 rounded-full bg-gradient-to-b from-amber-400 to-orange-500" />
+                <h3 className="flex items-center gap-2 text-base font-semibold text-foreground">
+                  Freeform diagrams
+                  <Sparkles className="h-4 w-4 text-amber-400" />
+                </h3>
+              </header>
+              <div className="grid grid-cols-3 gap-2">
+                {FREEFORM_DIAGRAMS.map(diagram => {
+                  const Icon = diagram.icon;
+                  const isSelected = selectedDiagram === diagram.id;
+                  return (
+                    <button
+                      key={diagram.id}
+                      type="button"
+                      onClick={() => setSelectedDiagram(diagram.id)}
+                      className={cn(
+                        'group relative flex h-24 flex-col items-start justify-between rounded-2xl border-2 p-4 text-left transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+                        isSelected
+                          ? 'border-amber-400 bg-amber-400/10 shadow-lg'
+                          : 'border-border/40 bg-card hover:-translate-y-0.5 hover:border-amber-300/70 hover:shadow-lg',
+                      )}
+                    >
+                      {isSelected && (
+                        <span className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-amber-400 text-[0.7rem] font-semibold text-amber-950 shadow-md">
+                          ⚡
+                        </span>
+                      )}
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={cn(
+                            'flex h-10 w-10 items-center justify-center rounded-xl bg-muted/50 text-primary transition-colors',
+                            isSelected ? 'bg-amber-400/20 text-amber-500' : 'group-hover:text-amber-400',
+                          )}
+                        >
+                          <Icon className="h-5 w-5" />
+                        </div>
+                        <div className="flex flex-col">
+                          <span
+                            className={cn('text-sm font-semibold', isSelected ? 'text-foreground' : 'text-muted-foreground')}
+                          >
+                            {diagram.name}
+                          </span>
+                          <span className="text-[0.65rem] text-muted-foreground/80">{diagram.description}</span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
             <Separator className="bg-gradient-to-r from-transparent via-border to-transparent" />
 
             <section className="space-y-3">
@@ -377,22 +480,32 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl border border-border/50 bg-popover/95 backdrop-blur">
-                    {COLOR_SCHEMES.map(scheme => (
-                      <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
-                        <div className="flex items-center gap-3">
-                          {scheme.icon && <span className="text-lg">{scheme.icon}</span>}
-                          <div className="flex gap-1.5">
-                            {scheme.colors.map(color => (
-                              <span
-                                key={color}
-                                className="h-4 w-4 rounded border border-border/40"
-                                style={{ backgroundColor: color }}
-                              />
-                            ))}
-                          </div>
-                          <span className="font-medium">{scheme.name}</span>
-                        </div>
-                      </SelectItem>
+                    {colorSchemeGroups.map((group, groupIndex) => (
+                      <React.Fragment key={group.category}>
+                        <SelectGroup>
+                          <SelectLabel className="px-2 py-1 text-[0.65rem] uppercase tracking-[0.08em] text-muted-foreground">
+                            {formatCategory(group.category)}
+                          </SelectLabel>
+                          {group.schemes.map(scheme => (
+                            <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
+                              <div className="flex items-center gap-3">
+                                {scheme.icon && <span className="text-lg">{scheme.icon}</span>}
+                                <div className="flex gap-1.5">
+                                  {scheme.colors.map((color, index) => (
+                                    <span
+                                      key={`${scheme.id}-${color}-${index}`}
+                                      className="h-4 w-4 rounded border border-border/40"
+                                      style={{ backgroundColor: color }}
+                                    />
+                                  ))}
+                                </div>
+                                <span className="font-medium">{scheme.name}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                        {groupIndex < colorSchemeGroups.length - 1 && <SelectSeparator className="my-2" />}
+                      </React.Fragment>
                     ))}
                   </SelectContent>
                 </Select>

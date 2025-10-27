@@ -17,12 +17,21 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
-import type { ChartConfig, ChartDataRow } from './types';
-import { DEFAULT_CHART_CONFIG, DEFAULT_CHART_DATA, normalizeChartType } from './constants';
+import type { ChartColorScheme, ChartConfig, ChartDataRow } from './types';
+import { COLOR_SCHEMES, DEFAULT_CHART_CONFIG, DEFAULT_CHART_DATA, normalizeChartType } from './constants';
 
 interface ChartDataEditorProps {
   open: boolean;
@@ -40,13 +49,6 @@ const chartTypes = [
   { id: 'area' as ChartConfig['type'], icon: AreaChart, name: 'Area' },
   { id: 'pie' as ChartConfig['type'], icon: PieChart, name: 'Pie' },
   { id: 'donut' as ChartConfig['type'], icon: Circle, name: 'Donut' },
-];
-
-const colorSchemes = [
-  { id: 'default', name: 'Default', colors: ['#3b82f6', '#8b5cf6', '#ec4899'] },
-  { id: 'vibrant', name: 'Vibrant', colors: ['#a855f7', '#06b6d4', '#10b981'] },
-  { id: 'pastel', name: 'Pastel', colors: ['#f9a8d4', '#93c5fd', '#86efac'] },
-  { id: 'monochrome', name: 'Monochrome', colors: ['#525252', '#737373', '#a3a3a3'] },
 ];
 
 const legendPositions = [
@@ -113,9 +115,25 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   );
 
   const colors = useMemo(() => {
-    const scheme = colorSchemes.find(s => s.id === config.colorScheme);
-    return scheme?.colors ?? colorSchemes[0].colors;
+    const scheme = COLOR_SCHEMES.find(s => s.id === config.colorScheme);
+    return scheme?.colors ?? COLOR_SCHEMES[0].colors;
   }, [config.colorScheme]);
+
+  const colorSchemeGroups = useMemo(() => {
+    const map = new Map<string, ChartColorScheme[]>();
+    COLOR_SCHEMES.forEach(scheme => {
+      const key = scheme.category ?? 'other';
+      const existing = map.get(key);
+      if (existing) {
+        existing.push(scheme);
+      } else {
+        map.set(key, [scheme]);
+      }
+    });
+    return Array.from(map.entries()).map(([category, schemes]) => ({ category, schemes }));
+  }, []);
+
+  const formatCategory = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
   const emitApply = (nextData: ChartDataDraft[], nextConfig: ChartConfig) => {
     const normalisedData = nextData.map(item => ({
@@ -498,21 +516,32 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent className="rounded-xl">
-                      {colorSchemes.map(scheme => (
-                        <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
-                          <div className="flex items-center gap-3">
-                            <div className="flex gap-1.5">
-                              {scheme.colors.map((color, index) => (
-                                <div
-                                  key={`${scheme.id}-${color}-${index}`}
-                                  className="h-4 w-4 rounded-md border-2 border-border/50"
-                                  style={{ backgroundColor: color }}
-                                />
-                              ))}
-                            </div>
-                            <span className="font-medium">{scheme.name}</span>
-                          </div>
-                        </SelectItem>
+                      {colorSchemeGroups.map((group, groupIndex) => (
+                        <React.Fragment key={group.category}>
+                          <SelectGroup>
+                            <SelectLabel className="px-2 py-1 text-[0.65rem] uppercase tracking-[0.08em] text-muted-foreground">
+                              {formatCategory(group.category)}
+                            </SelectLabel>
+                            {group.schemes.map(scheme => (
+                              <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
+                                <div className="flex items-center gap-3">
+                                  {scheme.icon && <span className="text-lg">{scheme.icon}</span>}
+                                  <div className="flex gap-1.5">
+                                    {scheme.colors.map((color, index) => (
+                                      <div
+                                        key={`${scheme.id}-${color}-${index}`}
+                                        className="h-4 w-4 rounded-md border-2 border-border/50"
+                                        style={{ backgroundColor: color }}
+                                      />
+                                    ))}
+                                  </div>
+                                  <span className="font-medium">{scheme.name}</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                          {groupIndex < colorSchemeGroups.length - 1 && <SelectSeparator className="my-2" />}
+                        </React.Fragment>
                       ))}
                     </SelectContent>
                   </Select>

@@ -28,6 +28,7 @@ export interface ChartColorScheme {
   name: string;
   icon?: string;
   colors: string[];
+  category?: string;
 }
 
 export interface ChartTypeDefinition {
