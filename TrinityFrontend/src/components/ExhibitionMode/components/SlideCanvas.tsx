@@ -10,6 +10,7 @@ import React, {
 import { User, Calendar, Sparkles, StickyNote, Settings, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui/use-toast';
 import {
   GRADIENT_STYLE_MAP,
   isSolidToken,
@@ -64,6 +65,7 @@ import {
   type TableCellData,
   type TableCellFormatting,
 } from './operationsPalette/tables/constants';
+import SlideObjectContextMenu, { AlignAction } from './SlideObjectContextMenu';
 
 interface CanvasDropPlacement {
   x: number;
@@ -92,6 +94,57 @@ type ActiveInteraction =
       startClientY: number;
       initial: { x: number; y: number; width: number; height: number };
     };
+
+const COLOR_PROP_KEYS = [
+  'color',
+  'fill',
+  'stroke',
+  'backgroundColor',
+  'textColor',
+  'borderColor',
+  'accentColor',
+] as const;
+
+const cloneValue = <T,>(value: T): T => {
+  const structured = (globalThis as any)?.structuredClone;
+  if (typeof structured === 'function') {
+    try {
+      return structured(value);
+    } catch (error) {
+      console.warn('[Exhibition] Structured clone failed, falling back to JSON clone', error);
+    }
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch {
+    return value;
+  }
+};
+
+const generateObjectId = (fallback: string) => {
+  const globalCrypto: Crypto | undefined =
+    typeof window !== 'undefined'
+      ? window.crypto
+      : typeof globalThis !== 'undefined' && 'crypto' in globalThis
+        ? (globalThis.crypto as Crypto | undefined)
+        : undefined;
+
+  if (globalCrypto && typeof globalCrypto.randomUUID === 'function') {
+    return globalCrypto.randomUUID();
+  }
+
+  const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${fallback || 'slide-object'}-${suffix}`;
+};
+
+const isSlideObjectLocked = (object: SlideObject | undefined | null): boolean => {
+  if (!object) {
+    return false;
+  }
+  const props = (object.props ?? {}) as Record<string, unknown>;
+  return Boolean(props.locked);
+};
 
 interface EditingTextState {
   id: string;
@@ -338,6 +391,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const sendSlideObjectsBackward = useExhibitionStore(state => state.sendSlideObjectsBackward);
   const groupSlideObjects = useExhibitionStore(state => state.groupSlideObjects);
   const removeSlideObject = useExhibitionStore(state => state.removeSlideObject);
+  const addSlideObjectToStore = useExhibitionStore(state => state.addSlideObject);
+  const updateCardInStore = useExhibitionStore(state => state.updateCard);
 
   const titleObjectId = useMemo(() => buildSlideTitleObjectId(card.id), [card.id]);
   const atomObjects = useMemo(() => slideObjects.filter(isAtomObject), [slideObjects]);
@@ -704,20 +759,40 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     [canEdit],
   );
 
-  const handleBringForward = useCallback(
-    (objectId: string) => {
-      bringSlideObjectsForward(card.id, [objectId]);
+  const handleBringForwardMany = useCallback(
+    (objectIds: string[]) => {
+      if (objectIds.length === 0) {
+        return;
+      }
+      bringSlideObjectsForward(card.id, objectIds);
       handleCanvasInteraction();
     },
     [bringSlideObjectsForward, card.id, handleCanvasInteraction],
   );
 
-  const handleSendBackward = useCallback(
-    (objectId: string) => {
-      sendSlideObjectsBackward(card.id, [objectId]);
+  const handleSendBackwardMany = useCallback(
+    (objectIds: string[]) => {
+      if (objectIds.length === 0) {
+        return;
+      }
+      sendSlideObjectsBackward(card.id, objectIds);
       handleCanvasInteraction();
     },
     [card.id, handleCanvasInteraction, sendSlideObjectsBackward],
+  );
+
+  const handleBringForward = useCallback(
+    (objectId: string) => {
+      handleBringForwardMany([objectId]);
+    },
+    [handleBringForwardMany],
+  );
+
+  const handleSendBackward = useCallback(
+    (objectId: string) => {
+      handleSendBackwardMany([objectId]);
+    },
+    [handleSendBackwardMany],
   );
 
   const handlePanelBringToFront = useCallback(
@@ -1144,6 +1219,12 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   accentImage={settings.accentImage ?? null}
                   accentImageName={settings.accentImageName ?? null}
                   titleObjectId={titleObjectId}
+                  onAddObject={object => addSlideObjectToStore(card.id, object)}
+                  onAddAtom={atom =>
+                    updateCardInStore(card.id, {
+                      atoms: [...(card.atoms ?? []), atom],
+                    })
+                  }
                   fullBleed={settings.fullBleed}
                   onCanvasDragLeave={handleDragLeave}
                   onCanvasDragOver={handleDragOver}
@@ -1151,6 +1232,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   onInteract={handleCanvasInteraction}
                   onRemoveAtom={handleAtomRemove}
                   onBringToFront={handleBringToFront}
+                  onBringForward={handleBringForwardMany}
+                  onSendBackward={handleSendBackwardMany}
                   onSendToBack={handleSendToBack}
                   onBulkUpdate={handleBulkUpdate}
                   onGroupObjects={handleGroupObjects}
@@ -1400,12 +1483,16 @@ type CanvasStageProps = {
   accentImage?: string | null;
   accentImageName?: string | null;
   titleObjectId: string | null;
+  onAddObject: (object: SlideObject) => void;
+  onAddAtom?: (atom: DroppedAtom) => void;
   onCanvasDragOver?: (event: React.DragEvent<HTMLDivElement>) => void;
   onCanvasDragLeave?: (event: React.DragEvent<HTMLDivElement>) => void;
   onCanvasDrop?: (event: React.DragEvent<HTMLDivElement>) => void;
   onInteract: () => void;
   onRemoveAtom?: (atomId: string) => void;
   onBringToFront: (objectIds: string[]) => void;
+  onBringForward: (objectIds: string[]) => void;
+  onSendBackward: (objectIds: string[]) => void;
   onSendToBack: (objectIds: string[]) => void;
   onBulkUpdate: (updates: Record<string, Partial<SlideObject>>) => void;
   onGroupObjects: (objectIds: string[], groupId: string | null) => void;
@@ -1429,12 +1516,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       accentImage,
       accentImageName,
       titleObjectId,
+      onAddObject,
+      onAddAtom,
       onCanvasDragOver,
       onCanvasDragLeave,
       onCanvasDrop,
       onInteract,
       onRemoveAtom,
       onBringToFront,
+      onBringForward,
+      onSendBackward,
       onSendToBack,
       onBulkUpdate,
       onGroupObjects,
@@ -1464,6 +1555,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     const [activeInteraction, setActiveInteraction] = useState<ActiveInteraction | null>(null);
     const [editingTextState, setEditingTextState] = useState<EditingTextState | null>(null);
     const [activeTextToolbar, setActiveTextToolbar] = useState<{ id: string; node: ReactNode } | null>(null);
+    const [clipboard, setClipboard] = useState<SlideObject[]>([]);
+    const [styleClipboard, setStyleClipboard] = useState<Record<string, string> | null>(null);
 
     const focusCanvas = useCallback(() => {
       const node = internalRef.current;
@@ -1473,6 +1566,466 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     }, []);
 
     const objectsMap = useMemo(() => new Map(objects.map(object => [object.id, object])), [objects]);
+    const selectedObjects = useMemo(
+      () =>
+        selectedIds
+          .map(id => objectsMap.get(id))
+          .filter((object): object is SlideObject => Boolean(object)),
+      [objectsMap, selectedIds],
+    );
+    const unlockedSelectedObjects = useMemo(
+      () => selectedObjects.filter(object => !isSlideObjectLocked(object)),
+      [selectedObjects],
+    );
+
+    const captureColorStyle = useCallback((object: SlideObject | null | undefined) => {
+      if (!object) {
+        return null;
+      }
+      const props = (object.props ?? {}) as Record<string, unknown>;
+      const palette: Record<string, string> = {};
+
+      COLOR_PROP_KEYS.forEach(key => {
+        const value = props[key];
+        if (typeof value === 'string' && value.trim().length > 0) {
+          palette[key] = value;
+        }
+      });
+
+      return Object.keys(palette).length > 0 ? palette : null;
+    }, []);
+
+    const handleCopySelection = useCallback(() => {
+      if (selectedObjects.length === 0) {
+        toast({
+          title: 'Nothing to copy',
+          description: 'Select an object to copy before copying.',
+        });
+        return;
+      }
+
+      const snapshots = selectedObjects.map(object => ({
+        ...object,
+        props: cloneValue(object.props ?? {}),
+      }));
+
+      setClipboard(snapshots);
+      toast({
+        title: snapshots.length === 1 ? 'Object copied' : 'Objects copied',
+        description:
+          snapshots.length === 1
+            ? 'Copied the selected object.'
+            : `Copied ${snapshots.length} objects to the clipboard.`,
+      });
+    }, [selectedObjects]);
+
+    const handleCopyStyle = useCallback(() => {
+      const primary = selectedObjects[0] ?? null;
+      if (!primary) {
+        toast({
+          title: 'No object selected',
+          description: 'Select an object to capture its styling.',
+        });
+        return;
+      }
+
+      const palette = captureColorStyle(primary);
+      if (!palette) {
+        toast({
+          title: 'No colors to copy',
+          description: 'The selected object does not expose color styling to copy.',
+        });
+        return;
+      }
+
+      setStyleClipboard(palette);
+      toast({
+        title: 'Style copied',
+        description: 'Copied the selected object styling for reuse.',
+      });
+    }, [captureColorStyle, selectedObjects]);
+
+    const handleDeleteSelection = useCallback(() => {
+      if (unlockedSelectedObjects.length === 0) {
+        if (selectedObjects.length === 0) {
+          toast({
+            title: 'Nothing to delete',
+            description: 'Select an object to remove it from the slide.',
+          });
+        } else {
+          toast({
+            title: 'Selection locked',
+            description: 'Unlock the selected object before deleting it.',
+          });
+        }
+        return;
+      }
+
+      onInteract();
+      unlockedSelectedObjects.forEach(object => {
+        if (isAtomObject(object) && onRemoveAtom) {
+          const atomId = (object.props as { atom?: DroppedAtom } | undefined)?.atom?.id;
+          if (atomId) {
+            onRemoveAtom(atomId);
+          }
+          return;
+        }
+
+        if (!onRemoveObject) {
+          return;
+        }
+
+        if (object.type === 'accent-image') {
+          return;
+        }
+
+        if (object.type === 'text-box' && titleObjectId && object.id === titleObjectId) {
+          return;
+        }
+
+        onRemoveObject(object.id);
+      });
+
+      setSelectedIds([]);
+      toast({
+        title: unlockedSelectedObjects.length === 1 ? 'Object deleted' : 'Objects deleted',
+        description:
+          unlockedSelectedObjects.length === 1
+            ? 'The selected object has been removed.'
+            : `${unlockedSelectedObjects.length} objects removed from the slide.`,
+      });
+    }, [onInteract, onRemoveAtom, onRemoveObject, titleObjectId, unlockedSelectedObjects, selectedObjects.length]);
+
+    const handleToggleLock = useCallback(() => {
+      if (selectedObjects.length === 0) {
+        toast({
+          title: 'No object selected',
+          description: 'Select an object to lock or unlock.',
+        });
+        return;
+      }
+
+      const shouldLock = unlockedSelectedObjects.length > 0;
+      const targets = shouldLock ? unlockedSelectedObjects : selectedObjects;
+      if (targets.length === 0) {
+        toast({
+          title: 'Selection locked',
+          description: 'All selected objects are already locked.',
+        });
+        return;
+      }
+
+      const updates: Record<string, Partial<SlideObject>> = {};
+      targets.forEach(object => {
+        const nextProps = { ...(object.props || {}) } as Record<string, unknown>;
+        if (shouldLock) {
+          nextProps.locked = true;
+        } else {
+          delete nextProps.locked;
+        }
+        updates[object.id] = { props: nextProps };
+      });
+
+      onInteract();
+      onBulkUpdate(updates);
+
+      toast({
+        title: shouldLock ? 'Objects locked' : 'Objects unlocked',
+        description: shouldLock
+          ? 'Locked the selected objects to prevent accidental edits.'
+          : 'Unlocked the selected objects.',
+      });
+    }, [onBulkUpdate, onInteract, selectedObjects, unlockedSelectedObjects]);
+
+    const handleLayerAction = useCallback(
+      (action: 'front' | 'forward' | 'backward' | 'back') => {
+        const targets = unlockedSelectedObjects.length > 0 ? unlockedSelectedObjects : selectedObjects;
+        if (targets.length === 0) {
+          toast({
+            title: 'No objects selected',
+            description: 'Select an object to change its layer order.',
+          });
+          return;
+        }
+
+        const ids = targets.map(object => object.id);
+        if (ids.length === 0) {
+          return;
+        }
+
+        onInteract();
+        switch (action) {
+          case 'front':
+            onBringToFront(ids);
+            break;
+          case 'forward':
+            onBringForward(ids);
+            break;
+          case 'backward':
+            onSendBackward(ids);
+            break;
+          case 'back':
+            onSendToBack(ids);
+            break;
+          default:
+            break;
+        }
+      },
+      [
+        onBringForward,
+        onBringToFront,
+        onInteract,
+        onSendBackward,
+        onSendToBack,
+        selectedObjects,
+        unlockedSelectedObjects,
+      ],
+    );
+
+    const handleLinkSelection = useCallback(() => {
+      if (selectedObjects.length === 0) {
+        toast({
+          title: 'No object selected',
+          description: 'Select an object to add a link.',
+        });
+        return;
+      }
+
+      if (typeof window === 'undefined') {
+        toast({
+          title: 'Link unavailable',
+          description: 'Links can only be edited in a browser environment.',
+        });
+        return;
+      }
+
+      const current = (selectedObjects[0]?.props as Record<string, unknown> | undefined)?.link;
+      const input = window.prompt('Enter a link URL', typeof current === 'string' ? current : '');
+      if (input === null) {
+        return;
+      }
+
+      const trimmed = input.trim();
+      const updates: Record<string, Partial<SlideObject>> = {};
+      unlockedSelectedObjects.forEach(object => {
+        const nextProps = { ...(object.props || {}) } as Record<string, unknown>;
+        if (trimmed.length === 0) {
+          delete nextProps.link;
+        } else {
+          nextProps.link = trimmed;
+        }
+        updates[object.id] = { props: nextProps };
+      });
+
+      if (Object.keys(updates).length === 0) {
+        toast({
+          title: 'Selection locked',
+          description: 'Unlock the object to update its link.',
+        });
+        return;
+      }
+
+      onInteract();
+      onBulkUpdate(updates);
+      toast({
+        title: trimmed.length === 0 ? 'Link cleared' : 'Link updated',
+        description:
+          trimmed.length === 0
+            ? 'Removed link information from the selected objects.'
+            : 'Updated the selected objects with the provided link.',
+      });
+    }, [onBulkUpdate, onInteract, selectedObjects, unlockedSelectedObjects]);
+
+    const handleCommentSelection = useCallback(() => {
+      if (selectedObjects.length === 0) {
+        toast({
+          title: 'No object selected',
+          description: 'Select an object to attach a comment.',
+        });
+        return;
+      }
+
+      if (typeof window === 'undefined') {
+        toast({
+          title: 'Comment unavailable',
+          description: 'Comments can only be edited in a browser environment.',
+        });
+        return;
+      }
+
+      const current = (selectedObjects[0]?.props as Record<string, unknown> | undefined)?.comment;
+      const input = window.prompt('Add a comment', typeof current === 'string' ? current : '');
+      if (input === null) {
+        return;
+      }
+
+      const trimmed = input.trim();
+      const updates: Record<string, Partial<SlideObject>> = {};
+      unlockedSelectedObjects.forEach(object => {
+        const nextProps = { ...(object.props || {}) } as Record<string, unknown>;
+        if (trimmed.length === 0) {
+          delete nextProps.comment;
+        } else {
+          nextProps.comment = trimmed;
+        }
+        updates[object.id] = { props: nextProps };
+      });
+
+      if (Object.keys(updates).length === 0) {
+        toast({
+          title: 'Selection locked',
+          description: 'Unlock the object to update comments.',
+        });
+        return;
+      }
+
+      onInteract();
+      onBulkUpdate(updates);
+      toast({
+        title: trimmed.length === 0 ? 'Comment cleared' : 'Comment added',
+        description:
+          trimmed.length === 0
+            ? 'Removed comments from the selected objects.'
+            : 'Saved the provided comment on the selection.',
+      });
+    }, [onBulkUpdate, onInteract, selectedObjects, unlockedSelectedObjects]);
+
+    const handleAltTextSelection = useCallback(() => {
+      const eligible = selectedObjects.filter(object => object.type === 'image' || object.type === 'accent-image');
+      if (eligible.length === 0) {
+        toast({
+          title: 'No image selected',
+          description: 'Select an image object to edit alternative text.',
+        });
+        return;
+      }
+
+      if (typeof window === 'undefined') {
+        toast({
+          title: 'Alternative text unavailable',
+          description: 'Alternative text can only be edited in a browser environment.',
+        });
+        return;
+      }
+
+      const current = (eligible[0].props as Record<string, unknown> | undefined)?.altText;
+      const input = window.prompt('Describe this image for screen readers', typeof current === 'string' ? current : '');
+      if (input === null) {
+        return;
+      }
+
+      const trimmed = input.trim();
+      const updates: Record<string, Partial<SlideObject>> = {};
+      eligible.forEach(object => {
+        if (isSlideObjectLocked(object)) {
+          return;
+        }
+        const nextProps = { ...(object.props || {}) } as Record<string, unknown>;
+        if (trimmed.length === 0) {
+          delete nextProps.altText;
+        } else {
+          nextProps.altText = trimmed;
+        }
+        updates[object.id] = { props: nextProps };
+      });
+
+      if (Object.keys(updates).length === 0) {
+        toast({
+          title: 'Images locked',
+          description: 'Unlock the image to change its alternative text.',
+        });
+        return;
+      }
+
+      onInteract();
+      onBulkUpdate(updates);
+      toast({
+        title: trimmed.length === 0 ? 'Alternative text cleared' : 'Alternative text saved',
+        description:
+          trimmed.length === 0
+            ? 'Removed alternative text from the selected images.'
+            : 'Updated alternative text for the selected images.',
+      });
+    }, [onBulkUpdate, onInteract, selectedObjects]);
+
+    const handleApplyColorsToAll = useCallback(() => {
+      const sourcePalette = styleClipboard ?? captureColorStyle(selectedObjects[0]);
+      if (!sourcePalette) {
+        toast({
+          title: 'No colors available',
+          description: 'Copy a style or select an object with color styling.',
+        });
+        return;
+      }
+
+      const updates: Record<string, Partial<SlideObject>> = {};
+      objects.forEach(object => {
+        if (isSlideObjectLocked(object)) {
+          return;
+        }
+        const nextProps = { ...(object.props || {}) } as Record<string, unknown>;
+        let changed = false;
+        Object.entries(sourcePalette).forEach(([key, value]) => {
+          if (typeof value !== 'string') {
+            return;
+          }
+          if (nextProps[key] !== value) {
+            nextProps[key] = value;
+            changed = true;
+          }
+        });
+        if (changed) {
+          updates[object.id] = { props: nextProps };
+        }
+      });
+
+      if (Object.keys(updates).length === 0) {
+        toast({
+          title: 'No updates applied',
+          description: 'Objects already use the selected colors.',
+        });
+        return;
+      }
+
+      onInteract();
+      onBulkUpdate(updates);
+      toast({
+        title: 'Colors applied',
+        description: 'Applied the captured styling across the slide.',
+      });
+    }, [captureColorStyle, objects, onBulkUpdate, onInteract, selectedObjects, styleClipboard]);
+
+    const handleInfo = useCallback(() => {
+      const target = selectedObjects[0] ?? null;
+      if (!target) {
+        toast({
+          title: 'No object selected',
+          description: 'Select an object to view its details.',
+        });
+        return;
+      }
+
+      const descriptionParts = [
+        `Type: ${target.type}`,
+        `Position: ${Math.round(target.x)}, ${Math.round(target.y)}`,
+        `Size: ${Math.round(target.width)} × ${Math.round(target.height)}`,
+      ];
+
+      toast({
+        title: 'Object details',
+        description: descriptionParts.join(' • '),
+      });
+    }, [selectedObjects]);
+
+    const hasSelection = selectedObjects.length > 0;
+    const hasClipboardItems = clipboard.length > 0;
+    const selectionLocked = hasSelection && unlockedSelectedObjects.length === 0;
+    const lockLabel: 'Lock' | 'Unlock' = selectionLocked ? 'Unlock' : 'Lock';
+    const selectedSupportsAltText = selectedObjects.some(
+      object => object.type === 'image' || object.type === 'accent-image',
+    );
+    const effectiveColorPalette = styleClipboard ?? captureColorStyle(selectedObjects[0]);
+    const canApplyColorsGlobally = Boolean(effectiveColorPalette);
 
     useEffect(() => {
       setSelectedIds(prev => prev.filter(id => objectsMap.has(id)));
@@ -2005,6 +2558,25 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [beginEditingTextBox, canEdit, objectsMap],
     );
 
+    const handleContextMenuRequest = useCallback(
+      (event: React.MouseEvent<HTMLDivElement>, objectId: string) => {
+        if (!canEdit) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (editingTextState) {
+          commitEditingText();
+        }
+
+        focusCanvas();
+        setSelectedIds(prev => (prev.includes(objectId) ? prev : [objectId]));
+      },
+      [canEdit, commitEditingText, editingTextState, focusCanvas],
+    );
+
     const clampPosition = useCallback((x: number, y: number, width: number, height: number) => {
       const canvas = internalRef.current;
       if (!canvas) {
@@ -2029,6 +2601,136 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         return { x: snappedX, y: snappedY };
       },
       [clampPosition],
+    );
+
+    const handlePasteClipboard = useCallback(() => {
+      if (clipboard.length === 0) {
+        toast({
+          title: 'Clipboard empty',
+          description: 'Copy an object before attempting to paste.',
+        });
+        return;
+      }
+
+      const pastedIds: string[] = [];
+      clipboard.forEach((snapshot, index) => {
+        const baseProps = cloneValue(snapshot.props ?? {}) as Record<string, unknown>;
+        delete baseProps.locked;
+
+        const offset = CANVAS_SNAP_GRID * 4 * (index + 1);
+        const nextX = snapshot.x + offset;
+        const nextY = snapshot.y + offset;
+        const { x, y } = clampAndSnapPosition(nextX, nextY, snapshot.width, snapshot.height);
+        const newId = generateObjectId(snapshot.id);
+
+        if (snapshot.type === 'atom') {
+          const atom = (snapshot.props as { atom?: DroppedAtom } | undefined)?.atom;
+          if (atom) {
+            const clonedAtom: DroppedAtom = { ...cloneValue(atom), id: newId };
+            baseProps.atom = clonedAtom;
+            onAddAtom?.(clonedAtom);
+          }
+        }
+
+        const prepared: SlideObject = {
+          ...snapshot,
+          id: newId,
+          x,
+          y,
+          groupId: null,
+          props: baseProps,
+        };
+
+        onAddObject(prepared);
+        pastedIds.push(newId);
+      });
+
+      if (pastedIds.length === 0) {
+        return;
+      }
+
+      onInteract();
+      onBringToFront(pastedIds);
+      setSelectedIds(pastedIds);
+      toast({
+        title: pastedIds.length === 1 ? 'Object pasted' : 'Objects pasted',
+        description:
+          pastedIds.length === 1
+            ? 'Added a copy of the selected object to the slide.'
+            : `Added ${pastedIds.length} copied objects to the slide.`,
+      });
+    }, [clipboard, clampAndSnapPosition, onAddAtom, onAddObject, onBringToFront, onInteract]);
+
+    const handleAlignSelection = useCallback(
+      (alignment: AlignAction) => {
+        if (selectedObjects.length === 0) {
+          toast({
+            title: 'No object selected',
+            description: 'Select an object to align it on the slide.',
+          });
+          return;
+        }
+
+        const canvas = internalRef.current;
+        if (!canvas) {
+          toast({
+            title: 'Canvas unavailable',
+            description: 'Unable to align objects while the canvas is not ready.',
+          });
+          return;
+        }
+
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+        const targets = unlockedSelectedObjects.length > 0 ? unlockedSelectedObjects : selectedObjects;
+        const updates: Record<string, Partial<SlideObject>> = {};
+
+        targets.forEach(object => {
+          if (alignment === 'left' || alignment === 'center' || alignment === 'right') {
+            let targetX = 0;
+            if (alignment === 'center') {
+              targetX = (width - object.width) / 2;
+            } else if (alignment === 'right') {
+              targetX = width - object.width;
+            }
+            const maxX = Math.max(0, width - object.width);
+            const snappedX = Math.min(Math.max(0, snapToGrid(targetX)), maxX);
+            if (Math.abs(snappedX - object.x) > 0.5) {
+              updates[object.id] = { ...(updates[object.id] ?? {}), x: snappedX };
+            }
+          }
+
+          if (alignment === 'top' || alignment === 'middle' || alignment === 'bottom') {
+            let targetY = 0;
+            if (alignment === 'middle') {
+              targetY = (height - object.height) / 2;
+            } else if (alignment === 'bottom') {
+              targetY = height - object.height;
+            }
+            const maxY = Math.max(0, height - object.height);
+            const snappedY = Math.min(Math.max(0, snapToGrid(targetY)), maxY);
+            if (Math.abs(snappedY - object.y) > 0.5) {
+              updates[object.id] = { ...(updates[object.id] ?? {}), y: snappedY };
+            }
+          }
+        });
+
+        if (Object.keys(updates).length === 0) {
+          toast({
+            title: 'No alignment changes',
+            description: 'Objects already align to the requested position.',
+          });
+          return;
+        }
+
+        onInteract();
+        onBulkUpdate(updates);
+        toast({
+          title: 'Objects aligned',
+          description: 'Updated the selection alignment on the slide.',
+        });
+      },
+      [onBulkUpdate, onInteract, selectedObjects, unlockedSelectedObjects],
     );
 
     const handleBackgroundPointerDown = useCallback(() => {
@@ -2113,6 +2815,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         const targetElement = event.target instanceof Element ? event.target : null;
         const editableTableCell = targetElement?.closest('[data-exhibition-table-cell-content="true"]');
 
+        const targetObject = objectsMap.get(objectId);
+        const isLocked = isSlideObjectLocked(targetObject);
+
         const isMulti = event.shiftKey || event.metaKey || event.ctrlKey;
         const resolveSelection = () => {
           const baseSelection = isMulti
@@ -2140,11 +2845,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         if (editingTextState) {
           commitEditingText();
         }
-        onInteract();
         focusCanvas();
 
         const uniqueSelection = resolveSelection();
         setSelectedIds(uniqueSelection);
+
+        if (isLocked) {
+          return;
+        }
+
+        onInteract();
 
         const initialPositions = new Map<string, { x: number; y: number }>();
         uniqueSelection.forEach(id => {
@@ -2186,12 +2896,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }
         event.preventDefault();
         event.stopPropagation();
-        onInteract();
         focusCanvas();
         const target = objectsMap.get(objectId);
         if (!target) {
           return;
         }
+        if (isSlideObjectLocked(target)) {
+          setSelectedIds(prev => (prev.includes(objectId) ? prev : [objectId]));
+          return;
+        }
+        onInteract();
         setSelectedIds([objectId]);
         onBringToFront([objectId]);
         setActiveInteraction({
@@ -2242,19 +2956,69 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           return;
         }
 
+        if ((event.key === 'c' || event.key === 'C') && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          if (event.altKey) {
+            handleCopyStyle();
+          } else {
+            handleCopySelection();
+          }
+          return;
+        }
+
+        if ((event.key === 'v' || event.key === 'V') && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          handlePasteClipboard();
+          return;
+        }
+
+        if ((event.key === 'l' || event.key === 'L') && event.altKey && event.shiftKey) {
+          event.preventDefault();
+          handleToggleLock();
+          return;
+        }
+
+        if ((event.key === 'k' || event.key === 'K') && (event.metaKey || event.ctrlKey)) {
+          event.preventDefault();
+          handleLinkSelection();
+          return;
+        }
+
+        if ((event.key === 'n' || event.key === 'N') && (event.metaKey || event.ctrlKey) && event.altKey) {
+          event.preventDefault();
+          handleCommentSelection();
+          return;
+        }
+
+        const activeTargets =
+          unlockedSelectedObjects.length > 0 ? unlockedSelectedObjects : selectedObjects;
+
+        if (activeTargets.length === 0) {
+          toast({
+            title: 'Selection locked',
+            description: 'Unlock the selected objects to edit them.',
+          });
+          return;
+        }
+
+        const activeIds = activeTargets.map(object => object.id);
+
         const step = event.shiftKey ? CANVAS_SNAP_GRID * 2 : CANVAS_SNAP_GRID;
         if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown') {
           event.preventDefault();
           const deltaX = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0;
           const deltaY = event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0;
           const updates: Record<string, Partial<SlideObject>> = {};
-          selectedIds.forEach(id => {
-            const object = objectsMap.get(id);
-            if (!object) {
-              return;
+          activeTargets.forEach(object => {
+            const { x, y } = clampAndSnapPosition(
+              object.x + deltaX,
+              object.y + deltaY,
+              object.width,
+              object.height,
+            );
+            if (x !== object.x || y !== object.y) {
+              updates[object.id] = { x, y };
             }
-            const { x, y } = clampAndSnapPosition(object.x + deltaX, object.y + deltaY, object.width, object.height);
-            updates[id] = { x, y };
           });
           if (Object.keys(updates).length > 0) {
             onInteract();
@@ -2265,22 +3029,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
         if (event.key === 'Backspace' || event.key === 'Delete') {
           event.preventDefault();
-          onInteract();
-          selectedIds.forEach(id => {
-            const object = objectsMap.get(id);
-            if (!object) {
-              return;
-            }
-            if (isAtomObject(object) && onRemoveAtom) {
-              onRemoveAtom(object.props.atom.id);
-            } else if (
-              onRemoveObject &&
-              object.type !== 'accent-image' &&
-              !(object.type === 'text-box' && object.id === titleObjectId)
-            ) {
-              onRemoveObject(id);
-            }
-          });
+          handleDeleteSelection();
           return;
         }
 
@@ -2288,26 +3037,24 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           event.preventDefault();
           if (event.shiftKey) {
             onInteract();
-            onGroupObjects(selectedIds, null);
+            onGroupObjects(activeIds, null);
           } else {
             const groupId = `group-${Date.now()}`;
             onInteract();
-            onGroupObjects(selectedIds, groupId);
+            onGroupObjects(activeIds, groupId);
           }
           return;
         }
 
         if (event.key === ']' && (event.metaKey || event.ctrlKey)) {
           event.preventDefault();
-          onInteract();
-          onBringToFront(selectedIds);
+          handleLayerAction('front');
           return;
         }
 
         if (event.key === '[' && (event.metaKey || event.ctrlKey)) {
           event.preventDefault();
-          onInteract();
-          onSendToBack(selectedIds);
+          handleLayerAction('back');
           return;
         }
       },
@@ -2316,16 +3063,21 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         cancelEditingText,
         clampAndSnapPosition,
         editingTextState,
+        handleCommentSelection,
+        handleCopySelection,
+        handleCopyStyle,
+        handleDeleteSelection,
+        handleLayerAction,
+        handleLinkSelection,
+        handlePasteClipboard,
+        handleToggleLock,
         onUndo,
         onBulkUpdate,
-        onRemoveAtom,
-        onRemoveObject,
         onGroupObjects,
-        onBringToFront,
-        onSendToBack,
         onInteract,
-        objectsMap,
         selectedIds,
+        selectedObjects,
+        unlockedSelectedObjects,
       ],
     );
 
@@ -2608,9 +3360,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const isEvaluateModelsFeatureAtom = atomId === 'evaluate-models-feature';
             const shouldShowTitle = !isFeatureOverviewAtom && !isChartMakerAtom && !isEvaluateModelsFeatureAtom;
 
-          return (
+          const renderObject = () => (
             <div
-              key={object.id}
               className="absolute group"
               style={{
                 left: object.x,
@@ -2713,6 +3464,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onRequestPositionPanel={
                         onRequestPositionPanel ? () => onRequestPositionPanel(object.id) : undefined
                       }
+                      onContextMenu={event => handleContextMenuRequest(event, object.id)}
                     />
                   ) : isTableObject && tableState ? (
                     <ExhibitionTable
@@ -2820,7 +3572,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 )}
               </div>
 
-              {canEdit && isSelected && !isEditingTextBox &&
+              {canEdit && isSelected && !isEditingTextBox && !isSlideObjectLocked(object) &&
                 handleDefinitions.map(definition => (
                   <span
                     key={definition.handle}
@@ -2833,6 +3585,48 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   />
                 ))}
             </div>
+          );
+
+          if (isTableObject) {
+            return React.cloneElement(renderObject(), { key: object.id });
+          }
+
+          return (
+            <SlideObjectContextMenu
+              key={object.id}
+              canEdit={canEdit}
+              canAlign={hasSelection && !selectionLocked}
+              canLayer={hasSelection && !selectionLocked}
+              canApplyColors={canApplyColorsGlobally}
+              canAddAltText={selectedSupportsAltText}
+              hasClipboard={hasClipboardItems}
+              lockLabel={lockLabel}
+              onContextMenu={event => handleContextMenuRequest(event, object.id)}
+              onCopy={handleCopySelection}
+              onCopyStyle={handleCopyStyle}
+              onPaste={handlePasteClipboard}
+              onDelete={handleDeleteSelection}
+              onToggleLock={handleToggleLock}
+              onBringToFront={() => handleLayerAction('front')}
+              onBringForward={() => handleLayerAction('forward')}
+              onSendBackward={() => handleLayerAction('backward')}
+              onSendToBack={() => handleLayerAction('back')}
+              onAlign={handleAlignSelection}
+              onLink={handleLinkSelection}
+              onComment={handleCommentSelection}
+              onAltText={handleAltTextSelection}
+              onApplyColorsToAll={handleApplyColorsToAll}
+              onInfo={handleInfo}
+              disableDelete={selectionLocked}
+              disableLock={!hasSelection}
+              disableCopy={!hasSelection}
+              disableCopyStyle={!hasSelection}
+              disableLink={selectionLocked}
+              disableComment={selectionLocked}
+              disableApplyColors={!canApplyColorsGlobally}
+            >
+              {renderObject()}
+            </SlideObjectContextMenu>
           );
         })}
         </div>
