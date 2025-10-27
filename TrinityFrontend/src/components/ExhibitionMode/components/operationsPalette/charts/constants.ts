@@ -296,6 +296,9 @@ export const normalizeChartType = (type?: string): ChartType => {
     case 'area':
     case 'pie':
     case 'donut':
+    case 'blank':
+    case 'calendar':
+    case 'gantt':
       return type;
     case 'column':
       return 'verticalBar';

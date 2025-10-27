@@ -98,9 +98,10 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
   );
   const [config, setConfig] = useState<ChartConfig>(() => sanitiseConfig(initialConfig));
   const [showDataEditor, setShowDataEditor] = useState(false);
-  const [selectedDiagram, setSelectedDiagram] = useState<string>('calendar');
+  const [selectedDiagram, setSelectedDiagram] = useState<string | null>(null);
 
-  const selectedType = useMemo(() => config.type, [config.type]);
+  const selectedType = useMemo(() => normalizeChartType(config.type), [config.type]);
+  const isDiagramType = selectedType === 'blank' || selectedType === 'calendar' || selectedType === 'gantt';
 
   const palette = useMemo(
     () => COLOR_SCHEMES.find(scheme => scheme.id === config.colorScheme) ?? COLOR_SCHEMES[0],
@@ -138,6 +139,19 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     });
   }, [chartData, config, onStateChange]);
 
+  useEffect(() => {
+    if (isDiagramType) {
+      if (selectedDiagram !== selectedType) {
+        setSelectedDiagram(selectedType);
+      }
+      return;
+    }
+
+    if (selectedDiagram !== null) {
+      setSelectedDiagram(null);
+    }
+  }, [isDiagramType, selectedDiagram, selectedType]);
+
   const handleInsert = () => {
     onInsert({
       data: chartData.map(entry => ({ ...entry })),
@@ -158,7 +172,13 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     syncEditorState(rows, nextConfig);
   };
 
+  const insertLabel = isDiagramType ? 'Insert diagram' : 'Insert chart';
+
   const renderPreview = () => {
+    if (isDiagramType) {
+      return renderDiagramPreview();
+    }
+
     if (chartData.length === 0) {
       return (
         <div className="flex h-56 items-center justify-center rounded-2xl border border-dashed border-border/50 text-xs text-muted-foreground">
@@ -320,21 +340,95 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     );
   };
 
-  const renderLegend = () => (
-    <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-[0.7rem] font-medium text-muted-foreground">
-      {chartData.map((item, index) => (
-        <span key={item.label} className="flex items-center gap-2">
-          <span
-            className="h-3 w-3 rounded-sm"
-            style={{ backgroundColor: palette.colors[index % palette.colors.length] }}
-          />
-          {item.label}
-        </span>
-      ))}
-    </div>
+  const renderLegend = () => {
+    if (isDiagramType) {
+      return null;
+    }
+
+    return (
+      <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-[0.7rem] font-medium text-muted-foreground">
+        {chartData.map((item, index) => (
+          <span key={item.label} className="flex items-center gap-2">
+            <span
+              className="h-3 w-3 rounded-sm"
+              style={{ backgroundColor: palette.colors[index % palette.colors.length] }}
+            />
+            {item.label}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
+  const diagramSampleData = useMemo(
+    () => [
+      { label: 'Q1', value: 65 },
+      { label: 'Q2', value: 78 },
+      { label: 'Q3', value: 90 },
+      { label: 'Q4', value: 72 },
+    ],
+    [],
   );
 
+  const renderDiagramPreview = () => {
+    switch (selectedType) {
+      case 'blank':
+        return (
+          <div className="flex h-56 items-center justify-center rounded-2xl border border-dashed border-border/60 bg-muted/10">
+            <div className="text-center text-xs text-muted-foreground">
+              <p className="text-sm font-semibold text-foreground">Blank diagram</p>
+              <p className="mt-1 text-xs text-muted-foreground">Start with a clean canvas for custom layouts.</p>
+            </div>
+          </div>
+        );
+      case 'calendar':
+        return (
+          <div className="flex h-56 items-center justify-center rounded-2xl border border-border/60 bg-card">
+            <div className="grid h-full w-full max-w-[19rem] grid-cols-7 gap-1 p-4 text-[0.65rem]">
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, dayIndex) => (
+                <div key={day} className="flex flex-col items-center gap-1">
+                  <span className="text-[0.65rem] font-semibold text-muted-foreground">{day}</span>
+                  {[...Array(4)].map((_, index) => (
+                    <span
+                      key={`${day}-${index}`}
+                      className="flex h-8 w-full items-center justify-center rounded border border-border/50 text-[0.6rem]"
+                      style={{ backgroundColor: `${palette.colors[(dayIndex + index) % palette.colors.length]}15` }}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      case 'gantt':
+        return (
+          <div className="flex h-56 items-center justify-center rounded-2xl border border-border/60 bg-card">
+            <div className="flex w-full max-w-[22rem] flex-col gap-3 p-5">
+              {diagramSampleData.map((item, index) => (
+                <div key={item.label} className="flex items-center gap-3">
+                  <span className="w-10 text-[0.65rem] font-semibold text-muted-foreground">{item.label}</span>
+                  <div className="relative h-8 flex-1 rounded-full bg-muted/40">
+                    <div
+                      className="absolute top-0 h-full rounded-full"
+                      style={{
+                        left: `${index * 10}%`,
+                        width: `${Math.max(item.value, 20)}%`,
+                        backgroundColor: palette.colors[index % palette.colors.length],
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
   const handleChartTypeChange = (type: ChartType) => {
+    setSelectedDiagram(null);
     setConfig(prev => ({ ...prev, type }));
   };
 
@@ -417,7 +511,10 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                     <button
                       key={diagram.id}
                       type="button"
-                      onClick={() => setSelectedDiagram(diagram.id)}
+                      onClick={() => {
+                        setSelectedDiagram(diagram.id);
+                        setConfig(prev => ({ ...prev, type: diagram.id as ChartType }));
+                      }}
                       className={cn(
                         'group relative flex h-24 flex-col items-start justify-between rounded-2xl border-2 p-4 text-left transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
                         isSelected
@@ -579,12 +676,24 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
 
             <div className="rounded-2xl border border-dashed border-border/50 bg-muted/10 p-5 text-center">
               <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
-                <Wand2 className="h-5 w-5 text-primary" />
-                <span>Need to fine-tune the data? Open the rich data editor for full control.</span>
+                <Wand2 className={cn('h-5 w-5 text-primary', isDiagramType && 'opacity-50')} />
+                <span>
+                  {isDiagramType
+                    ? 'Switch to a chart style to edit the underlying data.'
+                    : 'Need to fine-tune the data? Open the rich data editor for full control.'}
+                </span>
               </div>
               <Button
-                className="mt-3 w-full rounded-xl bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-sm font-semibold text-white shadow-lg transition-transform hover:scale-105"
-                onClick={() => setShowDataEditor(true)}
+                className={cn(
+                  'mt-3 w-full rounded-xl bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-sm font-semibold text-white shadow-lg transition-transform',
+                  isDiagramType ? 'cursor-not-allowed opacity-60' : 'hover:scale-105',
+                )}
+                onClick={() => {
+                  if (!isDiagramType) {
+                    setShowDataEditor(true);
+                  }
+                }}
+                disabled={isDiagramType}
               >
                 <Database className="mr-2 h-4 w-4" /> Edit chart data
                 <MousePointerClick className="ml-2 h-4 w-4 animate-pulse" />
@@ -603,7 +712,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
           >
             <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
             <span className="relative z-10 flex items-center justify-center gap-2">
-              <TrendingUp className="h-5 w-5 animate-pulse" /> Insert chart
+              <TrendingUp className="h-5 w-5 animate-pulse" /> {insertLabel}
               <Zap className="h-4 w-4" />
             </span>
           </Button>

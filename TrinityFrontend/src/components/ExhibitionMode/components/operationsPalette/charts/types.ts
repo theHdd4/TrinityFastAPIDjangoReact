@@ -6,7 +6,10 @@ export type ChartType =
   | 'line'
   | 'area'
   | 'pie'
-  | 'donut';
+  | 'donut'
+  | 'blank'
+  | 'calendar'
+  | 'gantt';
 
 export interface ChartDataRow {
   label: string;
