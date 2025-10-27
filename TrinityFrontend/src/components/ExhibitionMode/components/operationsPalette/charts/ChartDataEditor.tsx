@@ -95,15 +95,20 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 }) => {
   const [chartData, setChartData] = useState<ChartDataDraft[]>(() => sanitiseData(initialData));
   const [config, setConfig] = useState<ChartConfig>(() => sanitiseConfig(initialConfig));
+  const [isInitialised, setIsInitialised] = useState(false);
 
   useEffect(() => {
-    if (!open) {
+    if (open && !isInitialised) {
+      setChartData(sanitiseData(initialData));
+      setConfig(sanitiseConfig(initialConfig));
+      setIsInitialised(true);
       return;
     }
 
-    setChartData(sanitiseData(initialData));
-    setConfig(sanitiseConfig(initialConfig));
-  }, [open, initialData, initialConfig]);
+    if (!open && isInitialised) {
+      setIsInitialised(false);
+    }
+  }, [open, initialData, initialConfig, isInitialised]);
 
   const numericData = useMemo<ChartDataRow[]>(
     () =>
