@@ -56,11 +56,16 @@ const legendPositions = [
   { id: 'right' as ChartConfig['legendPosition'], name: 'Right' },
 ];
 
-const sanitiseData = (rows?: ChartDataRow[]): ChartDataRow[] => {
+type ChartDataDraft = { label: string; value: string };
+
+const sanitiseData = (rows?: ChartDataRow[]): ChartDataDraft[] => {
   const source = rows && rows.length ? rows : DEFAULT_CHART_DATA;
   return source.map(row => ({
     label: row.label ?? '',
-    value: Number.isFinite(row.value) ? row.value : 0,
+    value:
+      row.value === undefined || row.value === null || Number.isNaN(Number(row.value))
+        ? '0'
+        : Number(row.value).toString(),
   }));
 };
 
@@ -86,7 +91,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   initialConfig,
   onApply,
 }) => {
-  const [chartData, setChartData] = useState<ChartDataRow[]>(() => sanitiseData(initialData));
+  const [chartData, setChartData] = useState<ChartDataDraft[]>(() => sanitiseData(initialData));
   const [config, setConfig] = useState<ChartConfig>(() => sanitiseConfig(initialConfig));
 
   useEffect(() => {
@@ -96,25 +101,32 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
     setChartData(sanitiseData(initialData));
     setConfig(sanitiseConfig(initialConfig));
-  }, [open]);
+  }, [open, initialData, initialConfig]);
+
+  const numericData = useMemo<ChartDataRow[]>(
+    () =>
+      chartData.map(item => ({
+        label: item.label,
+        value: Number.isFinite(Number.parseFloat(item.value)) ? Number.parseFloat(item.value) : 0,
+      })),
+    [chartData],
+  );
 
   const colors = useMemo(() => {
     const scheme = colorSchemes.find(s => s.id === config.colorScheme);
     return scheme?.colors ?? colorSchemes[0].colors;
   }, [config.colorScheme]);
 
-  const emitApply = (nextData: ChartDataRow[], nextConfig: ChartConfig) => {
-    const normalisedData = nextData.map(item => ({ label: item.label, value: Number(item.value) || 0 }));
-    const normalisedConfig: ChartConfig = {
-      ...nextConfig,
-      type: nextConfig.type,
-      legendPosition: nextConfig.legendPosition,
-    };
-    onApply?.(normalisedData, normalisedConfig);
+  const emitApply = (nextData: ChartDataDraft[], nextConfig: ChartConfig) => {
+    const normalisedData = nextData.map(item => ({
+      label: item.label,
+      value: Number.isFinite(Number.parseFloat(item.value)) ? Number.parseFloat(item.value) : 0,
+    }));
+    onApply?.(normalisedData, nextConfig);
   };
 
   const addRow = () => {
-    const next = [...chartData, { label: 'New Item', value: 0 }];
+    const next = [...chartData, { label: 'New Item', value: '0' }];
     setChartData(next);
     emitApply(next, config);
   };
@@ -125,8 +137,10 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
         return row;
       }
       if (field === 'value') {
-        const numeric = typeof value === 'number' ? value : parseFloat(value as string);
-        return { ...row, value: Number.isFinite(numeric) ? numeric : 0 };
+        if (typeof value === 'number') {
+          return { ...row, value: Number.isFinite(value) ? value.toString() : row.value };
+        }
+        return { ...row, value };
       }
       return { ...row, label: typeof value === 'string' ? value : String(value) };
     });
@@ -151,7 +165,10 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   };
 
   const handleSave = () => {
-    const normalisedData = chartData.map(item => ({ label: item.label, value: Number(item.value) || 0 }));
+    const normalisedData = chartData.map(item => ({
+      label: item.label,
+      value: Number.isFinite(Number.parseFloat(item.value)) ? Number.parseFloat(item.value) : 0,
+    }));
     const normalisedConfig: ChartConfig = { ...config };
     onApply?.(normalisedData, normalisedConfig);
     onSave(normalisedData, normalisedConfig);
@@ -159,14 +176,29 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   };
 
   const renderChartPreview = () => {
+    if (numericData.length === 0) {
+      return (
+        <div className="flex h-64 w-full items-center justify-center text-sm text-muted-foreground">
+          Add data to preview your chart.
+        </div>
+      );
+    }
+
     if (config.type === 'pie' || config.type === 'donut') {
-      const total = chartData.reduce((sum, item) => sum + item.value, 0) || 1;
+      const total = numericData.reduce((sum, item) => sum + item.value, 0);
+      if (total <= 0) {
+        return (
+          <div className="flex h-64 w-full items-center justify-center text-sm text-muted-foreground">
+            Add values above zero to preview this chart.
+          </div>
+        );
+      }
       let currentAngle = 0;
 
       return (
         <div className="relative flex h-64 w-full items-center justify-center">
           <svg width="200" height="200" viewBox="0 0 200 200" className="-rotate-90">
-            {chartData.map((item, index) => {
+            {numericData.map((item, index) => {
               const percentage = (item.value / total) * 100;
               const angle = (percentage / 100) * 360;
               const startAngle = currentAngle;
@@ -192,7 +224,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
               return (
                 <path
-                  key={`${item.label}-${index}`}
+                  key={`${item.label || 'slice'}-${index}`}
                   d={pathData}
                   fill={colors[index % colors.length]}
                   className="transition-all duration-300 hover:opacity-80"
@@ -205,7 +237,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     }
 
     if (config.type === 'verticalBar' || config.type === 'horizontalBar') {
-      const maxValue = Math.max(...chartData.map(item => item.value), 1);
+      const maxValue = Math.max(...numericData.map(item => item.value), 0);
       const isBar = config.type === 'horizontalBar';
 
       return (
@@ -215,26 +247,35 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
             isBar ? 'flex-col justify-center' : 'items-end justify-center',
           )}
         >
-          {chartData.map((item, index) => {
-            const height = maxValue === 0 ? 0 : (item.value / maxValue) * 100;
+          {numericData.map((item, index) => {
+            const ratio = maxValue === 0 ? 0 : (item.value / maxValue) * 100;
             return (
               <div
-                key={`${item.label}-${index}`}
-                className={cn(
-                  'flex gap-2',
-                  isBar ? 'flex-row items-center' : 'flex-col items-center justify-end',
-                )}
+                key={`${item.label || 'bar'}-${index}`}
+                className={cn('flex gap-2', isBar ? 'flex-row items-center' : 'flex-col items-center justify-end')}
               >
                 <div
                   className="rounded-lg transition-all duration-300 hover:opacity-80"
                   style={{
                     backgroundColor: colors[index % colors.length],
-                    [isBar ? 'width' : 'height']: `${height}%`,
+                    [isBar ? 'width' : 'height']: `${ratio}%`,
                     [isBar ? 'height' : 'width']: '40px',
                     [isBar ? 'minWidth' : 'minHeight']: '20px',
                   }}
                 />
-                <span className="text-xs font-medium text-muted-foreground">{item.label}</span>
+                {(config.showLabels || config.showValues) && (
+                  <div
+                    className={cn(
+                      'flex flex-col gap-1 text-xs font-medium',
+                      isBar ? 'items-start' : 'items-center text-muted-foreground',
+                    )}
+                  >
+                    {config.showValues && (
+                      <span className="text-foreground">{Number.isFinite(item.value) ? item.value : 0}</span>
+                    )}
+                    {config.showLabels && <span className="text-muted-foreground">{item.label || 'Label'}</span>}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -243,43 +284,50 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     }
 
     if (config.type === 'line' || config.type === 'area') {
-      const maxValue = Math.max(...chartData.map(item => item.value), 1);
-      const points = chartData
+      const maxValue = Math.max(...numericData.map(item => item.value), 0);
+      const points = numericData
         .map((item, index) => {
-          const x = chartData.length <= 1 ? 0 : (index / (chartData.length - 1)) * 300;
+          const x = numericData.length <= 1 ? 0 : (index / (numericData.length - 1)) * 300;
           const y = 200 - (maxValue === 0 ? 0 : (item.value / maxValue) * 180);
           return `${x},${y}`;
         })
         .join(' ');
 
       return (
-        <div className="flex h-64 w-full items-center justify-center">
+        <div className="flex h-64 w-full flex-col items-center justify-center gap-4">
           <svg width="320" height="220" viewBox="0 0 320 220">
             {config.type === 'area' && (
               <polygon points={`0,200 ${points} 300,200`} fill={`${colors[0]}33`} stroke="none" />
             )}
-            <polyline
-              points={points}
-              fill="none"
-              stroke={colors[0]}
-              strokeWidth="3"
-              className="transition-all duration-300"
-            />
-            {chartData.map((item, index) => {
-              const x = chartData.length <= 1 ? 0 : (index / (chartData.length - 1)) * 300;
+            <polyline points={points} fill="none" stroke={colors[0]} strokeWidth="3" className="transition-all duration-300" />
+            {numericData.map((item, index) => {
+              const x = numericData.length <= 1 ? 0 : (index / (numericData.length - 1)) * 300;
               const y = 200 - (maxValue === 0 ? 0 : (item.value / maxValue) * 180);
               return (
-                <circle
-                  key={`${item.label}-${index}`}
-                  cx={x}
-                  cy={y}
-                  r="5"
-                  fill={colors[index % colors.length]}
-                  className="transition-all duration-300 hover:r-7"
-                />
+                <g key={`${item.label || 'point'}-${index}`}>
+                  <circle
+                    cx={x}
+                    cy={y}
+                    r="5"
+                    fill={colors[index % colors.length]}
+                    className="transition-all duration-300 hover:r-7"
+                  />
+                  {config.showValues && (
+                    <text x={x} y={y - 12} textAnchor="middle" className="fill-foreground text-xs font-semibold">
+                      {Number.isFinite(item.value) ? item.value : 0}
+                    </text>
+                  )}
+                </g>
               );
             })}
           </svg>
+          {config.showLabels && (
+            <div className="flex w-full justify-between px-8 text-xs text-muted-foreground">
+              {numericData.map((item, index) => (
+                <span key={`${item.label || 'axis'}-${index}`}>{item.label || `Item ${index + 1}`}</span>
+              ))}
+            </div>
+          )}
         </div>
       );
     }
@@ -289,7 +337,10 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={isOpen => !isOpen && onClose()}>
-      <DialogContent className="h-[85vh] max-w-6xl gap-0 overflow-hidden border-2 border-border/50 bg-gradient-to-br from-background via-background/98 to-primary/5 p-0 shadow-2xl">
+      <DialogContent
+        hideCloseButton
+        className="h-[85vh] max-w-6xl gap-0 overflow-hidden border-2 border-border/50 bg-gradient-to-br from-background via-background/98 to-primary/5 p-0 shadow-2xl"
+      >
         <DialogHeader className="relative overflow-hidden border-b border-border/50 bg-gradient-to-br from-primary/5 via-transparent to-transparent px-8 pb-6 pt-8">
           <div className="absolute inset-0 bg-grid-white/5 [mask-image:linear-gradient(0deg,transparent,black)]" />
           <div className="relative flex items-start justify-between">
@@ -338,7 +389,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                 </div>
 
                 {chartData.map((row, index) => (
-                  <div key={`${row.label}-${index}`} className="group grid animate-fade-in grid-cols-[1fr,140px,48px] gap-3">
+                  <div key={index} className="group grid animate-fade-in grid-cols-[1fr,140px,48px] gap-3">
                     <Input
                       value={row.label}
                       onChange={event => updateRow(index, 'label', event.target.value)}
@@ -347,7 +398,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                     />
                     <Input
                       type="number"
-                      value={Number.isFinite(row.value) ? row.value : 0}
+                      value={row.value}
                       onChange={event => updateRow(index, 'value', event.target.value)}
                       className="h-11 rounded-xl border-2 border-border/50 bg-card/50 transition-all hover:border-primary/50 focus:border-primary"
                       placeholder="0"
@@ -397,10 +448,15 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                       'flex-col items-end': config.legendPosition === 'right',
                     })}
                   >
-                    {chartData.map((item, index) => (
-                      <div key={`${item.label}-${index}`} className="flex items-center gap-2">
+                    {numericData.map((item, index) => (
+                      <div key={`${item.label || 'legend'}-${index}`} className="flex items-center gap-2">
                         <div className="h-3 w-3 rounded-sm" style={{ backgroundColor: colors[index % colors.length] }} />
-                        <span>{item.label}</span>
+                        <div className="flex flex-col text-xs">
+                          {config.showLabels && <span className="font-medium text-foreground">{item.label || `Item ${index + 1}`}</span>}
+                          {config.showValues && (
+                            <span className="text-muted-foreground">{Number.isFinite(item.value) ? item.value : 0}</span>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
