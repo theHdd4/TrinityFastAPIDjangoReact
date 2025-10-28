@@ -628,10 +628,12 @@ async def save_createcolumn_dataframe(
     project_name: str = Body(None),
     user_id: str = Body(None),
     project_id: int = Body(None),
-    operation_details: str = Body(None)
+    operation_details: str = Body(None),
+    overwrite_original: bool = Body(False)
 ):
     """
     Save a created column dataframe (CSV) to MinIO as Arrow file and save metadata to MongoDB.
+    If overwrite_original is True, overwrites the original input file.
     """
     import pandas as pd
     import pyarrow as pa
@@ -646,22 +648,36 @@ async def save_createcolumn_dataframe(
     print(f"🔍 DEBUG: project_name = '{project_name}'")
     print(f"🔍 DEBUG: user_id = '{user_id}'")
     print(f"🔍 DEBUG: project_id = {project_id}")
-    print(f"🔍 DEBUG: operation_details = '{operation_details[:200]}...' (truncated)")
+    print(f"🔍 DEBUG: operation_details = '{operation_details[:200]}...' (truncated)" if operation_details else "🔍 DEBUG: operation_details = None")
     print(f"🔍 DEBUG: filename = '{filename}'")
+    print(f"🔍 DEBUG: overwrite_original = {overwrite_original}")
 
     try:
         # Parse CSV to DataFrame
         df = pd.read_csv(io.StringIO(csv_data))
-        # Generate unique file key if not provided
-        if not filename:
-            file_id = str(uuid.uuid4())[:8]
-            filename = f"{file_id}_createcolumn.arrow"
-        if not filename.endswith('.arrow'):
-            filename += '.arrow'
-        # Get consistent object prefix and construct full path
-        prefix = await get_object_prefix()
-        filename = f"{prefix}create-data/{filename}"
-        print(f"[DEBUG] Saving to MinIO: bucket={MINIO_BUCKET}, filename={filename}")
+        
+        # Handle filename based on overwrite_original flag
+        if overwrite_original:
+            # When overwriting, use the filename as-is (should be the original file path)
+            # Remove .arrow extension if present, we'll add it back later
+            if filename.endswith('.arrow'):
+                final_filename = filename
+            else:
+                final_filename = filename + '.arrow'
+            print(f"[DEBUG] Overwriting original file: {final_filename}")
+        else:
+            # Normal save - create new file in create-data folder
+            if not filename:
+                file_id = str(uuid.uuid4())[:8]
+                filename = f"{file_id}_createcolumn.arrow"
+            if not filename.endswith('.arrow'):
+                filename += '.arrow'
+            # Get consistent object prefix and construct full path
+            prefix = await get_object_prefix()
+            final_filename = f"{prefix}create-data/{filename}"
+            print(f"[DEBUG] Creating new file: {final_filename}")
+        
+        print(f"[DEBUG] Saving to MinIO: bucket={MINIO_BUCKET}, filename={final_filename}")
         # Save to MinIO
         table = pa.Table.from_pandas(df)
         arrow_buffer = pa.BufferOutputStream()
@@ -670,13 +686,13 @@ async def save_createcolumn_dataframe(
         arrow_bytes = arrow_buffer.getvalue().to_pybytes()
         minio_client.put_object(
             MINIO_BUCKET,
-            filename,
+            final_filename,
             data=io.BytesIO(arrow_bytes),
             length=len(arrow_bytes),
             content_type="application/octet-stream",
         )
         # Cache in Redis for 1 hour
-        redis_client.setex(filename, 3600, arrow_bytes)
+        redis_client.setex(final_filename, 3600, arrow_bytes)
         
         # Save operation details to MongoDB if provided
         mongo_save_result = None
@@ -687,10 +703,11 @@ async def save_createcolumn_dataframe(
                 
                 # Get the input file from operation details
                 input_file = operation_data.get("input_file", "unknown_input_file")
-                operation_data["saved_file"] = filename
+                operation_data["saved_file"] = final_filename
                 operation_data["file_shape"] = df.shape
                 operation_data["file_columns"] = list(df.columns)
                 operation_data["saved_at"] = datetime.utcnow()
+                operation_data["overwrite_original"] = overwrite_original
                 
                 # Save to MongoDB
                 mongo_save_result = await save_createandtransform_configs(
@@ -709,11 +726,14 @@ async def save_createcolumn_dataframe(
                 # Don't fail the entire operation if MongoDB save fails
                 mongo_save_result = {"status": "error", "error": str(mongo_error)}
         
+        message = "Original file updated successfully" if overwrite_original else "DataFrame saved successfully"
+        
         return {
-            "result_file": filename,
+            "result_file": final_filename,
             "shape": df.shape,
             "columns": list(df.columns),
-            "message": "DataFrame saved successfully",
+            "message": message,
+            "overwrite_original": overwrite_original,
             "mongo_save_result": mongo_save_result
         }
     except Exception as e:

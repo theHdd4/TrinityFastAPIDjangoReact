@@ -5,6 +5,8 @@ import { VALIDATE_API } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import {
   Table,
   TableBody,
@@ -111,6 +113,8 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveFileName, setSaveFileName] = useState('');
   
   // Sorting and filtering state
   const [sortColumn, setSortColumn] = useState<string | null>(null);
@@ -661,13 +665,25 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
     fetchData(page);
   };
 
-  // Save DataFrame handler
-  const handleSaveDataFrame = async () => {
+  // Open save modal with default filename
+  const handleSaveDataFrame = () => {
+    if (!rawCSV) return;
+    
+    // Generate default filename
+    const defaultFilename = `merge_${file1?.split('/').pop() || 'file1'}_${file2?.split('/').pop() || 'file2'}_${Date.now()}`;
+    setSaveFileName(defaultFilename);
+    setShowSaveModal(true);
+  };
+
+  // Actually save the DataFrame with the chosen filename
+  const confirmSaveDataFrame = async () => {
+    if (!rawCSV) return;
+    
     setSaveLoading(true);
     setSaveError(null);
     setSaveSuccess(false);
     try {
-      const filename = `merge_${file1?.split('/').pop() || 'file1'}_${file2?.split('/').pop() || 'file2'}_${Date.now()}`;
+      const filename = saveFileName.trim() || `merge_${file1?.split('/').pop() || 'file1'}_${file2?.split('/').pop() || 'file2'}_${Date.now()}`;
       const response = await fetch(`${MERGE_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -679,6 +695,7 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
       const result = await response.json();
       setSaveSuccess(true);
       setIsSaved(true);
+      setShowSaveModal(false);
       // Update the settings to reflect the saved file
       // This would need to be handled by the parent component
     } catch (err) {
@@ -1122,7 +1139,7 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
                     disabled={saveLoading}
                     className="bg-green-600 hover:bg-green-700 text-white"
                   >
-                    {saveLoading ? 'Saving...' : 'Save DataFrame'}
+                    {saveLoading ? 'Saving...' : 'Save As'}
                   </Button>
                   {saveError && <span className="text-red-600 text-sm">{saveError}</span>}
                   {saveSuccess && <span className="text-green-600 text-sm">Saved!</span>}
@@ -1198,6 +1215,47 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
           </CardContent>
         </Card>
       )}
+
+      {/* Save DataFrame Modal */}
+      <Dialog open={showSaveModal} onOpenChange={setShowSaveModal}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Save DataFrame</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <label className="text-sm font-medium text-gray-700 mb-2 block">
+              File Name
+            </label>
+            <Input
+              value={saveFileName}
+              onChange={(e) => setSaveFileName(e.target.value)}
+              placeholder="Enter file name"
+              className="w-full"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && saveFileName.trim()) {
+                  confirmSaveDataFrame();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowSaveModal(false)}
+              disabled={saveLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSaveDataFrame}
+              disabled={saveLoading || !saveFileName.trim()}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              {saveLoading ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

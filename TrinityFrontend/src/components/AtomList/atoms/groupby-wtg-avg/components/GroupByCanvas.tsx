@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent } from '@/components/ui/card';
 import { X, Database, Settings2, BarChart, ChevronUp, ChevronDown } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { GROUPBY_API } from '@/lib/api';
 import Table from '@/templates/tables/table';
@@ -73,6 +74,8 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveFileName, setSaveFileName] = useState('');
   // Get configuration state from global store
   const configCollapsed = settings.configCollapsed || false;
   const currentPage = settings.currentPage || 1;
@@ -89,16 +92,28 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     return [headers.join(','), ...rows].join('\n');
   };
 
-  // Save DataFrame handler
-  const handleSaveDataFrame = async () => {
+  // Open save modal with default filename
+  const handleSaveDataFrame = () => {
     const dataToSave = allResults.length ? allResults : results;
-  if (!dataToSave || dataToSave.length === 0) return;
+    if (!dataToSave || dataToSave.length === 0) return;
+    
+    // Generate default filename
+    const defaultFilename = `groupby_${settings?.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
+    setSaveFileName(defaultFilename);
+    setShowSaveModal(true);
+  };
+
+  // Actually save the DataFrame with the chosen filename
+  const confirmSaveDataFrame = async () => {
+    const dataToSave = allResults.length ? allResults : results;
+    if (!dataToSave || dataToSave.length === 0) return;
+    
     setSaveLoading(true);
     setSaveError(null);
     setSaveSuccess(false);
     try {
       const csv_data = resultsToCSV(dataToSave);
-      const filename = `groupby_${settings?.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
+      const filename = saveFileName.trim() || `groupby_${settings?.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
       const response = await fetch(`${GROUPBY_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -108,8 +123,8 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
         throw new Error(`Save failed: ${response.statusText}`);
       }
       setSaveSuccess(true);
-    // Mark as saved if needed or update settings
       toast({ title: 'Success', description: 'DataFrame saved successfully.' });
+      setShowSaveModal(false);
     } catch (err: any) {
       const msg = err instanceof Error ? err.message : 'Failed to save DataFrame';
       setSaveError(msg);
@@ -1233,7 +1248,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                     disabled={saveLoading}
                     className="bg-blue-600 hover:bg-blue-700 text-white"
                   >
-                    {saveLoading ? 'Saving...' : 'Save DataFrame'}
+                    {saveLoading ? 'Saving...' : 'Save As'}
                   </Button>
                   {saveError && <span className="text-red-600 text-sm">{saveError}</span>}
                   {saveSuccess && <span className="text-green-600 text-sm">Saved!</span>}
@@ -1311,6 +1326,47 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
       ) : (
         <div className="p-4 text-gray-500">No results to display. Please Configure GroupBy options.</div>
       )}
+
+      {/* Save DataFrame Modal */}
+      <Dialog open={showSaveModal} onOpenChange={setShowSaveModal}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Save DataFrame</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <label className="text-sm font-medium text-gray-700 mb-2 block">
+              File Name
+            </label>
+            <Input
+              value={saveFileName}
+              onChange={(e) => setSaveFileName(e.target.value)}
+              placeholder="Enter file name"
+              className="w-full"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && saveFileName.trim()) {
+                  confirmSaveDataFrame();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowSaveModal(false)}
+              disabled={saveLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSaveDataFrame}
+              disabled={saveLoading || !saveFileName.trim()}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {saveLoading ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

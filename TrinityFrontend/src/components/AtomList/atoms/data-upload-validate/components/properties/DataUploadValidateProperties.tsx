@@ -55,9 +55,16 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   const [skipFetch, setSkipFetch] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [bypassMasterUpload, setBypassMasterUpload] = useState<boolean>(settings.bypassMasterUpload || false);
+  const [enableColumnClassifier, setEnableColumnClassifier] = useState<boolean>(settings.enableColumnClassifier || false);
   const [validatorId, setValidatorId] = useState<string>(
     settings.validatorId || "",
   );
+  
+  // Column Classifier Dimension Management State
+  const [showInput, setShowInput] = useState(false);
+  const [newDim, setNewDim] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [columnDataTypes, setColumnDataTypes] = useState<
     Record<string, string>
   >({});
@@ -131,6 +138,10 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   useEffect(() => {
     setBypassMasterUpload(settings.bypassMasterUpload || false);
   }, [settings.bypassMasterUpload]);
+
+  useEffect(() => {
+    setEnableColumnClassifier(settings.enableColumnClassifier || false);
+  }, [settings.enableColumnClassifier]);
 
   // Load existing configuration if validator id already present
   useEffect(() => {
@@ -330,6 +341,69 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   const handleBypassToggle = (val: boolean) => {
     setBypassMasterUpload(val);
     updateSettings(atomId, { bypassMasterUpload: val });
+  };
+
+  const handleColumnClassifierToggle = (val: boolean) => {
+    setEnableColumnClassifier(val);
+    updateSettings(atomId, { enableColumnClassifier: val });
+  };
+
+  const addDimension = () => {
+    const dim = newDim.trim().toLowerCase();
+    const currentDims = settings.classifierDimensions || [];
+    const allCustomDims = settings.classifierCustomDimensionsList || [];
+    
+    // Allow up to 5 custom dimensions (in addition to unattributed, market, product)
+    const maxCustomDimensions = 5;
+    
+    // Add to both selected dimensions and custom dimensions list
+    if (dim && !allCustomDims.includes(dim) && allCustomDims.length < maxCustomDimensions) {
+      updateSettings(atomId, {
+        classifierDimensions: [...currentDims, dim],
+        classifierCustomDimensionsList: [...allCustomDims, dim]
+      });
+    }
+    setNewDim('');
+    setShowInput(false);
+  };
+
+  const saveDimensions = async () => {
+    const classifierData = settings.classifierData;
+    if (!classifierData || classifierData.files.length === 0) {
+      setError('Classify a dataframe first');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const dims = ['unattributed', ...(settings.classifierDimensions || []).filter(d => d !== 'unattributed')];
+      updateSettings(atomId, {
+        classifierEnableDimensionMapping: true,
+        classifierDimensions: dims
+      });
+      
+      if (classifierData.files.length) {
+        const updatedFiles = classifierData.files.map(file => {
+          const identifiers = file.columns
+            .filter(c => c.category === 'identifiers')
+            .map(c => c.name);
+          const custom = dims.reduce((acc, d) => {
+            acc[d] = d === 'unattributed' ? identifiers : [];
+            return acc;
+          }, {} as { [key: string]: string[] });
+          return { ...file, customDimensions: custom };
+        });
+        updateSettings(atomId, {
+          classifierData: { ...classifierData, files: updatedFiles }
+        });
+      }
+      toast({ title: 'Dimensions Saved Successfully' });
+    } catch (e: any) {
+      setError(e.message);
+      toast({ title: 'Unable to Save Dimensions', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDataTypeChange = (column: string, value: string) => {
@@ -808,6 +882,123 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
             className="data-[state=checked]:bg-[#458EE2]"
           />
         </div>
+        <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+          <span className="text-sm font-medium text-gray-700">Enable column classifier</span>
+          <Switch
+            checked={enableColumnClassifier}
+            onCheckedChange={handleColumnClassifierToggle}
+            className="data-[state=checked]:bg-[#458EE2]"
+          />
+        </div>
+
+        {/* Column Classifier Dimension Settings - Only show when classifier is enabled */}
+        {enableColumnClassifier && settings.classifierData && settings.classifierData.files.length > 0 && (
+          <div className="p-4 border-b border-gray-200 bg-blue-50">
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-2">
+                  Business Dimensions
+                </label>
+                <div className="space-y-2">
+                  <div className="mb-1">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox checked={true} disabled={true} />
+                      <label className="text-sm text-gray-700">Unattributed</label>
+                    </div>
+                  </div>
+                  
+                  {/* Market option */}
+                  <div className="mb-1">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox 
+                        checked={(settings.classifierDimensions || []).includes('market')}
+                        onCheckedChange={(checked) => {
+                          const currentDims = settings.classifierDimensions || [];
+                          if (checked) {
+                            updateSettings(atomId, { classifierDimensions: [...currentDims, 'market'] });
+                          } else {
+                            updateSettings(atomId, { classifierDimensions: currentDims.filter(d => d !== 'market') });
+                          }
+                        }}
+                      />
+                      <label className="text-sm text-gray-700">Market</label>
+                    </div>
+                  </div>
+                  
+                  {/* Product option */}
+                  <div className="mb-1">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox 
+                        checked={(settings.classifierDimensions || []).includes('product')}
+                        onCheckedChange={(checked) => {
+                          const currentDims = settings.classifierDimensions || [];
+                          if (checked) {
+                            updateSettings(atomId, { classifierDimensions: [...currentDims, 'product'] });
+                          } else {
+                            updateSettings(atomId, { classifierDimensions: currentDims.filter(d => d !== 'product') });
+                          }
+                        }}
+                      />
+                      <label className="text-sm text-gray-700">Product</label>
+                    </div>
+                  </div>
+                  
+                  {/* Custom dimensions */}
+                  {(settings.classifierCustomDimensionsList || []).map(dim => (
+                    <div key={dim} className="mb-1">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox 
+                          checked={(settings.classifierDimensions || []).includes(dim)}
+                          onCheckedChange={(checked) => {
+                            const currentDims = settings.classifierDimensions || [];
+                            if (checked) {
+                              updateSettings(atomId, { classifierDimensions: [...currentDims, dim] });
+                            } else {
+                              updateSettings(atomId, { classifierDimensions: currentDims.filter(d => d !== dim) });
+                            }
+                          }}
+                        />
+                        <label className="text-sm text-gray-700">{dim}</label>
+                      </div>
+                    </div>
+                  ))}
+                  {(settings.classifierCustomDimensionsList?.length || 0) < 5 && !showInput && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowInput(true)}
+                      className="flex items-center mt-2"
+                    >
+                      <Plus className="w-4 h-4 mr-1" /> Add Dimension
+                    </Button>
+                  )}
+                  {showInput && (
+                    <div className="flex items-center space-x-2 mt-2">
+                      <Input
+                        value={newDim}
+                        onChange={e => setNewDim(e.target.value)}
+                        placeholder="Dimension name"
+                        className="h-8 text-xs"
+                      />
+                      <Button size="sm" onClick={addDimension}>
+                        Add
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {error && <p className="text-red-500 text-xs">{error}</p>}
+              <Button
+                onClick={saveDimensions}
+                disabled={loading || (settings.classifierDimensions?.filter(d => d !== 'unattributed').length || 0) === 0}
+                className="w-full h-8 text-xs"
+              >
+                {loading ? 'Saving...' : 'Save Dimensions'}
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Master File Upload Section - Only show when toggle is enabled */}
         {bypassMasterUpload && (
           <div className="p-4 border-b border-gray-200 bg-gray-50">

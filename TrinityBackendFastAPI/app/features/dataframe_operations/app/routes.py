@@ -459,11 +459,13 @@ class SaveRequest(BaseModel):
     csv_data: str | None = None
     filename: str | None = None
     df_id: str | None = None
+    overwrite_original: bool = False
 
 
 @router.post("/save")
 async def save_dataframe(payload: SaveRequest):
-    """Save a dataframe session to MinIO, falling back to CSV payloads when no session is available."""
+    """Save a dataframe session to MinIO, falling back to CSV payloads when no session is available.
+    If overwrite_original is True, overwrites the original input file."""
 
     df: pl.DataFrame | None = None
     session_id = payload.df_id
@@ -482,13 +484,24 @@ async def save_dataframe(payload: SaveRequest):
             raise HTTPException(status_code=400, detail=f"Invalid csv_data: {exc}") from exc
 
     filename = (payload.filename or "").strip()
-    if not filename:
-        stub = (session_id or str(uuid.uuid4())).replace("-", "")[:8]
-        filename = f"{stub}_dataframe_ops.arrow"
-    if not filename.endswith(".arrow"):
-        filename += ".arrow"
-
-    try:
+    
+    # Handle filename based on overwrite_original flag
+    if payload.overwrite_original:
+        # When overwriting, use the filename as-is (should be the original file path)
+        if not filename:
+            raise HTTPException(status_code=400, detail="filename is required when overwriting original file")
+        if not filename.endswith(".arrow"):
+            filename += ".arrow"
+        object_name = filename
+        print(f"[DEBUG] Overwriting original file: {object_name}")
+    else:
+        # Normal save - create new file in dataframe operations folder
+        if not filename:
+            stub = (session_id or str(uuid.uuid4())).replace("-", "")[:8]
+            filename = f"{stub}_dataframe_ops.arrow"
+        if not filename.endswith(".arrow"):
+            filename += ".arrow"
+        
         prefix = await get_object_prefix()
         dfops_prefix = f"{prefix}dataframe operations/"
         try:
@@ -497,7 +510,9 @@ async def save_dataframe(payload: SaveRequest):
             minio_client.put_object(MINIO_BUCKET, dfops_prefix, io.BytesIO(b""), 0)
 
         object_name = f"{dfops_prefix}{filename}"
+        print(f"[DEBUG] Creating new file: {object_name}")
 
+    try:
         arrow_buffer = io.BytesIO()
         df.write_ipc(arrow_buffer)
         arrow_bytes = arrow_buffer.getvalue()
@@ -509,11 +524,14 @@ async def save_dataframe(payload: SaveRequest):
             content_type="application/octet-stream",
         )
 
+        message = "Original file updated successfully" if payload.overwrite_original else "DataFrame saved successfully"
+
         response = {
             "result_file": object_name,
             "shape": df.shape,
             "columns": list(df.columns),
-            "message": "DataFrame saved successfully",
+            "message": message,
+            "overwrite_original": payload.overwrite_original,
         }
         if session_id:
             response["df_id"] = session_id
