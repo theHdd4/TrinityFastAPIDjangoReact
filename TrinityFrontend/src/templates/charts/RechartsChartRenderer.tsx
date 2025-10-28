@@ -35,7 +35,7 @@ const AxisLabelEditor = React.memo(({
 
   return (
     <div
-      className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-4 axis-label-submenu"
+      className="fixed z-[30] bg-white border border-gray-300 rounded-lg shadow-xl p-4 axis-label-submenu"
       style={{
         left: position.x,
         top: position.y,
@@ -1320,7 +1320,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
     const menu = (
       <div
-        className="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-lg py-2 min-w-48 context-menu"
+        className="fixed z-[30] bg-white border border-gray-200 rounded-lg shadow-lg py-2 min-w-48 context-menu"
         style={{
           left: contextMenuPosition.x,
           top: contextMenuPosition.y,
@@ -1494,7 +1494,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
     const submenu = (
       <div
-        className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-3 color-submenu"
+        className="fixed z-[30] bg-white border border-gray-300 rounded-lg shadow-xl p-3 color-submenu"
         style={{
           left: colorSubmenuPos.x,
           top: colorSubmenuPos.y,
@@ -1583,7 +1583,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
     const submenu = (
       <div
-        className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 sort-submenu"
+        className="fixed z-[30] bg-white border border-gray-300 rounded-lg shadow-xl p-2 sort-submenu"
         style={{
           left: sortSubmenuPos.x,
           top: sortSubmenuPos.y,
@@ -1744,7 +1744,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
     const submenu = (
       <div
-        className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 chart-type-submenu"
+        className="fixed z-[30] bg-white border border-gray-300 rounded-lg shadow-xl p-2 chart-type-submenu"
         style={{
           left: chartTypeSubmenuPos.x,
           top: chartTypeSubmenuPos.y,

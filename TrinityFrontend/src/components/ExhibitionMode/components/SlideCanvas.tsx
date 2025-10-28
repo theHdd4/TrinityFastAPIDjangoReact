@@ -56,6 +56,8 @@ import {
   buildSlideTitleObjectId,
   resolveCardTitle,
 } from '../store/exhibitionStore';
+import { useSlideTheme } from '../themeUtils';
+import { DEFAULT_EXHIBITION_THEME } from '../themes';
 import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
 import { SlideTextBoxObject } from './operationsPalette/textBox/TextBox';
 import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from './operationsPalette/textBox/constants';
@@ -233,7 +235,7 @@ const parseBooleanish = (value: unknown): boolean | null => {
 };
 
 const slideBackgroundClassNames: Record<SlideBackgroundPreset, string> = {
-  default: 'bg-card',
+  default: 'bg-transparent',
   ivory: 'bg-amber-100',
   slate: 'bg-slate-200',
   charcoal: 'bg-neutral-300',
@@ -264,6 +266,18 @@ const resolveSlideBackground = (
         },
       };
     }
+  }
+
+  if (background === 'default') {
+    return {
+      className: '',
+      style: {
+        backgroundColor: 'var(--slide-background, var(--theme-background, #ffffff))',
+        backgroundImage: 'var(--slide-gradient-background, var(--theme-gradient-background, none))',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      },
+    };
   }
 
   const className =
@@ -411,6 +425,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   }));
   const [activeTextToolbar, setActiveTextToolbar] = useState<ReactNode | null>(null);
   const [positionPanelTarget, setPositionPanelTarget] = useState<{ objectId: string } | null>(null);
+  const slideRootRef = useRef<HTMLDivElement | null>(null);
   const accentImageInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const presentationContainerRef = useRef<HTMLDivElement | null>(null);
@@ -430,6 +445,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     useCallback(state => state.slideObjectsByCardId[card.id] ?? [], [card.id]),
   );
   const activeTheme = useExhibitionStore(state => state.activeTheme);
+  useSlideTheme(activeTheme, slideRootRef);
   const bulkUpdateSlideObjects = useExhibitionStore(state => state.bulkUpdateSlideObjects);
   const bringSlideObjectsToFront = useExhibitionStore(state => state.bringSlideObjectsToFront);
   const bringSlideObjectsForward = useExhibitionStore(state => state.bringSlideObjectsForward);
@@ -623,58 +639,56 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   );
 
   const themeContext = useMemo(() => {
-    if (!activeTheme) {
-      return {
-        containerStyle: undefined as React.CSSProperties | undefined,
-        backgroundStyle: undefined as React.CSSProperties | undefined,
-        accent: undefined as string | undefined,
-        borderRadius: undefined as string | undefined,
-        shadow: undefined as string | undefined,
-        foreground: undefined as string | undefined,
-      };
-    }
+    const theme = activeTheme ?? DEFAULT_EXHIBITION_THEME;
 
-    const backgroundValue = activeTheme.gradients.background || activeTheme.colors.background;
-    const backgroundStyle =
-      typeof backgroundValue === 'string' && backgroundValue.startsWith('linear-gradient')
-        ? { backgroundImage: backgroundValue }
-        : { backgroundColor: backgroundValue };
+    const bodyFontFallback = JSON.stringify(theme.fonts.body ?? DEFAULT_EXHIBITION_THEME.fonts.body);
+    const backgroundColorFallback = theme.colors.background ?? DEFAULT_EXHIBITION_THEME.colors.background;
+    const foregroundFallback = theme.colors.foreground ?? DEFAULT_EXHIBITION_THEME.colors.foreground;
+    const accentColorFallback = theme.colors.accent ?? DEFAULT_EXHIBITION_THEME.colors.accent;
+    const shadowFallback = theme.effects.shadow ?? DEFAULT_EXHIBITION_THEME.effects.shadow;
+    const radiusFallback = theme.effects.borderRadius ?? DEFAULT_EXHIBITION_THEME.effects.borderRadius;
+
+    const backgroundGradientFallback =
+      theme.gradients.background && theme.gradients.background.trim().length > 0
+        ? theme.gradients.background
+        : 'none';
+    const accentGradientFallback =
+      theme.gradients.accent && theme.gradients.accent.trim().length > 0 ? theme.gradients.accent : '';
+
+    const containerStyle: React.CSSProperties = {
+      fontFamily: `var(--slide-font-body, var(--theme-font-body, ${bodyFontFallback}))`,
+      color: `var(--slide-foreground, var(--theme-foreground, ${foregroundFallback}))`,
+    };
+
+    const backgroundStyle: React.CSSProperties = {
+      backgroundColor: `var(--slide-background, var(--theme-background, ${backgroundColorFallback}))`,
+      backgroundImage: `var(--slide-gradient-background, var(--theme-gradient-background, ${backgroundGradientFallback}))`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+    };
+
+    const accentStyle: React.CSSProperties = accentGradientFallback
+      ? {
+          backgroundImage: `var(--slide-gradient-accent, var(--theme-gradient-accent, ${accentGradientFallback}))`,
+          backgroundColor: `var(--slide-accent, var(--theme-accent, ${accentColorFallback}))`,
+          color: `var(--slide-foreground, var(--theme-foreground, ${foregroundFallback}))`,
+        }
+      : {
+          backgroundColor: `var(--slide-accent, var(--theme-accent, ${accentColorFallback}))`,
+          color: `var(--slide-foreground, var(--theme-foreground, ${foregroundFallback}))`,
+        };
 
     return {
-      containerStyle: {
-        fontFamily: activeTheme.fonts.body,
-        '--exhibition-theme-primary': activeTheme.colors.primary,
-        '--exhibition-theme-secondary': activeTheme.colors.secondary,
-        '--exhibition-theme-accent': activeTheme.colors.accent,
-        '--exhibition-theme-muted': activeTheme.colors.muted,
-        '--exhibition-theme-border': activeTheme.colors.border,
-        '--exhibition-theme-heading-font': activeTheme.fonts.heading,
-        '--exhibition-theme-body-font': activeTheme.fonts.body,
-      } as React.CSSProperties,
+      containerStyle,
       backgroundStyle,
-      accent: activeTheme.gradients.accent || activeTheme.colors.accent,
-      borderRadius: activeTheme.effects.borderRadius,
-      shadow: activeTheme.effects.shadow,
-      foreground: activeTheme.colors.foreground,
+      accentStyle,
+      borderRadius: `var(--slide-border-radius, var(--theme-border-radius, ${radiusFallback}))`,
+      shadow: `var(--slide-shadow, var(--theme-shadow, ${shadowFallback}))`,
+      foreground: `var(--slide-foreground, var(--theme-foreground, ${foregroundFallback}))`,
     };
   }, [activeTheme]);
 
-  const accentButtonStyle = useMemo<React.CSSProperties | undefined>(() => {
-    if (!themeContext.accent) {
-      return undefined;
-    }
-    const accent = themeContext.accent;
-    if (accent.startsWith('linear-gradient')) {
-      return {
-        backgroundImage: accent,
-        color: '#ffffff',
-      };
-    }
-    return {
-      backgroundColor: accent,
-      color: '#ffffff',
-    };
-  }, [themeContext.accent]);
+  const accentButtonStyle = themeContext.accentStyle;
 
   const cardWidthClass = settings.cardWidth === 'M' ? 'max-w-4xl' : 'max-w-6xl';
 
@@ -1288,7 +1302,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         );
 
   return (
-    <div className={containerClasses} style={themeContext.containerStyle}>
+    <div ref={slideRootRef} className={containerClasses} style={themeContext.containerStyle}>
       <div
         ref={presentationMode ? presentationContainerRef : undefined}
         className={
@@ -1349,7 +1363,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   presentationMode
                     ? {
                         ...slideBackgroundStyle,
-                        ...(themeContext.backgroundStyle ?? {}),
+                        ...(settings.backgroundColor === 'default'
+                          ? themeContext.backgroundStyle ?? {}
+                          : {}),
                         ...(themeContext.shadow ? { boxShadow: themeContext.shadow } : {}),
                         ...(!settings.fullBleed && themeContext.borderRadius
                           ? { borderRadius: themeContext.borderRadius }
@@ -1368,7 +1384,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                     : {
                         height: CANVAS_STAGE_HEIGHT,
                         ...slideBackgroundStyle,
-                        ...(themeContext.backgroundStyle ?? {}),
+                        ...(settings.backgroundColor === 'default'
+                          ? themeContext.backgroundStyle ?? {}
+                          : {}),
                         ...(themeContext.shadow ? { boxShadow: themeContext.shadow } : {}),
                         ...(!settings.fullBleed && themeContext.borderRadius
                           ? { borderRadius: themeContext.borderRadius }

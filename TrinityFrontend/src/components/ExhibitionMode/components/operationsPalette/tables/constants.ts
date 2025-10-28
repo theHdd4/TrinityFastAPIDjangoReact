@@ -593,6 +593,7 @@ export interface TableObjectProps {
   cols: number;
   locked?: boolean;
   showOutline?: boolean;
+  styleId?: string;
 }
 
 export const createTableSlideObject = (
@@ -622,6 +623,7 @@ export const createTableSlideObject = (
       cols,
       locked: Boolean(options.locked),
       showOutline: options.showOutline !== false,
+      ...(typeof options.styleId === 'string' ? { styleId: options.styleId } : {}),
     },
     ...overrides,
   };

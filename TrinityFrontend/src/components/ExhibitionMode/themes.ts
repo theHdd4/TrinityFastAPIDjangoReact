@@ -24,6 +24,8 @@ export interface ExhibitionTheme {
   effects: {
     shadow: string;
     borderRadius: string;
+    blur?: string;
+    glow?: string;
   };
 }
 

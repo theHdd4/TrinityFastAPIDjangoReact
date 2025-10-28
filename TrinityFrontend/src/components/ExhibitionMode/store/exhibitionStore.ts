@@ -22,6 +22,9 @@ import {
   DEFAULT_EXHIBITION_THEME,
   type ExhibitionTheme,
 } from '../themes';
+import { getThemeStyleDefaults } from '../themeUtils';
+import { DEFAULT_CHART_CONFIG } from '../components/operationsPalette/charts/constants';
+import type { ChartConfig } from '../components/operationsPalette/charts/types';
 
 export type CardColor = GradientColorId | SolidColorToken;
 export type SlideBackgroundPreset =
@@ -38,6 +41,7 @@ export type ContentAlignment = 'top' | 'center' | 'bottom';
 export type CardLayout = 'none' | 'top' | 'bottom' | 'right' | 'left' | 'full';
 
 const DEFAULT_CARD_LAYOUT: CardLayout = 'right';
+const TABLE_DEFAULT_STYLE_ID = 'transparent';
 
 const CARD_LAYOUTS: readonly CardLayout[] = ['none', 'top', 'bottom', 'right', 'left', 'full'] as const;
 const SLIDE_BACKGROUND_PRESETS: readonly SlideBackgroundPreset[] = [
@@ -1295,7 +1299,18 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     let createdCard: LayoutCard | null = null;
 
     set(state => {
-      const newCard = createBlankSlide();
+      const baseCard = createBlankSlide();
+      const themeDefaults = getThemeStyleDefaults(state.activeTheme ?? DEFAULT_EXHIBITION_THEME);
+
+      const newCard: LayoutCard = {
+        ...baseCard,
+        presentationSettings: {
+          ...baseCard.presentationSettings,
+          cardColor: themeDefaults.presentation.cardColor as CardColor,
+          cardLayout: themeDefaults.presentation.cardLayout,
+          backgroundColor: themeDefaults.presentation.backgroundColor as SlideBackgroundColor,
+        },
+      };
 
       createdCard = newCard;
 
@@ -1572,19 +1587,60 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   applyTheme: (theme: ExhibitionTheme) => {
     set(state => {
       const previousTheme = state.activeTheme ?? DEFAULT_EXHIBITION_THEME;
+      const previousDefaults = getThemeStyleDefaults(previousTheme);
+      const nextDefaults = getThemeStyleDefaults(theme);
+
       const defaultFonts = new Set(
         [
           'Comic Sans',
-          previousTheme?.fonts.heading,
-          previousTheme?.fonts.body,
+          previousTheme.fonts.heading,
+          previousTheme.fonts.body,
         ].filter((value): value is string => Boolean(value)),
       );
-      const defaultColors = new Set(
+
+      const defaultTextColors = new Set(
         [
           '#111827',
-          previousTheme?.colors.foreground,
+          previousTheme.colors.foreground,
+          previousDefaults.text.color,
+          previousDefaults.text.headingColor,
         ].filter((value): value is string => Boolean(value)),
       );
+
+      const sanitiseChartConfig = (value: unknown): ChartConfig => {
+        const candidate = isRecord(value) ? (value as Partial<ChartConfig>) : {};
+
+        const type = typeof candidate.type === 'string' ? candidate.type : DEFAULT_CHART_CONFIG.type;
+        const colorScheme = typeof candidate.colorScheme === 'string'
+          ? candidate.colorScheme
+          : DEFAULT_CHART_CONFIG.colorScheme;
+        const legendPosition =
+          candidate.legendPosition && typeof candidate.legendPosition === 'string'
+            ? candidate.legendPosition
+            : DEFAULT_CHART_CONFIG.legendPosition;
+
+        return {
+          ...DEFAULT_CHART_CONFIG,
+          ...candidate,
+          type: type as ChartConfig['type'],
+          colorScheme,
+          showLabels:
+            typeof candidate.showLabels === 'boolean'
+              ? candidate.showLabels
+              : DEFAULT_CHART_CONFIG.showLabels,
+          showValues:
+            typeof candidate.showValues === 'boolean'
+              ? candidate.showValues
+              : DEFAULT_CHART_CONFIG.showValues,
+          legendPosition,
+          axisIncludesZero:
+            typeof candidate.axisIncludesZero === 'boolean'
+              ? candidate.axisIncludesZero
+              : DEFAULT_CHART_CONFIG.axisIncludesZero,
+          horizontalAlignment:
+            candidate.horizontalAlignment ?? DEFAULT_CHART_CONFIG.horizontalAlignment,
+        };
+      };
 
       const slideObjectsByCardId = Object.entries(state.slideObjectsByCardId).reduce(
         (acc, [cardId, objects]) => {
@@ -1595,25 +1651,102 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
 
           const titleId = buildSlideTitleObjectId(cardId);
           acc[cardId] = objects.map(object => {
-            if (object.type !== 'text-box') {
-              return { ...object };
+            if (object.type === 'text-box') {
+              const props = { ...(object.props ?? {}) } as Record<string, any>;
+              const isTitle = object.id === titleId;
+
+              const targetFont = isTitle ? theme.fonts.heading : theme.fonts.body;
+              const previousFont = isTitle ? previousTheme.fonts.heading : previousTheme.fonts.body;
+              const currentFont = typeof props.fontFamily === 'string' ? props.fontFamily : '';
+
+              if (!currentFont || currentFont === previousFont || defaultFonts.has(currentFont)) {
+                props.fontFamily = targetFont;
+              }
+
+              const targetFontSize = isTitle
+                ? nextDefaults.text.headingFontSize
+                : nextDefaults.text.bodyFontSize;
+              const previousFontSize = isTitle
+                ? previousDefaults.text.headingFontSize
+                : previousDefaults.text.bodyFontSize;
+              const numericFontSize = Number(props.fontSize);
+
+              if (!Number.isFinite(numericFontSize) || numericFontSize === previousFontSize) {
+                props.fontSize = targetFontSize;
+              }
+
+              const previousColor = isTitle
+                ? previousDefaults.text.headingColor ?? previousTheme.colors.foreground
+                : previousDefaults.text.color ?? previousTheme.colors.foreground;
+              const targetColor = isTitle
+                ? nextDefaults.text.headingColor ?? theme.colors.foreground
+                : nextDefaults.text.color ?? theme.colors.foreground;
+              const currentColor = typeof props.color === 'string' ? props.color : '';
+
+              if (!currentColor || currentColor === previousColor || defaultTextColors.has(currentColor)) {
+                props.color = targetColor;
+              }
+
+              return {
+                ...object,
+                props,
+              };
             }
 
-            const props = { ...(object.props ?? {}) } as Record<string, unknown>;
-            const currentFont = typeof props.fontFamily === 'string' ? props.fontFamily : '';
-            if (!currentFont || defaultFonts.has(currentFont)) {
-              props.fontFamily = object.id === titleId ? theme.fonts.heading : theme.fonts.body;
+            if (object.type === 'chart') {
+              const props = { ...(object.props ?? {}) } as Record<string, unknown>;
+              const config = sanitiseChartConfig(props.config);
+
+              const matchesPreviousDefaults =
+                config.type === previousDefaults.chart.type &&
+                config.colorScheme === previousDefaults.chart.colorScheme &&
+                config.showLabels === previousDefaults.chart.showLabels &&
+                config.showValues === previousDefaults.chart.showValues &&
+                config.legendPosition === previousDefaults.chart.legendPosition;
+
+              const matchesBaseline =
+                config.type === DEFAULT_CHART_CONFIG.type &&
+                config.colorScheme === DEFAULT_CHART_CONFIG.colorScheme &&
+                config.showLabels === DEFAULT_CHART_CONFIG.showLabels &&
+                config.showValues === DEFAULT_CHART_CONFIG.showValues &&
+                config.legendPosition === DEFAULT_CHART_CONFIG.legendPosition;
+
+              if (matchesPreviousDefaults || matchesBaseline) {
+                props.config = {
+                  ...config,
+                  ...nextDefaults.chart,
+                };
+              } else {
+                props.config = config;
+              }
+
+              return {
+                ...object,
+                props,
+              };
             }
 
-            const currentColor = typeof props.color === 'string' ? props.color : '';
-            if (!currentColor || defaultColors.has(currentColor)) {
-              props.color = theme.colors.foreground;
+            if (object.type === 'table') {
+              const props = { ...(object.props ?? {}) } as Record<string, unknown>;
+              const currentStyleId =
+                typeof props.styleId === 'string' ? props.styleId : TABLE_DEFAULT_STYLE_ID;
+              const previousStyleId = previousDefaults.tableStyleId ?? TABLE_DEFAULT_STYLE_ID;
+
+              if (
+                currentStyleId === previousStyleId ||
+                currentStyleId === TABLE_DEFAULT_STYLE_ID ||
+                !props.styleId
+              ) {
+                props.styleId = nextDefaults.tableStyleId;
+              }
+
+              return {
+                ...object,
+                props,
+              };
             }
 
-            return {
-              ...object,
-              props,
-            };
+            return { ...object };
           });
 
           return acc;
@@ -1621,9 +1754,55 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         {} as Record<string, SlideObject[]>,
       );
 
+      const cards = state.cards.map(card => {
+        const presentation = ensurePresentationSettings(card.presentationSettings);
+        let changed = false;
+        const nextPresentation = { ...presentation };
+
+        const previousPresentation = previousDefaults.presentation;
+
+        if (
+          presentation.cardColor === previousPresentation.cardColor ||
+          presentation.cardColor === DEFAULT_PRESENTATION_SETTINGS.cardColor
+        ) {
+          nextPresentation.cardColor = nextDefaults.presentation.cardColor as CardColor;
+          changed = true;
+        }
+
+        if (
+          presentation.cardLayout === previousPresentation.cardLayout ||
+          presentation.cardLayout === DEFAULT_PRESENTATION_SETTINGS.cardLayout
+        ) {
+          nextPresentation.cardLayout = nextDefaults.presentation.cardLayout;
+          changed = true;
+        }
+
+        if (
+          presentation.backgroundColor === previousPresentation.backgroundColor ||
+          presentation.backgroundColor === DEFAULT_PRESENTATION_SETTINGS.backgroundColor
+        ) {
+          nextPresentation.backgroundColor =
+            nextDefaults.presentation.backgroundColor as SlideBackgroundColor;
+          changed = true;
+        }
+
+        if (!changed) {
+          return card;
+        }
+
+        return {
+          ...card,
+          presentationSettings: nextPresentation,
+        };
+      });
+
+      const exhibitedCards = cards.filter(card => card.isExhibited);
+
       return {
         activeTheme: theme,
         slideObjectsByCardId,
+        cards,
+        exhibitedCards,
       };
     });
   },

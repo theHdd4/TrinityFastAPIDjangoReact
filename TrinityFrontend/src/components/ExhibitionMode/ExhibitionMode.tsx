@@ -53,6 +53,7 @@ import {
   buildTableDataFromManifest,
   clonePlain,
 } from '@/components/AtomList/atoms/feature-overview/utils/exhibitionManifest';
+import { getThemeStyleDefaults } from './themeUtils';
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
 const SLIDESHOW_ANIMATION_MS = 450;
@@ -167,6 +168,8 @@ const ExhibitionMode = () => {
   const { toast } = useToast();
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('exhibition:edit');
+  const activeTheme = useExhibitionStore(state => state.activeTheme);
+  const themeDefaults = useMemo(() => getThemeStyleDefaults(activeTheme), [activeTheme]);
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
 
   const presenterDisplayName = useMemo(() => {
@@ -219,6 +222,31 @@ const ExhibitionMode = () => {
       return {};
     }
   });
+
+  useEffect(() => {
+    if (operationsPanelState?.type === 'charts') {
+      return;
+    }
+
+    setChartPanelConfig(previous => ({
+      ...previous,
+      type: themeDefaults.chart.type,
+      colorScheme: themeDefaults.chart.colorScheme,
+      showLabels: themeDefaults.chart.showLabels,
+      showValues: themeDefaults.chart.showValues,
+      legendPosition: themeDefaults.chart.legendPosition,
+      axisIncludesZero: themeDefaults.chart.axisIncludesZero,
+    }));
+  }, [
+    operationsPanelState?.type,
+    setChartPanelConfig,
+    themeDefaults.chart.axisIncludesZero,
+    themeDefaults.chart.colorScheme,
+    themeDefaults.chart.legendPosition,
+    themeDefaults.chart.showLabels,
+    themeDefaults.chart.showValues,
+    themeDefaults.chart.type,
+  ]);
 
   const [isSlideshowActive, setIsSlideshowActive] = useState(false);
   const [presentationTransition, setPresentationTransition] =
@@ -1302,8 +1330,34 @@ const ExhibitionMode = () => {
     if (!canEdit) {
       return;
     }
-    setOperationsPanelState(prev => (prev?.type === 'charts' ? null : { type: 'charts' }));
-  }, [canEdit]);
+
+    setOperationsPanelState(prev => {
+      if (prev?.type === 'charts') {
+        return null;
+      }
+
+      setChartPanelConfig(previous => ({
+        ...previous,
+        type: themeDefaults.chart.type,
+        colorScheme: themeDefaults.chart.colorScheme,
+        showLabels: themeDefaults.chart.showLabels,
+        showValues: themeDefaults.chart.showValues,
+        legendPosition: themeDefaults.chart.legendPosition,
+        axisIncludesZero: themeDefaults.chart.axisIncludesZero,
+      }));
+
+      return { type: 'charts' };
+    });
+  }, [
+    canEdit,
+    setChartPanelConfig,
+    themeDefaults.chart.axisIncludesZero,
+    themeDefaults.chart.colorScheme,
+    themeDefaults.chart.legendPosition,
+    themeDefaults.chart.showLabels,
+    themeDefaults.chart.showValues,
+    themeDefaults.chart.type,
+  ]);
 
   const handleCloseChartsPanel = useCallback(() => {
     setOperationsPanelState(prev => (prev?.type === 'charts' ? null : prev));
@@ -1550,9 +1604,23 @@ const ExhibitionMode = () => {
       createTextBoxSlideObject(generateTextBoxId(), {
         x: 120 + offset,
         y: 120 + offset,
+      }, {
+        fontFamily: activeTheme?.fonts.body,
+        fontSize: themeDefaults.text.bodyFontSize,
+        color: themeDefaults.text.color ?? activeTheme?.colors.foreground,
       }),
     );
-  }, [addSlideObject, currentSlide, exhibitedCards, generateTextBoxId, slideObjectsByCardId]);
+  }, [
+    activeTheme?.colors.foreground,
+    activeTheme?.fonts.body,
+    addSlideObject,
+    currentSlide,
+    exhibitedCards,
+    generateTextBoxId,
+    slideObjectsByCardId,
+    themeDefaults.text.bodyFontSize,
+    themeDefaults.text.color,
+  ]);
 
   const handleCreateTable = useCallback(() => {
     const targetCard = exhibitedCards[currentSlide];
@@ -1569,9 +1637,18 @@ const ExhibitionMode = () => {
       createTableSlideObject(generateTableId(), {
         x: 144 + offset,
         y: 144 + offset,
+      }, {
+        styleId: themeDefaults.tableStyleId,
       }),
     );
-  }, [addSlideObject, currentSlide, exhibitedCards, generateTableId, slideObjectsByCardId]);
+  }, [
+    addSlideObject,
+    currentSlide,
+    exhibitedCards,
+    generateTableId,
+    slideObjectsByCardId,
+    themeDefaults.tableStyleId,
+  ]);
 
   const handleCreateChart = useCallback(
     (result: ChartPanelResult) => {
