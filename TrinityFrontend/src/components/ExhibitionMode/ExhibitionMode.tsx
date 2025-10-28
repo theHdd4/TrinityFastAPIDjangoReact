@@ -505,6 +505,65 @@ const ExhibitionMode = () => {
     [currentSlide, exhibitedCards, updateCard]
   );
 
+  const currentCard = exhibitedCards[currentSlide] ?? null;
+
+  const currentPresentationSettings: PresentationSettings = {
+    ...DEFAULT_PRESENTATION_SETTINGS,
+    ...currentCard?.presentationSettings,
+  };
+
+  const updateCurrentPresentationSettings = useCallback(
+    (partial: Partial<PresentationSettings>) => {
+      const targetCard = exhibitedCards[currentSlide];
+      if (!targetCard) {
+        return;
+      }
+
+      const merged: PresentationSettings = {
+        ...DEFAULT_PRESENTATION_SETTINGS,
+        ...targetCard.presentationSettings,
+        ...partial,
+      };
+
+      if (partial.autoAdvanceDuration !== undefined || partial.slideshowDuration !== undefined) {
+        const durationCandidate =
+          partial.autoAdvanceDuration ??
+          partial.slideshowDuration ??
+          merged.autoAdvanceDuration ??
+          merged.slideshowDuration;
+        const safeDuration = Math.max(1, Math.round(durationCandidate ?? DEFAULT_PRESENTATION_SETTINGS.slideshowDuration));
+        merged.autoAdvanceDuration = safeDuration;
+        merged.slideshowDuration = safeDuration;
+      }
+
+      if (partial.autoAdvance !== undefined && partial.autoAdvance === false) {
+        merged.autoAdvance = false;
+      }
+
+      if (partial.transitionDuration !== undefined) {
+        merged.transitionDuration = Math.max(100, Math.round(partial.transitionDuration));
+      }
+
+      if (partial.transitionEffect) {
+        merged.transitionEffect = partial.transitionEffect;
+        if (partial.transitionEffect === 'slide' || partial.transitionEffect === 'zoom') {
+          merged.slideshowTransition = partial.transitionEffect;
+        } else if (partial.transitionEffect === 'none') {
+          merged.slideshowTransition = merged.slideshowTransition ?? 'fade';
+        } else {
+          merged.slideshowTransition = 'fade';
+        }
+      }
+
+      if (typeof partial.backgroundImageUrl === 'string' && partial.backgroundImageUrl.trim().length === 0) {
+        merged.backgroundImageUrl = null;
+      }
+
+      handlePresentationChange(merged, targetCard.id);
+    },
+    [currentSlide, exhibitedCards, handlePresentationChange],
+  );
+
   const handleTitleChange = useCallback(
     (title: string, cardId: string) => {
       updateCard(cardId, { title });
@@ -1537,61 +1596,6 @@ const ExhibitionMode = () => {
         </div>
       </div>
     </div>
-  );
-
-  const currentCard = exhibitedCards[currentSlide] ?? null;
-  const currentPresentationSettings: PresentationSettings = {
-    ...DEFAULT_PRESENTATION_SETTINGS,
-    ...currentCard?.presentationSettings,
-  };
-
-  const updateCurrentPresentationSettings = useCallback(
-    (partial: Partial<PresentationSettings>) => {
-      const targetCard = exhibitedCards[currentSlide];
-      if (!targetCard) {
-        return;
-      }
-
-      const merged: PresentationSettings = {
-        ...DEFAULT_PRESENTATION_SETTINGS,
-        ...targetCard.presentationSettings,
-        ...partial,
-      };
-
-      if (partial.autoAdvanceDuration !== undefined || partial.slideshowDuration !== undefined) {
-        const durationCandidate =
-          partial.autoAdvanceDuration ?? partial.slideshowDuration ?? merged.autoAdvanceDuration ?? merged.slideshowDuration;
-        const safeDuration = Math.max(1, Math.round(durationCandidate ?? DEFAULT_PRESENTATION_SETTINGS.slideshowDuration));
-        merged.autoAdvanceDuration = safeDuration;
-        merged.slideshowDuration = safeDuration;
-      }
-
-      if (partial.autoAdvance !== undefined && partial.autoAdvance === false) {
-        merged.autoAdvance = false;
-      }
-
-      if (partial.transitionDuration !== undefined) {
-        merged.transitionDuration = Math.max(100, Math.round(partial.transitionDuration));
-      }
-
-      if (partial.transitionEffect) {
-        merged.transitionEffect = partial.transitionEffect;
-        if (partial.transitionEffect === 'slide' || partial.transitionEffect === 'zoom') {
-          merged.slideshowTransition = partial.transitionEffect;
-        } else if (partial.transitionEffect === 'none') {
-          merged.slideshowTransition = merged.slideshowTransition ?? 'fade';
-        } else {
-          merged.slideshowTransition = 'fade';
-        }
-      }
-
-      if (typeof partial.backgroundImageUrl === 'string' && partial.backgroundImageUrl.trim().length === 0) {
-        merged.backgroundImageUrl = null;
-      }
-
-      handlePresentationChange(merged, targetCard.id);
-    },
-    [currentSlide, exhibitedCards, handlePresentationChange],
   );
 
   const transitionFrames = presentationTransition
