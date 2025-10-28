@@ -71,8 +71,8 @@ const TRANSITION_OPTIONS = [
 const NOTES_POSITIONS: SlideNotesPosition[] = ['bottom', 'right'];
 
 const TAB_TRIGGER_CLASSES = cn(
-  'relative flex h-11 items-center justify-center rounded-full border border-transparent px-4 py-2 text-sm font-medium text-muted-foreground transition-all',
-  'whitespace-nowrap tracking-wide focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+  'relative flex h-11 items-center justify-center rounded-full border border-transparent px-5 text-sm font-medium text-muted-foreground transition-all',
+  'whitespace-nowrap tracking-wide leading-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
   'data-[state=active]:border-border/60 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm',
 );
 
@@ -295,7 +295,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       <ScrollArea className="max-h-[70vh] px-5">
         <Tabs defaultValue="background" className="w-full py-5">
-          <TabsList className="grid w-full grid-cols-2 gap-2 rounded-full border border-border/60 bg-muted/40 p-2 sm:grid-cols-4 sm:gap-3 sm:p-2.5">
+          <TabsList className="grid w-full grid-cols-2 gap-2.5 rounded-full border border-border/60 bg-muted/40 p-2.5 sm:grid-cols-4 sm:gap-3.5 sm:p-3">
             <TabsTrigger value="background" className={TAB_TRIGGER_CLASSES}>
               Background
             </TabsTrigger>
@@ -377,9 +377,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent
-                        side="bottom"
+                        side="left"
                         align="center"
-                        sideOffset={12}
+                        sideOffset={16}
                         collisionPadding={24}
                         className="z-[3000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
                       >
