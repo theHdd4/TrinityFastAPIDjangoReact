@@ -21,7 +21,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -161,10 +169,12 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     }
   }, [open, initialData, initialConfig, isInitialised]);
 
-  const colors = useMemo(() => {
+  const selectedColorScheme = useMemo(() => {
     const scheme = COLOR_SCHEMES.find(s => s.id === config.colorScheme);
-    return scheme?.colors ?? COLOR_SCHEMES[0].colors;
+    return scheme ?? COLOR_SCHEMES[0];
   }, [config.colorScheme]);
+
+  const colors = selectedColorScheme.colors;
 
   const clampDiagramValue = (value: number) => {
     if (!Number.isFinite(value)) {
@@ -533,11 +543,11 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
         className="h-[85vh] max-w-6xl gap-0 overflow-hidden border-2 border-border/50 bg-gradient-to-br from-background via-background/98 to-primary/5 p-0 shadow-2xl"
       >
         <DialogHeader className="relative overflow-hidden border-b border-border/50 bg-gradient-to-br from-primary/5 via-transparent to-transparent px-8 pb-6 pt-8">
-          <div className="absolute inset-0 bg-grid-white/5 [mask-image:linear-gradient(0deg,transparent,black)]" />
+          <div className="pointer-events-none absolute inset-0 bg-grid-white/5 [mask-image:linear-gradient(0deg,transparent,black)]" />
           <div className="relative flex items-start justify-between">
             <div className="flex items-center gap-4">
               <div className="relative">
-                <div className="absolute inset-0 animate-pulse rounded-2xl bg-gradient-to-br from-blue-500 to-purple-500 opacity-30 blur-xl" />
+                <div className="pointer-events-none absolute inset-0 animate-pulse rounded-2xl bg-gradient-to-br from-blue-500 to-purple-500 opacity-30 blur-xl" />
                 <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 ring-2 ring-blue-500/30 backdrop-blur-xl">
                   <TableIcon className="h-7 w-7 text-blue-500" />
                 </div>
@@ -703,28 +713,44 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
                 <div className="space-y-3">
                   <Label className="text-sm font-bold">Color Scheme</Label>
-                  <ScrollArea className="h-80 w-full rounded-lg border border-border/60 bg-card">
-                    <div className="space-y-3 p-3">
-                      {colorSchemeGroups.map(group => (
-                        <div key={group.category} className="space-y-2">
-                          <div className="px-2 py-1">
-                            <span className="text-[0.65rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                              {formatCategory(group.category)}
-                            </span>
+                  <Select
+                    value={config.colorScheme}
+                    onValueChange={value =>
+                      handleConfigChange({ colorScheme: value as ChartConfig['colorScheme'] })
+                    }
+                  >
+                    <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/50 hover:border-primary/50">
+                      <div className="flex w-full items-center gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex shrink-0 gap-1.5">
+                            {selectedColorScheme.colors.slice(0, 5).map((color, index) => (
+                              <div
+                                key={`${selectedColorScheme.id}-trigger-${color}-${index}`}
+                                className="h-5 w-5 rounded-md border border-border/40"
+                                style={{ backgroundColor: color }}
+                              />
+                            ))}
                           </div>
-                          <div className="space-y-1">
-                            {group.schemes.map(scheme => (
-                              <button
-                                type="button"
-                                key={scheme.id}
-                                onClick={() => handleConfigChange({ colorScheme: scheme.id })}
-                                className={cn(
-                                  'flex w-full items-center gap-3 rounded-lg border border-transparent p-2.5 text-left transition-colors',
-                                  config.colorScheme === scheme.id
-                                    ? 'border-primary/30 bg-primary/10'
-                                    : 'hover:border-border/50 hover:bg-muted/40',
-                                )}
-                              >
+                          <span className="text-sm font-semibold text-foreground">
+                            {selectedColorScheme.name}
+                          </span>
+                        </div>
+                      </div>
+                      <SelectValue className="sr-only" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-80 rounded-xl">
+                      {colorSchemeGroups.map(group => (
+                        <SelectGroup key={group.category}>
+                          <SelectLabel className="px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                            {formatCategory(group.category)}
+                          </SelectLabel>
+                          {group.schemes.map(scheme => (
+                            <SelectItem
+                              key={scheme.id}
+                              value={scheme.id}
+                              className="rounded-lg py-2 pl-8 pr-3 data-[state=checked]:bg-primary/10 data-[state=checked]:text-primary"
+                            >
+                              <div className="flex items-center gap-3">
                                 <div className="flex shrink-0 gap-1.5">
                                   {scheme.colors.slice(0, 5).map((color, index) => (
                                     <div
@@ -734,21 +760,14 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                                     />
                                   ))}
                                 </div>
-                                <span
-                                  className={cn(
-                                    'text-sm font-medium',
-                                    config.colorScheme === scheme.id ? 'text-primary' : 'text-foreground',
-                                  )}
-                                >
-                                  {scheme.name}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
+                                <span className="text-sm font-medium text-foreground">{scheme.name}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
                       ))}
-                    </div>
-                  </ScrollArea>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -812,7 +831,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
             onClick={handleSave}
             className="group relative h-12 flex-1 overflow-hidden rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 font-semibold shadow-lg transition-all hover:from-blue-600 hover:to-purple-600 hover:shadow-2xl hover:scale-105"
           >
-            <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-white/0 via-white/20 to-white/0 transition-transform duration-700 group-hover:translate-x-full" />
+            <div className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-white/0 via-white/20 to-white/0 transition-transform duration-700 group-hover:translate-x-full" />
             <span className="relative z-10 flex items-center justify-center gap-2">
               <TrendingUp className="h-5 w-5" />
               Save Chart
