@@ -10,7 +10,7 @@ class TrinityV1AtomSerializer(serializers.ModelSerializer):
     class Meta:
         model = TrinityV1Atom
         fields = [
-            'id', 'atom_id', 'name', 'description', 'category',
+            'id', 'atom_id', 'name', 'description', 'category', 'tags', 'color', 'available_atoms',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']

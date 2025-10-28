@@ -125,6 +125,9 @@ SHARED_APPS = [
     
     # Trinity V1 Atoms app - stores atom definitions in public schema
     "apps.trinity_v1_atoms",
+    
+    # Atoms app - stores atom definitions in public schema
+    "apps.atoms",
 ]
 
 TENANT_APPS = [
@@ -132,7 +135,6 @@ TENANT_APPS = [
     "apps.workflows",
     
     # Other tenant-specific apps
-    "apps.atoms",
     "apps.registry",
     "apps.subscriptions",
     "apps.atom_configs",

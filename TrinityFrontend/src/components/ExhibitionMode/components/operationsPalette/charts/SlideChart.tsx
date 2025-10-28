@@ -298,16 +298,74 @@ export const SlideChart: React.FC<SlideChartProps> = ({ data, config, className 
     );
   };
 
+  const chartContent = isDiagram
+    ? renderDiagram()
+    : chartType === 'pie' || chartType === 'donut'
+      ? renderPie(chartType)
+      : chartType === 'line' || chartType === 'area'
+        ? renderLineOrArea(chartType)
+        : renderBars(chartType as 'horizontalBar' | 'verticalBar');
+
+  const baseClassName = cn(
+    'relative h-full w-full overflow-hidden rounded-3xl border border-border/40 bg-transparent',
+    className,
+  );
+
+  if (isDiagram) {
+    return (
+      <div className={baseClassName}>
+        <div className="flex h-full w-full items-center justify-center">{chartContent}</div>
+      </div>
+    );
+  }
+
+  const showLegend = config.showLabels || config.showValues;
+  if (!showLegend) {
+    return (
+      <div className={baseClassName}>
+        <div className="flex h-full w-full items-center justify-center">{chartContent}</div>
+      </div>
+    );
+  }
+
+  const legendPosition = config.legendPosition ?? 'bottom';
+  const horizontalLegend = legendPosition === 'top' || legendPosition === 'bottom';
+  const legendItems = dataset.map((item, index) => (
+    <div key={`${item.label || 'legend'}-${index}`} className="flex items-center gap-2">
+      <span
+        className="h-3 w-3 rounded-sm"
+        style={{ backgroundColor: palette.colors[index % palette.colors.length] }}
+      />
+      <div className="flex flex-col text-[0.65rem] leading-tight">
+        {config.showLabels && (
+          <span className="font-medium text-foreground">{item.label || `Item ${index + 1}`}</span>
+        )}
+        {config.showValues && (
+          <span className="text-muted-foreground">{Number.isFinite(item.value) ? item.value : 0}</span>
+        )}
+      </div>
+    </div>
+  ));
+
+  const containerClass = cn(
+    'flex h-full w-full gap-3',
+    horizontalLegend ? 'flex-col' : 'flex-row',
+    legendPosition === 'bottom' && 'flex-col-reverse',
+    legendPosition === 'right' && 'flex-row-reverse',
+  );
+
+  const legendClass = cn(
+    'flex flex-none gap-3 text-xs font-medium text-muted-foreground',
+    horizontalLegend ? 'w-full flex-wrap items-center justify-center px-6 py-4' : 'min-w-[160px] flex-col px-4 py-6',
+    legendPosition === 'left' && 'items-start text-left',
+    legendPosition === 'right' && 'items-end text-right',
+  );
+
   return (
-    <div className={cn('relative h-full w-full overflow-hidden rounded-3xl border border-border/40 bg-transparent', className)}>
-      <div className="flex h-full w-full items-center justify-center">
-        {isDiagram
-          ? renderDiagram()
-          : chartType === 'pie' || chartType === 'donut'
-            ? renderPie(chartType)
-            : chartType === 'line' || chartType === 'area'
-              ? renderLineOrArea(chartType)
-              : renderBars(chartType as 'horizontalBar' | 'verticalBar')}
+    <div className={baseClassName}>
+      <div className={containerClass}>
+        <div className={legendClass}>{legendItems}</div>
+        <div className="flex flex-1 items-center justify-center p-2 sm:p-4">{chartContent}</div>
       </div>
     </div>
   );
