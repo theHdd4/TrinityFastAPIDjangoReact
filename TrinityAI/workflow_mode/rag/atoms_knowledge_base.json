@@ -1,0 +1,879 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "total_atoms": 40,
+    "categories": 8,
+    "last_updated": "2025-01-27"
+  },
+  "categories": {
+    "data_sources": {
+      "name": "Data Sources",
+      "description": "Atoms for loading and connecting to data sources",
+      "color": "blue",
+      "typical_usage": "First step in workflows - load data before processing",
+      "atoms": [
+        {
+          "id": "data-upload-validate",
+          "title": "Data Upload & Validate",
+          "description": "Upload and validate data files (CSV, Excel, Arrow) with automatic data type detection and validation",
+          "tags": ["upload", "validate", "import", "data-quality"],
+          "capabilities": [
+            "Upload CSV, Excel, Arrow files",
+            "Automatic data type detection",
+            "Data validation and quality checks",
+            "Schema inference",
+            "Missing value detection"
+          ],
+          "use_cases": [
+            "Initial data upload for analysis",
+            "Data quality assessment",
+            "File format validation",
+            "Schema discovery"
+          ],
+          "outputs": ["Validated DataFrame", "Data quality report"],
+          "related_atoms": ["csv-import", "json-import", "feature-overview"],
+          "typical_next_atoms": ["feature-overview", "column-classifier", "explore"]
+        },
+        {
+          "id": "csv-import",
+          "title": "CSV Import",
+          "description": "Import data from CSV files with advanced parsing options",
+          "tags": ["csv", "import", "data-load"],
+          "capabilities": [
+            "Parse CSV files",
+            "Custom delimiters",
+            "Header detection",
+            "Encoding support",
+            "Large file handling"
+          ],
+          "use_cases": [
+            "Import sales data",
+            "Load transaction records",
+            "Process survey data",
+            "Import time series data"
+          ],
+          "outputs": ["DataFrame"],
+          "related_atoms": ["data-upload-validate", "json-import"],
+          "typical_next_atoms": ["feature-overview", "dataframe-operations", "explore"]
+        },
+        {
+          "id": "json-import",
+          "title": "JSON Import",
+          "description": "Import data from JSON files with nested structure support",
+          "tags": ["json", "import", "api-data"],
+          "capabilities": [
+            "Parse JSON files",
+            "Handle nested structures",
+            "Array flattening",
+            "API response parsing",
+            "Schema normalization"
+          ],
+          "use_cases": [
+            "Import API responses",
+            "Load configuration data",
+            "Process nested data structures",
+            "Import NoSQL exports"
+          ],
+          "outputs": ["DataFrame", "Normalized DataFrame"],
+          "related_atoms": ["csv-import", "database-connect"],
+          "typical_next_atoms": ["dataframe-operations", "column-classifier"]
+        },
+        {
+          "id": "database-connect",
+          "title": "Database Connect",
+          "description": "Connect to SQL databases and execute queries",
+          "tags": ["database", "sql", "connect"],
+          "capabilities": [
+            "Connect to PostgreSQL, MySQL, SQL Server",
+            "Execute SQL queries",
+            "Table browsing",
+            "Schema inspection",
+            "Batch query execution"
+          ],
+          "use_cases": [
+            "Query production database",
+            "Load historical data",
+            "Execute complex SQL joins",
+            "Extract warehouse data"
+          ],
+          "outputs": ["Query Results DataFrame"],
+          "related_atoms": ["csv-import", "json-import"],
+          "typical_next_atoms": ["feature-overview", "groupby-wtg-avg", "merge"]
+        }
+      ]
+    },
+    "data_processing": {
+      "name": "Data Processing",
+      "description": "Atoms for transforming, cleaning, and preparing data",
+      "color": "green",
+      "typical_usage": "Second step - clean and transform data after loading",
+      "atoms": [
+        {
+          "id": "feature-overview",
+          "title": "Feature Overview",
+          "description": "Comprehensive data profiling and exploratory data analysis",
+          "tags": ["eda", "profiling", "overview", "statistics"],
+          "capabilities": [
+            "Generate summary statistics",
+            "Missing value analysis",
+            "Data type detection",
+            "Distribution analysis",
+            "Outlier detection",
+            "Correlation heatmap"
+          ],
+          "use_cases": [
+            "Initial data exploration",
+            "Data quality assessment",
+            "Feature understanding",
+            "Identify data issues"
+          ],
+          "outputs": ["Statistical Summary", "Quality Report", "Visualizations"],
+          "related_atoms": ["explore", "descriptive-stats", "correlation"],
+          "typical_next_atoms": ["column-classifier", "dataframe-operations", "groupby-wtg-avg"]
+        },
+        {
+          "id": "groupby-wtg-avg",
+          "title": "GroupBy with Weighted Average",
+          "description": "Group data and calculate aggregations including weighted averages",
+          "tags": ["groupby", "aggregate", "weighted-average", "summarize"],
+          "capabilities": [
+            "Group by multiple dimensions",
+            "Sum, mean, median, count aggregations",
+            "Weighted average calculations",
+            "Custom aggregation functions",
+            "Rank percentile by group"
+          ],
+          "use_cases": [
+            "Calculate KPIs by segment",
+            "Summarize sales by region/period",
+            "Weighted price calculations",
+            "Customer segmentation metrics",
+            "Business intelligence reporting"
+          ],
+          "outputs": ["Aggregated DataFrame", "Summary Statistics"],
+          "related_atoms": ["dataframe-operations", "create-column"],
+          "typical_next_atoms": ["chart-maker", "merge", "correlation"]
+        },
+        {
+          "id": "merge",
+          "title": "Merge",
+          "description": "Join datasets on common columns (SQL-style joins)",
+          "tags": ["merge", "join", "combine", "vlookup"],
+          "capabilities": [
+            "Inner, left, right, outer joins",
+            "Multiple key columns",
+            "Indicator columns",
+            "Fuzzy matching",
+            "Cross joins"
+          ],
+          "use_cases": [
+            "Combine customer and transaction data",
+            "VLOOKUP-style operations",
+            "Enrich data with lookups",
+            "Match datasets by ID"
+          ],
+          "outputs": ["Merged DataFrame"],
+          "related_atoms": ["concat", "dataframe-operations"],
+          "typical_next_atoms": ["dataframe-operations", "create-column", "chart-maker"]
+        },
+        {
+          "id": "concat",
+          "title": "Concat",
+          "description": "Concatenate datasets vertically (rows) or horizontally (columns)",
+          "tags": ["concat", "stack", "append", "combine"],
+          "capabilities": [
+            "Vertical concatenation (row-wise)",
+            "Horizontal concatenation (column-wise)",
+            "Multiple file combination",
+            "Index handling",
+            "Duplicate removal"
+          ],
+          "use_cases": [
+            "Combine monthly files",
+            "Stack regional data",
+            "Append new records",
+            "Combine similar datasets"
+          ],
+          "outputs": ["Concatenated DataFrame"],
+          "related_atoms": ["merge"],
+          "typical_next_atoms": ["dataframe-operations", "groupby-wtg-avg"]
+        },
+        {
+          "id": "scope-selector",
+          "title": "Scope Selector",
+          "description": "Select specific columns, rows, or data subsets",
+          "tags": ["filter", "select", "subset"],
+          "capabilities": [
+            "Column selection",
+            "Row filtering",
+            "Conditional selection",
+            "Range selection",
+            "Sample data"
+          ],
+          "use_cases": [
+            "Select relevant columns",
+            "Filter date ranges",
+            "Extract specific records",
+            "Create data subsets"
+          ],
+          "outputs": ["Filtered DataFrame"],
+          "related_atoms": ["dataframe-operations", "row-operations"],
+          "typical_next_atoms": ["groupby-wtg-avg", "correlation", "chart-maker"]
+        },
+        {
+          "id": "row-operations",
+          "title": "Row Operations",
+          "description": "Perform operations on rows (filter, sort, dedup, sample)",
+          "tags": ["rows", "filter", "sort", "dedup"],
+          "capabilities": [
+            "Filter rows by conditions",
+            "Sort by columns",
+            "Remove duplicates",
+            "Sample rows",
+            "Reset index"
+          ],
+          "use_cases": [
+            "Remove duplicate records",
+            "Sort by date or value",
+            "Sample for testing",
+            "Filter outliers"
+          ],
+          "outputs": ["Processed DataFrame"],
+          "related_atoms": ["scope-selector", "dataframe-operations"],
+          "typical_next_atoms": ["groupby-wtg-avg", "merge", "chart-maker"]
+        },
+        {
+          "id": "column-classifier",
+          "title": "Column Classifier",
+          "description": "Classify columns by data type and suggest transformations",
+          "tags": ["classification", "data-types", "schema"],
+          "capabilities": [
+            "Automatic type detection",
+            "Categorical vs numerical classification",
+            "Date/time detection",
+            "ID column identification",
+            "Suggest transformations"
+          ],
+          "use_cases": [
+            "Understand data structure",
+            "Prepare for modeling",
+            "Identify feature types",
+            "Data type validation"
+          ],
+          "outputs": ["Column Classification Report"],
+          "related_atoms": ["feature-overview", "dataframe-operations"],
+          "typical_next_atoms": ["create-column", "dataframe-operations", "regression-feature-based"]
+        },
+        {
+          "id": "create-column",
+          "title": "Create Column",
+          "description": "Create new calculated columns with formulas",
+          "tags": ["calculate", "derive", "transform"],
+          "capabilities": [
+            "Mathematical operations (+, -, *, /)",
+            "String operations",
+            "Date calculations",
+            "Conditional logic",
+            "Column combinations"
+          ],
+          "use_cases": [
+            "Calculate revenue (price * quantity)",
+            "Create year from date",
+            "Derive metrics",
+            "Feature engineering"
+          ],
+          "outputs": ["DataFrame with new columns"],
+          "related_atoms": ["dataframe-operations"],
+          "typical_next_atoms": ["groupby-wtg-avg", "correlation", "regression-feature-based"]
+        },
+        {
+          "id": "dataframe-operations",
+          "title": "DataFrame Operations",
+          "description": "Comprehensive data manipulation with AI-powered natural language queries",
+          "tags": ["operations", "transform", "manipulate", "ai-powered"],
+          "capabilities": [
+            "Natural language data queries",
+            "Filter, sort, group operations",
+            "Column transformations",
+            "Data cleaning",
+            "Missing value handling",
+            "Type conversions",
+            "Advanced pandas operations"
+          ],
+          "use_cases": [
+            "Quick data transformations",
+            "Exploratory data manipulation",
+            "Data cleaning workflows",
+            "Feature preparation"
+          ],
+          "outputs": ["Transformed DataFrame"],
+          "related_atoms": ["create-column", "row-operations", "scope-selector"],
+          "typical_next_atoms": ["groupby-wtg-avg", "correlation", "chart-maker"]
+        }
+      ]
+    },
+    "analytics": {
+      "name": "Analytics",
+      "description": "Atoms for data analysis and statistical operations",
+      "color": "purple",
+      "typical_usage": "Third step - analyze data after processing",
+      "atoms": [
+        {
+          "id": "correlation",
+          "title": "Correlation",
+          "description": "Calculate correlations between variables with visualization",
+          "tags": ["correlation", "relationship", "statistics"],
+          "capabilities": [
+            "Pearson correlation",
+            "Spearman correlation",
+            "Correlation matrix",
+            "Heatmap visualization",
+            "P-value calculation"
+          ],
+          "use_cases": [
+            "Find related variables",
+            "Feature selection for ML",
+            "Identify multicollinearity",
+            "Relationship analysis"
+          ],
+          "outputs": ["Correlation Matrix", "Heatmap"],
+          "related_atoms": ["descriptive-stats", "explore"],
+          "typical_next_atoms": ["regression-feature-based", "chart-maker"]
+        },
+        {
+          "id": "explore",
+          "title": "Explore",
+          "description": "Interactive data exploration with AI-powered insights",
+          "tags": ["explore", "eda", "interactive", "insights"],
+          "capabilities": [
+            "Interactive data browsing",
+            "Column profiling",
+            "Distribution analysis",
+            "Missing value visualization",
+            "Quick filtering",
+            "AI-generated insights"
+          ],
+          "use_cases": [
+            "Quick data overview",
+            "Interactive EDA",
+            "Data discovery",
+            "Anomaly detection"
+          ],
+          "outputs": ["Interactive Dashboard", "Insights Report"],
+          "related_atoms": ["feature-overview", "descriptive-stats"],
+          "typical_next_atoms": ["correlation", "chart-maker", "groupby-wtg-avg"]
+        },
+        {
+          "id": "descriptive-stats",
+          "title": "Descriptive Statistics",
+          "description": "Calculate comprehensive descriptive statistics",
+          "tags": ["statistics", "summary", "describe"],
+          "capabilities": [
+            "Mean, median, mode",
+            "Standard deviation, variance",
+            "Min, max, quartiles",
+            "Skewness, kurtosis",
+            "Count, unique values"
+          ],
+          "use_cases": [
+            "Summary statistics",
+            "Data distribution understanding",
+            "Outlier identification",
+            "Variable profiling"
+          ],
+          "outputs": ["Statistics Summary"],
+          "related_atoms": ["feature-overview", "explore"],
+          "typical_next_atoms": ["correlation", "trend-analysis", "chart-maker"]
+        },
+        {
+          "id": "trend-analysis",
+          "title": "Trend Analysis",
+          "description": "Analyze trends and patterns in time series data",
+          "tags": ["trend", "time-series", "pattern"],
+          "capabilities": [
+            "Trend detection",
+            "Seasonality analysis",
+            "Moving averages",
+            "Growth rate calculation",
+            "Anomaly detection"
+          ],
+          "use_cases": [
+            "Sales trend analysis",
+            "Time series patterns",
+            "Seasonal effects",
+            "Growth tracking"
+          ],
+          "outputs": ["Trend Report", "Time Series Visualizations"],
+          "related_atoms": ["descriptive-stats", "chart-maker"],
+          "typical_next_atoms": ["auto-regressive-models", "chart-maker"]
+        }
+      ]
+    },
+    "machine_learning": {
+      "name": "Machine Learning",
+      "description": "Atoms for building and evaluating ML models",
+      "color": "orange",
+      "typical_usage": "Advanced step - build predictive models",
+      "atoms": [
+        {
+          "id": "regression-feature-based",
+          "title": "Regression (Feature-Based)",
+          "description": "Build regression models using features to predict target variable",
+          "tags": ["regression", "prediction", "ml", "supervised"],
+          "capabilities": [
+            "Linear regression",
+            "Feature selection",
+            "Model training",
+            "Prediction generation",
+            "R-squared calculation"
+          ],
+          "use_cases": [
+            "Price prediction",
+            "Sales forecasting",
+            "Demand estimation",
+            "Risk modeling"
+          ],
+          "outputs": ["Trained Model", "Predictions", "Metrics"],
+          "related_atoms": ["select-models-feature", "evaluate-models-feature"],
+          "typical_next_atoms": ["evaluate-models-feature", "chart-maker"]
+        },
+        {
+          "id": "select-models-feature",
+          "title": "Select Models (Feature-Based)",
+          "description": "Select and compare multiple regression models",
+          "tags": ["model-selection", "comparison", "ml"],
+          "capabilities": [
+            "Multiple model types",
+            "Cross-validation",
+            "Hyperparameter tuning",
+            "Model comparison",
+            "Best model selection"
+          ],
+          "use_cases": [
+            "Compare model performance",
+            "Find best algorithm",
+            "Hyperparameter optimization",
+            "Model selection"
+          ],
+          "outputs": ["Model Comparison Report", "Best Model"],
+          "related_atoms": ["regression-feature-based", "build-model-feature-based"],
+          "typical_next_atoms": ["evaluate-models-feature", "build-model-feature-based"]
+        },
+        {
+          "id": "evaluate-models-feature",
+          "title": "Evaluate Models (Feature-Based)",
+          "description": "Evaluate regression model performance with metrics",
+          "tags": ["evaluation", "metrics", "performance"],
+          "capabilities": [
+            "R-squared, MAE, MSE, RMSE",
+            "Residual analysis",
+            "Prediction vs actual plots",
+            "Feature importance",
+            "Model diagnostics"
+          ],
+          "use_cases": [
+            "Model performance assessment",
+            "Compare predictions to actuals",
+            "Identify model weaknesses",
+            "Validate model accuracy"
+          ],
+          "outputs": ["Evaluation Report", "Metrics", "Visualizations"],
+          "related_atoms": ["regression-feature-based", "select-models-feature"],
+          "typical_next_atoms": ["chart-maker", "build-model-feature-based"]
+        },
+        {
+          "id": "auto-regressive-models",
+          "title": "Auto-Regressive Models",
+          "description": "Time series forecasting with auto-regressive models",
+          "tags": ["time-series", "forecasting", "arima"],
+          "capabilities": [
+            "ARIMA modeling",
+            "Seasonal decomposition",
+            "Forecast generation",
+            "Trend & seasonality",
+            "Multiple horizons"
+          ],
+          "use_cases": [
+            "Sales forecasting",
+            "Demand prediction",
+            "Inventory planning",
+            "Time series prediction"
+          ],
+          "outputs": ["Forecast", "Model Parameters"],
+          "related_atoms": ["select-models-auto-regressive", "trend-analysis"],
+          "typical_next_atoms": ["evaluate-models-auto-regressive", "chart-maker"]
+        },
+        {
+          "id": "select-models-auto-regressive",
+          "title": "Select Models (Auto-Regressive)",
+          "description": "Select best time series forecasting model",
+          "tags": ["model-selection", "time-series"],
+          "capabilities": [
+            "Compare ARIMA variants",
+            "Order selection",
+            "AIC/BIC comparison",
+            "Best model identification"
+          ],
+          "use_cases": [
+            "Find optimal ARIMA order",
+            "Compare forecast models",
+            "Model selection for time series"
+          ],
+          "outputs": ["Best Model", "Comparison Report"],
+          "related_atoms": ["auto-regressive-models"],
+          "typical_next_atoms": ["evaluate-models-auto-regressive"]
+        },
+        {
+          "id": "evaluate-models-auto-regressive",
+          "title": "Evaluate Models (Auto-Regressive)",
+          "description": "Evaluate time series forecast accuracy",
+          "tags": ["evaluation", "forecasting", "accuracy"],
+          "capabilities": [
+            "MAPE, MAE, RMSE",
+            "Forecast vs actual comparison",
+            "Residual diagnostics",
+            "Confidence intervals"
+          ],
+          "use_cases": [
+            "Assess forecast accuracy",
+            "Validate time series models",
+            "Compare forecast methods"
+          ],
+          "outputs": ["Evaluation Metrics", "Diagnostic Plots"],
+          "related_atoms": ["auto-regressive-models", "select-models-auto-regressive"],
+          "typical_next_atoms": ["chart-maker"]
+        },
+        {
+          "id": "build-model-feature-based",
+          "title": "Build Model (Feature-Based)",
+          "description": "Train and deploy production-ready regression models",
+          "tags": ["modeling", "production", "deployment"],
+          "capabilities": [
+            "Model training",
+            "Feature engineering",
+            "Model persistence",
+            "Batch predictions",
+            "Model deployment"
+          ],
+          "use_cases": [
+            "Production model deployment",
+            "Batch scoring",
+            "Model persistence",
+            "Operationalized predictions"
+          ],
+          "outputs": ["Trained Model", "Model Artifacts"],
+          "related_atoms": ["regression-feature-based", "select-models-feature"],
+          "typical_next_atoms": ["evaluate-models-feature"]
+        },
+        {
+          "id": "clustering",
+          "title": "Clustering",
+          "description": "Unsupervised clustering for customer segmentation and pattern discovery",
+          "tags": ["clustering", "segmentation", "unsupervised", "kmeans"],
+          "capabilities": [
+            "K-means clustering",
+            "Optimal cluster selection",
+            "Cluster profiling",
+            "Visualization",
+            "Segment assignment"
+          ],
+          "use_cases": [
+            "Customer segmentation",
+            "Pattern discovery",
+            "Market segmentation",
+            "Anomaly detection"
+          ],
+          "outputs": ["Cluster Assignments", "Cluster Profiles", "Visualizations"],
+          "related_atoms": ["descriptive-stats", "correlation"],
+          "typical_next_atoms": ["chart-maker", "groupby-wtg-avg"]
+        }
+      ]
+    },
+    "visualization": {
+      "name": "Visualization",
+      "description": "Atoms for creating charts and visualizations",
+      "color": "pink",
+      "typical_usage": "Final step - visualize insights and results",
+      "atoms": [
+        {
+          "id": "chart-maker",
+          "title": "Chart Maker",
+          "description": "Create interactive charts with AI-powered natural language interface",
+          "tags": ["chart", "visualization", "plotly", "interactive"],
+          "capabilities": [
+            "Bar, line, area, pie charts",
+            "Scatter plots, histograms",
+            "Heatmaps, waterfall charts",
+            "Interactive dashboards",
+            "AI-powered chart generation",
+            "Business dashboards"
+          ],
+          "use_cases": [
+            "Sales dashboards",
+            "KPI visualization",
+            "Trend visualization",
+            "Business reporting",
+            "Data presentation"
+          ],
+          "outputs": ["Interactive Charts", "Dashboards"],
+          "related_atoms": ["scatter-plot", "histogram", "text-box"],
+          "typical_next_atoms": ["text-box"]
+        },
+        {
+          "id": "text-box",
+          "title": "Text Box",
+          "description": "Add text annotations and explanations to reports",
+          "tags": ["text", "annotation", "documentation"],
+          "capabilities": [
+            "Rich text formatting",
+            "Markdown support",
+            "Headers and sections",
+            "Bullet lists",
+            "Documentation"
+          ],
+          "use_cases": [
+            "Report documentation",
+            "Chart explanations",
+            "Executive summaries",
+            "Findings documentation"
+          ],
+          "outputs": ["Formatted Text"],
+          "related_atoms": ["chart-maker"],
+          "typical_next_atoms": []
+        },
+        {
+          "id": "scatter-plot",
+          "title": "Scatter Plot",
+          "description": "Create scatter plots for relationship visualization",
+          "tags": ["scatter", "plot", "relationship"],
+          "capabilities": [
+            "X-Y scatter plots",
+            "Color by category",
+            "Size by value",
+            "Trend lines",
+            "Correlation visualization"
+          ],
+          "use_cases": [
+            "Correlation analysis",
+            "Relationship discovery",
+            "Outlier detection",
+            "Pattern identification"
+          ],
+          "outputs": ["Scatter Plot"],
+          "related_atoms": ["correlation", "chart-maker"],
+          "typical_next_atoms": ["text-box"]
+        },
+        {
+          "id": "histogram",
+          "title": "Histogram",
+          "description": "Create histograms for distribution analysis",
+          "tags": ["histogram", "distribution", "frequency"],
+          "capabilities": [
+            "Frequency distribution",
+            "Bin customization",
+            "Multiple overlays",
+            "Density curves",
+            "Statistical annotations"
+          ],
+          "use_cases": [
+            "Distribution analysis",
+            "Data quality checks",
+            "Normality testing",
+            "Range understanding"
+          ],
+          "outputs": ["Histogram"],
+          "related_atoms": ["descriptive-stats", "chart-maker"],
+          "typical_next_atoms": ["text-box"]
+        }
+      ]
+    },
+    "planning_optimization": {
+      "name": "Planning & Optimization",
+      "description": "Atoms for scenario planning and optimization",
+      "color": "indigo",
+      "typical_usage": "Advanced business planning and what-if analysis",
+      "atoms": [
+        {
+          "id": "scenario-planner",
+          "title": "Scenario Planner",
+          "description": "Create and compare business scenarios with what-if analysis",
+          "tags": ["planning", "scenarios", "what-if"],
+          "capabilities": [
+            "Multiple scenario creation",
+            "Variable adjustment",
+            "Comparison views",
+            "Impact analysis",
+            "Sensitivity testing"
+          ],
+          "use_cases": [
+            "Budget planning",
+            "Sales forecasting scenarios",
+            "Risk analysis",
+            "Strategic planning"
+          ],
+          "outputs": ["Scenario Comparison", "Impact Analysis"],
+          "related_atoms": ["optimizer"],
+          "typical_next_atoms": ["chart-maker", "optimizer"]
+        },
+        {
+          "id": "optimizer",
+          "title": "Optimizer",
+          "description": "Optimize variables to maximize/minimize objectives",
+          "tags": ["optimization", "maximize", "constraints"],
+          "capabilities": [
+            "Linear programming",
+            "Constraint optimization",
+            "Objective maximization",
+            "Resource allocation",
+            "Multi-variable optimization"
+          ],
+          "use_cases": [
+            "Resource allocation",
+            "Production optimization",
+            "Cost minimization",
+            "Profit maximization"
+          ],
+          "outputs": ["Optimal Solution", "Sensitivity Analysis"],
+          "related_atoms": ["scenario-planner"],
+          "typical_next_atoms": ["chart-maker"]
+        }
+      ]
+    },
+    "utilities": {
+      "name": "Utilities",
+      "description": "Utility atoms for special functions",
+      "color": "gray",
+      "typical_usage": "Supporting functions and custom extensions",
+      "atoms": [
+        {
+          "id": "atom-maker",
+          "title": "Atom Maker",
+          "description": "Create custom atoms for specific business needs",
+          "tags": ["custom", "extension", "builder"],
+          "capabilities": [
+            "Custom atom creation",
+            "Business logic encoding",
+            "Reusable components",
+            "Custom transformations"
+          ],
+          "use_cases": [
+            "Company-specific calculations",
+            "Custom business rules",
+            "Proprietary algorithms",
+            "Industry-specific functions"
+          ],
+          "outputs": ["Custom Atom"],
+          "related_atoms": [],
+          "typical_next_atoms": []
+        },
+        {
+          "id": "read-presentation-summarize",
+          "title": "Read Presentation & Summarize",
+          "description": "Extract and summarize content from presentations",
+          "tags": ["presentation", "summarize", "extract"],
+          "capabilities": [
+            "PowerPoint parsing",
+            "Content extraction",
+            "AI summarization",
+            "Key points identification"
+          ],
+          "use_cases": [
+            "Meeting summaries",
+            "Presentation digests",
+            "Report extraction",
+            "Content analysis"
+          ],
+          "outputs": ["Summary Text", "Key Points"],
+          "related_atoms": ["text-box"],
+          "typical_next_atoms": ["text-box"]
+        }
+      ]
+    },
+    "business_intelligence": {
+      "name": "Business Intelligence",
+      "description": "Specialized atoms for business-specific calculations",
+      "color": "emerald",
+      "typical_usage": "Industry-specific business calculations",
+      "atoms": [
+        {
+          "id": "base-price-estimator",
+          "title": "Base Price Estimator",
+          "description": "Estimate base prices using regression and business rules",
+          "tags": ["pricing", "estimation", "business"],
+          "capabilities": [
+            "Price regression modeling",
+            "Base price calculation",
+            "Price elasticity",
+            "Competitive pricing",
+            "Cost-plus pricing"
+          ],
+          "use_cases": [
+            "Product pricing strategy",
+            "Price optimization",
+            "Competitive analysis",
+            "Revenue management"
+          ],
+          "outputs": ["Price Estimates", "Pricing Model"],
+          "related_atoms": ["promo-estimator", "regression-feature-based"],
+          "typical_next_atoms": ["promo-estimator", "chart-maker"]
+        },
+        {
+          "id": "promo-estimator",
+          "title": "Promo Estimator",
+          "description": "Estimate promotional impact on sales and revenue",
+          "tags": ["promotion", "marketing", "roi"],
+          "capabilities": [
+            "Promo lift calculation",
+            "ROI analysis",
+            "Baseline vs promo comparison",
+            "Incremental sales",
+            "Cannibalization analysis"
+          ],
+          "use_cases": [
+            "Promotion planning",
+            "Marketing ROI",
+            "Campaign effectiveness",
+            "Trade promotion optimization"
+          ],
+          "outputs": ["Promo Impact Analysis", "ROI Metrics"],
+          "related_atoms": ["base-price-estimator"],
+          "typical_next_atoms": ["chart-maker"]
+        }
+      ]
+    }
+  },
+  "workflow_patterns": {
+    "basic_eda": {
+      "name": "Basic Exploratory Data Analysis",
+      "sequence": ["data-upload-validate", "feature-overview", "correlation", "chart-maker"],
+      "description": "Load data, profile it, find correlations, visualize"
+    },
+    "data_prep_modeling": {
+      "name": "Data Preparation and Modeling",
+      "sequence": ["csv-import", "dataframe-operations", "column-classifier", "regression-feature-based", "evaluate-models-feature"],
+      "description": "Load, clean, classify features, build model, evaluate"
+    },
+    "time_series_forecast": {
+      "name": "Time Series Forecasting",
+      "sequence": ["data-upload-validate", "trend-analysis", "auto-regressive-models", "evaluate-models-auto-regressive", "chart-maker"],
+      "description": "Load time series, analyze trends, forecast, evaluate, visualize"
+    },
+    "business_reporting": {
+      "name": "Business Reporting Dashboard",
+      "sequence": ["database-connect", "groupby-wtg-avg", "chart-maker", "text-box"],
+      "description": "Connect to DB, aggregate KPIs, create charts, add commentary"
+    },
+    "customer_segmentation": {
+      "name": "Customer Segmentation",
+      "sequence": ["data-upload-validate", "feature-overview", "clustering", "groupby-wtg-avg", "chart-maker"],
+      "description": "Load customers, profile, cluster, summarize segments, visualize"
+    },
+    "price_optimization": {
+      "name": "Price Optimization",
+      "sequence": ["data-upload-validate", "base-price-estimator", "scenario-planner", "optimizer", "chart-maker"],
+      "description": "Load data, estimate base prices, plan scenarios, optimize, visualize"
+    }
+  }
+}
+
+

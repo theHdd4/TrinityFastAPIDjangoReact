@@ -389,6 +389,7 @@ from Agent_chartmaker.main_app import router as chartmaker_router
 from Agent_explore.main_app import router as explore_router
 from Agent_dataframe_operations.main_app import router as dataframe_operations_router
 from SUPERAGENT.main_app import router as superagent_router
+from workflow_mode.api import router as workflow_router
 from insight import router as insight_router
 
 def convert_numpy(obj):
@@ -585,7 +586,8 @@ api_router.include_router(groupby_router)
 api_router.include_router(chartmaker_router)
 api_router.include_router(explore_router)
 api_router.include_router(dataframe_operations_router)
-api_router.include_router(superagent_router)
+api_router.include_router(superagent_router)  # Laboratory Mode (executes agents)
+api_router.include_router(workflow_router)     # Workflow Mode (composes molecules)
 api_router.include_router(insight_router)
 
 # Enable CORS for browser-based clients

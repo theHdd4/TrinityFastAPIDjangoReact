@@ -51,6 +51,8 @@ class ChatRequest(BaseModel):
     client_name: Optional[str] = ""
     app_name: Optional[str] = ""
     project_name: Optional[str] = ""
+    mode: Optional[str] = "laboratory"  # "laboratory" or "workflow"
+    workflow_context: Optional[Dict[str, Any]] = None  # Workflow-specific context
 
 class OrchestrateRequest(BaseModel):
     message: str
@@ -59,6 +61,8 @@ class OrchestrateRequest(BaseModel):
     client_name: Optional[str] = ""
     app_name: Optional[str] = ""
     project_name: Optional[str] = ""
+    mode: Optional[str] = "laboratory"  # "laboratory" or "workflow"
+    workflow_context: Optional[Dict[str, Any]] = None  # Workflow-specific context
 
 class ChatResponse(BaseModel):
     response: str
@@ -1396,9 +1400,13 @@ async def orchestrate_agents(request: OrchestrateRequest):
     """
     try:
         logger.info(f"SuperAgent orchestration request: {request.message}")
+        logger.info(f"Mode: {request.mode}")
+        if request.workflow_context:
+            logger.info(f"Workflow context: {request.workflow_context}")
         
         print("\n" + "🚀 "*40)
         print("STARTING COMPLETE ORCHESTRATION")
+        print(f"Mode: {request.mode}")
         print("🚀 "*40)
         print(f"📝 User Request: {request.message}")
         
@@ -1526,6 +1534,8 @@ async def orchestrate_agents_websocket(websocket: WebSocket):
         client_name = request_data.get("client_name", "")
         app_name = request_data.get("app_name", "")
         project_name = request_data.get("project_name", "")
+        mode = request_data.get("mode", "laboratory")
+        workflow_context = request_data.get("workflow_context", None)
         
         logger.info(f"WebSocket orchestration request: {message}")
         

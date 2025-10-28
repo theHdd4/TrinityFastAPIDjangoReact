@@ -9,6 +9,7 @@ import { atomCategories } from '@/components/AtomCategory/data/atomCategories';
 import { atomIconMap } from '../utils/atomIconMap';
 import AtomTooltip from './AtomTooltip';
 import { TrinityAIIcon } from '@/components/TrinityAI';
+import WorkflowAIPanel from '@/components/TrinityAI/WorkflowAIPanel';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -23,6 +24,7 @@ interface WorkflowRightPanelProps {
   assignedAtoms?: string[];
   onAtomLibraryVisibilityChange?: (isVisible: boolean) => void;
   onRightPanelToolVisibilityChange?: (isVisible: boolean) => void;
+  onMoleculeAdd?: (molecule: any) => void;
 }
 
 type PanelType = 'trinityAI' | 'atoms' | 'custom' | null;
@@ -33,7 +35,8 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
   onMultipleAtomsAssignToMolecule,
   assignedAtoms = [],
   onAtomLibraryVisibilityChange,
-  onRightPanelToolVisibilityChange
+  onRightPanelToolVisibilityChange,
+  onMoleculeAdd
 }) => {
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [selectedAtomForAssignment, setSelectedAtomForAssignment] = useState<string | null>(null);
@@ -122,26 +125,17 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
     <div className="flex h-full">
       {/* Panel Area - Shows when active */}
       {activePanel === 'trinityAI' && (
-        <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
-          <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-            <h3 className="font-semibold text-gray-900">Trinity AI</h3>
-            <button
-              className="w-6 h-6 flex items-center justify-center hover:bg-gray-100 rounded"
-              onClick={() => setActivePanel(null)}
-            >
-              <X className="w-4 h-4 text-gray-600" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
-            <div className="p-4">
-              <p className="text-sm text-gray-600 mb-4">
-                Trinity AI chat functionality will be integrated here.
-              </p>
-              <div className="h-96 bg-gray-50 rounded-lg flex items-center justify-center border border-gray-200">
-                <p className="text-sm text-gray-500">Chat interface coming soon</p>
-              </div>
-            </div>
-          </div>
+        <div className="h-full flex flex-col bg-white border-r border-gray-200">
+          <WorkflowAIPanel 
+            isCollapsed={false}
+            onToggle={() => setActivePanel(null)}
+            workflowContext={{
+              workflowName: localStorage.getItem('workflow-name') || 'Untitled Workflow',
+              canvasMolecules: JSON.parse(localStorage.getItem('workflow-canvas-molecules') || '[]'),
+              customMolecules: JSON.parse(localStorage.getItem('workflow-custom-molecules') || '[]')
+            }}
+            onMoleculeAdd={onMoleculeAdd}
+          />
         </div>
       )}
       

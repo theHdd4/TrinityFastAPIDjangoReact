@@ -3,7 +3,8 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Play, Save, Share2, Upload, ChevronLeft, ChevronRight, Grid3X3 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Play, Save, Share2, Upload, ChevronLeft, ChevronRight, Grid3X3, Edit2 } from 'lucide-react';
 import Header from '@/components/Header';
 import WorkflowCanvas from './components/WorkflowCanvas';
 import MoleculeList from '@/components/MoleculeList/MoleculeList';
@@ -30,6 +31,7 @@ const WorkflowMode = () => {
   const [isRightPanelVisible, setIsRightPanelVisible] = useState(true);
   const [isAtomLibraryVisible, setIsAtomLibraryVisible] = useState(false);
   const [isRightPanelToolVisible, setIsRightPanelToolVisible] = useState(false);
+  const [workflowName, setWorkflowName] = useState<string>('Untitled Workflow');
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -37,6 +39,7 @@ const WorkflowMode = () => {
   useEffect(() => {
     const savedCanvasMolecules = localStorage.getItem('workflow-canvas-molecules');
     const savedCustomMolecules = localStorage.getItem('workflow-custom-molecules');
+    const savedWorkflowName = localStorage.getItem('workflow-name');
     
     if (savedCanvasMolecules) {
       try {
@@ -54,6 +57,10 @@ const WorkflowMode = () => {
       } catch (error) {
         console.error('Error loading custom molecules:', error);
       }
+    }
+    
+    if (savedWorkflowName) {
+      setWorkflowName(savedWorkflowName);
     }
 
   }, []);
@@ -77,6 +84,10 @@ const WorkflowMode = () => {
   useEffect(() => {
     localStorage.setItem('workflow-custom-molecules', JSON.stringify(customMolecules));
   }, [customMolecules]);
+
+  useEffect(() => {
+    localStorage.setItem('workflow-name', workflowName);
+  }, [workflowName]);
 
   const handleMoleculeSelect = (moleculeId: string) => {
     setSelectedMoleculeId(moleculeId);
@@ -526,6 +537,7 @@ const WorkflowMode = () => {
         },
         credentials: 'include',
         body: JSON.stringify({
+          workflow_name: workflowName,
           canvas_molecules: canvasMolecules,
           custom_molecules: customMolecules,
           user_id: '', // Could be enhanced with actual user ID from session
@@ -603,15 +615,16 @@ const WorkflowMode = () => {
         const result = await response.json();
         
         if (result.workflow_data) {
-          const { canvas_molecules, custom_molecules } = result.workflow_data;
+          const { workflow_name, canvas_molecules, custom_molecules } = result.workflow_data;
           
           // Update state with loaded data
+          setWorkflowName(workflow_name || 'Untitled Workflow');
           setCanvasMolecules(canvas_molecules || []);
           setCustomMolecules(custom_molecules || []);
           
           toast({
             title: "Workflow Loaded",
-            description: `Workflow configuration has been loaded successfully`,
+            description: `Workflow "${workflow_name || 'Untitled Workflow'}" has been loaded successfully`,
           });
           console.log('Workflow loaded:', result.workflow_data);
         } else {
@@ -638,8 +651,10 @@ const WorkflowMode = () => {
   const clearWorkflowData = () => {
     setCanvasMolecules([]);
     setCustomMolecules([]);
+    setWorkflowName('Untitled Workflow');
     localStorage.removeItem('workflow-canvas-molecules');
     localStorage.removeItem('workflow-custom-molecules');
+    localStorage.removeItem('workflow-name');
     toast({
       title: 'Workflow Cleared',
       description: 'All molecules have been removed from the canvas'
@@ -759,8 +774,19 @@ const WorkflowMode = () => {
       {/* Workflow Header */}
       <div className="bg-card border-b border-border px-8 py-6 flex-shrink-0 relative z-20">
         <div className="flex items-center justify-between">
-              <div>
-            <h1 className="text-3xl font-semibold text-foreground mb-2">Workflow Mode</h1>
+          <div className="flex-1 max-w-2xl">
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-3xl font-semibold text-foreground">Workflow Mode</h1>
+              <div className="flex items-center gap-2 px-4 py-1.5 bg-muted/50 rounded-lg border border-border">
+                <Edit2 className="w-4 h-4 text-muted-foreground" />
+                <Input
+                  value={workflowName}
+                  onChange={(e) => setWorkflowName(e.target.value)}
+                  className="h-8 text-sm font-medium bg-transparent border-none focus-visible:ring-0 focus-visible:ring-offset-0 px-0"
+                  placeholder="Enter workflow name..."
+                />
+              </div>
+            </div>
             <p className="text-muted-foreground">
               Drag molecules from the list onto the workflow canvas. Connect molecules by drawing arrows between them.
             </p>
@@ -851,6 +877,7 @@ const WorkflowMode = () => {
             assignedAtoms={assignedAtoms}
             onAtomLibraryVisibilityChange={handleAtomLibraryVisibilityChange}
             onRightPanelToolVisibilityChange={handleRightPanelToolVisibilityChange}
+            onMoleculeAdd={handleMoleculeAdd}
           />
         </div>
 

@@ -78,9 +78,20 @@ interface Chat {
 interface SuperagentAIPanelProps {
   isCollapsed: boolean;
   onToggle: () => void;
+  mode?: 'laboratory' | 'workflow';
+  workflowContext?: {
+    workflowName?: string;
+    canvasMolecules?: any[];
+    customMolecules?: any[];
+  };
 }
 
-const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ isCollapsed, onToggle }) => {
+const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ 
+  isCollapsed, 
+  onToggle, 
+  mode = 'laboratory',
+  workflowContext 
+}) => {
   // Chat management state
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string>('');
@@ -407,7 +418,9 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ isCollapsed, onTo
               const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
               // Use environment variable or fallback to current hostname
               const wsHost = import.meta.env.VITE_TRINITY_AI_WS_HOST || window.location.hostname;
-              const wsPort = import.meta.env.VITE_TRINITY_AI_WS_PORT || '8002';
+              // Match the port logic from api.ts - use 8005 for dev (port 8081), 8002 for prod
+              const isDevStack = window.location.port === '8081';
+              const wsPort = import.meta.env.VITE_TRINITY_AI_WS_PORT || (isDevStack ? '8005' : '8002');
               const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/trinityai/superagent/orchestrate-ws`;
               
               console.log('🔗 Connecting to:', wsUrl);
@@ -450,14 +463,16 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ isCollapsed, onTo
                   console.warn('Failed to load environment context:', error);
                 }
                 
-                // Send workflow request with project context
+                // Send workflow request with project context and mode
                 ws.send(JSON.stringify({
                   message: currentInput,
                   workflow_json: workflowJSON,
                   session_id: `session_${Date.now()}`,
                   client_name: envContext.client_name,
                   app_name: envContext.app_name,
-                  project_name: envContext.project_name
+                  project_name: envContext.project_name,
+                  mode: mode,
+                  workflow_context: workflowContext
                 }));
               };
               
