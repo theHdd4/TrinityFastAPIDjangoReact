@@ -15,6 +15,7 @@ import {
   X,
   Table as TableIcon,
   Palette as PaletteIcon,
+  Type,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -570,43 +571,54 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
         </DialogHeader>
 
         <div className="flex flex-1 overflow-hidden">
-          <div className="flex w-1/2 flex-col border-r border-border/50">
-            <div className="border-b border-border/50 bg-gradient-to-br from-muted/20 to-transparent p-6">
-              <h3 className="mb-2 flex items-center gap-2 text-lg font-bold">
-                <TableIcon className="h-5 w-5 text-primary" />
+          <div className="w-1/2 border-r border-border/40 flex flex-col bg-muted/20">
+            <div className="p-6 border-b border-border/40 bg-card">
+              <h3 className="text-lg font-semibold mb-1.5 flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg bg-primary/10 ring-1 ring-primary/20">
+                  <TableIcon className="h-4 w-4 text-primary" />
+                </div>
                 Chart Data
               </h3>
               <p className="text-sm text-muted-foreground">Enter your data values below</p>
             </div>
 
             <ScrollArea className="flex-1">
-              <div className="space-y-3 p-6">
-                <div className="grid grid-cols-[1fr,140px,48px] gap-3 border-b-2 border-border/50 pb-2">
-                  <Label className="text-sm font-bold text-foreground">Label</Label>
-                  <Label className="text-sm font-bold text-foreground">Value</Label>
+              <div className="p-6 space-y-3">
+                <div className="grid grid-cols-[1fr,140px,48px] gap-3 pb-3 mb-2 border-b border-border/40">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                    <Type className="h-3 w-3" />
+                    Label
+                  </Label>
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                    <TrendingUp className="h-3 w-3" />
+                    Value
+                  </Label>
                   <div />
                 </div>
 
                 {draftRows.map((row, index) => (
-                  <div key={index} className="group grid animate-fade-in grid-cols-[1fr,140px,48px] gap-3">
+                  <div
+                    key={index}
+                    className="grid grid-cols-[1fr,140px,48px] gap-3 group animate-fade-in"
+                  >
                     <Input
                       value={row.label}
                       onChange={event => updateRow(index, 'label', event.target.value)}
-                      className="h-11 rounded-xl border-2 border-border/50 bg-card/50 transition-all hover:border-primary/50 focus:border-primary"
+                      className="h-11 bg-card border border-border/60 hover:border-primary/40 focus:border-primary focus:ring-1 focus:ring-primary/20 rounded-lg transition-all"
                       placeholder="Enter label"
                     />
                     <Input
                       type="number"
                       value={row.value}
                       onChange={event => updateRow(index, 'value', event.target.value)}
-                      className="h-11 rounded-xl border-2 border-border/50 bg-card/50 transition-all hover:border-primary/50 focus:border-primary"
+                      className="h-11 bg-card border border-border/60 hover:border-accent/40 focus:border-accent focus:ring-1 focus:ring-accent/20 rounded-lg transition-all"
                       placeholder="0"
                     />
                     <Button
                       variant="ghost"
                       size="icon"
                       onClick={() => deleteRow(index)}
-                      className="h-11 w-11 rounded-xl opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                      className="h-11 w-11 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all"
                       disabled={draftRows.length <= 1}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -617,10 +629,10 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                 <Button
                   variant="outline"
                   onClick={addRow}
-                  className="mt-2 h-12 w-full rounded-xl border-2 border-dashed border-border/50 transition-all hover:border-primary/50 hover:bg-primary/5"
+                  className="w-full h-12 border border-dashed border-border/60 hover:border-primary/40 hover:bg-primary/5 rounded-lg transition-all mt-4"
                 >
-                  <Plus className="mr-2 h-5 w-5" />
-                  Add Row
+                  <Plus className="h-4 w-4 mr-2" />
+                  <span className="font-medium">Add Row</span>
                 </Button>
               </div>
             </ScrollArea>
