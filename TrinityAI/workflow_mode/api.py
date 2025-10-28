@@ -20,6 +20,7 @@ if str(PARENT_DIR) not in sys.path:
 
 from main_api import get_llm_config
 from workflow_mode.llm_workflow_agent import get_workflow_composition_agent
+from workflow_mode.workflow_agent import get_workflow_agent
 
 logger = logging.getLogger("trinity.workflow_api")
 
@@ -92,6 +93,8 @@ async def compose_workflow(request: WorkflowRequest):
             "smart_response": result.get('smart_response', ''),
             "molecules": molecules,
             "workflow_suggestions": result.get('workflow_composition', {}) if result.get('success') else {},
+            "auto_create": True,  # Flag to automatically create molecules
+            "execution_plan": result.get('execution_plan', []),  # Step-by-step execution plan
             "mode": "workflow_composition"
         }
         
@@ -210,6 +213,8 @@ async def compose_workflow_websocket(websocket: WebSocket):
             "success": result.get('success', False),
             "session_id": result.get('session_id'),
             "workflow_composition": result.get('workflow_composition'),
+            "auto_create": result.get('auto_create', False),  # Flag to automatically create molecules
+            "execution_plan": result.get('execution_plan', []),  # Step-by-step execution plan
             "mode": "workflow_composition"
         })
         

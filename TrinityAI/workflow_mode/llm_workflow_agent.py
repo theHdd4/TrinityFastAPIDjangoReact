@@ -152,6 +152,41 @@ class WorkflowCompositionAgent:
         # Add session ID if not present
         result["session_id"] = session_id
         
+        # Add auto_create flag if workflow composition is successful
+        if result.get('success') and result.get('workflow_composition'):
+            result['auto_create'] = True
+            
+            # Generate step-by-step execution plan
+            execution_plan = []
+            step = 1
+            
+            for molecule in result.get('workflow_composition', {}).get('molecules', []):
+                # Step 1: Create molecule
+                execution_plan.append({
+                    'step': step,
+                    'action': 'create_molecule',
+                    'molecule_number': molecule.get('molecule_number'),
+                    'molecule_name': molecule.get('molecule_name'),
+                    'purpose': molecule.get('purpose')
+                })
+                step += 1
+                
+                # Steps 2+: Add each atom to the molecule
+                for atom in molecule.get('atoms', []):
+                    execution_plan.append({
+                        'step': step,
+                        'action': 'add_atom',
+                        'molecule_number': molecule.get('molecule_number'),
+                        'atom_id': atom.get('id'),
+                        'atom_title': atom.get('title'),
+                        'order': atom.get('order'),
+                        'purpose': atom.get('purpose'),
+                        'required': atom.get('required', True)
+                    })
+                    step += 1
+            
+            result['execution_plan'] = execution_plan
+        
         # Update session memory
         self._update_session_memory(session_id, user_prompt, result)
         

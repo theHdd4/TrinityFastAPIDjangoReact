@@ -38,12 +38,18 @@ CURRENT WORKFLOW CONTEXT:
 AVAILABLE ATOMS (by category):
 {json.dumps(available_atoms, indent=2)}
 
+RAG KNOWLEDGE (use as inspiration ONLY, not fixed templates):
 {rag_knowledge}
 
 CONVERSATION HISTORY:
 {conversation_context}
 
-TASK: Analyze the user input and suggest molecule compositions for their workflow goal.
+TASK: Analyze the user input deeply and CREATE intelligent, custom molecule compositions.
+- DO NOT just copy RAG templates
+- ANALYZE the user's specific needs and goals
+- SELECT the BEST atoms from the AVAILABLE ATOMS section
+- DESIGN a complete, sophisticated workflow (5-8 molecules for complex tasks)
+- ENSURE logical flow and data pipeline completeness
 
 SUCCESS RESPONSE (when you can suggest a workflow):
 {{
@@ -73,8 +79,52 @@ SUCCESS RESPONSE (when you can suggest a workflow):
   }},
   "message": "Workflow composition completed",
   "smart_response": "I'll help you create a workflow for [goal].\\n\\n**Molecule 1: [Name]**\\nPurpose: [What it does]\\nAtoms:\\n  1. [Atom Title] - [purpose]\\n  2. [Atom Title] - [purpose]\\n\\n**Molecule 2: [Name]**...",
-  "reasoning": "Matched use case pattern / Created custom composition",
-  "use_case_matched": "mmm_marketing_mix_modeling"
+          "reasoning": "Matched use case pattern / Created custom composition",
+          "use_case_matched": "mmm_marketing_mix_modeling",
+          "auto_create": true,
+          "execution_plan": [
+            {{
+              "step": 1,
+              "action": "create_molecule",
+              "molecule_number": 1,
+              "molecule_name": "Descriptive Name",
+              "purpose": "What this molecule accomplishes"
+            }},
+            {{
+              "step": 2,
+              "action": "add_atom",
+              "molecule_number": 1,
+              "atom_id": "atom-id-1",
+              "atom_title": "Atom Title 1",
+              "order": 1,
+              "required": true
+            }},
+            {{
+              "step": 3,
+              "action": "add_atom",
+              "molecule_number": 1,
+              "atom_id": "atom-id-2",
+              "atom_title": "Atom Title 2",
+              "order": 2,
+              "required": true
+            }},
+            {{
+              "step": 4,
+              "action": "create_molecule",
+              "molecule_number": 2,
+              "molecule_name": "Next Molecule Name",
+              "purpose": "Purpose of second molecule"
+            }},
+            {{
+              "step": 5,
+              "action": "add_atom",
+              "molecule_number": 2,
+              "atom_id": "atom-id-3",
+              "atom_title": "Atom Title 3",
+              "order": 1,
+              "required": true
+            }}
+          ]
 }}
 
 GENERAL RESPONSE (for questions, clarifications, or showing available options):
@@ -93,30 +143,52 @@ GENERAL RESPONSE (for questions, clarifications, or showing available options):
 
 INTELLIGENCE RULES:
 
-1. **CRITICAL: ALWAYS include "smart_response" field** - This is displayed to the user in the chat
-2. **MOLECULE COMPOSITION FOCUS**: Suggest how to GROUP atoms into molecules (2-4 atoms per molecule)
-3. **SEQUENTIAL FLOW**: Explain how molecules connect: Molecule 1 → Molecule 2 → Molecule 3
-4. **USE CASE MATCHING**: Use the RAG knowledge to match predefined workflows (MMM, churn, forecasting, etc.)
-5. **ATOM VALIDATION**: Only suggest atoms that exist in the AVAILABLE ATOMS section
-6. **CLEAR GROUPING**: Each molecule should have a clear sub-goal (e.g., "Data Preparation", "Model Building")
-7. **TYPICAL STRUCTURE**: 
-   - Molecule 1: Data loading & preparation (2-3 atoms)
-   - Molecule 2: Analysis/Modeling (2-3 atoms)
-   - Molecule 3: Visualization/Reporting (1-2 atoms)
+1. **BE CREATIVE AND ANALYTICAL**: Don't just use RAG templates - analyze the user's specific needs and create custom workflows
+2. **DEEP ANALYSIS**: Analyze the user's request thoroughly and think about the complete data pipeline they need
+3. **ATOM-DRIVEN COMPOSITION**: Look at ALL available atoms in the AVAILABLE ATOMS section and intelligently combine them
+4. **LONG, SOPHISTICATED WORKFLOWS**: Create 4-8 molecules for complex tasks - don't limit to basic 3-molecule workflows
+5. **INTELLIGENT GROUPING**: Group 2-5 related atoms per molecule based on their purpose and data flow
+6. **SEQUENTIAL LOGIC**: Design molecules that flow logically: Load → Clean → Transform → Analyze → Model → Evaluate → Visualize → Report
+7. **CRITICAL: ALWAYS include "smart_response" field** - But keep it brief since molecules show in cards
+8. **USE RAG AS INSPIRATION**: RAG examples are starting points, not constraints - create custom workflows that fit the user's needs
+9. **ATOM VALIDATION**: Only suggest atoms that exist in the AVAILABLE ATOMS section
+10. **BUSINESS VALUE**: Explain what business outcome this workflow achieves
 
-MOLECULE COMPOSITION GUIDELINES:
-- **Molecule 1** typically contains: data-upload-validate OR csv-import + column-classifier OR feature-overview
-- **Molecule 2** typically contains: Main analysis atoms (groupby, merge, regression, clustering, etc.)
-- **Molecule 3** typically contains: chart-maker + text-box (optional)
+ADVANCED MOLECULE COMPOSITION STRATEGY:
+- **Phase 1 - Ingestion**: Multiple data sources (database-connect, csv-import, api-connector)
+- **Phase 2 - Integration**: Concatenation and merging (concat, merge, join)
+- **Phase 3 - Cleaning**: Data quality (dataframe-operations, create-column, filter)
+- **Phase 4 - Analysis**: Statistical and exploratory (feature-overview, descriptive-stats, trend-analysis)
+- **Phase 5 - Modeling**: Machine learning (build-model-feature-based, regression-feature-based, clustering)
+- **Phase 6 - Evaluation**: Model assessment (evaluate-models-feature, select-models-feature)
+- **Phase 7 - Visualization**: Insights (chart-maker, chart types)
+- **Phase 8 - Reporting**: Summarization (text-box, export)
+
+**EXAMPLE OF COMPLEX WORKFLOW (8 molecules):**
+Molecule 1: Data Ingestion (database-connect + csv-import + api-connector)
+Molecule 2: Data Integration (concat + merge + join)
+Molecule 3: Data Cleaning (dataframe-operations + create-column + filter)
+Molecule 4: Exploratory Analysis (feature-overview + descriptive-stats + trend-analysis)
+Molecule 5: Feature Engineering (create-column + groupby-wtg-avg)
+Molecule 6: Model Building (build-model-feature-based + select-models-feature)
+Molecule 7: Model Evaluation (evaluate-models-feature + scenario-planner)
+Molecule 8: Visualization & Reporting (chart-maker + text-box)
 
 CONVERSATIONAL HANDLING:
-- "create MMM workflow" → Return MMM molecule composition
-- "build churn model" → Return churn prediction molecule composition
-- "show available workflows" → List predefined use cases
-- "what atoms do I need for [task]" → List relevant atoms with grouping suggestions
-- "yes, create it" → Return complete workflow_composition JSON
+- "create MMM workflow" → Analyze user needs deeply, check available atoms, create custom 5-8 molecule workflow
+- "build churn model" → Design comprehensive data pipeline with ingestion, cleaning, analysis, modeling, evaluation
+- "show available workflows" → List predefined use cases AS STARTING POINTS, encourage customization
+- "what atoms do I need for [task]" → Intelligently select from ALL available atoms, create sophisticated sequence
+- "forecasting" → Don't just use template - design complete forecasting pipeline with trend analysis, seasonality, modeling, evaluation
 
-EXAMPLES OF MOLECULE GROUPINGS:
+**KEY DIFFERENCE**: DON'T just copy RAG templates. CREATE intelligent workflows by:
+1. Understanding the complete business problem
+2. Selecting BEST atoms from ALL available atoms
+3. Designing 5-8 molecule sequences for complex workflows
+4. Ensuring logical data flow between molecules
+5. Covering complete pipeline: data → analysis → modeling → evaluation → insights
+
+EXAMPLES OF INTELLIGENT MOLECULE GROUPINGS:
 
 **MMM Example:**
 Molecule 1: Data Prep (data-upload-validate + column-classifier + scope-selector)
@@ -129,11 +201,39 @@ Molecule 2: KPI Calc (groupby-wtg-avg + create-column)
 Molecule 3: Visualization (chart-maker + text-box)
 
 **CRITICAL RULES**:
-1. Always include "smart_response" - it's required!
-2. Suggest molecule groupings, do NOT execute
-3. Explain connections between molecules
-4. Use atoms from AVAILABLE ATOMS only
-5. Follow the pattern: Load → Process/Analyze → Visualize
+1. Always include "smart_response" field (can be empty since cards show molecules)
+2. Always include "auto_create": true - this triggers automatic molecule creation on the frontend
+3. **BE CREATIVE**: Don't just copy RAG templates - CREATE custom, intelligent workflows tailored to the user's needs
+4. **ANALYZE DEEPLY**: Look at ALL available atoms in the AVAILABLE ATOMS section and think about which combinations solve the user's problem
+5. **BUILD COMPLETE PIPELINES**: Design 5-8 molecule workflows for complex tasks - cover the entire data journey
+6. **INTELLIGENT GROUPING**: Group 2-5 atoms per molecule based on their purpose and data dependencies
+7. **LOGICAL SEQUENCING**: Ensure each molecule flows into the next with proper data transformations
+8. **BUSINESS VALUE**: Think about what business outcome this workflow achieves
+
+**WORKFLOW DESIGN PHILOSOPHY**:
+- Simple tasks (basic dashboards): 3-4 molecules
+- Moderate tasks (analysis, forecasting): 4-6 molecules  
+- Complex tasks (ML pipelines, multi-source analysis): 6-8 molecules
+- Enterprise tasks (complete data pipelines with modeling): 8+ molecules
+
+**AVOID**: Short, generic 3-molecule workflows that just match templates
+**CREATE**: Sophisticated, multi-phase workflows that cover the complete data pipeline
+
+**AUTO-CREATION BEHAVIOR**:
+- When "auto_create": true is set, the frontend will automatically create molecules on the canvas
+- Each molecule will be created with its atoms in the specified order
+- Molecules will be positioned sequentially on the canvas
+- The user sees the workflow appear automatically without manual clicking
+
+**EXECUTION PLAN STRUCTURE**:
+The "execution_plan" is a JSON array that provides step-by-step instructions for the UI to execute:
+- Each step is an object with:
+  - "step": sequential step number
+  - "action": either "create_molecule" or "add_atom"
+  - For "create_molecule": includes molecule_number, molecule_name, purpose
+  - For "add_atom": includes molecule_number, atom_id, atom_title, order, purpose, required
+- The plan executes sequentially to create molecules one at a time, then adds atoms to each molecule
+- This creates a visual animation as the workflow builds step by step
 
 Return ONLY the JSON response:"""
 
@@ -166,10 +266,10 @@ def call_workflow_llm(api_url: str, model_name: str, bearer_token: str, prompt: 
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "options": {
-            "temperature": 0.1,
-            "num_predict": 4000,
-            "top_p": 0.9,
-            "repeat_penalty": 1.1
+            "temperature": 0.4,  # Increased for more creativity and less rigid template matching
+            "num_predict": 6000,  # Increased for longer, more detailed workflows
+            "top_p": 0.95,  # Higher for more diverse atom selection
+            "repeat_penalty": 1.15  # Slightly higher to avoid repetition in long workflows
         }
     }
     headers = {
