@@ -157,9 +157,14 @@ class MMMStackDataPooler:
             # Print unique values for pool_by_identifiers after merging
             
             # Step 4: Filter the merged data using pool-identifiers selection
-            pooled_data = self._filter_by_pool_identifiers(
-                merged_df, combinations, pool_by_identifiers
-            )
+            if pool_by_identifiers:
+                # If pool_by_identifiers is provided, filter by those identifiers
+                pooled_data = self._filter_by_pool_identifiers(
+                    merged_df, combinations, pool_by_identifiers
+                )
+            else:
+                # If pool_by_identifiers is empty, treat all data as one pool
+                pooled_data = {"all_data": merged_df}
             
             return pooled_data
             
@@ -278,6 +283,10 @@ class MMMStackDataPooler:
     def _combination_matches_pool_values(self, combination: str, pool_by_identifiers: List[str], pool_values: tuple) -> bool:
 
         try:
+            # If no pool_by_identifiers, all combinations match
+            if not pool_by_identifiers:
+                return True
+                
             pool_value_strings = [str(value) for value in pool_values]
             
             # Debug logging
@@ -801,8 +810,7 @@ class StackModelDataProcessor:
             if not combinations:
                 raise ValueError("No combinations provided")
             
-            if not pool_by_identifiers:
-                raise ValueError("No pooling identifiers provided")
+            # pool_by_identifiers is optional - if empty, treat all data as one pool
             
             # Fetch column classifier configuration
             column_config = await self.get_column_classifier_config()
@@ -817,11 +825,12 @@ class StackModelDataProcessor:
             filtered_identifiers = [id for id in all_identifiers if id not in date_related_identifiers]
            
             
-            # Validate that pool_by_identifiers are valid identifiers (case-insensitive)
-            all_identifiers_lower = [id.lower() for id in all_identifiers]
-            invalid_identifiers = [id for id in pool_by_identifiers if id.lower() not in all_identifiers_lower]
-            if invalid_identifiers:
-                raise ValueError(f"Invalid pooling identifiers: {invalid_identifiers}. Available identifiers: {all_identifiers}")
+            # Validate that pool_by_identifiers are valid identifiers (case-insensitive) - only if provided
+            if pool_by_identifiers:
+                all_identifiers_lower = [id.lower() for id in all_identifiers]
+                invalid_identifiers = [id for id in pool_by_identifiers if id.lower() not in all_identifiers_lower]
+                if invalid_identifiers:
+                    raise ValueError(f"Invalid pooling identifiers: {invalid_identifiers}. Available identifiers: {all_identifiers}")
             
             
             # Create data pooler instance

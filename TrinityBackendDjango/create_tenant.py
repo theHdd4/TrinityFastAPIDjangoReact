@@ -254,6 +254,13 @@ def main():
     except Exception as exc:
         print(f"   ⚠️  Failed to update atoms from frontend: {exc}")
 
+    # Update available atoms status based on working atoms list
+    try:
+        call_command("update_available_atoms")
+        print("   ✅ Available atoms status updated")
+    except Exception as exc:
+        print(f"   ⚠️  Failed to update available atoms: {exc}")
+
     # Populate use cases if they don't exist
     try:
         call_command("populate_usecases")

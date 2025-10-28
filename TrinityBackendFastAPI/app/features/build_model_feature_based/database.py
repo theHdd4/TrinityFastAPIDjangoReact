@@ -61,6 +61,9 @@ try:
     # ADD CREATEANDTRANSFORM COLLECTION HERE
     trinity_db_db = mongo_client["trinity_db"]
     createandtransform_configs_collection = trinity_db_db["createandtransform_configs"]
+    
+    # ADD SCOPESELECTOR CONFIGS COLLECTION HERE
+    scopeselector_configs_collection = trinity_db_db["scopeselector_configs"]
 
 
     
@@ -73,6 +76,7 @@ except Exception as e:
     scopes_collection = None
     build_collection = None
     createandtransform_configs_collection = None
+    scopeselector_configs_collection = None
 
 # MinIO Client Connection
 try:

@@ -295,7 +295,10 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         return;
       }
       
-      const newNodeId = `molecule-${Date.now()}`;
+      // Generate molecule ID in format: molecule_name-number
+      const moleculeName = molecule.title.toLowerCase().replace(/\s+/g, '-');
+      const timestamp = Date.now();
+      const newNodeId = `${moleculeName}-${timestamp}`;
       
       // Calculate flexible position for new molecule
       const getFlexiblePosition = () => {
