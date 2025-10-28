@@ -152,7 +152,7 @@ const CHART_ALIGNMENT_OPTIONS: {
   { value: 'right', label: 'Align right', icon: AlignRight },
 ];
 
-const MENU_CLOSE_TO_EDITOR_DELAY_MS = 160;
+const MENU_CLOSE_TO_EDITOR_DELAY_MS = 220;
 
 const cloneValue = <T,>(value: T): T => {
   const structured = (globalThis as any)?.structuredClone;

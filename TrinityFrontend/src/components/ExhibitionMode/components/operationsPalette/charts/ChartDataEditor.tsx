@@ -117,6 +117,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   const [config, setConfig] = useState<ChartConfig>(() => sanitiseConfig(initialConfig));
   const [isInitialised, setIsInitialised] = useState(false);
   const configRef = useRef(config);
+  const firstLabelInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     configRef.current = config;
@@ -137,6 +138,24 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       setIsInitialised(false);
     }
   }, [open, initialData, initialConfig, isInitialised]);
+
+  useEffect(() => {
+    if (!open || !isInitialised) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const input = firstLabelInputRef.current;
+      if (input) {
+        input.focus({ preventScroll: true });
+        input.select();
+      }
+    }, 120);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [open, isInitialised]);
 
   const colors = useMemo(() => {
     const scheme = COLOR_SCHEMES.find(s => s.id === config.colorScheme);
@@ -546,6 +565,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                 {chartData.map((row, index) => (
                   <div key={index} className="group grid animate-fade-in grid-cols-[1fr,140px,48px] gap-3">
                     <Input
+                      ref={index === 0 ? firstLabelInputRef : undefined}
                       value={row.label}
                       onChange={event => updateRow(index, 'label', event.target.value)}
                       className="h-11 rounded-xl border-2 border-border/50 bg-card/50 transition-all hover:border-primary/50 focus:border-primary"
