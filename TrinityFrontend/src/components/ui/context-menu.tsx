@@ -16,6 +16,63 @@ const ContextMenuSub = ContextMenuPrimitive.Sub
 
 const ContextMenuRadioGroup = ContextMenuPrimitive.RadioGroup
 
+type ForwardedRef<T> = React.ForwardedRef<T> | undefined
+
+const setRef = <T,>(ref: ForwardedRef<T>, value: T | null) => {
+  if (!ref) {
+    return
+  }
+
+  if (typeof ref === "function") {
+    ref(value)
+    return
+  }
+
+  ;(ref as React.MutableRefObject<T | null>).current = value
+}
+
+const useDisablePointerEventsOnClose = (ref: React.RefObject<HTMLElement | null>) => {
+  React.useEffect(() => {
+    const node = ref.current
+    if (!node) {
+      return
+    }
+
+    const wrapper = node.parentElement as HTMLElement | null
+    if (!wrapper || !wrapper.hasAttribute("data-radix-popper-content-wrapper")) {
+      return
+    }
+
+    let frame = 0
+
+    const updatePointerState = () => {
+      const state = node.getAttribute("data-state")
+      wrapper.style.pointerEvents = state === "open" ? "" : "none"
+    }
+
+    const scheduleUpdate = () => {
+      cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(updatePointerState)
+    }
+
+    updatePointerState()
+
+    const observer = new MutationObserver(scheduleUpdate)
+    observer.observe(node, { attributes: true, attributeFilter: ["data-state"] })
+
+    node.addEventListener("animationstart", scheduleUpdate)
+    node.addEventListener("animationend", scheduleUpdate)
+
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+      node.removeEventListener("animationstart", scheduleUpdate)
+      node.removeEventListener("animationend", scheduleUpdate)
+      wrapper.style.pointerEvents = ""
+    }
+  }, [ref])
+}
+
 const ContextMenuSubTrigger = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.SubTrigger>,
   React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.SubTrigger> & {
@@ -41,12 +98,10 @@ const ContextMenuSubContent = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.SubContent>,
   React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.SubContent>
 >(({ className, ...props }, ref) => (
-  <ContextMenuPrimitive.SubContent
+  <ContextMenuContentBase
+    primitive={ContextMenuPrimitive.SubContent}
     ref={ref}
-    className={cn(
-      "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:pointer-events-none data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
-      className
-    )}
+    className={className}
     {...props}
   />
 ))
@@ -55,19 +110,54 @@ ContextMenuSubContent.displayName = ContextMenuPrimitive.SubContent.displayName
 const ContextMenuContent = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Content>
->(({ className, ...props }, ref) => (
+)(({ className, ...props }, ref) => (
   <ContextMenuPrimitive.Portal>
-    <ContextMenuPrimitive.Content
+    <ContextMenuContentBase
+      primitive={ContextMenuPrimitive.Content}
       ref={ref}
-      className={cn(
-        "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:pointer-events-none data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
-        className
-      )}
+      className={className}
       {...props}
     />
   </ContextMenuPrimitive.Portal>
 ))
 ContextMenuContent.displayName = ContextMenuPrimitive.Content.displayName
+
+type PrimitiveContentComponent =
+  | typeof ContextMenuPrimitive.Content
+  | typeof ContextMenuPrimitive.SubContent
+
+type PrimitiveContentProps<T extends PrimitiveContentComponent> = {
+  primitive: T
+} & React.ComponentPropsWithoutRef<T>
+
+const ContextMenuContentBase = React.forwardRef<
+  HTMLElement,
+  PrimitiveContentProps<PrimitiveContentComponent>
+>(({ primitive: Primitive, className, ...props }, forwardedRef) => {
+  const localRef = React.useRef<HTMLElement | null>(null)
+  const composedRef = React.useCallback(
+    (node: HTMLElement | null) => {
+      setRef(forwardedRef, node)
+      localRef.current = node
+    },
+    [forwardedRef]
+  )
+
+  useDisablePointerEventsOnClose(localRef)
+
+  return (
+    <Primitive
+      ref={composedRef as React.Ref<any>}
+      className={cn(
+        "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:pointer-events-none data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        Primitive === ContextMenuPrimitive.Content && "animate-in fade-in-80",
+        className
+      )}
+      {...(props as any)}
+    />
+  )
+})
+ContextMenuContentBase.displayName = "ContextMenuContentBase"
 
 const ContextMenuItem = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.Item>,
