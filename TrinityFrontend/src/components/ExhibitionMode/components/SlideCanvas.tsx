@@ -4249,9 +4249,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                         return;
                       }
                       closeMenu();
-                      requestAnimationFrame(() => {
+                      setTimeout(() => {
                         chartHandle?.openDataEditor();
-                      });
+                      }, 0);
                     }}
                   >
                     <Edit3 className="mr-2 h-4 w-4" />
