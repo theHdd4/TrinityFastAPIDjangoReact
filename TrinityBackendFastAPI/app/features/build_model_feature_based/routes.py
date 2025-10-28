@@ -11,6 +11,7 @@ from .models import CustomConstrainedRidge, ConstrainedLinearRegression
 # Database imports - Enhanced versions only
 from .database import (
     scopes_collection, 
+    scopeselector_configs_collection,
     minio_client,
     build_collection,
     file_exists, 
@@ -143,69 +144,284 @@ async def health():
         api=settings.app_name,
     )
 
-@router.get("/scopes/{scope_id}", response_model=ScopeDetail, tags=["Scopes"])
-async def get_scope_by_id(
-    scope_id: str = Path(..., description="Scope ID from MongoDB")
+
+@router.get("/build-atom/scopes", tags=["Build Atom"])
+async def get_build_atom_scopes(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
 ):
     """
-    Get scope details and combinations by scope ID.
-    The scope_id can be either the MongoDB _id or the scope_id field.
+    Get scopes and combinations for the build-model feature-based atom.
+    Returns data in the format expected by the frontend.
+    Uses client_name/app_name/project_name to find the specific scope document.
     """
-    if scopes_collection is None:
+    logger.info("🔍 Starting get_build_atom_scopes endpoint")
+    logger.info(f"📋 Parameters: client_name={client_name}, app_name={app_name}, project_name={project_name}")
+    
+    if scopeselector_configs_collection is None:
+        logger.error("❌ MongoDB scopeselector_configs_collection is None")
+        raise HTTPException(
+            status_code=503,
+            detail="MongoDB connection not available"
+        )
+    
+    logger.info("✅ MongoDB scopeselector_configs_collection is available")
+    
+    try:
+        scopes = []
+        
+        # Create the MongoDB _id using client_name/app_name/project_name pattern
+        scope_id = f"{client_name}/{app_name}/{project_name}"
+        logger.info(f"🔍 Looking for scope with _id: {scope_id}")
+        
+        # Query MongoDB using the specific _id
+        scope_doc = await scopeselector_configs_collection.find_one({"_id": scope_id})
+        
+        if scope_doc is None:
+            logger.warning(f"⚠️ No scope document found with _id: {scope_id}")
+            # Try alternative query patterns
+            logger.info("🔍 Trying alternative query patterns...")
+            
+            # Try with scope_id field instead of _id
+            scope_doc = await scopeselector_configs_collection.find_one({"scope_id": scope_id})
+            if scope_doc:
+                logger.info(f"✅ Found scope using scope_id field: {scope_id}")
+            else:
+                logger.warning(f"⚠️ No scope found with scope_id field either: {scope_id}")
+                
+                # Try partial matches
+                partial_matches = []
+                async for doc in scopeselector_configs_collection.find({}).limit(10):
+                    doc_id = str(doc.get("_id", ""))
+                    if client_name in doc_id or app_name in doc_id or project_name in doc_id:
+                        partial_matches.append(doc_id)
+                
+                logger.info(f"🔍 Found {len(partial_matches)} partial matches: {partial_matches}")
+                
+                return {
+                    "success": False,
+                    "message": f"No scope found with _id: {scope_id}",
+                    "scopes": [],
+                    "total_scopes": 0,
+                    "debug_info": {
+                        "requested_id": scope_id,
+                        "partial_matches": partial_matches,
+                        "total_documents": await scopeselector_configs_collection.count_documents({})
+                    }
+                }
+        else:
+            logger.info(f"✅ Found scope document with _id: {scope_id}")
+        
+        # Process the found scope document
+        logger.info(f"📄 Processing scope document: {scope_doc.get('_id', 'No ID')}")
+        
+        scope_id_str = str(scope_doc.get("_id", scope_doc.get("scope_id", "")))
+        scope_name = scope_doc.get("name", f"Scope {scope_id_str}")
+        
+        logger.info(f"  📋 Scope ID: {scope_id_str}, Name: {scope_name}")
+        
+        # Extract scope numbers from filter_set_results
+        scope_numbers = set()
+        combinations_by_scope = {}
+        
+        filter_set_results = scope_doc.get("filter_set_results", [])
+        logger.info(f"  🔍 Found {len(filter_set_results)} filter_set_results")
+        
+        for i, fset in enumerate(filter_set_results):
+            set_name = fset.get("set_name", "")
+            logger.info(f"    📁 Filter set {i}: set_name = '{set_name}'")
+            
+            if set_name.startswith("Scope_"):
+                logger.info(f"    ✅ Found scope set: {set_name}")
+                
+                # Extract scope number from set_name like "Scope_1", "Scope_2", etc.
+                scope_match = set_name.split("_")
+                if len(scope_match) >= 2:
+                    scope_num = scope_match[1]
+                    scope_numbers.add(scope_num)
+                    logger.info(f"    🔢 Extracted scope number: {scope_num}")
+                    
+                    # Extract combinations for this scope
+                    scope_combinations = []
+                    combination_files = fset.get("combination_files", [])
+                    logger.info(f"    📊 Found {len(combination_files)} combination files")
+                    
+                    for j, cfile in enumerate(combination_files):
+                        combo = cfile.get("combination", {})
+                        logger.info(f"      🔗 Combination {j}: {combo}")
+                        
+                        # Create combination string from the combination object
+                        combo_parts = []
+                        for key, value in combo.items():
+                            if value:  # Only include non-empty values
+                                # Normalize value to match file_key format: replace spaces with underscores
+                                normalized_value = str(value).replace(' ', '_')
+                                combo_parts.append(normalized_value)
+                        
+                        if combo_parts:
+                            combination_string = "_".join(combo_parts)
+                            logger.info(f"      ✅ Created combination string: {combination_string}")
+                            
+                            scope_combinations.append({
+                                "value": combination_string,
+                                "label": combination_string,  # Same as value for clean display
+                                "file_key": cfile.get("file_key", ""),
+                                "record_count": cfile.get("record_count", 0)
+                            })
+                        else:
+                            logger.warning(f"      ⚠️ Empty combination parts for combo: {combo}")
+                    
+                    combinations_by_scope[scope_num] = scope_combinations
+                    logger.info(f"    📈 Scope {scope_num} has {len(scope_combinations)} combinations")
+                else:
+                    logger.warning(f"    ⚠️ Invalid scope format: {set_name}")
+            else:
+                logger.info(f"    ❌ Skipping non-scope set: {set_name}")
+        
+        logger.info(f"  🎯 Found scope numbers: {sorted(scope_numbers)}")
+        
+        # Create scope options for each scope number
+        for scope_num in sorted(scope_numbers, key=int):
+            scope_option = {
+                "scope_id": scope_id_str,
+                "scope_number": scope_num,
+                "scope_name": f"Scope {scope_num}",  # Simplified name
+                "combinations": combinations_by_scope.get(scope_num, [])
+            }
+            scopes.append(scope_option)
+            logger.info(f"  ✅ Added scope option: {scope_option['scope_name']} with {len(scope_option['combinations'])} combinations")
+        
+        logger.info(f"🎉 Final result: {len(scopes)} scopes found")
+        for i, scope in enumerate(scopes):
+            logger.info(f"  📋 Scope {i+1}: {scope['scope_name']} ({len(scope['combinations'])} combinations)")
+        
+        return {
+            "success": True,
+            "scopes": scopes,
+            "total_scopes": len(scopes),
+            "debug_info": {
+                "requested_id": scope_id,
+                "found_document": scope_doc is not None,
+                "scope_numbers_found": sorted(scope_numbers)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error fetching build atom scopes: {e}")
+        logger.error(f"❌ Error type: {type(e)}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching scopes: {str(e)}"
+        )
+
+@router.get("/build-atom/scopes/{scope_number}/combinations", tags=["Build Atom"])
+async def get_build_atom_combinations(
+    scope_number: str = Path(..., description="Scope number (e.g., '1', '2', '3')"),
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
+):
+    """
+    Get combinations for a specific scope number for the build-model feature-based atom.
+    Uses client_name/app_name/project_name to find the specific scope document.
+    """
+    if scopeselector_configs_collection is None:
         raise HTTPException(
             status_code=503,
             detail="MongoDB connection not available"
         )
     
     try:
-        scope_data = await get_scope_combinations(scope_id)
+        combinations = []
         
-        if scope_data is None:
+        # Create the MongoDB _id using client_name/app_name/project_name pattern
+        scope_id = f"{client_name}/{app_name}/{project_name}"
+        logger.info(f"🔍 Looking for scope with _id: {scope_id}")
+        
+        # Query MongoDB using the specific _id
+        scope_doc = await scopeselector_configs_collection.find_one({"_id": scope_id})
+        
+        if scope_doc is None:
+            logger.warning(f"⚠️ No scope document found with _id: {scope_id}")
+            # Try alternative query patterns
+            logger.info("🔍 Trying alternative query patterns...")
+            
+            # Try with scope_id field instead of _id
+            scope_doc = await scopeselector_configs_collection.find_one({"scope_id": scope_id})
+            if scope_doc:
+                logger.info(f"✅ Found scope using scope_id field: {scope_id}")
+            else:
+                logger.warning(f"⚠️ No scope found with scope_id field either: {scope_id}")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No scope found with _id: {scope_id}"
+                )
+        else:
+            logger.info(f"✅ Found scope document with _id: {scope_id}")
+        
+        # Process the found scope document
+        logger.info(f"📄 Processing scope document: {scope_doc.get('_id', 'No ID')}")
+        
+        # Look for the specific scope number in filter_set_results
+        for fset in scope_doc.get("filter_set_results", []):
+            set_name = fset.get("set_name", "")
+            logger.info(f"📁 Checking filter set: {set_name}")
+            
+            if set_name == f"Scope_{scope_number}":
+                logger.info(f"✅ Found matching scope set: {set_name}")
+                # Extract combinations for this scope
+                for cfile in fset.get("combination_files", []):
+                    combo = cfile.get("combination", {})
+                    logger.info(f"🔗 Processing combination: {combo}")
+                    
+                    # Create combination string from the combination object
+                    combo_parts = []
+                    for key, value in combo.items():
+                        if value:  # Only include non-empty values
+                            # Normalize value to match file_key format: replace spaces with underscores
+                            normalized_value = str(value).replace(' ', '_')
+                            combo_parts.append(normalized_value)
+                    if combo_parts:
+                        combination_string = "_".join(combo_parts)
+                        logger.info(f"✅ Created combination string: {combination_string}")
+                        
+                        combinations.append({
+                            "value": combination_string,
+                            "label": combination_string,  # Same as value for clean display
+                            "file_key": cfile.get("file_key", ""),
+                            "record_count": cfile.get("record_count", 0),
+                            "scope_id": str(scope_doc.get("_id", scope_doc.get("scope_id", "")))
+                        })
+        
+        if not combinations:
             raise HTTPException(
                 status_code=404,
-                detail=f"Scope with ID '{scope_id}' not found"
+                detail=f"No combinations found for Scope_{scope_number} in document {scope_id}"
             )
         
-        return scope_data
+        logger.info(f"🎉 Found {len(combinations)} combinations for Scope_{scope_number}")
+        
+        return {
+            "success": True,
+            "scope_number": scope_number,
+            "combinations": combinations,
+            "total_combinations": len(combinations),
+            "debug_info": {
+                "requested_id": scope_id,
+                "found_document": scope_doc is not None
+            }
+        }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching scope {scope_id}: {e}")
+        logger.error(f"Error fetching combinations for scope {scope_number}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Error fetching scope: {str(e)}"
-        )
-
-@router.get("/scopes", response_model=List[ScopeDetail], tags=["Scopes"])
-async def list_all_scopes(
-    limit: int = Query(10, ge=1, le=100, description="Maximum number of scopes"),
-    skip: int = Query(0, ge=0, description="Number of scopes to skip")
-):
-    """List all available scopes with their combinations."""
-    if scopes_collection is None:
-        raise HTTPException(
-            status_code=503,
-            detail="MongoDB connection not available"
-        )
-    
-    try:
-        scopes = []
-        cursor = scopes_collection.find({}).skip(skip).limit(limit)
-        
-        async for scope_doc in cursor:
-            scope_id = str(scope_doc.get("_id", scope_doc.get("scope_id", "")))
-            scope_data = await get_scope_combinations(scope_id)
-            if scope_data:
-                scopes.append(scope_data)
-        
-        return scopes
-        
-    except Exception as e:
-        logger.error(f"Error listing scopes: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error listing scopes: {str(e)}"
+            detail=f"Error fetching combinations: {str(e)}"
         )
 
 @router.get("/", tags=["Info"])
@@ -220,7 +436,9 @@ async def root():
             "get_scope": "/api/v1/scopes/{scope_id}",
             "list_scopes": "/api/v1/scopes",
             "get_scope_set": "/api/v1/scopes/{scope_id}/sets/{set_name}",
-            "list_scope_sets": "/api/v1/scopes/{scope_id}/sets"
+            "list_scope_sets": "/api/v1/scopes/{scope_id}/sets",
+            "build_atom_scopes": "/api/v1/build-atom/scopes?client_name={client}&app_name={app}&project_name={project}",
+            "build_atom_combinations": "/api/v1/build-atom/scopes/{scope_number}/combinations?client_name={client}&app_name={app}&project_name={project}"
         }
     }
 

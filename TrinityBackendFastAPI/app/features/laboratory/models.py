@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LaboratoryCardRequest(BaseModel):
@@ -27,8 +27,7 @@ class LaboratoryCardRequest(BaseModel):
         description="Optional settings object to initialize the atom with.",
     )
 
-    class Config:
-        allow_population_by_field_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class LaboratoryAtomResponse(BaseModel):
@@ -36,6 +35,18 @@ class LaboratoryAtomResponse(BaseModel):
 
     id: str = Field(..., description="Unique identifier for this atom instance")
     atom_id: str = Field(..., alias="atomId", description="Atom identifier (e.g. 'feature-overview')")
+    title: Optional[str] = Field(
+        default=None,
+        description="Human readable title for the atom.",
+    )
+    category: Optional[str] = Field(
+        default="Atom",
+        description="Category of the atom (e.g. 'Atom', 'Molecule').",
+    )
+    color: Optional[str] = Field(
+        default="bg-gray-400",
+        description="CSS color class for the atom display.",
+    )
     source: Literal["manual", "ai"] = Field(
         default="manual",
         description="Indicates how the atom was added to the card.",
@@ -48,9 +59,18 @@ class LaboratoryAtomResponse(BaseModel):
         default=None,
         description="Settings payload to bootstrap the atom in the UI.",
     )
+    molecule_id: Optional[str] = Field(
+        default=None,
+        alias="moleculeId",
+        description="Optional molecule identifier for grouping atoms together.",
+    )
+    molecule_title: Optional[str] = Field(
+        default=None,
+        alias="moleculeTitle",
+        description="Human readable molecule title when available.",
+    )
 
-    class Config:
-        allow_population_by_field_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class LaboratoryCardResponse(BaseModel):
@@ -74,5 +94,4 @@ class LaboratoryCardResponse(BaseModel):
         description="Human readable molecule title when available.",
     )
 
-    class Config:
-        allow_population_by_field_name = True
+    model_config = ConfigDict(populate_by_name=True)

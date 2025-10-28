@@ -71,6 +71,9 @@ export const DEFAULT_FEATURE_OVERVIEW_TREND_METADATA: FeatureOverviewMetadata = 
     })),
   },
   viewType: 'trend_analysis',
+  exhibitionControls: {
+    transparentBackground: true,
+  },
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -301,6 +304,37 @@ const normaliseSkuStatisticsSettings = (value: unknown) => {
   return Object.keys(settings).length > 0 ? settings : undefined;
 };
 
+const normaliseExhibitionControls = (value: unknown) => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const controls: NonNullable<FeatureOverviewMetadata['exhibitionControls']> = {};
+
+  const enableComponentTitle = asBoolean(
+    value.enableComponentTitle ?? value['enable_component_title'] ?? value['component_title'],
+  );
+  if (enableComponentTitle !== undefined) {
+    controls.enableComponentTitle = enableComponentTitle;
+  }
+
+  const allowEditInExhibition = asBoolean(
+    value.allowEditInExhibition ?? value['allow_edit_in_exhibition'] ?? value['allowEdit'],
+  );
+  if (allowEditInExhibition !== undefined) {
+    controls.allowEditInExhibition = allowEditInExhibition;
+  }
+
+  const transparentBackground = asBoolean(
+    value.transparentBackground ?? value['transparent_background'] ?? value['makeTransparent'],
+  );
+  if (transparentBackground !== undefined) {
+    controls.transparentBackground = transparentBackground;
+  }
+
+  return Object.keys(controls).length > 0 ? controls : undefined;
+};
+
 const parsePossibleJson = (value: unknown) => {
   if (typeof value === 'string') {
     const trimmed = value.trim();
@@ -436,6 +470,13 @@ export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverview
     result.skuStatisticsSettings = skuSettings;
   }
 
+  const exhibitionControls = normaliseExhibitionControls(
+    nested.exhibitionControls ?? nested['exhibition_controls'],
+  );
+  if (exhibitionControls) {
+    result.exhibitionControls = exhibitionControls;
+  }
+
   if ('chartRendererProps' in nested || 'chart_renderer_props' in nested) {
     result.chartRendererProps = parsePossibleJson(nested.chartRendererProps ?? nested['chart_renderer_props']);
   }
@@ -516,6 +557,15 @@ export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverview
       }
     }
 
+    if (!result.exhibitionControls) {
+      const selectionControls = normaliseExhibitionControls(
+        selection.exhibitionControls ?? selection['exhibition_controls'],
+      );
+      if (selectionControls) {
+        result.exhibitionControls = selectionControls;
+      }
+    }
+
     if (!result.chartRendererProps && ('chartRendererProps' in selection || 'chart_renderer_props' in selection)) {
       result.chartRendererProps = parsePossibleJson(selection.chartRendererProps ?? selection['chart_renderer_props']);
     }
@@ -542,8 +592,8 @@ export const parseFeatureOverviewMetadata = (metadata: unknown): FeatureOverview
 };
 
 const DEFAULT_TREND_CHART_HEIGHT = {
-  full: 300,
-  compact: 220,
+  full: 400,
+  compact: 280,
 } as const;
 
 const toRendererType = (value: unknown): ChartRendererType | null => {
@@ -724,14 +774,14 @@ const parseDirectChartRendererConfig = (
     toRendererType(candidate['chart_type']) ||
     toRendererType(candidate['chartType']);
 
-  const data = ensureRecordArray(candidate.data ?? candidate['filtered_data'] ?? candidate['filteredData']);
-  if (!type || data.length === 0) {
+  const rawData = ensureRecordArray(candidate.data ?? candidate['filtered_data'] ?? candidate['filteredData']);
+  if (!type || rawData.length === 0) {
     return null;
   }
 
   const config: ChartRendererConfig = {
     type,
-    data,
+    data: rawData, // Will be sanitized later
     height: DEFAULT_TREND_CHART_HEIGHT[variant],
   };
 
@@ -739,6 +789,11 @@ const parseDirectChartRendererConfig = (
   if (typeof candidate['x_field'] === 'string') config.xField = candidate['x_field'] as string;
   if (typeof candidate.yField === 'string') config.yField = candidate.yField;
   if (typeof candidate['y_field'] === 'string') config.yField = candidate['y_field'] as string;
+  
+  // Sanitize the data to match the expected field names
+  if (config.xField && config.yField) {
+    config.data = sanitizeTimeseries(rawData, config.xField, config.yField);
+  }
 
   const yFields = candidate.yFields ?? candidate['y_fields'];
   if (Array.isArray(yFields)) {
@@ -795,6 +850,7 @@ const createChartRendererConfig = (
   const xField = chartState.xAxisField || 'index';
   const yField = chartState.yAxisField || metadata.metric || 'value';
   const type = toRendererType(chartState.chartType) ?? 'line_chart';
+  
   const data = prepareChartData(metadata.statisticalDetails, xField, yField);
 
   if (data.length === 0) {
@@ -826,12 +882,15 @@ const createChartRendererConfig = (
 export const deriveChartConfig = (
   metadata: FeatureOverviewMetadata,
   variant: FeatureOverviewComponentProps['variant'],
-): ChartRendererConfig | null =>
-  ensureRenderableChartConfig(
-    parseDirectChartRendererConfig(metadata, variant) ??
-      createChartRendererConfig(metadata, variant) ??
-      buildDefaultTrendChartConfig(variant),
+): ChartRendererConfig | null => {
+  const directConfig = parseDirectChartRendererConfig(metadata, variant);
+  const createdConfig = createChartRendererConfig(metadata, variant);
+  const defaultConfig = buildDefaultTrendChartConfig(variant);
+  
+  return ensureRenderableChartConfig(
+    directConfig ?? createdConfig ?? defaultConfig,
   );
+};
 
 export const extractSummaryEntries = (stats: FeatureOverviewStatistics | undefined): Array<[string, unknown]> => {
   if (!stats || !isRecord(stats.summary)) {

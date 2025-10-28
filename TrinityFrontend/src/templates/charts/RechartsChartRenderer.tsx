@@ -2368,7 +2368,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           // Check if this is a date axis
           const isDateAxisMultiLine =
             xKeyForLine &&
-            xKeyForLine.toLowerCase().includes('date') &&
+            xKeyForLine.toLowerCase() === 'date' &&
             pivotedLineData.length > 0 &&
             typeof pivotedLineData[0][xKeyForLine] === 'number';
           const formatDateTickMultiLine = d3.timeFormat('%d-%B-%y');
@@ -2460,7 +2460,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           // Original single line chart logic
           const isDateAxis =
             xKey &&
-            xKey.toLowerCase().includes('date') &&
+            xKey.toLowerCase() === 'date' &&
             chartDataForRendering.length > 0 &&
             typeof chartDataForRendering[0][xKey] === 'number';
           const formatDateTick = d3.timeFormat('%d-%B-%y');
@@ -2631,7 +2631,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           // Check if this is a date axis
           const isDateAxisArea =
             xKeyForArea &&
-            xKeyForArea.toLowerCase().includes('date') &&
+            xKeyForArea.toLowerCase() === 'date' &&
             pivotedLineData.length > 0 &&
             typeof pivotedLineData[0][xKeyForArea] === 'number';
           const formatDateTickArea = d3.timeFormat('%d-%B-%y');
@@ -2787,7 +2787,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         // Check if this is a date axis
         const isDateAxisScatter =
           xKeyForScatter &&
-          xKeyForScatter.toLowerCase().includes('date') &&
+          xKeyForScatter.toLowerCase() === 'date' &&
           ((legendField && legendValues.length > 0 && pivotedLineData.length > 0) ? 
             (pivotedLineData.length > 0 && typeof pivotedLineData[0][xKeyForScatter] === 'number') :
             (chartDataForRendering.length > 0 && typeof chartDataForRendering[0][xKeyForScatter] === 'number'));
@@ -3396,3 +3396,4 @@ const RechartsChartRenderer: React.FC<Props> = ({
 };
 
 export default RechartsChartRenderer; 
+

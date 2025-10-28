@@ -1,11 +1,34 @@
+# services:
+#   cloudflared:
+#     image: cloudflare/cloudflared:latest
+#     command: tunnel --config /etc/cloudflared/config.yml run
+#     volumes:
+#       - ./tunnelCreds:/etc/cloudflared:ro
+#     networks:
+#       - trinity-dev-net
+#     restart: always
+
+# networks:
+#   trinity-dev-net:
+#     external: true
+#     name: trinity-dev-net
+version: "3.9"
+
 services:
   cloudflared:
     image: cloudflare/cloudflared:latest
+    container_name: cloudflared-dev
+    restart: always
     command: tunnel --config /etc/cloudflared/config.yml run
     volumes:
       - ./tunnelCreds:/etc/cloudflared:ro
     networks:
       - trinity-dev-net
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "list"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
 
 networks:
   trinity-dev-net:

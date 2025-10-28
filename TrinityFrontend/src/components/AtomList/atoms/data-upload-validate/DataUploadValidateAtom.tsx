@@ -50,6 +50,10 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const [validationDetails, setValidationDetails] = useState<Record<string, any[]>>({});
   const [openValidatedFile, setOpenValidatedFile] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<Record<string, string>>({});
+  const [dataChanges, setDataChanges] = useState<{
+    dtypeChanges: Record<string, Record<string, string>>;
+    missingValueStrategies: Record<string, Record<string, { strategy: string; value?: string }>>;
+  }>({ dtypeChanges: {}, missingValueStrategies: {} });
 
   useEffect(() => {
     setFileAssignments(settings.fileMappings || {});
@@ -526,6 +530,54 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const handleSaveDataFrames = async () => {
     if (!settings.validatorId && settings.bypassMasterUpload) return;
     console.log('🔧 Running save dataframes util');
+    
+    // Apply data transformations if any changes were made
+    const hasChanges = Object.keys(dataChanges.dtypeChanges).length > 0 || 
+                      Object.keys(dataChanges.missingValueStrategies).length > 0;
+    
+    if (hasChanges) {
+      console.log('🔧 Applying data transformations before saving...');
+      for (const file of uploadedFiles) {
+        const fileChanges = {
+          file_path: file.path,
+          dtype_changes: dataChanges.dtypeChanges[file.name] || {},
+          missing_value_strategies: dataChanges.missingValueStrategies[file.name] || {},
+        };
+        
+        // Only apply if there are actual changes for this file
+        if (Object.keys(fileChanges.dtype_changes).length > 0 || 
+            Object.keys(fileChanges.missing_value_strategies).length > 0) {
+          try {
+            const response = await fetch(`${VALIDATE_API}/apply-data-transformations`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(fileChanges),
+              credentials: 'include',
+            });
+            
+            if (response.ok) {
+              console.log(`✅ Transformations applied to ${file.name}`);
+            } else {
+              const error = await response.json();
+              toast({
+                title: `Failed to apply changes to ${file.name}`,
+                description: error.detail || 'An error occurred',
+                variant: 'destructive',
+              });
+              return; // Stop saving if transformation fails
+            }
+          } catch (error) {
+            toast({
+              title: `Error transforming ${file.name}`,
+              description: 'Failed to apply data transformations',
+              variant: 'destructive',
+            });
+            return; // Stop saving if transformation fails
+          }
+        }
+      }
+    }
+    
     try {
       let query = '';
       const envStr = localStorage.getItem('env');
@@ -783,6 +835,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 saveStatus={saveStatus}
                 disabled={false}
                 useMasterFile={settings.bypassMasterUpload}
+                onDataChanges={setDataChanges}
               />
             </div>
 

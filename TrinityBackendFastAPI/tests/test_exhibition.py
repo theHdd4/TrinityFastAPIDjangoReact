@@ -150,3 +150,47 @@ async def test_exhibition_storage_returns_manifest_payload() -> None:
         assert manifest["component_id"] == "sku-3"
         assert manifest["manifest"]["metric"] == "Margin"
         assert manifest["manifest_id"] == "sku-3::manifest"
+
+
+@pytest.mark.anyio("asyncio")
+async def test_exhibition_storage_ignores_empty_component_collections() -> None:
+    with TemporaryDirectory() as tmpdir:
+        storage_path = Path(tmpdir) / "config.json"
+        storage = ExhibitionStorage(storage_path)
+
+        payload = {
+            "client_name": "Quant Matrix",
+            "app_name": "Insights",
+            "project_name": "Q3 Launch",
+            "atoms": [
+                {
+                    "id": "feature-overview",
+                    "atom_name": "Feature Overview",
+                    "exhibited_components": [],
+                },
+                {
+                    "id": "stat-summary",
+                    "atom_name": "Statistical Summary",
+                    "exhibited_components": [
+                        {
+                            "id": "sku-10",
+                            "title": "Delta",
+                        }
+                    ],
+                },
+            ],
+        }
+
+        saved = await storage.save_configuration(payload)
+
+        assert len(saved["atoms"]) == 1
+        assert saved["atoms"][0]["id"] == "stat-summary"
+
+        on_disk = json.loads(storage_path.read_text())
+        assert len(on_disk) == 1
+        assert on_disk[0]["id"] == "stat-summary"
+
+        fetched = await storage.get_configuration("Quant Matrix", "Insights", "Q3 Launch")
+        assert fetched is not None
+        assert len(fetched["atoms"]) == 1
+        assert fetched["atoms"][0]["id"] == "stat-summary"

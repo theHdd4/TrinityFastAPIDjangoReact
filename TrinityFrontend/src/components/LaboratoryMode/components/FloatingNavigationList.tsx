@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { GripVertical, X, Minimize2, Maximize2 } from 'lucide-react';
-import { useExhibitionStore } from '../../ExhibitionMode/store/exhibitionStore';
+import { useLaboratoryStore } from '../store/laboratoryStore';
 
 interface FloatingNavigationListProps {
   isVisible: boolean;
@@ -26,7 +26,7 @@ const FloatingNavigationList: React.FC<FloatingNavigationListProps> = ({
   const [isFadingIn, setIsFadingIn] = useState(false);
   const widgetRef = useRef<HTMLDivElement>(null);
   const manualPositionRef = useRef(false);
-  const { cards } = useExhibitionStore();
+  const cards = useLaboratoryStore(state => state.cards);
   const cardsLength = cards.length;
 
   const clampPositionToViewport = useCallback((x: number, y: number) => {

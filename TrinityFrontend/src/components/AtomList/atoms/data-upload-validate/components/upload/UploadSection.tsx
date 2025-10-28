@@ -3,6 +3,7 @@ import { FileText, Upload, Trash2 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import FileDataPreview from './FileDataPreview';
 
 interface FileRow {
   name: string;
@@ -36,6 +37,10 @@ interface UploadSectionProps {
   disableValidation?: boolean;
   /** When true, hide the heading and instruction text */
   useMasterFile?: boolean;
+  onDataChanges?: (changes: {
+    dtypeChanges: Record<string, Record<string, string>>;
+    missingValueStrategies: Record<string, Record<string, { strategy: string; value?: string }>>;
+  }) => void;
 }
 
 const UploadSection: React.FC<UploadSectionProps> = ({
@@ -60,7 +65,8 @@ const UploadSection: React.FC<UploadSectionProps> = ({
   saveStatus,
   disabled = false,
   disableValidation = false,
-  useMasterFile = false
+  useMasterFile = false,
+  onDataChanges
 }) => {
   const inputId = useId();
   return (
@@ -154,6 +160,10 @@ const UploadSection: React.FC<UploadSectionProps> = ({
           Validate Files
         </Button>
       )}
+      
+      {/* Data Preview & Configuration Section */}
+      <FileDataPreview uploadedFiles={uploadedFiles} onDataChanges={onDataChanges} />
+      
       {uploadedFiles.length > 0 && (
         <Button className="w-full mt-2" onClick={onSaveDataFrames} disabled={!saveEnabled}>
           Save Data Frame

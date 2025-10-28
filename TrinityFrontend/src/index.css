@@ -41,6 +41,14 @@
   stroke-width: 3px !important;
 }
 
+/* Remove the intermediate popover wrapper background for the text toolbar color picker */
+[data-radix-popper-content-wrapper]:has([data-text-toolbar-root]) {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

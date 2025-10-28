@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from motor.motor_asyncio import AsyncIOMotorCollection
 
 from .deps import get_exhibition_layout_collection
+from .persistence import save_exhibition_list_configuration
 from .schemas import (
     ExhibitionConfigurationIn,
     ExhibitionConfigurationOut,
@@ -81,11 +81,14 @@ async def get_layout_configuration(
         "project_name": project_name.strip(),
     }
 
-    record = await collection.find_one(filter_query)
+    record = await collection.find_one({**filter_query, "document_type": "layout_snapshot"})
+    if not record:
+        record = await collection.find_one(filter_query)
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exhibition layout not found")
 
     record.pop("_id", None)
+    record.pop("document_type", None)
     return ExhibitionLayoutConfigurationOut(**record)
 
 
@@ -94,7 +97,7 @@ async def save_layout_configuration(
     layout: ExhibitionLayoutConfigurationIn,
     collection: AsyncIOMotorCollection = Depends(get_exhibition_layout_collection),
 ) -> Dict[str, Any]:
-    payload = layout.dict(by_alias=True)
+    payload = layout.model_dump(by_alias=True)
     client_name = payload.get("client_name", "").strip()
     app_name = payload.get("app_name", "").strip()
     project_name = payload.get("project_name", "").strip()
@@ -113,21 +116,29 @@ async def save_layout_configuration(
     if not isinstance(slide_objects, dict):
         slide_objects = {}
 
-    timestamp = datetime.utcnow()
-
-    document = {
-        "client_name": client_name,
-        "app_name": app_name,
-        "project_name": project_name,
-        "cards": cards,
-        "slide_objects": slide_objects,
-        "updated_at": timestamp,
-    }
-
-    await collection.update_one(
-        {"client_name": client_name, "app_name": app_name, "project_name": project_name},
-        {"$set": document},
-        upsert=True,
+    persistence_result = await save_exhibition_list_configuration(
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+        exhibition_config_data={
+            "mode": payload.get("mode") or "exhibition",
+            "cards": cards,
+            "slide_objects": slide_objects,
+        },
+        collection=collection,
     )
 
-    return {"status": "ok", "updated_at": timestamp}
+    if persistence_result.get("status") != "success":
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=persistence_result.get("error", "Failed to persist exhibition layout"),
+        )
+
+    timestamp = persistence_result.get("updated_at", datetime.utcnow())
+    updated_at = timestamp.isoformat() if isinstance(timestamp, datetime) else str(timestamp)
+
+    return {
+        "status": "ok",
+        "updated_at": updated_at,
+        "documents_inserted": persistence_result.get("documents_written", 0),
+    }
