@@ -61,6 +61,9 @@ const TRANSITION_OPTIONS = [
 
 const NOTES_POSITIONS: SlideNotesPosition[] = ['bottom', 'right'];
 
+const TAB_TRIGGER_CLASSES =
+  'rounded-xl px-3 py-2 text-xs font-semibold text-muted-foreground transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow';
+
 interface SettingsPanelProps {
   settings: PresentationSettings;
   onChange: (partial: Partial<PresentationSettings>) => void;
@@ -159,11 +162,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       <ScrollArea className="max-h-[70vh] px-5">
         <Tabs defaultValue="background" className="w-full py-5">
-          <TabsList className="grid w-full grid-cols-4 rounded-full bg-muted/40 p-1">
-            <TabsTrigger value="background">Background</TabsTrigger>
-            <TabsTrigger value="behavior">Behaviour</TabsTrigger>
-            <TabsTrigger value="transitions">Transitions</TabsTrigger>
-            <TabsTrigger value="accessibility">Access</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-4 gap-2 rounded-2xl bg-muted/40 p-1.5">
+            <TabsTrigger value="background" className={TAB_TRIGGER_CLASSES}>
+              Background
+            </TabsTrigger>
+            <TabsTrigger value="behavior" className={TAB_TRIGGER_CLASSES}>
+              Behaviour
+            </TabsTrigger>
+            <TabsTrigger value="transitions" className={TAB_TRIGGER_CLASSES}>
+              Transitions
+            </TabsTrigger>
+            <TabsTrigger value="accessibility" className={TAB_TRIGGER_CLASSES}>
+              Access
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="background" className="space-y-5 pt-4">
