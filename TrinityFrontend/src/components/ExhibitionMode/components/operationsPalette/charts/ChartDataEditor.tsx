@@ -21,16 +21,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -608,8 +599,8 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                       placeholder="Enter label"
                     />
                     <Input
-                      type="number"
                       value={row.value}
+                      inputMode="decimal"
                       onChange={event => updateRow(index, 'value', event.target.value)}
                       className="h-11 bg-card border border-border/60 hover:border-accent/40 focus:border-accent focus:ring-1 focus:ring-accent/20 rounded-lg transition-all"
                       placeholder="0"
@@ -712,42 +703,52 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
                 <div className="space-y-3">
                   <Label className="text-sm font-bold">Color Scheme</Label>
-                  <Select
-                    value={config.colorScheme}
-                    onValueChange={value => handleConfigChange({ colorScheme: value })}
-                  >
-                    <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/50 hover:border-primary/50">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl">
-                      {colorSchemeGroups.map((group, groupIndex) => (
-                        <React.Fragment key={group.category}>
-                          <SelectGroup>
-                            <SelectLabel className="px-2 py-1 text-[0.65rem] uppercase tracking-[0.08em] text-muted-foreground">
+                  <ScrollArea className="h-80 w-full rounded-lg border border-border/60 bg-card">
+                    <div className="space-y-3 p-3">
+                      {colorSchemeGroups.map(group => (
+                        <div key={group.category} className="space-y-2">
+                          <div className="px-2 py-1">
+                            <span className="text-[0.65rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
                               {formatCategory(group.category)}
-                            </SelectLabel>
+                            </span>
+                          </div>
+                          <div className="space-y-1">
                             {group.schemes.map(scheme => (
-                              <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
-                                <div className="flex items-center gap-3">
-                                  <div className="flex gap-1.5">
-                                    {scheme.colors.map((color, index) => (
-                                      <div
-                                        key={`${scheme.id}-${color}-${index}`}
-                                        className="h-4 w-4 rounded-md border-2 border-border/50"
-                                        style={{ backgroundColor: color }}
-                                      />
-                                    ))}
-                                  </div>
-                                  <span className="font-medium">{scheme.name}</span>
+                              <button
+                                type="button"
+                                key={scheme.id}
+                                onClick={() => handleConfigChange({ colorScheme: scheme.id })}
+                                className={cn(
+                                  'flex w-full items-center gap-3 rounded-lg border border-transparent p-2.5 text-left transition-colors',
+                                  config.colorScheme === scheme.id
+                                    ? 'border-primary/30 bg-primary/10'
+                                    : 'hover:border-border/50 hover:bg-muted/40',
+                                )}
+                              >
+                                <div className="flex shrink-0 gap-1.5">
+                                  {scheme.colors.slice(0, 5).map((color, index) => (
+                                    <div
+                                      key={`${scheme.id}-${color}-${index}`}
+                                      className="h-5 w-5 rounded-md border border-border/40"
+                                      style={{ backgroundColor: color }}
+                                    />
+                                  ))}
                                 </div>
-                              </SelectItem>
+                                <span
+                                  className={cn(
+                                    'text-sm font-medium',
+                                    config.colorScheme === scheme.id ? 'text-primary' : 'text-foreground',
+                                  )}
+                                >
+                                  {scheme.name}
+                                </span>
+                              </button>
                             ))}
-                          </SelectGroup>
-                          {groupIndex < colorSchemeGroups.length - 1 && <SelectSeparator className="my-2" />}
-                        </React.Fragment>
+                          </div>
+                        </div>
                       ))}
-                    </SelectContent>
-                  </Select>
+                    </div>
+                  </ScrollArea>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
