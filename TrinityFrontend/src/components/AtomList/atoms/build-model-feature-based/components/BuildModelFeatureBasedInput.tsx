@@ -1,11 +1,11 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Database } from 'lucide-react';
-import { VALIDATE_API } from '@/lib/api';
+import { BUILD_MODEL_API } from '@/lib/api';
 import { BuildModelFeatureBasedData } from '../BuildModelFeatureBasedAtom';
 
 interface BuildModelFeatureBasedInputProps {
@@ -17,54 +17,71 @@ const BuildModelFeatureBasedInput: React.FC<BuildModelFeatureBasedInputProps> = 
   data,
   onDataChange
 }) => {
-  // fetch saved dataframes list on mount
+  const [scopes, setScopes] = useState<Array<{
+    scope_id: string;
+    scope_number: string;
+    scope_name: string;
+    combinations: Array<{
+      value: string;
+      label: string;
+      file_key: string;
+      record_count: number;
+    }>;
+  }>>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch scopes and combinations from backend API
   useEffect(() => {
-    fetch(`${VALIDATE_API}/list_saved_dataframes`)
-      .then(r => r.json())
-      .then(d => {
-        const files = Array.isArray(d.files) ? d.files.map((f: any)=> f.object_name || f) : [];
-        if (files.length && (!data?.availableFiles || data.availableFiles.length === 0)) {
-          onDataChange({ availableFiles: files });
+    const fetchScopes = async () => {
+      // Get environment variables for MongoDB querying
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      
+      const client_name = env.CLIENT_NAME || 'default_client';
+      const app_name = env.APP_NAME || 'default_app';
+      const project_name = env.PROJECT_NAME || 'default_project';
+      
+      // Build API URL with query parameters
+      const apiUrl = `${BUILD_MODEL_API}/build-atom/scopes?client_name=${encodeURIComponent(client_name)}&app_name=${encodeURIComponent(app_name)}&project_name=${encodeURIComponent(project_name)}`;
+      
+      setLoading(true);
+      setError(null);
+      
+      try {
+        const response = await fetch(apiUrl);
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
         }
-      })
-      .catch(() => {/* ignore */});
-  }, [data?.availableFiles]);
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          setScopes(result.scopes);
+        } else {
+          throw new Error(result.message || 'Failed to fetch scopes');
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to fetch scopes');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  // Filter files that contain "Scope" and extract unique scope numbers
-  const scopeFiles = (data?.availableFiles || []).filter(file => 
-    typeof file === 'string' && file.includes('Scope_')
-  );
+    fetchScopes();
+  }, []);
 
-  // Extract unique scope numbers from filenames
-  const uniqueScopeNumbers = scopeFiles
-    .map(file => {
-      const match = file.match(/Scope_(\d+)_/);
-      return match ? parseInt(match[1]) : null;
-    })
-    .filter((scopeNum): scopeNum is number => scopeNum !== null)
-    .sort((a, b) => a - b);
-
-  // Remove duplicates and create scope options
-  const scopeOptions = [...new Set(uniqueScopeNumbers)].map(scopeNum => ({
-    value: scopeNum.toString(),
-    label: `Scope ${scopeNum}`
+  // Create scope options from backend data
+  const scopeOptions = scopes.map(scope => ({
+    value: scope.scope_number,
+    label: scope.scope_name
   }));
 
-  // Filter files by selected scope number and extract combinations after scope number
-  const filesForSelectedScope = data?.selectedScope ? 
-    scopeFiles.filter(file => file.includes(`Scope_${data.selectedScope}_`)) : [];
-
-  // Extract combinations after scope number (e.g., "Channel_Convenience_Variant_Flavoured_Brand_HEINZ_Flavoured_PPG_Small_Single")
-  const scopeCombinations = filesForSelectedScope.map(file => {
-    const match = file.match(/Scope_\d+_(.+?)_\d{8}_\d{6}\.arrow$/);
-    return match ? match[1] : null;
-  }).filter((combination): combination is string => combination !== null);
-
-  // Remove duplicates and create combination options
-  const uniqueCombinations = [...new Set(scopeCombinations)].map(combination => ({
-    value: combination,
-    label: combination
-  }));
+  // Get combinations for selected scope
+  const selectedScopeData = scopes.find(scope => scope.scope_number === data.selectedScope);
+  const uniqueCombinations = selectedScopeData?.combinations || [];
 
   const handleCombinationToggle = (combination: string, checked: boolean) => {
     const updatedCombinations = checked
@@ -77,7 +94,7 @@ const BuildModelFeatureBasedInput: React.FC<BuildModelFeatureBasedInputProps> = 
   const handleSelectAllCombinations = (checked: boolean) => {
     if (checked) {
       // Select all combinations
-      const allCombinations = uniqueCombinations.map(option => option.value);
+      const allCombinations = uniqueCombinations.map(combination => combination.value);
       onDataChange({ selectedCombinations: allCombinations });
     } else {
       // Deselect all combinations
@@ -87,7 +104,7 @@ const BuildModelFeatureBasedInput: React.FC<BuildModelFeatureBasedInputProps> = 
 
   // Check if all combinations are selected
   const allCombinationsSelected = uniqueCombinations.length > 0 && 
-    uniqueCombinations.every(option => data?.selectedCombinations?.includes(option.value));
+    uniqueCombinations.every(combination => data?.selectedCombinations?.includes(combination.value));
 
   return (
     <div className="space-y-6">
@@ -104,22 +121,14 @@ const BuildModelFeatureBasedInput: React.FC<BuildModelFeatureBasedInputProps> = 
             <Label>Scope Selection</Label>
             <Select value={data.selectedScope} onValueChange={(value) => {
               if (value !== data.selectedScope) {
-                // Get combinations for the selected scope
-                const scopeFiles = (data?.availableFiles || []).filter(file => 
-                  typeof file === 'string' && file.includes(`Scope_${value}_`)
-                );
-                
-                const scopeCombinations = scopeFiles.map(file => {
-                  const match = file.match(/Scope_\d+_(.+?)_\d{8}_\d{6}\.arrow$/);
-                  return match ? match[1] : null;
-                }).filter((combination): combination is string => combination !== null);
-                
-                const uniqueCombinationsForScope = [...new Set(scopeCombinations)];
+                // Get combinations for the selected scope from backend data
+                const selectedScopeData = scopes.find(scope => scope.scope_number === value);
+                const combinationsForScope = selectedScopeData?.combinations.map(c => c.value) || [];
                 
                 // Automatically select all combinations for the new scope
                 onDataChange({ 
                   selectedScope: value, 
-                  selectedCombinations: uniqueCombinationsForScope 
+                  selectedCombinations: combinationsForScope 
                 });
               }
             }}>
@@ -127,12 +136,16 @@ const BuildModelFeatureBasedInput: React.FC<BuildModelFeatureBasedInputProps> = 
                 <SelectValue placeholder="Select a scope number" />
               </SelectTrigger>
               <SelectContent>
-                {scopeOptions.length > 0 ? (
+                {loading ? (
+                  <SelectItem value="loading" disabled>Loading scopes...</SelectItem>
+                ) : error ? (
+                  <SelectItem value="error" disabled>Error loading scopes: {error}</SelectItem>
+                ) : scopeOptions.length > 0 ? (
                   scopeOptions.map(option => (
                     <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                   ))
                 ) : (
-                  <SelectItem value="no-scopes" disabled>No scope files found</SelectItem>
+                  <SelectItem value="no-scopes" disabled>No scopes found</SelectItem>
                 )}
               </SelectContent>
             </Select>
@@ -181,20 +194,35 @@ const BuildModelFeatureBasedInput: React.FC<BuildModelFeatureBasedInputProps> = 
             
             <div className="max-h-60 overflow-y-auto overflow-x-auto mt-2">
               <div className="space-y-1 min-w-max">
-                {uniqueCombinations.map(option => (
-                  <div key={option.value} className="flex items-center space-x-2 py-1">
+                {uniqueCombinations.map(combination => (
+                  <div key={combination.value} className="flex items-center space-x-2 py-1">
                     <Checkbox
-                      id={option.value}
-                      checked={data?.selectedCombinations?.includes(option.value) || false}
-                      onCheckedChange={(checked) => handleCombinationToggle(option.value, checked as boolean)}
+                      id={combination.value}
+                      checked={data?.selectedCombinations?.includes(combination.value) || false}
+                      onCheckedChange={(checked) => handleCombinationToggle(combination.value, checked as boolean)}
                       onClick={(e) => e.stopPropagation()}
                     />
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Label htmlFor={option.value} className="text-sm truncate">{option.label}</Label>
+                        <Label htmlFor={combination.value} className="text-sm truncate">
+                          {combination.label}
+                          {combination.record_count > 0 && (
+                            <span className="text-xs text-muted-foreground ml-2">
+                              ({combination.record_count} records)
+                            </span>
+                          )}
+                        </Label>
                       </TooltipTrigger>
                       <TooltipContent>
-                        <p>{option.label}</p>
+                        <div>
+                          <p className="font-medium">{combination.label}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Records: {combination.record_count}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            File: {combination.file_key.split('/').pop()}
+                          </p>
+                        </div>
                       </TooltipContent>
                     </Tooltip>
                   </div>

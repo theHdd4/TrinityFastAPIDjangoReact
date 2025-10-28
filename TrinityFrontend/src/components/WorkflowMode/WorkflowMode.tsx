@@ -35,7 +35,7 @@ const WorkflowMode = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  // Load workflow state from localStorage on component mount
+  // Load workflow state on component mount - always try MongoDB first, then localStorage
   useEffect(() => {
     const savedCanvasMolecules = localStorage.getItem('workflow-canvas-molecules');
     const savedCustomMolecules = localStorage.getItem('workflow-custom-molecules');
@@ -167,9 +167,13 @@ const WorkflowMode = () => {
     );
     const nextNumber = existingNewMolecules.length + 1;
     const finalName = `New Molecule ${nextNumber}`;
+    
+    // Generate molecule ID in format: molecule_name-number
+    const moleculeName = finalName.toLowerCase().replace(/\s+/g, '-');
+    const moleculeId = `${moleculeName}-${nextNumber}`;
 
     const newMolecule = {
-      id: `custom-molecule-${Date.now()}`,
+      id: moleculeId,
       title: finalName,
       atoms: []
     };
@@ -503,32 +507,14 @@ const WorkflowMode = () => {
   // Function to save workflow configuration
   const saveWorkflowConfiguration = async () => {
     try {
-      // Get current app/project information from localStorage
-      const currentAppStr = localStorage.getItem('current-app');
-      const currentProjectStr = localStorage.getItem('current-project');
+      // Get environment variables for MongoDB saving
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      const client_name = env.CLIENT_NAME || 'default_client';
+      const app_name = env.APP_NAME || 'default_app';
+      const project_name = env.PROJECT_NAME || 'default_project';
       
-      let client_id = '';
-      let app_id = '';
-      let project_id = null;
-      
-      if (currentAppStr) {
-        try {
-          const currentApp = JSON.parse(currentAppStr);
-          client_id = currentApp.client_name || '';
-          app_id = currentApp.app_name || '';
-        } catch (e) {
-          console.warn('Failed to parse current app:', e);
-        }
-      }
-      
-      if (currentProjectStr) {
-        try {
-          const currentProject = JSON.parse(currentProjectStr);
-          project_id = currentProject.id || null;
-        } catch (e) {
-          console.warn('Failed to parse current project:', e);
-        }
-      }
+      console.log('🔍 Saving workflow with:', { client_name, app_name, project_name });
 
       const response = await fetch(`${MOLECULES_API}/workflow/save`, {
         method: 'POST',
@@ -541,9 +527,9 @@ const WorkflowMode = () => {
           canvas_molecules: canvasMolecules,
           custom_molecules: customMolecules,
           user_id: '', // Could be enhanced with actual user ID from session
-          client_id: client_id,
-          app_id: app_id,
-          project_id: project_id
+          client_name: client_name,
+          app_name: app_name,
+          project_name: project_name
         })
       });
 
@@ -568,51 +554,49 @@ const WorkflowMode = () => {
   };
 
   // Function to load workflow configuration
-  const loadWorkflowConfiguration = async () => {
+  const loadWorkflowConfiguration = async (showToast: boolean = true): Promise<boolean> => {
     try {
-      // Get current app/project information from localStorage
-      const currentAppStr = localStorage.getItem('current-app');
-      const currentProjectStr = localStorage.getItem('current-project');
+      // Get environment variables for MongoDB saving
+      const envStr = localStorage.getItem('env');
+      console.log('🔍 Raw env string from localStorage:', envStr);
       
-      let client_id = '';
-      let app_id = '';
-      let project_id = null;
+      const env = envStr ? JSON.parse(envStr) : {};
+      console.log('🔍 Parsed env object:', env);
       
-      if (currentAppStr) {
-        try {
-          const currentApp = JSON.parse(currentAppStr);
-          client_id = currentApp.client_name || '';
-          app_id = currentApp.app_name || '';
-        } catch (e) {
-          console.warn('Failed to parse current app:', e);
-        }
-      }
+      const client_name = env.CLIENT_NAME || 'default_client';
+      const app_name = env.APP_NAME || 'default_app';
+      const project_name = env.PROJECT_NAME || 'default_project';
       
-      if (currentProjectStr) {
-        try {
-          const currentProject = JSON.parse(currentProjectStr);
-          project_id = currentProject.id || null;
-        } catch (e) {
-          console.warn('Failed to parse current project:', e);
-        }
-      }
+      console.log('🔍 Extracted from localStorage:', { client_name, app_name, project_name });
+      
+      // Check if we have real values or just defaults
+      const hasRealValues = client_name !== 'default_client' || 
+                           app_name !== 'default_app' || 
+                           project_name !== 'default_project';
+      
+      console.log('🔍 Has real values:', hasRealValues);
 
-      const response = await fetch(`${MOLECULES_API}/workflow/get`, {
+      // Try to load with current values first
+      let response = await fetch(`${MOLECULES_API}/workflow/get`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
         body: JSON.stringify({
-          user_id: '', // Could be enhanced with actual user ID from session
-          client_id: client_id,
-          app_id: app_id,
-          project_id: project_id
+          user_id: '',
+          client_name: client_name,
+          app_name: app_name,
+          project_name: project_name
         })
       });
 
+      console.log('📡 API response status:', response.status);
+      console.log('📡 API response ok:', response.ok);
+
       if (response.ok) {
         const result = await response.json();
+        console.log('📡 API response data:', result);
         
         if (result.workflow_data) {
           const { workflow_name, canvas_molecules, custom_molecules } = result.workflow_data;
@@ -627,23 +611,74 @@ const WorkflowMode = () => {
             description: `Workflow "${workflow_name || 'Untitled Workflow'}" has been loaded successfully`,
           });
           console.log('Workflow loaded:', result.workflow_data);
+          return true; // Data was loaded successfully
         } else {
-          toast({
-            title: "No Saved Workflow",
-            description: "No saved workflow configuration found for this project",
-            variant: "destructive",
-          });
+          console.log('📡 No workflow_data in response');
+          
+          // If we used default values and got no data, try without any filters
+          if (!hasRealValues) {
+            console.log('🔄 Trying to load any workflow without filters...');
+            response = await fetch(`${MOLECULES_API}/workflow/get`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              credentials: 'include',
+              body: JSON.stringify({
+                user_id: '',
+                client_name: '',
+                app_name: '',
+                project_name: ''
+              })
+            });
+            
+            if (response.ok) {
+              const fallbackResult = await response.json();
+              console.log('📡 Fallback API response data:', fallbackResult);
+              
+              if (fallbackResult.workflow_data) {
+                const { canvas_molecules, custom_molecules } = fallbackResult.workflow_data;
+                console.log('📡 Found fallback workflow data - canvas_molecules:', canvas_molecules?.length || 0, 'custom_molecules:', custom_molecules?.length || 0);
+                
+                // Update state with loaded data
+                setCanvasMolecules(canvas_molecules || []);
+                setCustomMolecules(custom_molecules || []);
+                
+                if (showToast) {
+                  toast({
+                    title: "Workflow Loaded",
+                    description: `Workflow configuration has been loaded successfully`,
+                  });
+                }
+                console.log('Fallback workflow loaded:', fallbackResult.workflow_data);
+                return true; // Data was loaded successfully
+              }
+            }
+          }
+          
+          if (showToast) {
+            toast({
+              title: "No Saved Workflow",
+              description: "No saved workflow configuration found for this project",
+              variant: "destructive",
+            });
+          }
+          return false; // No data found
         }
       } else {
+        console.log('📡 API request failed with status:', response.status);
         throw new Error('Failed to load workflow');
       }
     } catch (error) {
       console.error('Error loading workflow:', error);
-      toast({
-        title: "Load Failed",
-        description: "Failed to load workflow configuration. Please try again.",
-        variant: "destructive",
-      });
+      if (showToast) {
+        toast({
+          title: "Load Failed",
+          description: "Failed to load workflow configuration. Please try again.",
+          variant: "destructive",
+        });
+      }
+      return false; // Failed to load
     }
   };
 
@@ -796,7 +831,7 @@ const WorkflowMode = () => {
             <Button variant="outline" size="sm" onClick={clearWorkflowData}>
               Clear
             </Button>
-            <Button variant="outline" size="sm" onClick={loadWorkflowConfiguration}>
+            <Button variant="outline" size="sm" onClick={() => loadWorkflowConfiguration(true)}>
               <Upload className="w-4 h-4 mr-2" />
               Load
             </Button>

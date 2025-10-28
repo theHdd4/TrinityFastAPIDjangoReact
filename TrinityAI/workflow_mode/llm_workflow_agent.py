@@ -220,37 +220,23 @@ class WorkflowCompositionAgent:
     
     def _build_rag_knowledge_context(self, user_prompt: str) -> str:
         """
-        Build RAG knowledge context specific to user's request
+        Provide HIGH-LEVEL guidance only. We intentionally avoid injecting
+        concrete workflow templates from RAG to prevent biasing the LLM.
+        The goal is to nudge the model toward creating custom, atom-driven
+        workflows tailored to the user's prompt.
         """
-        # Search for matching use cases
-        use_cases = self.rag.search_use_case_workflows(user_prompt)
-        
-        context = "\nRAG KNOWLEDGE - WORKFLOW PATTERNS:\n"
-        
-        if use_cases and use_cases[0]['score'] > 10:
-            # Found a matching use case
-            best_match = use_cases[0]
-            use_case_data = best_match['data']
-            
-            context += f"\n**MATCHED USE CASE: {use_case_data['name']}**\n"
-            context += f"Description: {use_case_data['description']}\n"
-            context += f"Industry: {use_case_data.get('industry', 'General')}\n\n"
-            
-            context += "SUGGESTED MOLECULE COMPOSITION:\n"
-            for molecule in use_case_data.get('molecules', []):
-                context += f"\nMolecule {molecule['molecule_number']}: {molecule['molecule_name']}\n"
-                context += f"Purpose: {molecule['purpose']}\n"
-                context += f"Atoms:\n"
-                for atom in molecule['atoms']:
-                    context += f"  - {atom['id']} (order: {atom['order']}, required: {atom.get('required', True)})\n"
-        else:
-            # No exact match - provide general guidance
-            context += "\nNo exact use case match found. Suggest general workflow structure:\n"
-            context += "- Molecule 1: Data loading & preparation\n"
-            context += "- Molecule 2: Analysis or modeling\n"
-            context += "- Molecule 3: Visualization & reporting\n"
-        
-        return context
+        guidance = (
+            "\nRAG GUIDANCE (high-level, non-prescriptive):\n"
+            "- Treat examples and patterns as inspiration only, not templates.\n"
+            "- Design a custom workflow based on the user's goal and AVAILABLE ATOMS.\n"
+            "- Prefer multi-phase pipelines covering: ingestion, integration, cleaning,\n"
+            "  analysis, modeling, evaluation, visualization, and reporting.\n"
+            "- Group 2-5 complementary atoms per molecule; ensure logical sequencing\n"
+            "  and clear purpose per molecule.\n"
+            "- For complex tasks, consider 5-8 molecules.\n"
+            "- Always explain business value briefly.\n"
+        )
+        return guidance
     
     def _update_session_memory(self, session_id: str, user_prompt: str, result: Dict):
         """

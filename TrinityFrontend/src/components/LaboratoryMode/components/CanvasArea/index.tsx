@@ -68,6 +68,8 @@ import {
   DEFAULT_EXPLORE_DATA,
 } from '../../store/laboratoryStore';
 import { deriveWorkflowMolecules, WorkflowMolecule } from './helpers';
+import { LABORATORY_PROJECT_STATE_API } from '@/lib/api';
+import { getActiveProjectContext } from '@/utils/projectEnv';
 
 
 interface CanvasAreaProps {
@@ -115,6 +117,84 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
     moleculeId: card.moleculeId,
     moleculeTitle: card.moleculeTitle,
   }));
+};
+
+// Function to fetch atom configurations from MongoDB
+const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
+  cards: LayoutCard[];
+  workflowMolecules: WorkflowMolecule[];
+} | null> => {
+  try {
+    const projectContext = getActiveProjectContext();
+    if (!projectContext) {
+      console.warn('[Laboratory API] No project context available for MongoDB fetch');
+      return null;
+    }
+
+    const requestUrl = `${LABORATORY_PROJECT_STATE_API}/get/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}`;
+    
+    console.info('[Laboratory API] Fetching atom configurations from MongoDB', {
+      url: requestUrl,
+      project: projectContext.project_name,
+    });
+
+    const response = await fetch(requestUrl, {
+      method: 'GET',
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      console.warn('[Laboratory API] Failed to fetch atom configurations from MongoDB', {
+        status: response.status,
+        statusText: response.statusText,
+      });
+      return null;
+    }
+
+    const data = await response.json();
+    console.log('[Laboratory API] MongoDB response data:', data);
+    
+    if (data.status === 'ok' && data.cards && Array.isArray(data.cards)) {
+      console.info('[Laboratory API] Successfully fetched atom configurations from MongoDB', {
+        cardsCount: data.cards.length,
+        workflowMoleculesCount: data.workflow_molecules?.length || 0,
+      });
+
+      // The backend already returns cards in the correct format, so we can use them directly
+      const cards = data.cards.map((card: any) => {
+        console.log('[Laboratory API] Processing card from MongoDB:', {
+          id: card.id,
+          moleculeId: card.moleculeId,
+          moleculeTitle: card.moleculeTitle,
+          atomsCount: card.atoms?.length || 0
+        });
+        
+        // The backend already formats the atoms correctly, so we can use them directly
+        return {
+          id: card.id,
+          atoms: card.atoms || [],
+          isExhibited: card.isExhibited || false,
+          moleculeId: card.moleculeId,
+          moleculeTitle: card.moleculeTitle,
+          collapsed: card.collapsed || false,
+          scroll_position: card.scroll_position || 0,
+        };
+      });
+
+      // Use workflow molecules from backend directly - no assignments needed
+      const workflowMolecules = data.workflow_molecules || [];
+      
+      console.log('[Laboratory API] Using workflow molecules from MongoDB backend:', workflowMolecules);
+
+      return { cards, workflowMolecules };
+    } else {
+      console.warn('[Laboratory API] Invalid response format from MongoDB fetch', data);
+      return null;
+    }
+  } catch (error) {
+    console.error('[Laboratory API] Error fetching atom configurations from MongoDB', error);
+    return null;
+  }
 };
 
 const CanvasArea: React.FC<CanvasAreaProps> = ({
@@ -752,7 +832,7 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     let initialCards: LayoutCard[] | null = null;
     let initialWorkflow: WorkflowMolecule[] | undefined;
     let isMounted = true;
-    let hasAppliedInitialCards = false;
+    // Removed hasAppliedInitialCards flag to prevent blocking subsequent data loads
     let hasPendingAsyncLoad = false;
 
     const markLoadingComplete = () => {
@@ -770,8 +850,87 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         return;
       }
 
+      console.log('[Laboratory API] applyInitialCards called with:', {
+        cardsCount: cards?.length || 0,
+        workflowOverrideCount: workflowOverride?.length || 0,
+        cards: cards
+      });
+
       const normalizedCards = Array.isArray(cards) ? cards : [];
-      setLayoutCards(normalizedCards);
+      console.log('[Laboratory API] Normalized cards:', normalizedCards);
+      
+      // Debug: Check molecule info in cards
+      const cardsWithMoleculeInfo = normalizedCards.filter(card => card.moleculeId);
+      const cardsWithoutMoleculeInfo = normalizedCards.filter(card => !card.moleculeId);
+      console.log('[Laboratory API] Cards with molecule info:', cardsWithMoleculeInfo.length);
+      console.log('[Laboratory API] Cards without molecule info:', cardsWithoutMoleculeInfo.length);
+      
+      if (cardsWithoutMoleculeInfo.length > 0) {
+        console.log('[Laboratory API] Cards without molecule info:', cardsWithoutMoleculeInfo);
+      }
+      
+      // If we have cards without molecule info, try to fetch molecule information from MongoDB
+      if (cardsWithoutMoleculeInfo.length > 0) {
+        console.log('[Laboratory API] Attempting to fetch molecule information from MongoDB for cards without molecule info');
+        
+        // Try to fetch molecule information from MongoDB
+        fetchAtomConfigurationsFromMongoDB()
+          .then((mongoData) => {
+            if (mongoData && mongoData.cards.length > 0) {
+              console.log('[Laboratory API] Found MongoDB data with molecule info, updating cards');
+              
+              // Create a map of MongoDB cards by their atom IDs for quick lookup
+              const mongoCardMap = new Map();
+              mongoData.cards.forEach(mongoCard => {
+                const atomId = mongoCard.atoms[0]?.atomId;
+                if (atomId) {
+                  mongoCardMap.set(atomId, mongoCard);
+                }
+              });
+              
+              // Update cards with molecule information from MongoDB
+              const updatedCards = normalizedCards.map(card => {
+                const atomId = card.atoms[0]?.atomId;
+                if (atomId && mongoCardMap.has(atomId)) {
+                  const mongoCard = mongoCardMap.get(atomId);
+                  console.log(`[Laboratory API] Updating card ${atomId} with molecule info from MongoDB:`, {
+                    moleculeId: mongoCard.moleculeId,
+                    moleculeTitle: mongoCard.moleculeTitle
+                  });
+                  return {
+                    ...card,
+                    moleculeId: mongoCard.moleculeId,
+                    moleculeTitle: mongoCard.moleculeTitle
+                  };
+                }
+                return card;
+              });
+              
+              console.log('[Laboratory API] Updated cards with MongoDB molecule info:', updatedCards);
+              
+              // Use workflow molecules from MongoDB if available
+              if (mongoData.workflowMolecules && mongoData.workflowMolecules.length > 0) {
+                console.log('[Laboratory API] Using workflow molecules from MongoDB:', mongoData.workflowMolecules);
+                workflow = mongoData.workflowMolecules;
+                
+                // Set cards directly - no assignment needed
+                setLayoutCards(updatedCards);
+              } else {
+                setLayoutCards(updatedCards);
+              }
+            } else {
+              console.log('[Laboratory API] No MongoDB data found, using cards as-is');
+              setLayoutCards(normalizedCards);
+            }
+          })
+          .catch((error) => {
+            console.error('[Laboratory API] Failed to fetch molecule info from MongoDB:', error);
+            console.log('[Laboratory API] Using cards as-is without molecule info');
+            setLayoutCards(normalizedCards);
+          });
+      } else {
+        setLayoutCards(normalizedCards);
+      }
       
       // Check for saved workflowMolecules in localStorage if no override provided
       let workflow = workflowOverride;
@@ -789,18 +948,42 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
         }
       }
       
-      setWorkflowMolecules(workflow);
+      console.log('[Laboratory API] Setting workflow molecules:', workflow);
+      
+      // Debug: Compare molecule IDs between workflow molecules and cards
+      const workflowMoleculeIds = workflow.map(m => m.moleculeId);
+      const cardMoleculeIds = normalizedCards.map(c => c.moleculeId).filter(id => id);
+      console.log('[Laboratory API] Molecule ID comparison:', {
+        workflowMoleculeIds,
+        cardMoleculeIds,
+        match: workflowMoleculeIds.every(id => cardMoleculeIds.includes(id))
+      });
+      
+      // No need for complex assignment - use workflow molecules directly from backend
+      
+      // Filter out empty molecule containers (molecules with 0 atoms)
+      const validWorkflow = workflow.filter(molecule => molecule.atoms.length > 0);
+      
+      if (validWorkflow.length !== workflow.length) {
+        console.log('[Laboratory API] Removed empty molecule containers:', 
+          workflow.length - validWorkflow.length, 'empty molecules removed');
+      }
+      
+      setWorkflowMolecules(validWorkflow);
 
       // Set all workflow molecules as collapsed by default
-      if (workflow.length > 0) {
+      if (validWorkflow.length > 0) {
         const initialCollapsedState: Record<string, boolean> = {};
-        workflow.forEach(molecule => {
+        validWorkflow.forEach(molecule => {
           initialCollapsedState[molecule.moleculeId] = true; // true = collapsed
         });
+        console.log('[Laboratory API] Setting collapsed molecules state:', initialCollapsedState);
         setCollapsedMolecules(initialCollapsedState);
       }
+      
+      // Set cards directly - no assignment needed as molecules are handled separately
+      setLayoutCards(normalizedCards);
 
-      hasAppliedInitialCards = true;
       markLoadingComplete();
     };
 
@@ -1027,9 +1210,22 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
                 /* ignore load failures */
               })
               .finally(() => {
-                if (!hasAppliedInitialCards) {
-                  markLoadingComplete();
-                }
+                // Always try MongoDB as fallback if project registry fetch failed or returned no data
+                console.info('[Laboratory API] Project registry fetch completed, checking MongoDB as fallback');
+                fetchAtomConfigurationsFromMongoDB()
+                  .then((mongoData) => {
+                    if (mongoData && mongoData.cards.length > 0) {
+                      console.info('[Laboratory API] Successfully loaded atom configurations from MongoDB fallback');
+                      applyInitialCards(mongoData.cards, mongoData.workflowMolecules);
+                    } else {
+                      console.info('[Laboratory API] No atom configurations found in MongoDB fallback');
+                      markLoadingComplete();
+                    }
+                  })
+                  .catch((error) => {
+                    console.error('[Laboratory API] Failed to fetch from MongoDB fallback', error);
+                    markLoadingComplete();
+                  });
               });
           }
         }
@@ -1048,8 +1244,35 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           }
         }
       }
-      applyInitialCards(initialCards, initialWorkflow);
-    } else if (!hasPendingAsyncLoad && !hasAppliedInitialCards) {
+      // Check if cards have molecule information, if not, try MongoDB
+      const hasMoleculeInfo = initialCards.some(card => card.moleculeId);
+      console.log('[Laboratory API] hasMoleculeInfo check:', {
+        hasMoleculeInfo,
+        totalCards: initialCards.length,
+        cardsWithMoleculeId: initialCards.filter(card => card.moleculeId).length,
+        sampleCard: initialCards[0]
+      });
+      if (!hasMoleculeInfo) {
+        console.info('[Laboratory API] Cards from localStorage lack molecule info, trying MongoDB');
+        fetchAtomConfigurationsFromMongoDB()
+          .then((mongoData) => {
+            if (mongoData && mongoData.cards.length > 0) {
+              console.info('[Laboratory API] Found MongoDB data with molecule info, using it instead');
+              applyInitialCards(mongoData.cards, mongoData.workflowMolecules);
+            } else {
+              console.info('[Laboratory API] No MongoDB data found, using localStorage data');
+              applyInitialCards(initialCards, initialWorkflow);
+            }
+          })
+          .catch((error) => {
+            console.error('[Laboratory API] MongoDB fetch failed, using localStorage data', error);
+            applyInitialCards(initialCards, initialWorkflow);
+          });
+      } else {
+        console.info('[Laboratory API] Cards from localStorage have molecule info, using localStorage data');
+        applyInitialCards(initialCards, initialWorkflow);
+      }
+    } else if (!hasPendingAsyncLoad) {
       // Even if no initialCards, check if we need to restore workflow molecules from saved layout
       const storedLayout = localStorage.getItem(STORAGE_KEY);
       const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
@@ -1063,14 +1286,33 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
           if (layoutCards && layoutCards.length > 0 && workflowMolecules && workflowMolecules.length > 0) {
             applyInitialCards(layoutCards, workflowMolecules);
           } else {
-      markLoadingComplete();
+            markLoadingComplete();
           }
         } catch (e) {
           console.error('Failed to parse stored layout or workflow molecules', e);
           markLoadingComplete();
         }
       } else {
-        markLoadingComplete();
+        // If no local storage data, try to fetch from MongoDB as a fallback
+        console.info('[Laboratory API] No local storage data found, attempting to fetch from MongoDB');
+        console.log('[Laboratory API] Current project context:', getActiveProjectContext());
+        fetchAtomConfigurationsFromMongoDB()
+          .then((mongoData) => {
+            console.log('[Laboratory API] MongoDB fetch result:', mongoData);
+            if (mongoData && mongoData.cards.length > 0) {
+              console.info('[Laboratory API] Successfully loaded atom configurations from MongoDB');
+              console.log('[Laboratory API] Cards to apply:', mongoData.cards);
+              console.log('[Laboratory API] Workflow molecules to apply:', mongoData.workflowMolecules);
+              applyInitialCards(mongoData.cards, mongoData.workflowMolecules);
+            } else {
+              console.info('[Laboratory API] No atom configurations found in MongoDB');
+              markLoadingComplete();
+            }
+          })
+          .catch((error) => {
+            console.error('[Laboratory API] Failed to fetch from MongoDB, falling back to empty state', error);
+            markLoadingComplete();
+          });
       }
     }
 
@@ -1142,12 +1384,18 @@ const CanvasArea: React.FC<CanvasAreaProps> = ({
     setCards(layoutCards);
   }, [layoutCards, setCards]);
 
-  // Persist workflowMolecules to localStorage
+  // Persist workflowMolecules to localStorage only when we have cards with molecule info
   useEffect(() => {
-    if (workflowMolecules.length > 0) {
+    const hasCardsWithMoleculeId = Array.isArray(layoutCards) && 
+      layoutCards.some(card => card.moleculeId);
+    
+    if (workflowMolecules.length > 0 && hasCardsWithMoleculeId) {
       localStorage.setItem('workflow-molecules', JSON.stringify(workflowMolecules));
+    } else if (!hasCardsWithMoleculeId && workflowMolecules.length === 0) {
+      // Clear workflow molecules from localStorage when in regular laboratory mode
+      localStorage.removeItem('workflow-molecules');
     }
-  }, [workflowMolecules]);
+  }, [workflowMolecules, layoutCards]);
 
   // Ensure workflow molecules are restored when layout cards exist but workflow molecules are missing
   useEffect(() => {
@@ -1960,7 +2208,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         <Card
                           key={card.id}
                           data-card-id={card.id}
-                          className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
+                          className={`w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
                             dragOverCardId === card.id
                               ? 'border-blue-500 bg-blue-50 shadow-lg'
                               : draggedCardId === card.id
@@ -2160,10 +2408,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
               if (standaloneCards.length > 0) {
                 return (
                   <div className="space-y-6">
-                    <div className="text-center">
-                      <h3 className="text-lg font-semibold text-gray-700 mb-4">Independent Atoms</h3>
-                    </div>
-                    {standaloneCards.map((card) => {
+                    {standaloneCards.map((card, index) => {
                       const cardTitle = card.moleculeTitle
                         ? card.atoms.length > 0
                           ? `${card.moleculeTitle} - ${card.atoms[0].title}`
@@ -2172,10 +2417,10 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           ? card.atoms[0].title
                           : 'Card';
                       return (
+                        <React.Fragment key={card.id}>
                         <Card
-                          key={card.id}
                           data-card-id={card.id}
-                          className={`w-full min-h-[200px] bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
+                          className={`w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
                             dragOverCardId === card.id
                               ? 'border-blue-500 bg-blue-50 shadow-lg'
                               : draggedCardId === card.id
@@ -2236,6 +2481,20 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 title="Expand Card"
                               >
                                 <Maximize2 className="w-4 h-4 text-gray-400" />
+                              </button>
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  toggleCardCollapse(card.id);
+                                }}
+                                className="p-1 hover:bg-gray-100 rounded"
+                                title="Toggle Card"
+                              >
+                                {collapsedCards[card.id] ? (
+                                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                                ) : (
+                                  <Minus className="w-4 h-4 text-gray-400" />
+                                )}
                               </button>
                             </div>
                           </div>
@@ -2314,6 +2573,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                       <DataUploadValidateAtom atomId={atom.id} />
                                     ) : atom.atomId === 'feature-overview' ? (
                                       <FeatureOverviewAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'clustering' ? (
+                                      <ClusteringAtom atomId={atom.id} />
                                     ) : atom.atomId === 'explore' ? (
                                       <ExploreAtom atomId={atom.id} />
                                     ) : atom.atomId === 'chart-maker' ? (
@@ -2332,6 +2593,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                       <GroupByAtom atomId={atom.id} />
                                     ) : atom.atomId === 'build-model-feature-based' ? (
                                       <BuildModelFeatureBasedAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'scenario-planner' ? (
+                                      <ScenarioPlannerAtom atomId={atom.id} />
                                     ) : atom.atomId === 'select-models-feature' ? (
                                       <SelectModelsFeatureAtom atomId={atom.id} />
                                     ) : atom.atomId === 'evaluate-models-feature' ? (
@@ -2359,6 +2622,29 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             )}
                           </div>
                         </Card>
+                        {index < standaloneCards.length - 1 && (
+                          <div className="flex justify-center my-4">
+                            <button
+                              onClick={() => addNewCard(undefined, index + 1)}
+                              onDragEnter={e => handleAddDragEnter(e, `workflow-p-${index}`)}
+                              onDragLeave={handleAddDragLeave}
+                              onDragOver={e => e.preventDefault()}
+                              onDrop={e => {
+                                void handleDropNewCard(e, undefined, index + 1);
+                              }}
+                              className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `workflow-p-${index}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
+                              title="Add new card"
+                            >
+                              <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `workflow-p-${index}` ? 'scale-125 mb-2' : ''}`} />
+                              <span
+                                className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
+                              >
+                                Add New Card
+                              </span>
+                            </button>
+                          </div>
+                        )}
+                        </React.Fragment>
                       );
                     })}
                   </div>
@@ -2391,6 +2677,172 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 </div>
           </div>
         </div>
+
+        {/* Fullscreen Card Modal */}
+        {expandedCard &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-40 pointer-events-none"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div
+                className="absolute inset-0 bg-black/40 pointer-events-auto"
+                aria-hidden="true"
+                onClick={() => setExpandedCard(null)}
+              />
+              <div className="relative flex h-full w-full flex-col bg-gray-50 shadow-2xl pointer-events-auto">
+                <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white shadow-sm">
+                  <div className="flex items-center space-x-2">
+                  <span className="text-lg font-semibold text-gray-900">
+                    {(() => {
+                      // Look for the card in both layoutCards and workflowMolecules
+                      let card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
+                      
+                      // If not found in layoutCards, look in workflowMolecules
+                      if (!card && Array.isArray(workflowMolecules)) {
+                        for (const molecule of workflowMolecules) {
+                          const moleculeCards = Array.isArray(layoutCards) ? 
+                            layoutCards.filter(c => c.moleculeId === molecule.moleculeId) : [];
+                          card = moleculeCards.find(c => c.id === expandedCard);
+                          if (card) break;
+                        }
+                      }
+                      
+                      if (!card) return 'Card';
+                      return card.moleculeTitle
+                        ? (card.atoms.length > 0 ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
+                        : card.atoms.length > 0
+                          ? card.atoms[0].title
+                          : 'Card';
+                    })()}
+                  </span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setExpandedCard(null)}
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                    title="Close Fullscreen"
+                  >
+                    <X className="w-5 h-5 text-gray-500" />
+                  </button>
+                  </div>
+                </div>
+
+                {/* Fullscreen Content */}
+                <div className="flex-1 flex flex-col px-8 py-4 space-y-4 overflow-auto">
+                {(() => {
+                // Look for the card in both layoutCards and workflowMolecules
+                let card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
+                
+                // If not found in layoutCards, look in workflowMolecules
+                if (!card && Array.isArray(workflowMolecules)) {
+                  for (const molecule of workflowMolecules) {
+                    const moleculeCards = Array.isArray(layoutCards) ? 
+                      layoutCards.filter(c => c.moleculeId === molecule.moleculeId) : [];
+                    card = moleculeCards.find(c => c.id === expandedCard);
+                    if (card) break;
+                  }
+                }
+                
+                if (!card) return null;
+
+                  return card.atoms.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[400px]">
+                      <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-6">
+                        <Grid3X3 className="w-10 h-10 text-gray-400" />
+                      </div>
+                      <p className="text-gray-500 text-lg mb-2">No atoms in this section</p>
+                      <p className="text-sm text-gray-400">Configure this atom for your application</p>
+                    </div>
+                  ) : (
+                    <div className={`grid gap-6 w-full overflow-visible ${card.atoms.length === 1 ? 'grid-cols-1' : card.atoms.length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1 lg:grid-cols-2 xl:grid-cols-3'}`}>
+                      {card.atoms.map((atom) => (
+                        <AtomBox
+                          key={`${atom.id}-expanded`}
+                          className="p-6 border border-gray-200 bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-200 min-h-[400px] flex flex-col overflow-visible"
+                        >
+                          {/* Atom Header */}
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center space-x-2">
+                              <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                              <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeAtom(card.id, atom.id);
+                              }}
+                              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4 text-gray-400" />
+                            </button>
+                          </div>
+
+                          {/* Atom Content */}
+                          <div className="w-full flex-1 overflow-visible">
+                            {atom.atomId === 'text-box' ? (
+                              <TextBoxEditor textId={atom.id} />
+                            ) : atom.atomId === 'data-upload-validate' ? (
+                              <DataUploadValidateAtom atomId={atom.id} />
+                            ) : atom.atomId === 'feature-overview' ? (
+                              <FeatureOverviewAtom atomId={atom.id} />
+                            ) : atom.atomId === 'clustering' ? (
+                              <ClusteringAtom atomId={atom.id} />
+                            ) : atom.atomId === 'explore' ? (
+                              <ExploreAtom atomId={atom.id} />
+                            ) : atom.atomId === 'chart-maker' ? (
+                              <ChartMakerAtom atomId={atom.id} />
+                            ) : atom.atomId === 'concat' ? (
+                              <ConcatAtom atomId={atom.id} />
+                            ) : atom.atomId === 'merge' ? (
+                              <MergeAtom atomId={atom.id} />
+                            ) : atom.atomId === 'column-classifier' ? (
+                              <ColumnClassifierAtom atomId={atom.id} />
+                            ) : atom.atomId === 'dataframe-operations' ? (
+                              <DataFrameOperationsAtom atomId={atom.id} />
+                            ) : atom.atomId === 'create-column' ? (
+                              <CreateColumnAtom atomId={atom.id} />
+                            ) : atom.atomId === 'groupby-wtg-avg' ? (
+                              <GroupByAtom atomId={atom.id} />
+                            ) : atom.atomId === 'build-model-feature-based' ? (
+                              <BuildModelFeatureBasedAtom atomId={atom.id} />
+                            ) : atom.atomId === 'scenario-planner' ? (
+                              <ScenarioPlannerAtom atomId={atom.id} />
+                            ) : atom.atomId === 'select-models-feature' ? (
+                              <SelectModelsFeatureAtom atomId={atom.id} />
+                            ) : atom.atomId === 'evaluate-models-feature' ? (
+                              <EvaluateModelsFeatureAtom atomId={atom.id} />
+                            ) : atom.atomId === 'scope-selector' ? (
+                              <ScopeSelectorAtom atomId={atom.id} />
+                            ) : atom.atomId === 'correlation' ? (
+                              <CorrelationAtom atomId={atom.id} />
+                            ) : atom.atomId === 'auto-regressive-models' ? (
+                              <AutoRegressiveModelsAtom atomId={atom.id} />
+                            ) : atom.atomId === 'select-models-auto-regressive' ? (
+                              <SelectModelsAutoRegressiveAtom atomId={atom.id} />
+                            ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
+                              <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                            ) : (
+                              <div>
+                                <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
+                                <p className="text-sm text-gray-600 mb-3">{atom.category}</p>
+                                <p className="text-sm text-gray-500">
+                                  Configure this atom for your application
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </AtomBox>
+                      ))}
+                    </div>
+                  );
+                })()}
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )}
       </>
     );
   }
@@ -2560,6 +3012,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         <DataUploadValidateAtom atomId={atom.id} />
                       ) : atom.atomId === 'feature-overview' ? (
                         <FeatureOverviewAtom atomId={atom.id} />
+                      ) : atom.atomId === 'clustering' ? (
+                        <ClusteringAtom atomId={atom.id} />
                       ) : atom.atomId === 'explore' ? (
                         <ExploreAtom atomId={atom.id} />
                       ) : atom.atomId === 'chart-maker' ? (
@@ -2578,6 +3032,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         <GroupByAtom atomId={atom.id} />
                       ) : atom.atomId === 'build-model-feature-based' ? (
                           <BuildModelFeatureBasedAtom atomId={atom.id} />
+                       ) : atom.atomId === 'scenario-planner' ? (
+                          <ScenarioPlannerAtom atomId={atom.id} />
                        ) : atom.atomId === 'select-models-feature' ? (
                         <SelectModelsFeatureAtom atomId={atom.id} />
                        ) : atom.atomId === 'evaluate-models-feature' ? (

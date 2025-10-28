@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.features.build_model_feature_based.mongodb_saver import (
     save_atom_list_configuration,
+    get_atom_list_configuration,
 )
 from app.features.exhibition.deps import get_exhibition_layout_collection
 from app.features.exhibition.persistence import save_exhibition_list_configuration
@@ -88,6 +89,52 @@ async def save_laboratory_project_state(payload: LaboratoryProjectStateIn):
         "documents_inserted": persistence_result.get("documents_inserted", 0),
         "collection": persistence_result.get("collection"),
     }
+
+
+@laboratory_project_state_router.get("/get/{client_name}/{app_name}/{project_name}")
+async def get_laboratory_project_state(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    mode: str = "laboratory"
+):
+    """Get laboratory project state from MongoDB atom_list_configuration collection"""
+    try:
+        client_name = client_name.strip()
+        app_name = app_name.strip()
+        project_name = project_name.strip()
+
+        if not client_name or not app_name or not project_name:
+            raise HTTPException(status_code=400, detail="client_name, app_name, and project_name are required")
+
+        result = await get_atom_list_configuration(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
+            mode=mode
+        )
+
+        if result.get("status") != "success":
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=result.get("error", "Failed to retrieve laboratory configuration"),
+            )
+
+        timestamp = datetime.utcnow().isoformat()
+
+        return {
+            "status": "ok",
+            "cards": result.get("cards", []),
+            "workflow_molecules": result.get("workflow_molecules", []),
+            "count": result.get("count", 0),
+            "retrieved_at": timestamp,
+            "collection": "atom_list_configuration",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 class ExhibitionProjectStateIn(LaboratoryProjectStateIn):

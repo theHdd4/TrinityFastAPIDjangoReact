@@ -35,6 +35,18 @@ class LaboratoryAtomResponse(BaseModel):
 
     id: str = Field(..., description="Unique identifier for this atom instance")
     atom_id: str = Field(..., alias="atomId", description="Atom identifier (e.g. 'feature-overview')")
+    title: Optional[str] = Field(
+        default=None,
+        description="Human readable title for the atom.",
+    )
+    category: Optional[str] = Field(
+        default="Atom",
+        description="Category of the atom (e.g. 'Atom', 'Molecule').",
+    )
+    color: Optional[str] = Field(
+        default="bg-gray-400",
+        description="CSS color class for the atom display.",
+    )
     source: Literal["manual", "ai"] = Field(
         default="manual",
         description="Indicates how the atom was added to the card.",
@@ -46,6 +58,16 @@ class LaboratoryAtomResponse(BaseModel):
     settings: Optional[Any] = Field(
         default=None,
         description="Settings payload to bootstrap the atom in the UI.",
+    )
+    molecule_id: Optional[str] = Field(
+        default=None,
+        alias="moleculeId",
+        description="Optional molecule identifier for grouping atoms together.",
+    )
+    molecule_title: Optional[str] = Field(
+        default=None,
+        alias="moleculeTitle",
+        description="Human readable molecule title when available.",
     )
 
     model_config = ConfigDict(populate_by_name=True)

@@ -14,6 +14,8 @@ from typing import Any, Iterable, List
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
+from minio.error import S3Error
 
 from app.DataStorageRetrieval.minio_utils import (
     MINIO_BUCKET,
@@ -105,6 +107,58 @@ def _object_to_schema(obj) -> ProjectImage:
         url=_build_image_url(obj.object_name),
         uploaded_at=uploaded_at,
     )
+
+
+@router.get("/content", response_class=StreamingResponse)
+async def get_project_image_content(
+    object_name: str = Query(..., min_length=1, max_length=512, description="MinIO object path for the image"),
+) -> StreamingResponse:
+    """Stream an image stored for a project through the API."""
+
+    candidate = object_name.strip().lstrip("/")
+    if not candidate:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Object name is required")
+
+    if ".." in candidate.split("/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid image reference")
+
+    if "/Images/" not in f"/{candidate}":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid image reference")
+
+    if not ensure_minio_bucket():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Image storage bucket is unavailable",
+        )
+
+    client = get_client()
+    try:
+        response = client.get_object(MINIO_BUCKET, candidate)
+    except S3Error as exc:  # pragma: no cover - depends on external storage
+        if exc.code == "NoSuchKey":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found") from exc
+        logging.error("Failed to fetch project image %s: %s", candidate, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to retrieve image",
+        ) from exc
+
+    media_type = response.headers.get("Content-Type") or "application/octet-stream"
+    content_length = response.headers.get("Content-Length")
+
+    def iterfile():
+        try:
+            for chunk in response.stream(32 * 1024):
+                yield chunk
+        finally:
+            response.close()
+            response.release_conn()
+
+    headers = {"Cache-Control": "private, max-age=300"}
+    if content_length:
+        headers["Content-Length"] = content_length
+
+    return StreamingResponse(iterfile(), media_type=media_type, headers=headers)
 
 
 @router.get("", response_model=ProjectImageListResponse)

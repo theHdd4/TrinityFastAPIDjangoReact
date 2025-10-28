@@ -838,9 +838,9 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                 </span>
               </div>
               <div className="text-center py-2">
-                <p className="text-xs text-muted-foreground mb-1">Drag molecules or select atoms</p>
+                <p className="text-xs text-muted-foreground mb-1.5">Drag molecules or select atoms</p>
                 <div 
-                  className="border-2 border-dashed border-muted-foreground/30 rounded-lg p-2 transition-colors hover:border-primary/50"
+                  className="border-2 border-dashed border-muted-foreground/30 rounded-lg p-3 min-h-[50px] transition-colors hover:border-primary/50 flex items-center justify-center"
                   onDragOver={(e) => {
                     e.preventDefault();
                     e.currentTarget.classList.add('border-primary/70', 'bg-primary/5');
@@ -868,7 +868,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                     }
                   }}
                 >
-                  <p className="text-xs text-muted-foreground/60">Drag QM or custom molecule</p>
+                  <p className="text-sm text-muted-foreground/60 font-medium">Drag QM or custom molecule</p>
                 </div>
               </div>
             </>

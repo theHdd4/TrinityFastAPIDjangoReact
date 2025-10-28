@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles } from 'lucide-react';
+import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor } from 'lucide-react';
 import Header from '@/components/Header';
 import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
 import { REGISTRY_API } from '@/lib/api';
@@ -206,9 +206,12 @@ const Apps = () => {
       'demand-forecasting': TrendingUp,
       'price-optimization': ShoppingCart,
       'churn-prediction': Brain,
-      'data-integration': Database,
       'blank': Plus,
       'customer-analytics': BarChart3,
+      'price-ladder-analytics': Layers,
+      'revenue-mix-optimization': DollarSign,
+      'ecom-promo-planning': Megaphone,
+      'ecom-media-planning': Monitor,
     };
     return iconMap[slug] || Target;
   };
@@ -224,9 +227,12 @@ const Apps = () => {
       'demand-forecasting': 'bg-emerald-600',
       'price-optimization': 'bg-rose-600',
       'churn-prediction': 'bg-amber-600',
-      'data-integration': 'bg-cyan-600',
       'blank': 'bg-slate-600',
       'customer-analytics': 'bg-violet-600',
+      'price-ladder-analytics': 'bg-teal-600',
+      'revenue-mix-optimization': 'bg-pink-600',
+      'ecom-promo-planning': 'bg-yellow-600',
+      'ecom-media-planning': 'bg-lime-600',
     };
     return colorMap[slug] || 'bg-gray-600';
   };
@@ -236,12 +242,15 @@ const Apps = () => {
     const categoryMap: Record<string, string> = {
       'marketing-mix': 'marketing',
       'promo-effectiveness': 'marketing',
+      'ecom-promo-planning': 'marketing',
+      'ecom-media-planning': 'marketing',
       'forecasting': 'analytics',
       'exploratory-data-analysis': 'analytics',
-      'data-integration': 'analytics',
       'customer-analytics': 'analytics',
+      'price-ladder-analytics': 'analytics',
       'demand-forecasting': 'business',
       'price-optimization': 'business',
+      'revenue-mix-optimization': 'business',
       'customer-segmentation': 'ml',
       'churn-prediction': 'ml',
       'blank': 'all',
@@ -268,12 +277,11 @@ const Apps = () => {
     const matchesSearch = app.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          app.description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory === 'all' || app.category === selectedCategory;
-    return matchesSearch && matchesCategory;
+    // Exclude custom apps from the main filtered apps (they'll be shown separately)
+    return matchesSearch && matchesCategory && !app.custom;
   });
 
-  const featuredApps = filteredApps.filter(app => app.featured);
-  const customApps = filteredApps.filter(app => app.custom);
-  const otherApps = filteredApps.filter(app => !app.custom);
+  const customApps = displayApps.filter(app => app.custom);
 
   const animationStyle = (offset: number) => ({
     animationDelay: `${(introBaseDelay + offset).toFixed(1)}s`,
@@ -356,21 +364,21 @@ const Apps = () => {
               )}
             </div>
 
-            {/* Featured Apps */}
-            {!loading && featuredApps.length > 0 && (
-              <div className="mb-12 animate-fade-in" style={animationStyle(1.0)}>
+            {/* All Applications */}
+            {!loading && filteredApps.length > 0 && (
+              <div className="animate-fade-in" style={animationStyle(1.0)}>
                 <div className="flex items-center gap-2 mb-6">
                   <Sparkles className="w-5 h-5 text-primary" />
-                  <h3 className="text-lg font-bold text-foreground">Featured Applications</h3>
+                  <h3 className="text-lg font-bold text-foreground">All Applications</h3>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {featuredApps.map((app, index) => {
+                  {filteredApps.map((app, index) => {
                     const Icon = app.icon;
                     return (
                       <Card 
                         key={app.id}
                         className="group relative bg-card border border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 overflow-hidden hover-scale cursor-pointer animate-scale-in"
-                        style={animationStyle(1.1 + index * 0.1)}
+                        style={animationStyle(1.1 + index * 0.05)}
                         onClick={() => handleAppSelect(app.id)}
                       >
                         {/* Gradient Overlay */}
@@ -382,14 +390,9 @@ const Apps = () => {
                               <Icon className="w-5 h-5 text-white" />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between mb-1">
-                                <h3 className="text-base font-bold text-foreground group-hover:text-primary transition-colors">
-                                  {app.title}
-                                </h3>
-                                <Badge variant="secondary" className="bg-primary/10 text-primary">
-                                  Featured
-                                </Badge>
-                              </div>
+                              <h3 className="text-base font-bold text-foreground group-hover:text-primary transition-colors mb-1">
+                                {app.title}
+                              </h3>
                               <p className="text-muted-foreground text-xs leading-relaxed line-clamp-2">
                                 {app.description}
                               </p>
@@ -439,7 +442,7 @@ const Apps = () => {
 
             {/* Custom Applications */}
             {!loading && customApps.length > 0 && (
-              <div className="mb-12 animate-fade-in" style={animationStyle(1.4)}>
+              <div className="mt-10 mb-12 animate-fade-in" style={animationStyle(1.4)}>
                 <div className="flex items-center gap-2 mb-6">
                   <Plus className="w-5 h-5 text-primary" />
                   <h3 className="text-lg font-bold text-foreground">Custom Applications</h3>
@@ -493,83 +496,6 @@ const Apps = () => {
               </div>
             )}
 
-            {/* All Other Apps */}
-            {!loading && otherApps.length > 0 && (
-              <div className="animate-fade-in" style={animationStyle(1.6)}>
-                <h3 className="text-lg font-bold text-foreground mb-4">All Applications</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {otherApps.map((app, index) => {
-            const Icon = app.icon;
-            return (
-              <Card
-                key={app.id}
-                className="group bg-card border border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 hover-scale cursor-pointer animate-scale-in"
-                style={animationStyle(1.7 + index * 0.05)}
-                onClick={() => handleAppSelect(app.id)}
-              >
-                <div className="p-4 h-full flex flex-col min-h-[200px]">
-                  <div className="flex items-start gap-3 mb-3">
-                    <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-110 transition-transform duration-300`}>
-                      <Icon className="w-5 h-5 text-white" />
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <h3 className="text-base font-bold text-foreground group-hover:text-primary transition-colors">
-                          {app.title}
-                        </h3>
-                        {app.featured && (
-                          <Badge variant="secondary" className="bg-primary/10 text-primary text-xs">
-                            Featured
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-muted-foreground text-xs leading-relaxed line-clamp-2">
-                        {app.description}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  {app.modules.length > 0 && (
-                    <div className="mb-4 flex-1">
-                      <div className="flex flex-wrap gap-1.5">
-                        {app.modules.slice(0, 2).map((module, idx) => (
-                          <Badge 
-                            key={idx}
-                            variant="secondary"
-                            className="text-xs"
-                          >
-                            {module}
-                          </Badge>
-                        ))}
-                        {app.modules.length > 2 && (
-                          <Badge variant="secondary" className="text-xs">
-                            +{app.modules.length - 2}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <Button 
-                    variant="ghost"
-                    size="sm"
-                    className="w-full justify-between text-sm group-hover:bg-primary/5 group-hover:text-primary transition-colors mt-auto"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleAppSelect(app.id);
-                    }}
-                  >
-                    Select
-                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                  </Button>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-              </div>
-            )}
 
             {/* No Results */}
             {!loading && filteredApps.length === 0 && (

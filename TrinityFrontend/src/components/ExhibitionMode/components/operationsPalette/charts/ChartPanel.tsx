@@ -4,10 +4,13 @@ import {
   AlignLeft,
   AlignRight,
   BarChart3,
+  Calendar,
   Database,
+  GanttChartSquare,
   MousePointerClick,
   Palette,
   Sparkles,
+  Square,
   TrendingUp,
   Wand2,
   Zap,
@@ -15,7 +18,16 @@ import {
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -25,9 +37,10 @@ import {
   COLOR_SCHEMES,
   DEFAULT_CHART_CONFIG,
   DEFAULT_CHART_DATA,
+  applyAlphaToHex,
   normalizeChartType,
 } from './constants';
-import type { ChartConfig, ChartDataRow, ChartPanelResult, ChartType } from './types';
+import type { ChartColorScheme, ChartConfig, ChartDataRow, ChartPanelResult, ChartType } from './types';
 
 interface ChartPanelProps {
   onClose: () => void;
@@ -44,6 +57,36 @@ const renderSparkles = () => (
   </div>
 );
 
+const FREEFORM_DIAGRAMS = [
+  {
+    id: 'blank',
+    name: 'Blank',
+    description: 'Start from a clean canvas',
+    icon: Square,
+  },
+  {
+    id: 'calendar',
+    name: 'Calendar',
+    description: 'Plan schedules visually',
+    icon: Calendar,
+  },
+  {
+    id: 'gantt',
+    name: 'Gantt',
+    description: 'Track project timelines',
+    icon: GanttChartSquare,
+  },
+];
+
+const sanitiseConfig = (value?: ChartConfig): ChartConfig => {
+  const merged = { ...DEFAULT_CHART_CONFIG, ...(value ?? {}) };
+  return {
+    ...merged,
+    type: normalizeChartType(merged.type),
+    legendPosition: merged.legendPosition ?? DEFAULT_CHART_CONFIG.legendPosition,
+  };
+};
+
 export const ChartPanel: React.FC<ChartPanelProps> = ({
   onClose,
   onInsert,
@@ -54,30 +97,40 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
   const [chartData, setChartData] = useState<ChartDataRow[]>(() =>
     (initialData ?? DEFAULT_CHART_DATA).map(entry => ({ ...entry })),
   );
-  const [config, setConfig] = useState<ChartConfig>(() => ({
-    ...DEFAULT_CHART_CONFIG,
-    ...(initialConfig ?? {}),
-    type: normalizeChartType(initialConfig?.type),
-  }));
+  const [config, setConfig] = useState<ChartConfig>(() => sanitiseConfig(initialConfig));
   const [showDataEditor, setShowDataEditor] = useState(false);
+  const [selectedDiagram, setSelectedDiagram] = useState<string | null>(null);
 
-  const selectedType = useMemo(() => config.type, [config.type]);
+  const selectedType = useMemo(() => normalizeChartType(config.type), [config.type]);
+  const isDiagramType = selectedType === 'blank' || selectedType === 'calendar' || selectedType === 'gantt';
 
   const palette = useMemo(
     () => COLOR_SCHEMES.find(scheme => scheme.id === config.colorScheme) ?? COLOR_SCHEMES[0],
     [config.colorScheme],
   );
 
+  const colorSchemeGroups = useMemo(() => {
+    const map = new Map<string, ChartColorScheme[]>();
+    COLOR_SCHEMES.forEach(scheme => {
+      const key = scheme.category ?? 'other';
+      const existing = map.get(key);
+      if (existing) {
+        existing.push(scheme);
+      } else {
+        map.set(key, [scheme]);
+      }
+    });
+    return Array.from(map.entries()).map(([category, schemes]) => ({ category, schemes }));
+  }, []);
+
+  const formatCategory = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+
   useEffect(() => {
     setChartData((initialData ?? DEFAULT_CHART_DATA).map(entry => ({ ...entry })));
   }, [initialData]);
 
   useEffect(() => {
-    setConfig({
-      ...DEFAULT_CHART_CONFIG,
-      ...(initialConfig ?? {}),
-      type: normalizeChartType(initialConfig?.type),
-    });
+    setConfig(sanitiseConfig(initialConfig));
   }, [initialConfig]);
 
   useEffect(() => {
@@ -87,19 +140,29 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     });
   }, [chartData, config, onStateChange]);
 
+  useEffect(() => {
+    if (isDiagramType) {
+      if (selectedDiagram !== selectedType) {
+        setSelectedDiagram(selectedType);
+      }
+      return;
+    }
+
+    if (selectedDiagram !== null) {
+      setSelectedDiagram(null);
+    }
+  }, [isDiagramType, selectedDiagram, selectedType]);
+
   const handleInsert = () => {
     onInsert({
       data: chartData.map(entry => ({ ...entry })),
-      config: { ...config, type: normalizeChartType(config.type) },
+      config: sanitiseConfig(config),
     });
   };
 
   const syncEditorState = (rows: ChartDataRow[], nextConfig: ChartConfig) => {
     setChartData(rows.map(entry => ({ ...entry })));
-    setConfig({
-      ...nextConfig,
-      type: normalizeChartType(nextConfig.type),
-    });
+    setConfig(sanitiseConfig(nextConfig));
   };
 
   const handleDataEditorSave = (rows: ChartDataRow[], nextConfig: ChartConfig) => {
@@ -110,7 +173,13 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     syncEditorState(rows, nextConfig);
   };
 
+  const insertLabel = isDiagramType ? 'Insert diagram' : 'Insert chart';
+
   const renderPreview = () => {
+    if (isDiagramType) {
+      return renderDiagramPreview();
+    }
+
     if (chartData.length === 0) {
       return (
         <div className="flex h-56 items-center justify-center rounded-2xl border border-dashed border-border/50 text-xs text-muted-foreground">
@@ -272,21 +341,149 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
     );
   };
 
-  const renderLegend = () => (
-    <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-[0.7rem] font-medium text-muted-foreground">
-      {chartData.map((item, index) => (
-        <span key={item.label} className="flex items-center gap-2">
-          <span
-            className="h-3 w-3 rounded-sm"
-            style={{ backgroundColor: palette.colors[index % palette.colors.length] }}
-          />
-          {item.label}
-        </span>
-      ))}
-    </div>
+  const renderLegend = () => {
+    if (isDiagramType) {
+      return null;
+    }
+
+    return (
+      <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-[0.7rem] font-medium text-muted-foreground">
+        {chartData.map((item, index) => (
+          <span key={item.label} className="flex items-center gap-2">
+            <span
+              className="h-3 w-3 rounded-sm"
+              style={{ backgroundColor: palette.colors[index % palette.colors.length] }}
+            />
+            {item.label}
+          </span>
+        ))}
+      </div>
+    );
+  };
+
+  const clampDiagramValue = (value: number) => {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+    if (value < 0) {
+      return 0;
+    }
+    if (value > 100) {
+      return 100;
+    }
+    return value;
+  };
+
+  const diagramSampleData = useMemo(
+    () => [
+      { label: 'Q1', value: 65 },
+      { label: 'Q2', value: 78 },
+      { label: 'Q3', value: 90 },
+      { label: 'Q4', value: 72 },
+    ],
+    [],
   );
 
+  const diagramBackgroundColor = (baseColor: string, value: number) => {
+    const intensity = clampDiagramValue(value) / 100;
+    return applyAlphaToHex(baseColor, 0.25 + intensity * 0.5);
+  };
+
+  const renderDiagramPreview = () => {
+    const diagramData = (chartData.length > 0 ? chartData : diagramSampleData).map((entry, index) => ({
+      label: entry.label || `Item ${index + 1}`,
+      value: Number.isFinite(entry.value) ? entry.value : 0,
+    }));
+
+    switch (selectedType) {
+      case 'blank':
+        return (
+          <div className="flex h-56 items-center justify-center rounded-2xl border border-dashed border-border/60 bg-muted/10">
+            <div className="text-center text-xs text-muted-foreground">
+              <p className="text-sm font-semibold text-foreground">Blank diagram</p>
+              <p className="mt-1 text-xs text-muted-foreground">Start with a clean canvas for custom layouts.</p>
+            </div>
+          </div>
+        );
+      case 'calendar':
+        return (
+          <div className="flex h-56 items-center justify-center rounded-2xl border border-border/60 bg-card">
+            <div className="grid h-full w-full max-w-[22rem] grid-cols-7 gap-1 p-4 text-[0.65rem]">
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, dayIndex) => {
+                const events = diagramData.filter((_, dataIndex) => dataIndex % 7 === dayIndex).slice(0, 4);
+                return (
+                  <div key={day} className="flex flex-col gap-1">
+                    <span className="text-[0.6rem] font-semibold uppercase tracking-wide text-muted-foreground">{day}</span>
+                    {Array.from({ length: 4 }).map((_, slotIndex) => {
+                      const event = events[slotIndex];
+                      const color = palette.colors[(dayIndex + slotIndex) % palette.colors.length];
+                      const background = event
+                        ? diagramBackgroundColor(color, event.value)
+                        : `${color}1a`;
+
+                      return (
+                        <div
+                          key={`${day}-${slotIndex}`}
+                          className="flex h-10 flex-col items-center justify-center rounded border border-border/40 px-2 text-center"
+                          style={{ backgroundColor: background }}
+                        >
+                          {event && config.showLabels !== false && (
+                            <span className="w-full truncate text-[0.6rem] font-semibold text-foreground">{event.label}</span>
+                          )}
+                          {event && config.showValues && (
+                            <span className="text-[0.55rem] text-muted-foreground">Value: {event.value}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      case 'gantt': {
+        const maxValue = Math.max(...diagramData.map(entry => entry.value), 1);
+        return (
+          <div className="flex h-56 items-center justify-center rounded-2xl border border-border/60 bg-card">
+            <div className="flex w-full max-w-[24rem] flex-col gap-3 p-6">
+              {diagramData.map((item, index) => {
+                const ratio = maxValue === 0 ? 0 : item.value / maxValue;
+                const widthPercent = `${Math.max(ratio * 100, 6)}%`;
+                const offsetPercent = `${Math.min(index * 8, 80)}%`;
+
+                return (
+                  <div key={`${item.label}-${index}`} className="flex items-center gap-3">
+                    {config.showLabels !== false && (
+                      <span className="w-16 truncate text-xs font-medium text-muted-foreground">{item.label}</span>
+                    )}
+                    <div className="relative h-8 flex-1 rounded-full bg-muted/40">
+                      <div
+                        className="absolute top-1/2 h-5 -translate-y-1/2 rounded-full shadow-sm transition-all duration-300"
+                        style={{
+                          left: offsetPercent,
+                          width: widthPercent,
+                          backgroundColor: palette.colors[index % palette.colors.length],
+                        }}
+                      />
+                    </div>
+                    {config.showValues && (
+                      <span className="w-12 text-right text-xs font-semibold text-foreground">{item.value}</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+      default:
+        return null;
+    }
+  };
+
   const handleChartTypeChange = (type: ChartType) => {
+    setSelectedDiagram(null);
     setConfig(prev => ({ ...prev, type }));
   };
 
@@ -353,6 +550,62 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
               </div>
             </section>
 
+            <section className="space-y-3">
+              <header className="flex items-center gap-2">
+                <div className="h-7 w-1 rounded-full bg-gradient-to-b from-amber-400 to-orange-500" />
+                <h3 className="flex items-center gap-2 text-base font-semibold text-foreground">
+                  Freeform diagrams
+                  <Sparkles className="h-4 w-4 text-amber-400" />
+                </h3>
+              </header>
+              <div className="grid grid-cols-2 gap-2">
+                {FREEFORM_DIAGRAMS.map(diagram => {
+                  const Icon = diagram.icon;
+                  const isSelected = selectedDiagram === diagram.id;
+                  return (
+                    <button
+                      key={diagram.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDiagram(diagram.id);
+                        setConfig(prev => ({ ...prev, type: diagram.id as ChartType }));
+                      }}
+                      className={cn(
+                        'group relative flex h-24 flex-col items-start justify-between rounded-2xl border-2 p-4 text-left transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60',
+                        isSelected
+                          ? 'border-amber-400 bg-amber-400/10 shadow-lg'
+                          : 'border-border/40 bg-card hover:-translate-y-0.5 hover:border-amber-300/70 hover:shadow-lg',
+                      )}
+                    >
+                      {isSelected && (
+                        <span className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-amber-400 text-[0.7rem] font-semibold text-amber-950 shadow-md">
+                          ⚡
+                        </span>
+                      )}
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={cn(
+                            'flex h-10 w-10 items-center justify-center rounded-xl bg-muted/50 text-primary transition-colors',
+                            isSelected ? 'bg-amber-400/20 text-amber-500' : 'group-hover:text-amber-400',
+                          )}
+                        >
+                          <Icon className="h-5 w-5" />
+                        </div>
+                        <div className="flex flex-col">
+                          <span
+                            className={cn('text-sm font-semibold', isSelected ? 'text-foreground' : 'text-muted-foreground')}
+                          >
+                            {diagram.name}
+                          </span>
+                          <span className="text-[0.65rem] text-muted-foreground/80">{diagram.description}</span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
             <Separator className="bg-gradient-to-r from-transparent via-border to-transparent" />
 
             <section className="space-y-3">
@@ -379,22 +632,31 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl border border-border/50 bg-popover/95 backdrop-blur">
-                    {COLOR_SCHEMES.map(scheme => (
-                      <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
-                        <div className="flex items-center gap-3">
-                          {scheme.icon && <span className="text-lg">{scheme.icon}</span>}
-                          <div className="flex gap-1.5">
-                            {scheme.colors.map(color => (
-                              <span
-                                key={color}
-                                className="h-4 w-4 rounded border border-border/40"
-                                style={{ backgroundColor: color }}
-                              />
-                            ))}
-                          </div>
-                          <span className="font-medium">{scheme.name}</span>
-                        </div>
-                      </SelectItem>
+                    {colorSchemeGroups.map((group, groupIndex) => (
+                      <React.Fragment key={group.category}>
+                        <SelectGroup>
+                          <SelectLabel className="px-2 py-1 text-[0.65rem] uppercase tracking-[0.08em] text-muted-foreground">
+                            {formatCategory(group.category)}
+                          </SelectLabel>
+                          {group.schemes.map(scheme => (
+                            <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
+                              <div className="flex items-center gap-3">
+                                <div className="flex gap-1.5">
+                                  {scheme.colors.map((color, index) => (
+                                    <span
+                                      key={`${scheme.id}-${color}-${index}`}
+                                      className="h-4 w-4 rounded border border-border/40"
+                                      style={{ backgroundColor: color }}
+                                    />
+                                  ))}
+                                </div>
+                                <span className="font-medium">{scheme.name}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                        {groupIndex < colorSchemeGroups.length - 1 && <SelectSeparator className="my-2" />}
+                      </React.Fragment>
                     ))}
                   </SelectContent>
                 </Select>
@@ -470,7 +732,11 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
             <div className="rounded-2xl border border-dashed border-border/50 bg-muted/10 p-5 text-center">
               <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
                 <Wand2 className="h-5 w-5 text-primary" />
-                <span>Need to fine-tune the data? Open the rich data editor for full control.</span>
+                <span>
+                  {isDiagramType
+                    ? 'Use the data editor to customise your diagram content and styling.'
+                    : 'Need to fine-tune the data? Open the rich data editor for full control.'}
+                </span>
               </div>
               <Button
                 className="mt-3 w-full rounded-xl bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-sm font-semibold text-white shadow-lg transition-transform hover:scale-105"
@@ -493,7 +759,7 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({
           >
             <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
             <span className="relative z-10 flex items-center justify-center gap-2">
-              <TrendingUp className="h-5 w-5 animate-pulse" /> Insert chart
+              <TrendingUp className="h-5 w-5 animate-pulse" /> {insertLabel}
               <Zap className="h-4 w-4" />
             </span>
           </Button>
