@@ -94,9 +94,16 @@ const ContextMenuSubTrigger = React.forwardRef<
 ))
 ContextMenuSubTrigger.displayName = ContextMenuPrimitive.SubTrigger.displayName
 
+type ContextMenuSubContentRef = React.ElementRef<
+  typeof ContextMenuPrimitive.SubContent
+>
+interface ContextMenuSubContentProps extends React.ComponentPropsWithoutRef<
+  typeof ContextMenuPrimitive.SubContent
+> {}
+
 const ContextMenuSubContent = React.forwardRef<
-  React.ElementRef<typeof ContextMenuPrimitive.SubContent>,
-  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.SubContent>
+  ContextMenuSubContentRef,
+  ContextMenuSubContentProps
 >(({ className, ...props }, ref) => (
   <ContextMenuContentBase
     primitive={ContextMenuPrimitive.SubContent}
@@ -107,10 +114,17 @@ const ContextMenuSubContent = React.forwardRef<
 ))
 ContextMenuSubContent.displayName = ContextMenuPrimitive.SubContent.displayName
 
+type ContextMenuContentRef = React.ElementRef<
+  typeof ContextMenuPrimitive.Content
+>
+interface ContextMenuContentProps extends React.ComponentPropsWithoutRef<
+  typeof ContextMenuPrimitive.Content
+> {}
+
 const ContextMenuContent = React.forwardRef<
-  React.ElementRef<typeof ContextMenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Content>
-)(({ className, ...props }, ref) => (
+  ContextMenuContentRef,
+  ContextMenuContentProps
+>(({ className, ...props }, ref) => (
   <ContextMenuPrimitive.Portal>
     <ContextMenuContentBase
       primitive={ContextMenuPrimitive.Content}
