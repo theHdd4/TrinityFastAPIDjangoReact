@@ -90,6 +90,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const backgroundOpacity = Math.min(100, Math.max(0, settings.backgroundOpacity ?? 100));
   const transitionDuration = Math.min(2000, Math.max(100, settings.transitionDuration ?? 450));
   const autoAdvanceDuration = Math.max(1, Math.round(settings.autoAdvanceDuration ?? settings.slideshowDuration ?? 8));
+  const showSlideNumber = settings.showSlideNumber ?? true;
 
   const handleBackgroundModeChange = (mode: 'solid' | 'gradient' | 'image') => {
     onChange({ backgroundMode: mode });
