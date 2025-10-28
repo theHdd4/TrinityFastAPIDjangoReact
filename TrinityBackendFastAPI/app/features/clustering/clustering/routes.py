@@ -931,8 +931,55 @@ async def save_clustering_dataframe(
     import uuid
     
     try:
+        # ============================================================
+        # 🔧 DTYPE PRESERVATION FIX
+        # ============================================================
+        # STEP 1: Preview CSV to detect dtypes intelligently
+        df_preview = pd.read_csv(io.StringIO(csv_data), nrows=10000)
+        
+        # STEP 2: Content-based date detection
+        # Analyze column values to intelligently detect date columns
+        date_columns = []
+        for col in df_preview.columns:
+            # Skip numeric columns
+            if pd.api.types.is_numeric_dtype(df_preview[col]):
+                continue
+            
+            # Get non-null sample
+            non_null_values = df_preview[col].dropna()
+            if len(non_null_values) == 0:
+                continue
+            
+            # Sample up to 100 values for testing
+            sample_size = min(100, len(non_null_values))
+            sample = non_null_values.head(sample_size)
+            
+            # Try parsing as datetime
+            try:
+                parsed = pd.to_datetime(sample, errors='coerce')
+                success_rate = parsed.notna().sum() / len(parsed)
+                
+                # If 80%+ of samples parse as dates, it's a date column
+                if success_rate >= 0.8:
+                    date_columns.append(col)
+            except Exception as e:
+                continue
+        
+        # STEP 3: Parse full CSV with enhanced dtype inference
+        df = pd.read_csv(
+            io.StringIO(csv_data),
+            parse_dates=date_columns,      # Explicit date columns
+            infer_datetime_format=True,    # Speed up date parsing
+            low_memory=False,              # Scan entire file before inferring dtypes
+            na_values=['', 'None', 'null', 'NULL', 'nan', 'NaN', 'NA', 'N/A']
+        )
+        
+        # STEP 4: Fallback - Manual date conversion for any missed columns
+        for col in date_columns:
+            if col in df.columns and df[col].dtype == 'object':
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+        # ============================================================
         # 1. Load dataframe from CSV payload (expected full data, not a preview)
-        df = pd.read_csv(io.StringIO(csv_data))
 
         # 2. Determine output filename with standard prefix
         if not filename:

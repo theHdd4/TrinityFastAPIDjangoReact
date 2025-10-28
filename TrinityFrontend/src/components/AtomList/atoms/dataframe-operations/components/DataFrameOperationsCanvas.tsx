@@ -1058,16 +1058,23 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       const baseName = data.fileName ? data.fileName.replace(/\.[^/.]+$/, '') : `dataframe_${Date.now()}`;
       const filename = `DF_OPS_${nextSerial}_${baseName}.arrow`;
 
-      // Always use CSV data to ensure processed state is saved
-      const payload: Record<string, unknown> = { csv_data, filename };
-      // Don't include df_id to force backend to use the CSV data instead of original DataFrame
+      // 🔧 REVERTED TO ORIGINAL APPROACH: Always use CSV
+      // This ensures all UI changes (deletions, filters, search) are captured
+      // Backend has enhanced CSV parsing that preserves dtypes
+      const payload: Record<string, unknown> = { 
+        filename,
+        csv_data: csv_data  // Always send CSV (captures all UI state)
+      };
+      
       const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      
       if (!response.ok) {
-        throw new Error(`Save failed: ${response.statusText}`);
+        const errorText = await response.text();
+        throw new Error(`Save failed: ${response.statusText} - ${errorText}`);
       }
       const result = await response.json();
       setSaveSuccess(true);
@@ -1566,7 +1573,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   }, []);
 
   const handleSort = async (column: string, direction: 'asc' | 'desc') => {
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     // Save current state before making changes
     saveToUndoStack(data);
@@ -1574,7 +1583,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     setSortLoading(true);
     try {
       console.log('[DataFrameOperations] sort', column, direction);
-      const resp = await apiSort(fileId, column, direction);
+      const resp = await apiSort(activeFileId, column, direction);
       
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -1637,7 +1646,9 @@ const commitCellEdit = (rowIndex: number, column: string) => {
 
 // Helper to commit a header edit
 const commitHeaderEdit = async (colIdx: number, value?: string) => {
-  if (!data || !fileId) { setEditingHeader(null); return; }
+  // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+  const activeFileId = settings.fileId || fileId;
+  if (!data || !activeFileId) { setEditingHeader(null); return; }
   const newHeader = value !== undefined ? value : editingHeaderValue;
   const oldHeader = data.headers[colIdx];
   if (newHeader === oldHeader) { setEditingHeader(null); return; }
@@ -1653,25 +1664,10 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   saveToUndoStack(data);
   
   try {
-    console.log('[DataFrameOperations] Renaming column:', { oldHeader, newHeader, currentHeaders: data.headers });
-    
-    const resp = await apiRenameColumn(fileId, oldHeader, newHeader);
-    
-    console.log('[DataFrameOperations] Backend response after rename:', {
-      headers: resp.headers,
-      oldHeader,
-      newHeader
-    });
+    const resp = await apiRenameColumn(activeFileId, oldHeader, newHeader);
     
     // Create updated column order by replacing old name with new name BEFORE filtering
     const updatedColumnOrder = columnOrder.map(col => col === oldHeader ? newHeader : col);
-    
-    console.log('[DataFrameOperations] Column order mapping:', {
-      oldColumnOrder: columnOrder,
-      updatedColumnOrder,
-      oldHeader,
-      newHeader
-    });
     
     // Update the columnOrder state
     setColumnOrder(updatedColumnOrder);
@@ -1697,11 +1693,6 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       orderedHeaders = [...orderedHeaders, ...newColumns];
     }
     
-    console.log('[DataFrameOperations] Final ordered headers:', {
-      availableHeaders,
-      orderedHeaders,
-      updatedColumnOrder
-    });
     
     // Filter rows to match ordered headers
     const filteredRows = resp.rows.map((row: any) => {
@@ -1764,10 +1755,12 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
 // Original immediate update util (kept for programmatic usage)
   const handleCellEdit = async (rowIndex: number, column: string, newValue: string) => {
     resetSaveSuccess();
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     const globalRowIndex = startIndex + rowIndex;
     try {
-      const resp = await apiEditCell(fileId, globalRowIndex, column, newValue);
+      const resp = await apiEditCell(activeFileId, globalRowIndex, column, newValue);
       
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -1792,7 +1785,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
 
   const handleAddRow = async () => {
     resetSaveSuccess();
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     // Save current state before making changes
     saveToUndoStack(data);
@@ -1800,7 +1795,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const idx = data.rows.length > 0 ? data.rows.length - 1 : 0;
     const dir: 'above' | 'below' = data.rows.length > 0 ? 'below' : 'above';
     try {
-      const resp = await apiInsertRow(fileId, idx, dir);
+      const resp = await apiInsertRow(activeFileId, idx, dir);
       
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -1825,7 +1820,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
 
   const handleAddColumn = async () => {
     resetSaveSuccess();
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     // Save current state before making changes
     saveToUndoStack(data);
@@ -1837,7 +1834,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const backendEndIndex = getBackendColumnIndex(frontendEndIndex);
     
     try {
-      const resp = await apiInsertColumn(fileId, backendEndIndex, newColumnName, '');
+      const resp = await apiInsertColumn(activeFileId, backendEndIndex, newColumnName, '');
       
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -1902,7 +1899,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   };
 
   const handleDragEnd = async () => {
-    if (draggedCol && data && fileId && targetPosition !== null) {
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (draggedCol && data && activeFileId && targetPosition !== null) {
       // Save current state before making changes
       saveToUndoStack(data);
       
@@ -1920,7 +1919,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       
       try {
         // Call the backend API to update the column order
-        const resp = await apiMoveColumn(fileId, draggedCol, backendToIndex);
+        const resp = await apiMoveColumn(activeFileId, draggedCol, backendToIndex);
         
         console.log('[DataFrameOperations] Move column API response:', {
           responseHeaders: resp.headers,
@@ -2152,35 +2151,21 @@ const handleHeaderClick = (header: string) => {
 };
 
   const handleFormulaSubmit = async () => {
-    console.log('[DataFrameOperations] handleFormulaSubmit called');
     resetSaveSuccess();
-    if (!data || !selectedColumn || !fileId) {
-      console.log('[DataFrameOperations] Missing required data:', { data: !!data, selectedColumn, fileId });
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !selectedColumn || !activeFileId) {
       showValidationError('Please select a target column first');
       return;
     }
     const trimmedFormula = formulaInput.trim();
     if (!trimmedFormula) {
-      console.log('[DataFrameOperations] No formula provided');
       showValidationError('Please enter a formula');
       return;
     }
   
-  // Debug logging
-  console.log('[DataFrameOperations] Applying formula:', {
-    selectedColumn,
-    formula: trimmedFormula,
-    fileId,
-    currentHeaders: data.headers,
-    hasFilters: Object.keys(settings.filters || {}).length > 0,
-    hasSearchTerm: !!settings.searchTerm,
-    currentDataRows: data.rows.length,
-    processedDataRows: processedData.filteredRows.length,
-    isProcessingOperation
-  });
   
   // Apply formula directly without queuing to test
-  console.log('[DataFrameOperations] Starting formula application');
   setFormulaLoading(true);
   setIsProcessingOperation(false); // Reset processing state
   try {
@@ -2191,42 +2176,14 @@ const handleHeaderClick = (header: string) => {
       const currentFilters = settings.filters || {};
       const currentSearchTerm = settings.searchTerm || '';
       
-      console.log('[DataFrameOperations] Current data state:', {
-        hasActiveFilters,
-        currentFilters,
-        currentSearchTerm,
-        originalDataRows: data.rows.length,
-        filteredDataRows: processedData.filteredRows.length
-      });
-      
       // Apply the formula to the original data (backend requirement)
       // But we'll ensure the filtered view reflects the changes
-      console.log('[DataFrameOperations] Calling apiApplyFormula with:', {
-        fileId,
-        selectedColumn,
-        formula: trimmedFormula
-      });
-      
-      const resp = await apiApplyFormula(fileId, selectedColumn, trimmedFormula);
-    
-    console.log('[DataFrameOperations] Formula applied successfully:', {
-      selectedColumn,
-      responseHeaders: resp.headers,
-      responseRowsCount: resp.rows?.length,
-      responseTypes: resp.types
-    });
+      const resp = await apiApplyFormula(activeFileId, selectedColumn, trimmedFormula);
     
     // Preserve deleted columns by filtering out columns that were previously deleted
     const currentHiddenColumns = data.hiddenColumns || [];
     const currentDeletedColumns = data.deletedColumns || [];
     const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
-    
-    console.log('[DataFrameOperations] Updating data with:', {
-      headers: filtered.headers.length,
-      rows: filtered.rows.length,
-      fileName: data.fileName,
-      columnTypes: Object.keys(filtered.columnTypes || {}).length
-    });
     
     onDataChange({
       headers: filtered.headers,
@@ -2240,29 +2197,17 @@ const handleHeaderClick = (header: string) => {
       deletedColumns: currentDeletedColumns,
     });
     
-    console.log('[DataFrameOperations] Data updated successfully');
-    
     // Force a refresh to ensure the UI updates with the new data
     setForceRefresh(prev => prev + 1);
     
     // Don't re-apply filters - let the data update naturally
     // The processedData will automatically reflect the new data with existing filters
-    console.log('[DataFrameOperations] Formula applied to original data, filtered view will update automatically');
-    
-    console.log('[DataFrameOperations] Data updated after formula:', {
-      selectedColumn,
-      newHeaders: filtered.headers,
-      newRowsCount: filtered.rows?.length,
-      columnStillExists: filtered.headers.includes(selectedColumn),
-      firstRowSample: filtered.rows?.[0] ? Object.keys(filtered.rows[0]) : []
-    });
     
     setColumnFormulas(prev => {
       if (prev[selectedColumn] === trimmedFormula) {
         return prev;
       }
       const next = { ...prev, [selectedColumn]: trimmedFormula };
-      console.log('[DataFrameOperations] Updating column formulas:', next);
       onSettingsChange({ columnFormulas: next });
       return next;
     });
@@ -2273,17 +2218,7 @@ const handleHeaderClick = (header: string) => {
     // Force a complete reset to ensure the new column is usable for future operations
     setTimeout(() => {
       resetFormulaBar();
-      console.log('[DataFrameOperations] Formula bar completely reset - new column ready for future operations');
     }, 200);
-    
-    console.log('[DataFrameOperations] Formula application completed successfully');
-    
-    console.log('[DataFrameOperations] Formula state updated:', {
-      selectedColumn,
-      formulaApplied: trimmedFormula,
-      formulaBarReset: true,
-      columnFormulasUpdated: true
-    });
     
     // Add to history
     addToHistory('Apply Formula', `Applied formula "${trimmedFormula}" to column "${selectedColumn}"`);
@@ -2294,13 +2229,11 @@ const handleHeaderClick = (header: string) => {
       description: `Formula applied to column "${selectedColumn}". Click on formula bar to edit this column again.`,
     });
     
-    console.log('[DataFrameOperations] Formula application process completed');
   } catch (err) {
     console.error('[DataFrameOperations] Formula application failed:', err);
     handleApiError('Apply formula failed', err);
     addToHistory('Apply Formula', `Failed to apply formula "${trimmedFormula}" to column "${selectedColumn}"`, 'error');
   } finally {
-    console.log('[DataFrameOperations] Formula application finally block - setting loading to false');
     setFormulaLoading(false);
   }
 };
@@ -2331,7 +2264,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
   // Simple and direct insert column implementation
   const handleInsertColumn = async (colIdx: number) => {
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     console.log('[DataFrameOperations] Insert column called with colIdx:', colIdx);
     console.log('[DataFrameOperations] Current headers:', data.headers);
@@ -2359,7 +2294,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     setInsertLoading(true);
     try {
       // Call the backend API with the exact position
-      const resp = await apiInsertColumn(fileId, insertPosition, newColumnName, '');
+      const resp = await apiInsertColumn(activeFileId, insertPosition, newColumnName, '');
       
       // Update the data with the response
       onDataChange({
@@ -2468,7 +2403,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
   // Completely rewritten duplicate column functionality
   const handleDuplicateColumn = async (colIdx: number) => {
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     console.log('[DataFrameOperations] Duplicate column called with colIdx:', colIdx);
     console.log('[DataFrameOperations] Current headers:', data.headers);
@@ -2503,7 +2440,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     
     try {
       // Call the backend API to duplicate the column
-      const resp = await apiDuplicateColumn(fileId, originalColumn, newColumnName);
+      const resp = await apiDuplicateColumn(activeFileId, originalColumn, newColumnName);
       
       console.log('[DataFrameOperations] Duplicate response:', resp);
       
@@ -2542,14 +2479,16 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
   // Row insert / delete handlers
   const handleInsertRow = async (position: 'above' | 'below', rowIdx: number) => {
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     // Save current state before making changes
     saveToUndoStack(data);
     
     setInsertLoading(true);
     try {
-      const resp = await apiInsertRow(fileId, rowIdx, position);
+      const resp = await apiInsertRow(activeFileId, rowIdx, position);
       
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -2579,14 +2518,16 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   };
 
   const handleDuplicateRow = async (rowIdx: number) => {
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     // Save current state before making changes
     saveToUndoStack(data);
     
     setDuplicateLoading(true);
     try {
-      const resp = await apiDuplicateRow(fileId, rowIdx);
+      const resp = await apiDuplicateRow(activeFileId, rowIdx);
       
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -2616,7 +2557,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   };
 
   const handleRetypeColumn = async (col: string, newType: 'number' | 'text' | 'date') => {
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     // Save current state before making changes
     saveToUndoStack(data);
@@ -2624,7 +2567,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     setConvertLoading(true);
     try {
       console.log('[DataFrameOperations] Retype column:', col, 'to', newType);
-      const resp = await apiRetypeColumn(fileId, col, newType === 'text' ? 'string' : newType);
+      const resp = await apiRetypeColumn(activeFileId, col, newType === 'text' ? 'string' : newType);
       console.log('[DataFrameOperations] Retype response:', resp);
       
        // Preserve deleted columns by filtering out columns that were previously deleted
@@ -2943,9 +2886,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   };
 
   const handleDescribeColumn = async (column: string) => {
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     try {
-      const describeData = await apiDescribeColumn(fileId, column);
+      const describeData = await apiDescribeColumn(activeFileId, column);
       setDescribeModal({
         isOpen: true,
         column,
