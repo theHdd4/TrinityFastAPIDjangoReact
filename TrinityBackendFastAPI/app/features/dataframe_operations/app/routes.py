@@ -163,6 +163,21 @@ def _fn_substr(value: Any, start: Any, end: Any | None = None) -> Any:
 
 
 def _fn_str_replace(value: Any, old: Any, new: Any) -> Any:
+    """
+    Replace text in value. 
+    ENHANCED: If old="" (empty string), it matches blank cells (NULL, "", whitespace)
+    """
+    # Check if we're replacing blanks (old is empty string)
+    if old == "" or old == '':
+        # Check if value is blank (NULL, empty string, or whitespace only)
+        if _is_null(value):
+            return new  # Replace NULL with new value
+        str_val = str(value).strip()
+        if str_val == "":
+            return new  # Replace empty/whitespace with new value
+        return value  # Not blank, keep original
+    
+    # Normal string replacement
     if _is_null(value):
         return None
     return str(value).replace(str(old), str(new))
@@ -325,6 +340,24 @@ def _fn_fillna(value: Any, replacement: Any) -> Any:
     return replacement if _fn_isnull(value) else value
 
 
+def _fn_fillblank(value: Any, replacement: Any) -> Any:
+    """
+    Fill blank cells with replacement value.
+    Treats NULL, empty strings, and whitespace-only strings as blank.
+    """
+    # Check if value is NULL
+    if _is_null(value):
+        return replacement
+    
+    # Check if value is empty string or whitespace only
+    if isinstance(value, str):
+        if value == "" or value.strip() == "":
+            return replacement
+    
+    # Not blank, return original value
+    return value
+
+
 SAFE_EVAL_GLOBALS: Dict[str, Any] = {
     "__builtins__": {},
     "True": True,
@@ -359,6 +392,7 @@ SAFE_EVAL_GLOBALS: Dict[str, Any] = {
     "MAP": _fn_map,
     "ISNULL": _fn_isnull,
     "FILLNA": _fn_fillna,
+    "FILLBLANK": _fn_fillblank,
 }
 
 SAFE_EVAL_FUNCTIONS = {

@@ -767,16 +767,36 @@ All operations map directly to backend APIs at `/api/dataframe-operations/`:
 - Explain what you're doing
 - Example: "I'll load your UK beans data file and process it."
 
-🔧 FORMULA OPERATIONS - ONLY USE THESE SUPPORTED FUNCTIONS:
-- =SUM(colA,colB) - Add columns together
-- =AVG(colA,colB) - Calculate average of columns
-- =CORR(colA,colB) - Calculate correlation between columns
-- =PROD(colA,colB) - Multiply columns together
-- =DIV(colA,colB) - Divide first column by second
-- =MIN(colA,colB) - Find minimum value between columns
-- =MAX(colA,colB) - Find maximum value between columns
+🔧 FORMULA OPERATIONS - COMPREHENSIVE FUNCTION LIST:
+**Mathematical:**
+- SUM(colA,colB) - Add columns together
+- AVG(colA,colB) / MEAN(colA,colB) - Calculate average
+- PROD(colA,colB) - Multiply columns together
+- DIV(colA,colB) - Divide first column by second
+- MIN(colA,colB) - Find minimum value between columns
+- MAX(colA,colB) - Find maximum value between columns
+- ABS(x), ROUND(x,digits), FLOOR(x), CEIL(x), EXP(x), LOG(x), SQRT(x)
 
-⚠️ NEVER use basic math operators like +, -, *, / in formulas - only use the supported functions above
+**Statistical:**
+- CORR(colA,colB) - Calculate correlation between columns
+- ZSCORE(column) / NORM(column) - Z-score normalization
+
+**Text:**
+- UPPER(text), LOWER(text), LEN(text), SUBSTR(text,start,end), STR_REPLACE(text,"old","new")
+- **STR_REPLACE with blanks:** STR_REPLACE(column,"","new") - Replace blank cells when old=""
+
+**Date:**
+- YEAR(date), MONTH(date), DAY(date), WEEKDAY(date), DATE_DIFF(end,start)
+
+**Logical:**
+- IF(condition,true_value,false_value) - Conditional logic
+- ISNULL(value) - Check if null
+
+**Data Handling:**
+- FILLNA(column,replacement) - Fill NULL values only
+- **FILLBLANK(column,"value")** - Fill ALL blanks (NULL, empty strings, whitespace)
+- BIN(value,[edges]) - Bucket values into bins
+- MAP(value,{from:to}) - Map/lookup values
 
 🔧 RESPONSE FORMAT REQUIREMENTS:
 - **ALWAYS** include "smart_response" field - this is what the user sees
