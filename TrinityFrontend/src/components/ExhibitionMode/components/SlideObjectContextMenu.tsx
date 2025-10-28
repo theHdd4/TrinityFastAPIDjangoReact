@@ -79,6 +79,8 @@ interface SlideObjectContextMenuProps {
   renderAdditionalContent?: (closeMenu: () => void) => React.ReactNode;
 }
 
+export const CONTEXT_MENU_Z_INDEX = 45;
+
 const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
   children,
   canEdit,
@@ -135,7 +137,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
       <ContextMenuTrigger asChild>
         <div onContextMenu={onContextMenu}>{children}</div>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-64" style={{ zIndex: 9999 }}>
+      <ContextMenuContent className="w-64" style={{ zIndex: CONTEXT_MENU_Z_INDEX }}>
         <ContextMenuItem disabled={!canEdit || disableCopy} onSelect={event => {
           event.preventDefault();
           closeMenu();

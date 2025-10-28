@@ -102,7 +102,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import SlideObjectContextMenu, { AlignAction } from './SlideObjectContextMenu';
+import SlideObjectContextMenu, { AlignAction, CONTEXT_MENU_Z_INDEX } from './SlideObjectContextMenu';
 
 interface CanvasDropPlacement {
   x: number;
@@ -151,6 +151,8 @@ const CHART_ALIGNMENT_OPTIONS: {
   { value: 'center', label: 'Align center', icon: AlignCenter },
   { value: 'right', label: 'Align right', icon: AlignRight },
 ];
+
+const MENU_CLOSE_TO_EDITOR_DELAY_MS = 160;
 
 const cloneValue = <T,>(value: T): T => {
   const structured = (globalThis as any)?.structuredClone;
@@ -4077,9 +4079,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                         return;
                       }
                       closeMenu();
-                      requestAnimationFrame(() => {
+                      setTimeout(() => {
                         chartHandle?.openDataEditor();
-                      });
+                      }, MENU_CLOSE_TO_EDITOR_DELAY_MS);
                     }}
                   >
                     <Edit3 className="mr-2 h-4 w-4" />
@@ -4091,7 +4093,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       <PaletteIcon className="mr-2 h-4 w-4" />
                       Color scheme
                     </ContextMenuSubTrigger>
-                    <ContextMenuSubContent className="w-64">
+                    <ContextMenuSubContent className="w-64" style={{ zIndex: CONTEXT_MENU_Z_INDEX }}>
                       {COLOR_SCHEMES.map(scheme => (
                         <ContextMenuItem
                           key={scheme.id}
@@ -4129,7 +4131,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       <AlignCenter className="mr-2 h-4 w-4" />
                       Align
                     </ContextMenuSubTrigger>
-                    <ContextMenuSubContent className="w-56">
+                    <ContextMenuSubContent className="w-56" style={{ zIndex: CONTEXT_MENU_Z_INDEX }}>
                       {CHART_ALIGNMENT_OPTIONS.map(option => {
                         const Icon = option.icon;
                         return (
@@ -4162,7 +4164,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       <BarChart3 className="mr-2 h-4 w-4" />
                       Switch type
                     </ContextMenuSubTrigger>
-                    <ContextMenuSubContent className="w-60">
+                    <ContextMenuSubContent className="w-60" style={{ zIndex: CONTEXT_MENU_Z_INDEX }}>
                       {CHART_TYPES.map(type => {
                         const Icon = type.icon;
                         return (
@@ -4257,7 +4259,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         )}
           </div>
         </ContextMenuTrigger>
-        <ContextMenuContent className="w-64" style={{ zIndex: 10000 }}>
+        <ContextMenuContent className="w-64" style={{ zIndex: CONTEXT_MENU_Z_INDEX }}>
           <ContextMenuItem
             disabled={!canEdit || !hasSelection}
             onSelect={event => {
