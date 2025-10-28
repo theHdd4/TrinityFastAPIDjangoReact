@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { cn } from '@/lib/utils';
-import { COLOR_SCHEMES, normalizeChartType } from './constants';
+import { COLOR_SCHEMES, applyAlphaToHex, normalizeChartType } from './constants';
 import type { ChartConfig, ChartDataRow } from './types';
 
 interface SlideChartProps {
@@ -17,6 +17,127 @@ export const SlideChart: React.FC<SlideChartProps> = ({ data, config, className 
 
   const dataset = data.length > 0 ? data : [{ label: 'Sample', value: 1 }];
   const chartType = useMemo(() => normalizeChartType(config.type), [config.type]);
+  const isDiagram = chartType === 'blank' || chartType === 'calendar' || chartType === 'gantt';
+
+  const clampDiagramValue = (value: number) => {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+    if (value < 0) {
+      return 0;
+    }
+    if (value > 100) {
+      return 100;
+    }
+    return value;
+  };
+
+  const diagramBackground = (color: string, value: number) => {
+    const intensity = clampDiagramValue(value) / 100;
+    return applyAlphaToHex(color, 0.25 + intensity * 0.5);
+  };
+
+  const diagramSampleData = useMemo(
+    () => [
+      { label: 'Q1', value: 65 },
+      { label: 'Q2', value: 78 },
+      { label: 'Q3', value: 90 },
+      { label: 'Q4', value: 72 },
+    ],
+    [],
+  );
+
+  const renderDiagram = () => {
+    const sourceData = dataset.length > 0 ? dataset : diagramSampleData;
+    const diagramData = sourceData.map((entry, index) => ({
+      label: entry.label || `Item ${index + 1}`,
+      value: Number.isFinite(entry.value) ? entry.value : 0,
+    }));
+
+    switch (chartType) {
+      case 'blank':
+        return (
+          <div className="flex h-full w-full items-center justify-center bg-muted/10">
+            <div className="rounded-2xl border border-dashed border-border/60 px-6 py-8 text-center">
+              <p className="text-base font-semibold text-foreground">Blank diagram</p>
+              <p className="mt-2 text-sm text-muted-foreground">Add your custom content here</p>
+            </div>
+          </div>
+        );
+      case 'calendar':
+        return (
+          <div className="flex h-full w-full items-center justify-center bg-card">
+            <div className="grid h-full w-full max-w-[24rem] grid-cols-7 gap-1 p-4 text-xs">
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, dayIndex) => {
+                const events = diagramData.filter((_, dataIndex) => dataIndex % 7 === dayIndex).slice(0, 4);
+                return (
+                  <div key={day} className="flex flex-col gap-1">
+                    <span className="text-[0.7rem] font-semibold text-muted-foreground">{day}</span>
+                    {Array.from({ length: 4 }).map((_, slotIndex) => {
+                      const event = events[slotIndex];
+                      const color = palette.colors[(dayIndex + slotIndex) % palette.colors.length];
+                      const background = event ? diagramBackground(color, event.value) : `${color}1f`;
+
+                      return (
+                        <div
+                          key={`${day}-${slotIndex}`}
+                          className="flex h-10 flex-col items-center justify-center rounded border border-border/40 px-2 text-center"
+                          style={{ backgroundColor: background }}
+                        >
+                          {event && config.showLabels !== false && (
+                            <span className="w-full truncate text-[0.6rem] font-semibold text-foreground">{event.label}</span>
+                          )}
+                          {event && config.showValues && (
+                            <span className="text-[0.55rem] text-muted-foreground">Value: {event.value}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      case 'gantt': {
+        const maxValue = Math.max(...diagramData.map(entry => entry.value), 1);
+        return (
+          <div className="flex h-full w-full items-center justify-center bg-card">
+            <div className="flex w-full max-w-[24rem] flex-col gap-3 p-6">
+              {diagramData.map((item, index) => {
+                const ratio = maxValue === 0 ? 0 : item.value / maxValue;
+                const widthPercent = `${Math.max(ratio * 100, 6)}%`;
+                const offsetPercent = `${Math.min(index * 8, 80)}%`;
+
+                return (
+                  <div key={`${item.label}-${index}`} className="flex items-center gap-3">
+                    {config.showLabels !== false && (
+                      <span className="w-16 truncate text-xs font-medium text-muted-foreground">{item.label}</span>
+                    )}
+                    <div className="relative h-8 flex-1 rounded-full bg-muted/40">
+                      <div
+                        className="absolute top-1/2 h-5 -translate-y-1/2 rounded-full shadow-sm transition-all duration-300"
+                        style={{
+                          left: offsetPercent,
+                          width: widthPercent,
+                          backgroundColor: palette.colors[index % palette.colors.length],
+                        }}
+                      />
+                    </div>
+                    {config.showValues && (
+                      <span className="w-12 text-right text-xs font-semibold text-foreground">{item.value}</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+      default:
+        return null;
+    }
+  };
 
   const renderPie = (variant: 'pie' | 'donut') => {
     const total = dataset.reduce((sum, item) => sum + item.value, 0);
@@ -177,14 +298,74 @@ export const SlideChart: React.FC<SlideChartProps> = ({ data, config, className 
     );
   };
 
+  const chartContent = isDiagram
+    ? renderDiagram()
+    : chartType === 'pie' || chartType === 'donut'
+      ? renderPie(chartType)
+      : chartType === 'line' || chartType === 'area'
+        ? renderLineOrArea(chartType)
+        : renderBars(chartType as 'horizontalBar' | 'verticalBar');
+
+  const baseClassName = cn(
+    'relative h-full w-full overflow-hidden rounded-3xl border border-border/40 bg-transparent',
+    className,
+  );
+
+  if (isDiagram) {
+    return (
+      <div className={baseClassName}>
+        <div className="flex h-full w-full items-center justify-center">{chartContent}</div>
+      </div>
+    );
+  }
+
+  const showLegend = config.showLabels || config.showValues;
+  if (!showLegend) {
+    return (
+      <div className={baseClassName}>
+        <div className="flex h-full w-full items-center justify-center">{chartContent}</div>
+      </div>
+    );
+  }
+
+  const legendPosition = config.legendPosition ?? 'bottom';
+  const horizontalLegend = legendPosition === 'top' || legendPosition === 'bottom';
+  const legendItems = dataset.map((item, index) => (
+    <div key={`${item.label || 'legend'}-${index}`} className="flex items-center gap-2">
+      <span
+        className="h-3 w-3 rounded-sm"
+        style={{ backgroundColor: palette.colors[index % palette.colors.length] }}
+      />
+      <div className="flex flex-col text-[0.65rem] leading-tight">
+        {config.showLabels && (
+          <span className="font-medium text-foreground">{item.label || `Item ${index + 1}`}</span>
+        )}
+        {config.showValues && (
+          <span className="text-muted-foreground">{Number.isFinite(item.value) ? item.value : 0}</span>
+        )}
+      </div>
+    </div>
+  ));
+
+  const containerClass = cn(
+    'flex h-full w-full gap-3',
+    horizontalLegend ? 'flex-col' : 'flex-row',
+    legendPosition === 'bottom' && 'flex-col-reverse',
+    legendPosition === 'right' && 'flex-row-reverse',
+  );
+
+  const legendClass = cn(
+    'flex flex-none gap-3 text-xs font-medium text-muted-foreground',
+    horizontalLegend ? 'w-full flex-wrap items-center justify-center px-6 py-4' : 'min-w-[160px] flex-col px-4 py-6',
+    legendPosition === 'left' && 'items-start text-left',
+    legendPosition === 'right' && 'items-end text-right',
+  );
+
   return (
-    <div className={cn('relative h-full w-full overflow-hidden rounded-3xl border border-border/40 bg-transparent', className)}>
-      <div className="flex h-full w-full items-center justify-center">
-        {chartType === 'pie' || chartType === 'donut'
-          ? renderPie(chartType)
-          : chartType === 'line' || chartType === 'area'
-            ? renderLineOrArea(chartType)
-            : renderBars(chartType as 'horizontalBar' | 'verticalBar')}
+    <div className={baseClassName}>
+      <div className={containerClass}>
+        <div className={legendClass}>{legendItems}</div>
+        <div className="flex flex-1 items-center justify-center p-2 sm:p-4">{chartContent}</div>
       </div>
     </div>
   );

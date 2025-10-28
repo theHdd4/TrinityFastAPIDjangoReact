@@ -60,10 +60,28 @@ class Command(BaseCommand):
                 'modules': ['churn-prep', 'feature-engineering', 'churn-model']
             },
             {
-                'name': 'Data Integration Hub',
-                'slug': 'data-integration',
-                'description': 'Connect, transform, and consolidate data from multiple sources into unified datasets',
-                'modules': ['data-connectors', 'etl-pipeline', 'data-quality']
+                'name': 'Price Ladder Analytics',
+                'slug': 'price-ladder-analytics',
+                'description': 'Analyze price elasticity and optimize pricing strategies across product portfolios using advanced ladder analysis',
+                'modules': ['price-ladder-prep', 'elasticity-analysis', 'price-optimization']
+            },
+            {
+                'name': 'Revenue Mix Optimization',
+                'slug': 'revenue-mix-optimization',
+                'description': 'Optimize revenue streams and product mix allocation to maximize profitability and market share',
+                'modules': ['revenue-prep', 'mix-analysis', 'optimization-engine']
+            },
+            {
+                'name': 'E-Com Promo Planning',
+                'slug': 'ecom-promo-planning',
+                'description': 'Plan and optimize e-commerce promotional campaigns with data-driven insights and ROI forecasting',
+                'modules': ['promo-planning', 'campaign-optimizer', 'roi-forecasting']
+            },
+            {
+                'name': 'E-Com Media Planning',
+                'slug': 'ecom-media-planning',
+                'description': 'Strategic media planning and budget allocation for e-commerce channels with performance analytics',
+                'modules': ['media-planning', 'budget-optimizer', 'channel-analytics']
             },
             {
                 'name': 'Create Custom App',
