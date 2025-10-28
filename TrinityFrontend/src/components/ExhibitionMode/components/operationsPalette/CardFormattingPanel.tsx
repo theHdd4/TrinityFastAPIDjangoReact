@@ -1,4 +1,11 @@
-import React, { RefObject } from 'react';
+import React, {
+  RefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   AlignCenter,
   AlignLeft,
@@ -15,67 +22,85 @@ import {
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   ColorTray,
   DEFAULT_GRADIENT_COLOR_OPTIONS,
   DEFAULT_SOLID_COLOR_OPTIONS,
   DEFAULT_SOLID_SECTION,
   DEFAULT_GRADIENT_SECTION,
+  GRADIENT_STYLE_MAP,
+  isKnownGradientId,
+  isSolidToken,
+  createSolidToken,
+  solidTokenToHex,
 } from '@/templates/color-tray';
 import type { ColorTrayOption, ColorTraySection } from '@/templates/color-tray';
 import type { PresentationSettings } from '../../store/exhibitionStore';
+import { cn } from '@/lib/utils';
 
-const backgroundPresetOptions: readonly ColorTrayOption[] = [
-  {
-    id: 'default',
-    label: 'Default',
-    tooltip: 'Default (system color)',
-    swatchClassName: 'bg-card',
-    ariaLabel: 'Use default slide background',
-  },
-  {
-    id: 'ivory',
-    label: 'Ivory',
-    value: '#fef3c7',
-    tooltip: 'Ivory (#FEF3C7)',
-    swatchStyle: { backgroundColor: '#fef3c7' },
-  },
-  {
-    id: 'slate',
-    label: 'Soft Slate',
-    value: '#e2e8f0',
-    tooltip: 'Soft Slate (#E2E8F0)',
-    swatchStyle: { backgroundColor: '#e2e8f0' },
-  },
-  {
-    id: 'charcoal',
-    label: 'Charcoal Mist',
-    value: '#d4d4d4',
-    tooltip: 'Charcoal Mist (#D4D4D4)',
-    swatchStyle: { backgroundColor: '#d4d4d4' },
-  },
-  {
-    id: 'indigo',
-    label: 'Indigo Haze',
-    value: '#e0e7ff',
-    tooltip: 'Indigo Haze (#E0E7FF)',
-    swatchStyle: { backgroundColor: '#e0e7ff' },
-  },
-  {
-    id: 'emerald',
-    label: 'Emerald Veil',
-    value: '#d1fae5',
-    tooltip: 'Emerald Veil (#D1FAE5)',
-    swatchStyle: { backgroundColor: '#d1fae5' },
-  },
-  {
-    id: 'rose',
-    label: 'Rose Quartz',
-    value: '#ffe4e6',
-    tooltip: 'Rose Quartz (#FFE4E6)',
-    swatchStyle: { backgroundColor: '#ffe4e6' },
-  },
-];
+const BACKGROUND_PRESET_GROUP_ID = 'preset-backgrounds';
+const BACKGROUND_PRESET_GROUP_LABEL = 'Presets';
+
+const backgroundPresetOptions: readonly ColorTrayOption[] = (
+  [
+    {
+      id: 'default',
+      label: 'Default',
+      tooltip: 'Default (system color)',
+      swatchClassName: 'bg-card',
+      ariaLabel: 'Use default slide background',
+    },
+    {
+      id: 'ivory',
+      label: 'Ivory',
+      value: '#fef3c7',
+      tooltip: 'Ivory (#FEF3C7)',
+      swatchStyle: { backgroundColor: '#fef3c7' },
+    },
+    {
+      id: 'slate',
+      label: 'Soft Slate',
+      value: '#e2e8f0',
+      tooltip: 'Soft Slate (#E2E8F0)',
+      swatchStyle: { backgroundColor: '#e2e8f0' },
+    },
+    {
+      id: 'charcoal',
+      label: 'Charcoal Mist',
+      value: '#d4d4d4',
+      tooltip: 'Charcoal Mist (#D4D4D4)',
+      swatchStyle: { backgroundColor: '#d4d4d4' },
+    },
+    {
+      id: 'indigo',
+      label: 'Indigo Haze',
+      value: '#e0e7ff',
+      tooltip: 'Indigo Haze (#E0E7FF)',
+      swatchStyle: { backgroundColor: '#e0e7ff' },
+    },
+    {
+      id: 'emerald',
+      label: 'Emerald Veil',
+      value: '#d1fae5',
+      tooltip: 'Emerald Veil (#D1FAE5)',
+      swatchStyle: { backgroundColor: '#d1fae5' },
+    },
+    {
+      id: 'rose',
+      label: 'Rose Quartz',
+      value: '#ffe4e6',
+      tooltip: 'Rose Quartz (#FFE4E6)',
+      swatchStyle: { backgroundColor: '#ffe4e6' },
+    },
+  ] as const
+).map((option, index) => ({
+  ...option,
+  groupId: BACKGROUND_PRESET_GROUP_ID,
+  groupLabel: BACKGROUND_PRESET_GROUP_LABEL,
+  groupOrder: -1,
+  toneOrder: index,
+})) as readonly ColorTrayOption[];
 
 const backgroundGradientOptions = DEFAULT_GRADIENT_COLOR_OPTIONS.filter(option =>
   option.id.startsWith('gradient-'),
@@ -126,10 +151,111 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
   accentImageInputRef,
   onClose,
 }) => {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [layoutPopoverOpen, setLayoutPopoverOpen] = useState(false);
+  const [backgroundPopoverOpen, setBackgroundPopoverOpen] = useState(false);
+  const layoutTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const backgroundTriggerRef = useRef<HTMLButtonElement | null>(null);
   const hasAccentImage = Boolean(settings.accentImage);
 
+  const getSelectedOption = (sections: readonly ColorTraySection[], id: string | null | undefined) => {
+    if (!id) {
+      return undefined;
+    }
+    for (const section of sections) {
+      const option = section.options.find(candidate => candidate.id === id);
+      if (option) {
+        return option;
+      }
+    }
+    return undefined;
+  };
+
+  const resolveSwatchStyle = (id: string | null | undefined, option?: ColorTrayOption) => {
+    if (!id) {
+      return {};
+    }
+    if (option?.swatchStyle) {
+      return option.swatchStyle;
+    }
+    if (isSolidToken(id)) {
+      return { backgroundColor: solidTokenToHex(id) };
+    }
+    if (isKnownGradientId(id)) {
+      return { backgroundImage: GRADIENT_STYLE_MAP[id] };
+    }
+    return {};
+  };
+
+  const layoutColorOption = getSelectedOption(layoutColorSections, settings.cardColor);
+  const layoutSwatchStyle = resolveSwatchStyle(settings.cardColor, layoutColorOption);
+  const layoutCustomHex = useMemo(() => {
+    if (isSolidToken(settings.cardColor)) {
+      return solidTokenToHex(settings.cardColor);
+    }
+    return '#111827';
+  }, [settings.cardColor]);
+  const layoutColorLabel = useMemo(() => {
+    if (layoutColorOption?.label) {
+      return layoutColorOption.label;
+    }
+    if (isSolidToken(settings.cardColor)) {
+      return solidTokenToHex(settings.cardColor).toUpperCase();
+    }
+    return undefined;
+  }, [layoutColorOption, settings.cardColor]);
+
+  const backgroundColorOption = getSelectedOption(backgroundColorSections, settings.backgroundColor);
+  const backgroundSwatchStyle = resolveSwatchStyle(settings.backgroundColor, backgroundColorOption);
+  const backgroundCustomHex = useMemo(() => {
+    if (isSolidToken(settings.backgroundColor)) {
+      return solidTokenToHex(settings.backgroundColor);
+    }
+    return '#111827';
+  }, [settings.backgroundColor]);
+  const backgroundColorLabel = useMemo(() => {
+    if (backgroundColorOption?.label) {
+      return backgroundColorOption.label;
+    }
+    if (isSolidToken(settings.backgroundColor)) {
+      return solidTokenToHex(settings.backgroundColor).toUpperCase();
+    }
+    return undefined;
+  }, [backgroundColorOption, settings.backgroundColor]);
+
+  useEffect(() => {
+    if ((!canEdit || hasAccentImage) && layoutPopoverOpen) {
+      setLayoutPopoverOpen(false);
+    }
+  }, [canEdit, hasAccentImage, layoutPopoverOpen]);
+
+  useEffect(() => {
+    if (!canEdit && backgroundPopoverOpen) {
+      setBackgroundPopoverOpen(false);
+    }
+  }, [canEdit, backgroundPopoverOpen]);
+
+  const handleCustomLayoutColor = useCallback(
+    (hex: string) => {
+      const token = createSolidToken(hex);
+      onUpdateSettings({ cardColor: token as PresentationSettings['cardColor'] });
+    },
+    [onUpdateSettings],
+  );
+
+  const handleCustomBackgroundColor = useCallback(
+    (hex: string) => {
+      const token = createSolidToken(hex);
+      onUpdateSettings({ backgroundColor: token as PresentationSettings['backgroundColor'] });
+    },
+    [onUpdateSettings],
+  );
+
   return (
-    <div className="w-full shrink-0 rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
+    <div
+      ref={panelRef}
+      className="w-full shrink-0 rounded-3xl border border-border/70 bg-background/95 shadow-2xl"
+    >
       <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
         <div className="flex items-center gap-2">
           <Settings className="h-4 w-4 text-muted-foreground" />
@@ -302,16 +428,62 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
               <Palette className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm">Layout color</span>
             </div>
+            <div className="flex items-center gap-3">
+              {layoutColorLabel && (
+                <span className="text-xs font-medium text-muted-foreground">{layoutColorLabel}</span>
+              )}
+              <Popover open={layoutPopoverOpen} onOpenChange={setLayoutPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    type="button"
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
+                    disabled={!canEdit || hasAccentImage}
+                    ref={layoutTriggerRef}
+                  >
+                    <span
+                      className={cn(
+                        'h-5 w-5 rounded-full border border-white/70 shadow-inner',
+                        layoutColorOption?.swatchClassName,
+                      )}
+                      style={layoutSwatchStyle}
+                    />
+                    <span className="sr-only">Select layout color</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  side="left"
+                  align="center"
+                  sideOffset={16}
+                  collisionPadding={24}
+                  className="z-[3000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
+                >
+                  <div className="w-[360px] space-y-4 p-4">
+                    <ColorTray
+                      sections={layoutColorSections}
+                      selectedId={settings.cardColor}
+                      onSelect={option =>
+                        onUpdateSettings({ cardColor: option.id as PresentationSettings['cardColor'] })
+                      }
+                      disabled={!canEdit || hasAccentImage}
+                      defaultSectionId="gradients"
+                    />
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={layoutCustomHex}
+                        onChange={event => handleCustomLayoutColor(event.target.value)}
+                        className="h-11 w-full cursor-pointer rounded-2xl border border-border"
+                        disabled={!canEdit || hasAccentImage}
+                      />
+                      <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Custom</span>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
-          <ColorTray
-            sections={layoutColorSections}
-            selectedId={settings.cardColor}
-            onSelect={option =>
-              onUpdateSettings({ cardColor: option.id as PresentationSettings['cardColor'] })
-            }
-            disabled={!canEdit || hasAccentImage}
-            defaultSectionId="gradients"
-          />
         </section>
 
         <section className="space-y-3">
@@ -320,16 +492,64 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
               <Maximize2 className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm">Background (Card Color)</span>
             </div>
+            <div className="flex items-center gap-3">
+              {backgroundColorLabel && (
+                <span className="text-xs font-medium text-muted-foreground">{backgroundColorLabel}</span>
+              )}
+              <Popover open={backgroundPopoverOpen} onOpenChange={setBackgroundPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    type="button"
+                    className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
+                    disabled={!canEdit}
+                    ref={backgroundTriggerRef}
+                  >
+                    <span
+                      className={cn(
+                        'h-5 w-5 rounded-full border border-white/70 shadow-inner',
+                        backgroundColorOption?.swatchClassName,
+                      )}
+                      style={backgroundSwatchStyle}
+                    />
+                    <span className="sr-only">Select background color</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  side="left"
+                  align="center"
+                  sideOffset={16}
+                  collisionPadding={24}
+                  className="z-[3000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
+                >
+                  <div className="w-[360px] space-y-4 p-4">
+                    <ColorTray
+                      sections={backgroundColorSections}
+                      selectedId={settings.backgroundColor}
+                      onSelect={option =>
+                        onUpdateSettings({
+                          backgroundColor: option.id as PresentationSettings['backgroundColor'],
+                        })
+                      }
+                      disabled={!canEdit}
+                      defaultSectionId="solids"
+                    />
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={backgroundCustomHex}
+                        onChange={event => handleCustomBackgroundColor(event.target.value)}
+                        className="h-11 w-full cursor-pointer rounded-2xl border border-border"
+                        disabled={!canEdit}
+                      />
+                      <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Custom</span>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
-          <ColorTray
-            sections={backgroundColorSections}
-            selectedId={settings.backgroundColor}
-            onSelect={option =>
-              onUpdateSettings({ backgroundColor: option.id as PresentationSettings['backgroundColor'] })
-            }
-            disabled={!canEdit}
-            defaultSectionId="solids"
-          />
         </section>
 
         <Separator />

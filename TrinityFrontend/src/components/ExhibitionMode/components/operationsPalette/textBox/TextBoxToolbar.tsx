@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlignCenter,
   AlignLeft,
@@ -134,6 +134,8 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
   const [activeFilter, setActiveFilter] = useState<FontFilterChipId | null>(null);
   const [activeTab, setActiveTab] = useState<'font' | 'styles'>('font');
   const [searchTerm, setSearchTerm] = useState('');
+  const [colorPopoverOpen, setColorPopoverOpen] = useState(false);
+  const colorTriggerRef = useRef<HTMLButtonElement | null>(null);
   const cssFontFamily = useMemo(() => resolveFontFamily(fontFamily), [fontFamily]);
   const activeTextStyleId = useMemo(() => {
     const presetMatch = TEXT_STYLE_PRESETS.find(preset => {
@@ -582,7 +584,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
 
       <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
 
-      <Popover>
+      <Popover open={colorPopoverOpen} onOpenChange={setColorPopoverOpen}>
         <PopoverTrigger asChild>
           <Button
             variant="ghost"
@@ -590,6 +592,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
             type="button"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border/50 p-0"
             onMouseDown={handleToolbarMouseDown}
+            ref={colorTriggerRef}
           >
             <span
               className="h-5 w-5 rounded-full border border-white/70 shadow-inner"
@@ -599,12 +602,14 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           </Button>
         </PopoverTrigger>
         <PopoverContent
-          side="top"
+          side="left"
           align="center"
-          className="z-[4000] w-60 rounded-2xl border border-border/70 bg-background/95 p-3 shadow-2xl"
+          sideOffset={14}
+          collisionPadding={24}
+          className="z-[4000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
           data-text-toolbar-root
         >
-          <div className="flex flex-col gap-3">
+          <div className="w-[360px] space-y-4 p-4">
             <ColorTray
               sections={TEXT_COLOR_SECTIONS}
               selectedId={normalizedColorId}
@@ -618,8 +623,6 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
                   onColorChange(`#${option.id.slice(6)}`);
                 }
               }}
-              swatchSize="sm"
-              optionClassName="min-h-[3.25rem]"
               defaultSectionId="solids"
             />
             <div className="flex items-center gap-2">
@@ -627,7 +630,7 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
                 type="color"
                 value={color || '#111827'}
                 onChange={event => onColorChange(event.target.value)}
-                className="h-10 w-full cursor-pointer rounded-xl border border-border"
+                className="h-11 w-full cursor-pointer rounded-2xl border border-border"
               />
               <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Custom</span>
             </div>

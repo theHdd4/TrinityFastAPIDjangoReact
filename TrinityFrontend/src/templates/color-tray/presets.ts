@@ -147,12 +147,25 @@ const buildGradientString = (preset: GradientPreset): string => {
   return `linear-gradient(${angle}deg, ${stops})`;
 };
 
+const slugify = (value: string): string =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+const SOLID_NEUTRAL_GROUP_ID = 'neutrals';
+const SOLID_NEUTRAL_GROUP_LABEL = 'Neutrals';
+
 const buildSolidPalette = (): readonly ColorTrayOption[] => {
   const options: ColorTrayOption[] = [];
   const seen = new Set<string>();
 
   for (let hueIndex = 0; hueIndex < SOLID_HUES.length; hueIndex += 1) {
     const hue = SOLID_HUES[hueIndex];
+    const hueName = SOLID_HUE_NAMES[hueIndex] ?? 'Spectrum';
+    const groupId = `hue-${slugify(hueName)}`;
+    const groupLabel = hueName;
     for (
       let lightnessIndex = SOLID_LIGHTNESS_LEVELS.length - 1;
       lightnessIndex >= 0;
@@ -165,7 +178,6 @@ const buildSolidPalette = (): readonly ColorTrayOption[] => {
         continue;
       }
       seen.add(token);
-      const hueName = SOLID_HUE_NAMES[hueIndex] ?? 'Spectrum';
       const toneName = SOLID_LIGHTNESS_DESCRIPTORS[lightnessIndex] ?? 'Tone';
       const label = `${toneName} ${hueName}`;
       const tooltip = `${label} (${hex.toUpperCase()})`;
@@ -176,7 +188,11 @@ const buildSolidPalette = (): readonly ColorTrayOption[] => {
         tooltip,
         swatchStyle: { backgroundColor: hex },
         ariaLabel: `Select ${tooltip}`,
-        keywords: [label, hex.toUpperCase(), hex.toLowerCase()],
+        keywords: [label, groupLabel, hex.toUpperCase(), hex.toLowerCase()],
+        groupId,
+        groupLabel,
+        groupOrder: hueIndex,
+        toneOrder: lightnessIndex,
       });
     }
   }
@@ -197,7 +213,11 @@ const buildSolidPalette = (): readonly ColorTrayOption[] => {
       tooltip,
       swatchStyle: { backgroundColor: neutral },
       ariaLabel: `Select ${tooltip}`,
-      keywords: [label, neutral.toUpperCase(), neutral.toLowerCase()],
+      keywords: [label, SOLID_NEUTRAL_GROUP_LABEL, neutral.toUpperCase(), neutral.toLowerCase()],
+      groupId: SOLID_NEUTRAL_GROUP_ID,
+      groupLabel: SOLID_NEUTRAL_GROUP_LABEL,
+      groupOrder: SOLID_HUES.length,
+      toneOrder: index,
     });
   }
 

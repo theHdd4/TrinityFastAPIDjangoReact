@@ -7,8 +7,8 @@ class TrinityV1AtomAdmin(admin.ModelAdmin):
     """
     Admin interface for TrinityV1Atom model.
     """
-    list_display = ['atom_id', 'name', 'category', 'created_at']
-    list_filter = ['category', 'created_at']
+    list_display = ['atom_id', 'name', 'category', 'available_atoms', 'created_at']
+    list_filter = ['category', 'available_atoms', 'created_at']
     search_fields = ['atom_id', 'name', 'description', 'category']
     readonly_fields = ['created_at', 'updated_at']
     
@@ -17,7 +17,7 @@ class TrinityV1AtomAdmin(admin.ModelAdmin):
             'fields': ('atom_id', 'name')
         }),
         ('Details', {
-            'fields': ('description', 'category')
+            'fields': ('description', 'category', 'available_atoms')
         }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at'),
