@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Calendar,
   Clock,
@@ -33,10 +33,19 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  ColorTray,
+  DEFAULT_SOLID_COLOR_OPTIONS,
+  type ColorTrayOption,
+  type ColorTraySection,
+} from '@/templates/color-tray';
 import type {
   PresentationSettings,
   SlideNotesPosition,
 } from '@/components/ExhibitionMode/store/exhibitionStore';
+import { DEFAULT_PRESENTATION_SETTINGS } from '@/components/ExhibitionMode/store/exhibitionStore';
+import { cn } from '@/lib/utils';
 
 const GRADIENT_DIRECTIONS = [
   { value: '0deg', label: 'Top to Bottom' },
@@ -61,8 +70,77 @@ const TRANSITION_OPTIONS = [
 
 const NOTES_POSITIONS: SlideNotesPosition[] = ['bottom', 'right'];
 
-const TAB_TRIGGER_CLASSES =
-  'rounded-xl px-3 py-2 text-xs font-semibold text-muted-foreground transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow';
+const TAB_TRIGGER_CLASSES = cn(
+  'rounded-full px-4 py-2 text-sm font-semibold tracking-wide text-muted-foreground transition-all',
+  'data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm',
+  'leading-5',
+);
+
+const BACKGROUND_PRESET_GROUP_ID = 'preset-backgrounds';
+const BACKGROUND_PRESET_GROUP_LABEL = 'Presets';
+
+const buildBackgroundPresetOptions = (defaultHex: string): readonly ColorTrayOption[] =>
+  (
+    [
+      {
+        id: 'default',
+        label: 'Default',
+        value: defaultHex,
+        tooltip: `Default (${defaultHex.toUpperCase()})`,
+        swatchClassName: 'bg-card',
+        swatchStyle: { backgroundColor: defaultHex },
+        ariaLabel: 'Use default slide background',
+      },
+      {
+        id: 'ivory',
+        label: 'Ivory',
+        value: '#fef3c7',
+        tooltip: 'Ivory (#FEF3C7)',
+        swatchStyle: { backgroundColor: '#fef3c7' },
+      },
+      {
+        id: 'slate',
+        label: 'Soft Slate',
+        value: '#e2e8f0',
+        tooltip: 'Soft Slate (#E2E8F0)',
+        swatchStyle: { backgroundColor: '#e2e8f0' },
+      },
+      {
+        id: 'charcoal',
+        label: 'Charcoal Mist',
+        value: '#d4d4d4',
+        tooltip: 'Charcoal Mist (#D4D4D4)',
+        swatchStyle: { backgroundColor: '#d4d4d4' },
+      },
+      {
+        id: 'indigo',
+        label: 'Indigo Haze',
+        value: '#e0e7ff',
+        tooltip: 'Indigo Haze (#E0E7FF)',
+        swatchStyle: { backgroundColor: '#e0e7ff' },
+      },
+      {
+        id: 'emerald',
+        label: 'Emerald Veil',
+        value: '#d1fae5',
+        tooltip: 'Emerald Veil (#D1FAE5)',
+        swatchStyle: { backgroundColor: '#d1fae5' },
+      },
+      {
+        id: 'rose',
+        label: 'Rose Quartz',
+        value: '#ffe4e6',
+        tooltip: 'Rose Quartz (#FFE4E6)',
+        swatchStyle: { backgroundColor: '#ffe4e6' },
+      },
+    ] as const
+  ).map((option, index) => ({
+    ...option,
+    groupId: BACKGROUND_PRESET_GROUP_ID,
+    groupLabel: BACKGROUND_PRESET_GROUP_LABEL,
+    groupOrder: -1,
+    toneOrder: index,
+  }));
 
 interface SettingsPanelProps {
   settings: PresentationSettings;
@@ -94,6 +172,61 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const transitionDuration = Math.min(2000, Math.max(100, settings.transitionDuration ?? 450));
   const autoAdvanceDuration = Math.max(1, Math.round(settings.autoAdvanceDuration ?? settings.slideshowDuration ?? 8));
   const showSlideNumber = settings.showSlideNumber ?? true;
+  const [backgroundPaletteOpen, setBackgroundPaletteOpen] = useState(false);
+
+  const backgroundColorSections = useMemo<readonly ColorTraySection[]>(() => {
+    const defaultHex = DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
+    const presets = buildBackgroundPresetOptions(defaultHex);
+    return [
+      {
+        id: 'solids',
+        label: 'Solid colors',
+        options: [...presets, ...DEFAULT_SOLID_COLOR_OPTIONS] as readonly ColorTrayOption[],
+      },
+    ];
+  }, []);
+
+  const resolvedSolidHex = useMemo(() => {
+    const candidate = settings.backgroundSolidColor ?? DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
+    return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(candidate)
+      ? candidate
+      : DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
+  }, [settings.backgroundSolidColor]);
+
+  const backgroundColorOption = useMemo(() => {
+    const normalized = resolvedSolidHex.toLowerCase();
+    for (const section of backgroundColorSections) {
+      for (const option of section.options) {
+        if (typeof option.value === 'string' && option.value.toLowerCase() === normalized) {
+          return option;
+        }
+      }
+    }
+    return undefined;
+  }, [backgroundColorSections, resolvedSolidHex]);
+
+  const backgroundSelectedId = backgroundColorOption?.id;
+  const backgroundColorLabel = backgroundColorOption?.label ?? resolvedSolidHex.toUpperCase();
+  const backgroundSwatchStyle = backgroundColorOption?.swatchStyle ?? { backgroundColor: resolvedSolidHex };
+
+  const handleBackgroundPaletteSelect = useCallback(
+    (option: ColorTrayOption) => {
+      if (typeof option.value === 'string') {
+        onChange({ backgroundMode: 'solid', backgroundSolidColor: option.value });
+      }
+      setBackgroundPaletteOpen(false);
+    },
+    [onChange],
+  );
+
+  const handleCustomBackgroundColor = useCallback(
+    (hex: string) => {
+      if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex)) {
+        onChange({ backgroundMode: 'solid', backgroundSolidColor: hex });
+      }
+    },
+    [onChange],
+  );
 
   const handleBackgroundModeChange = (mode: 'solid' | 'gradient' | 'image') => {
     onChange({ backgroundMode: mode });
@@ -162,7 +295,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       <ScrollArea className="max-h-[70vh] px-5">
         <Tabs defaultValue="background" className="w-full py-5">
-          <TabsList className="grid w-full grid-cols-4 gap-2 rounded-2xl bg-muted/40 p-1.5">
+          <TabsList className="grid w-full grid-cols-4 gap-3 rounded-3xl bg-muted/40 p-2">
             <TabsTrigger value="background" className={TAB_TRIGGER_CLASSES}>
               Background
             </TabsTrigger>
@@ -215,24 +348,62 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
 
             {backgroundMode === 'solid' && (
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Colour</Label>
-                <div className="flex items-center gap-3">
-                  <Input
-                    type="color"
-                    value={settings.backgroundSolidColor ?? '#ffffff'}
-                    onChange={event =>
-                      onChange({ backgroundMode: 'solid', backgroundSolidColor: event.target.value })
-                    }
-                    className="h-10 w-20 cursor-pointer"
-                  />
-                  <Input
-                    value={settings.backgroundSolidColor ?? '#ffffff'}
-                    onChange={event =>
-                      onChange({ backgroundMode: 'solid', backgroundSolidColor: event.target.value })
-                    }
-                    className="flex-1"
-                  />
+              <div className="space-y-3 rounded-xl border border-border/60 bg-muted/30 px-4 py-4">
+                <Label className="flex items-center gap-2 text-sm font-semibold">
+                  <Droplet className="h-4 w-4" />
+                  Solid colour
+                </Label>
+                <div className="flex items-center justify-between">
+                  {backgroundColorLabel ? (
+                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {backgroundColorLabel}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">Choose a colour</span>
+                  )}
+                  <Popover open={backgroundPaletteOpen} onOpenChange={setBackgroundPaletteOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        type="button"
+                        className="flex h-9 w-9 items-center justify-center rounded-full border border-border/60 bg-background/80 p-0 shadow-sm"
+                      >
+                        <span
+                          className="h-5 w-5 rounded-full border border-white/70 shadow-inner"
+                          style={backgroundSwatchStyle}
+                        />
+                        <span className="sr-only">Select background colour</span>
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      side="bottom"
+                      align="end"
+                      sideOffset={12}
+                      collisionPadding={24}
+                      className="z-[3000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
+                    >
+                      <div className="w-[360px] space-y-4 p-4">
+                        <ColorTray
+                          sections={backgroundColorSections}
+                          selectedId={backgroundSelectedId}
+                          onSelect={handleBackgroundPaletteSelect}
+                          swatchSize="md"
+                        />
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={resolvedSolidHex}
+                            onChange={event => handleCustomBackgroundColor(event.target.value)}
+                            className="h-11 w-full cursor-pointer rounded-2xl border border-border"
+                          />
+                          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Custom
+                          </span>
+                        </div>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </div>
               </div>
             )}
