@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Calendar,
   Clock,
@@ -71,9 +71,9 @@ const TRANSITION_OPTIONS = [
 const NOTES_POSITIONS: SlideNotesPosition[] = ['bottom', 'right'];
 
 const TAB_TRIGGER_CLASSES = cn(
-  'relative flex h-11 items-center justify-center rounded-full border border-transparent px-5 text-sm font-medium text-muted-foreground transition-all',
-  'whitespace-nowrap tracking-wide leading-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-  'data-[state=active]:border-border/60 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm',
+  'relative flex min-w-0 items-center justify-center rounded-2xl border border-transparent px-4 py-2 text-sm font-semibold text-muted-foreground transition-all duration-200',
+  'whitespace-nowrap leading-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+  'hover:text-foreground data-[state=active]:border-border/70 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm',
 );
 
 const BACKGROUND_PRESET_GROUP_ID = 'preset-backgrounds';
@@ -172,7 +172,20 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const transitionDuration = Math.min(2000, Math.max(100, settings.transitionDuration ?? 450));
   const autoAdvanceDuration = Math.max(1, Math.round(settings.autoAdvanceDuration ?? settings.slideshowDuration ?? 8));
   const showSlideNumber = settings.showSlideNumber ?? true;
+
+  const resolvedSolidHex = useMemo(() => {
+    const candidate = settings.backgroundSolidColor ?? DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
+    return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(candidate)
+      ? candidate
+      : DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
+  }, [settings.backgroundSolidColor]);
+
   const [backgroundPaletteOpen, setBackgroundPaletteOpen] = useState(false);
+  const [backgroundHexInput, setBackgroundHexInput] = useState(resolvedSolidHex.toUpperCase());
+
+  useEffect(() => {
+    setBackgroundHexInput(resolvedSolidHex.toUpperCase());
+  }, [resolvedSolidHex]);
 
   const backgroundColorSections = useMemo<readonly ColorTraySection[]>(() => {
     const defaultHex = DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
@@ -185,13 +198,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       },
     ];
   }, []);
-
-  const resolvedSolidHex = useMemo(() => {
-    const candidate = settings.backgroundSolidColor ?? DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
-    return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(candidate)
-      ? candidate
-      : DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
-  }, [settings.backgroundSolidColor]);
 
   const backgroundColorOption = useMemo(() => {
     const normalized = resolvedSolidHex.toLowerCase();
@@ -222,7 +228,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const handleCustomBackgroundColor = useCallback(
     (hex: string) => {
       if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex)) {
+        setBackgroundHexInput(hex.toUpperCase());
         onChange({ backgroundMode: 'solid', backgroundSolidColor: hex });
+      }
+    },
+    [onChange],
+  );
+
+  const handleBackgroundHexInputChange = useCallback(
+    (value: string) => {
+      const trimmed = value.replace(/\s+/g, '').toUpperCase();
+      const prefixed = trimmed.startsWith('#') ? trimmed : `#${trimmed.replace(/#/g, '')}`;
+      const sanitized = `#${prefixed
+        .replace(/[^0-9A-F#]/g, '')
+        .replace(/#/g, '')
+        .slice(0, 6)}`;
+      setBackgroundHexInput(sanitized);
+      if (/^#([0-9A-F]{3}|[0-9A-F]{6})$/.test(sanitized)) {
+        onChange({ backgroundMode: 'solid', backgroundSolidColor: sanitized.toLowerCase() });
       }
     },
     [onChange],
@@ -277,15 +300,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   return (
-    <div className="w-full shrink-0 rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
-      <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
+    <div className="w-full shrink-0 rounded-[28px] border border-border/60 bg-gradient-to-br from-background via-background/98 to-card shadow-[0_40px_90px_-45px_rgba(15,23,42,0.45)]">
+      <div className="flex items-center justify-between border-b border-border/50 px-6 py-5">
+        <div className="flex items-center gap-3">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-primary/10 text-primary">
             <Palette className="h-4 w-4" />
           </span>
-          <div>
+          <div className="space-y-1">
             <h3 className="text-lg font-semibold text-foreground">Slide Settings</h3>
-            <p className="text-xs text-muted-foreground">Fine-tune appearance and playback behaviour.</p>
+            <p className="text-xs text-muted-foreground">Configure slide behaviour and appearance.</p>
           </div>
         </div>
         <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={onClose}>
@@ -293,9 +316,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </Button>
       </div>
 
-      <ScrollArea className="max-h-[70vh] px-5">
-        <Tabs defaultValue="background" className="w-full py-5">
-          <TabsList className="grid w-full grid-cols-2 gap-2.5 rounded-full border border-border/60 bg-muted/40 p-2.5 sm:grid-cols-4 sm:gap-3.5 sm:p-3">
+      <ScrollArea className="max-h-[70vh] px-6">
+        <Tabs defaultValue="background" className="w-full py-6">
+          <TabsList className="grid w-full grid-cols-2 gap-3 rounded-3xl border border-border/50 bg-muted/40 p-2 sm:grid-cols-4">
             <TabsTrigger value="background" className={TAB_TRIGGER_CLASSES}>
               Background
             </TabsTrigger>
@@ -310,17 +333,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="background" className="space-y-5 pt-4">
-            <div className="space-y-3">
+          <TabsContent value="background" className="space-y-6 pt-4">
+            <div className="space-y-4 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
               <Label className="flex items-center gap-2 text-sm font-semibold">
                 <Palette className="h-4 w-4" />
                 Background Type
               </Label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <Button
                   variant={backgroundMode === 'solid' ? 'default' : 'outline'}
                   size="sm"
-                  className="justify-start"
+                  className="h-10 justify-center rounded-xl text-sm"
                   onClick={() => handleBackgroundModeChange('solid')}
                 >
                   <Droplet className="mr-2 h-4 w-4" />
@@ -329,7 +352,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <Button
                   variant={backgroundMode === 'gradient' ? 'default' : 'outline'}
                   size="sm"
-                  className="justify-start"
+                  className="h-10 justify-center rounded-xl text-sm"
                   onClick={() => handleBackgroundModeChange('gradient')}
                 >
                   <Layers className="mr-2 h-4 w-4" />
@@ -338,7 +361,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <Button
                   variant={backgroundMode === 'image' ? 'default' : 'outline'}
                   size="sm"
-                  className="justify-start"
+                  className="h-10 justify-center rounded-xl text-sm"
                   onClick={() => handleBackgroundModeChange('image')}
                 >
                   <ImageIcon className="mr-2 h-4 w-4" />
@@ -348,23 +371,25 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
 
             {backgroundMode === 'solid' && (
-              <div className="space-y-3 rounded-xl border border-border/60 bg-muted/30 px-4 py-4">
-                <div className="flex items-center justify-between">
+              <div className="space-y-4 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2">
                     <Droplet className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-semibold text-foreground">Solid colour</span>
+                    <div className="flex flex-col">
+                      <span className="text-sm font-semibold text-foreground">Color</span>
+                      {backgroundColorLabel && (
+                        <span className="text-xs text-muted-foreground">{backgroundColorLabel}</span>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    {backgroundColorLabel && (
-                      <span className="text-xs font-medium text-muted-foreground">{backgroundColorLabel}</span>
-                    )}
                     <Popover open={backgroundPaletteOpen} onOpenChange={setBackgroundPaletteOpen}>
                       <PopoverTrigger asChild>
                         <Button
                           variant="ghost"
                           size="icon"
                           type="button"
-                          className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
+                          className="flex h-9 w-9 items-center justify-center rounded-full border border-border/50 p-0"
                         >
                           <span
                             className={cn(
@@ -404,42 +429,48 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         </div>
                       </PopoverContent>
                     </Popover>
+                    <Input
+                      value={backgroundHexInput}
+                      onChange={event => handleBackgroundHexInputChange(event.target.value)}
+                      className="h-9 w-28 rounded-xl border-border/60 text-center text-xs font-semibold uppercase tracking-wide"
+                      maxLength={7}
+                    />
                   </div>
                 </div>
               </div>
             )}
 
             {backgroundMode === 'gradient' && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-4 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <Label className="text-xs font-medium">Start</Label>
+                    <Label className="text-xs font-medium text-muted-foreground">Start</Label>
                     <Input
                       type="color"
                       value={settings.backgroundGradientStart ?? '#667eea'}
                       onChange={event =>
                         handleGradientChange({ backgroundGradientStart: event.target.value })
                       }
-                      className="h-10 w-full cursor-pointer"
+                      className="h-11 w-full cursor-pointer rounded-2xl border border-border"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-xs font-medium">End</Label>
+                    <Label className="text-xs font-medium text-muted-foreground">End</Label>
                     <Input
                       type="color"
                       value={settings.backgroundGradientEnd ?? '#764ba2'}
                       onChange={event => handleGradientChange({ backgroundGradientEnd: event.target.value })}
-                      className="h-10 w-full cursor-pointer"
+                      className="h-11 w-full cursor-pointer rounded-2xl border border-border"
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label className="text-xs font-medium">Direction</Label>
+                  <Label className="text-xs font-medium text-muted-foreground">Direction</Label>
                   <Select
                     value={settings.backgroundGradientDirection ?? '135deg'}
                     onValueChange={value => handleGradientChange({ backgroundGradientDirection: value })}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="rounded-xl border-border/60">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent className="bg-background">
@@ -455,8 +486,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             )}
 
             {backgroundMode === 'image' && (
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Image URL</Label>
+              <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
+                <Label className="flex items-center gap-2 text-sm font-semibold">
+                  <ImageIcon className="h-4 w-4" />
+                  Image URL
+                </Label>
                 <Input
                   placeholder="https://example.com/background.jpg"
                   value={settings.backgroundImageUrl ?? ''}
@@ -466,12 +500,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       backgroundImageUrl: event.target.value.trim(),
                     })
                   }
+                  className="rounded-xl border-border/60"
                 />
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Background Opacity {backgroundOpacity}%</Label>
+            <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
+              <Label className="text-sm font-semibold text-foreground">
+                Background Opacity {backgroundOpacity}%
+              </Label>
               <Slider
                 min={0}
                 max={100}
@@ -483,7 +520,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </TabsContent>
 
           <TabsContent value="behavior" className="space-y-5 pt-4">
-            <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/30 px-4 py-3">
+            <div className="flex items-center justify-between rounded-2xl border border-border/50 bg-background/70 px-5 py-4">
               <div className="flex items-center gap-2">
                 {settings.backgroundLocked ? (
                   <Lock className="h-4 w-4 text-destructive" />
@@ -501,7 +538,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               />
             </div>
 
-            <div className="space-y-4 rounded-xl border border-border/60 bg-muted/30 px-4 py-4">
+            <div className="space-y-4 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
               <Label className="flex items-center gap-2 text-sm font-semibold">
                 <Grid3x3 className="h-4 w-4" />
                 Canvas Guides
@@ -539,7 +576,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </div>
                 {settings.snapToGrid !== false && (
                   <div className="space-y-2">
-                    <Label className="text-xs font-medium">Grid Size {gridSize}px</Label>
+                    <Label className="text-xs font-medium text-muted-foreground">Grid Size {gridSize}px</Label>
                     <Slider
                       min={4}
                       max={120}
@@ -552,7 +589,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
             </div>
 
-            <div className="space-y-3 rounded-xl border border-border/60 bg-muted/30 px-4 py-4">
+            <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
               <Label className="flex items-center gap-2 text-sm font-semibold">
                 <Hash className="h-4 w-4" />
                 Slide Numbering
@@ -566,7 +603,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
               {showSlideNumber && (
                 <div className="space-y-2">
-                  <Label className="text-xs font-medium">Position</Label>
+                  <Label className="text-xs font-medium text-muted-foreground">Position</Label>
                   <Select
                     value={settings.slideNumberPosition ?? 'bottom-right'}
                     onValueChange={value =>
@@ -575,7 +612,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       })
                     }
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="rounded-xl border-border/60">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent className="bg-background">
@@ -589,7 +626,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               )}
             </div>
 
-            <div className="space-y-3 rounded-xl border border-border/60 bg-muted/30 px-4 py-4">
+            <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
               <Label className="flex items-center gap-2 text-sm font-semibold">
                 <Calendar className="h-4 w-4" />
                 Speaker Notes
@@ -600,12 +637,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
               {notesVisible && (
                 <div className="space-y-2">
-                  <Label className="text-xs font-medium">Position</Label>
+                  <Label className="text-xs font-medium text-muted-foreground">Position</Label>
                   <Select
                     value={settings.slideNotesPosition ?? 'bottom'}
                     onValueChange={value => handleNotesPosition(value as SlideNotesPosition)}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger className="rounded-xl border-border/60">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent className="bg-background">
@@ -622,7 +659,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </TabsContent>
 
           <TabsContent value="transitions" className="space-y-5 pt-4">
-            <div className="space-y-3 rounded-xl border border-border/60 bg-muted/30 px-4 py-4">
+            <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
               <Label className="flex items-center gap-2 text-sm font-semibold">
                 <Zap className="h-4 w-4" />
                 Transition Effect
@@ -631,7 +668,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 value={(settings.transitionEffect as string) ?? settings.slideshowTransition ?? 'fade'}
                 onValueChange={handleTransitionChange}
               >
-                <SelectTrigger>
+                <SelectTrigger className="rounded-xl border-border/60">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-background">
@@ -643,7 +680,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </SelectContent>
               </Select>
               <div className="space-y-2">
-                <Label className="text-xs font-medium">Duration {transitionDuration}ms</Label>
+                <Label className="text-xs font-medium text-muted-foreground">Duration {transitionDuration}ms</Label>
                 <Slider
                   min={100}
                   max={2000}
@@ -654,7 +691,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
             </div>
 
-            <div className="space-y-3 rounded-xl border border-border/60 bg-muted/30 px-4 py-4">
+            <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
               <Label className="flex items-center gap-2 text-sm font-semibold">
                 <Clock className="h-4 w-4" />
                 Auto Advance
@@ -665,7 +702,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
               {settings.autoAdvance && (
                 <div className="space-y-2">
-                  <Label className="text-xs font-medium">Delay {autoAdvanceDuration}s</Label>
+                  <Label className="text-xs font-medium text-muted-foreground">Delay {autoAdvanceDuration}s</Label>
                   <Slider
                     min={1}
                     max={60}
@@ -679,7 +716,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </TabsContent>
 
           <TabsContent value="accessibility" className="space-y-5 pt-4">
-            <div className="space-y-3 rounded-xl border border-border/60 bg-muted/30 px-4 py-4">
+            <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-foreground">High Contrast</p>
@@ -714,7 +751,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               </div>
             </div>
 
-            <div className="space-y-3 rounded-xl border border-border/60 bg-muted/30 px-4 py-4">
+            <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
               <Label className="text-sm font-semibold text-foreground">Responsive Preview</Label>
               <div className="grid grid-cols-3 gap-2">
                 <Button variant="outline" size="sm" className="justify-start">
@@ -735,7 +772,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </Tabs>
       </ScrollArea>
 
-      <div className="flex items-center justify-between border-t border-border/60 px-5 py-4">
+      <div className="flex items-center justify-between border-t border-border/50 px-6 py-5">
         <Button variant="outline" onClick={onClose}>
           Close
         </Button>
