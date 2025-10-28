@@ -92,6 +92,9 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
   // Suggested molecules from AI
   const [suggestedMolecules, setSuggestedMolecules] = useState<any[]>([]);
 
+  // Session ID management - one session per chat
+  const [chatSessionIds, setChatSessionIds] = useState<Record<string, string>>({});
+
   // Auto-scroll to bottom
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -104,6 +107,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
   // Create new chat
   const createNewChat = () => {
     const newChatId = `workflow_chat_${Date.now()}`;
+    const newSessionId = `workflow_session_${Date.now()}`;
     const newChat: Chat = {
       id: newChatId,
       title: 'New Workflow',
@@ -119,6 +123,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
     };
     
     setChats(prev => [...prev, newChat]);
+    setChatSessionIds(prev => ({ ...prev, [newChatId]: newSessionId }));
     setCurrentChatId(newChatId);
   };
 
@@ -126,6 +131,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
   useEffect(() => {
     const savedChats = localStorage.getItem('workflow-ai-chats');
     const savedCurrentChatId = localStorage.getItem('workflow-ai-current-chat-id');
+    const savedSessionIds = localStorage.getItem('workflow-ai-session-ids');
     
     if (savedChats) {
       try {
@@ -139,6 +145,16 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
           }))
         }));
         setChats(chatsWithDates);
+        
+        // Load saved session IDs
+        if (savedSessionIds) {
+          try {
+            const parsedSessionIds = JSON.parse(savedSessionIds);
+            setChatSessionIds(parsedSessionIds);
+          } catch (e) {
+            console.warn('Failed to load session IDs:', e);
+          }
+        }
         
         if (savedCurrentChatId && chatsWithDates.find((chat: Chat) => chat.id === savedCurrentChatId)) {
           setCurrentChatId(savedCurrentChatId);
@@ -167,6 +183,13 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
       localStorage.setItem('workflow-ai-current-chat-id', currentChatId);
     }
   }, [currentChatId]);
+
+  // Save session IDs to localStorage
+  useEffect(() => {
+    if (Object.keys(chatSessionIds).length > 0) {
+      localStorage.setItem('workflow-ai-session-ids', JSON.stringify(chatSessionIds));
+    }
+  }, [chatSessionIds]);
 
   // Update messages when current chat changes
   useEffect(() => {
@@ -232,30 +255,26 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
         console.log('✅ Workflow WebSocket connected');
         setWsConnected(true);
         
-        // Add connected message
-        const connectedMessage: Message = {
-          id: `connected_${Date.now()}`,
-          content: '✅ Connected to Workflow AI! Analyzing your request...',
-        sender: 'ai',
-        timestamp: new Date()
-      };
+        // Skip the connected message - user already sees their message being processed
 
-        setChats(prevChats => {
-          return prevChats.map(chat => {
-            if (chat.id === currentChatId) {
-              return { ...chat, messages: [...chat.messages, connectedMessage] };
-            }
-            return chat;
-          });
-        });
+        // Get session ID for current chat
+        const sessionId = chatSessionIds[currentChatId] || `workflow_session_${Date.now()}`;
+        
+        // If no session ID exists for this chat, create and store it
+        if (!chatSessionIds[currentChatId]) {
+          setChatSessionIds(prev => ({ ...prev, [currentChatId]: sessionId }));
+        }
 
-        // Send request to Workflow Agent
+        // Send request to Workflow Agent with persistent session ID
         ws.send(JSON.stringify({
           message: currentInput,
-          session_id: `workflow_session_${Date.now()}`,
+          session_id: sessionId,
           workflow_context: workflowContext
         }));
       };
+
+      // Track if we've already added the final response message
+      let finalResponseAdded = false;
 
       ws.onmessage = async (event) => {
         const data = JSON.parse(event.data);
@@ -267,86 +286,103 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
             break;
 
           case 'thinking':
-            // Add thinking message to chat
-            const thinkingMessage: Message = {
-              id: `thinking_${Date.now()}`,
-              content: data.message,
-              sender: 'ai',
-              timestamp: new Date()
-            };
-            setChats(prevChats => {
-              return prevChats.map(chat => {
-                if (chat.id === currentChatId) {
-                  return { ...chat, messages: [...chat.messages, thinkingMessage] };
-                }
-                return chat;
-              });
-            });
+            // Skip thinking messages - just log
+            console.log('💭 Agent is thinking:', data.message);
             break;
 
           case 'molecules_suggested':
-            // Store suggested molecules
-            if (data.molecules) {
-              setSuggestedMolecules(data.molecules);
-            }
-            
-            // Add ONLY the molecule cards message (skip the text description)
-            const moleculeSuggestionsMessage: Message = {
-              id: `molecules_suggested_${Date.now()}`,
-              content: '', // Empty content - we only want to show the molecule cards
-              sender: 'ai',
-              timestamp: new Date(),
-              molecules: data.molecules
-            };
-            setChats(prevChats => {
-              return prevChats.map(chat => {
-                if (chat.id === currentChatId) {
-                  return { ...chat, messages: [...chat.messages, moleculeSuggestionsMessage] };
-                }
-                return chat;
-              });
-            });
+            // Ignore interim suggestions in chat (cards will be added on final response)
             break;
-
           case 'message':
-            // Only add AI message if it has molecules to display, otherwise skip the text
-            const aiMessage: Message = {
-              id: `ai_response_${Date.now()}`,
-              content: data.content || data.message || 'Response received',
-              sender: 'ai',
-              timestamp: new Date(),
-              molecules: data.molecules || suggestedMolecules
-            };
-
-            // Only add message if it has molecules, otherwise it's just redundant text
-            if (aiMessage.molecules && aiMessage.molecules.length > 0) {
-              // Message with molecules will be displayed as cards
-            setChats(prevChats => {
-              return prevChats.map(chat => {
-                if (chat.id === currentChatId) {
-                    return { ...chat, messages: [...chat.messages, aiMessage] };
-                }
-                return chat;
-              });
-            });
-            } else {
-              // If no molecules, don't show the redundant text
-              console.log('📝 Skipping text-only message, showing molecule cards instead');
-            }
+            // Ignore interim text updates; we only render on final 'response'
             break;
-
           case 'response':
-            // Full response with workflow composition
-            if (data.workflow_composition && data.success) {
-              console.log('✅ Workflow composition received:', data.workflow_composition);
+            // Handle both success and failure cases
+            if (!finalResponseAdded) {
+              console.log('📨 Processing response:', { success: data.success, hasMolecules: !!data.workflow_composition?.molecules });
               
-              // Store molecules from workflow composition
-              const molecules = data.workflow_composition.molecules || [];
-              if (molecules.length > 0) {
+              // If success is FALSE, show guidance message
+              if (data.success === false) {
+                let content = '';
+                
+                // Add smart_response as main content
+                if (data.smart_response) {
+                  content = data.smart_response;
+                } else if (data.message) {
+                  content = data.message;
+                } else {
+                  content = 'I need more information to help you.';
+                }
+                
+                // Add reasoning if available
+                if (data.reasoning) {
+                  content += `\n\n**💭 My Reasoning:** ${data.reasoning}`;
+                }
+                
+                // Add suggestions if available
+                if (data.suggestions && data.suggestions.length > 0) {
+                  content += `\n\n**💡 Suggestions:**\n${data.suggestions.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}`;
+                }
+                
+                const guidanceMessage: Message = {
+                  id: `guidance_${Date.now()}`,
+                  content: content,
+                  sender: 'ai',
+                  timestamp: new Date()
+                };
+                
+                console.log('📝 Adding guidance message to chat');
+                setChats(prevChats => {
+                  return prevChats.map(chat => {
+                    if (chat.id === currentChatId) {
+                      return { ...chat, messages: [...chat.messages, guidanceMessage] };
+                    }
+                    return chat;
+                  });
+                });
+                finalResponseAdded = true;
+              } 
+              // If success is TRUE, show molecules with smart_response
+              else if (data.success === true && data.workflow_composition && data.workflow_composition.molecules) {
+                const molecules = data.workflow_composition.molecules;
                 setSuggestedMolecules(molecules);
                 
-                // DO NOT auto-create molecules - user must click "Create" button
-                console.log('📋 Molecules received, waiting for user to click "Create" button');
+                // Build content from smart_response (not from message field)
+                let content = '';
+                if (data.smart_response) {
+                  content = data.smart_response;
+                }
+                
+                // Add reasoning if available
+                if (data.reasoning) {
+                  if (content) {
+                    content += `\n\n**💭 My Reasoning:** ${data.reasoning}`;
+                  } else {
+                    content = `**💭 My Reasoning:** ${data.reasoning}`;
+                  }
+                }
+                
+                const responseMessage: Message = {
+                  id: `response_${Date.now()}`,
+                  content: content,
+                  sender: 'ai',
+                  timestamp: new Date(),
+                  molecules: molecules
+                };
+
+                console.log('✅ Adding molecule response to chat');
+                setChats(prevChats => {
+                  return prevChats.map(chat => {
+                    if (chat.id === currentChatId) {
+                      return { ...chat, messages: [...chat.messages, responseMessage] };
+                    }
+                    return chat;
+                  });
+                });
+                
+                finalResponseAdded = true;
+              } else {
+                console.warn('⚠️ Unknown response format:', data);
               }
             }
             break;
@@ -787,13 +823,13 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
                 </div>
                  )}
                  {(message.content || (message.molecules && message.molecules.length > 0)) && (
-                   <p className="text-xs text-gray-600 mt-2 px-2 font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200 font-inter">
-                     {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                   </p>
+                <p className="text-xs text-gray-600 mt-2 px-2 font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200 font-inter">
+                  {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </p>
                  )}
-               </div>
-             </div>
-           ))}
+              </div>
+            </div>
+          ))}
 
           {/* Typing Indicator */}
           {isLoading && (
