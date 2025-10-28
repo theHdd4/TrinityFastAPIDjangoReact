@@ -71,9 +71,9 @@ const TRANSITION_OPTIONS = [
 const NOTES_POSITIONS: SlideNotesPosition[] = ['bottom', 'right'];
 
 const TAB_TRIGGER_CLASSES = cn(
-  'rounded-full px-4 py-2 text-sm font-semibold tracking-wide text-muted-foreground transition-all',
-  'data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm',
-  'leading-5',
+  'relative flex h-11 items-center justify-center rounded-full border border-transparent px-4 py-2 text-sm font-medium text-muted-foreground transition-all',
+  'whitespace-nowrap tracking-wide focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+  'data-[state=active]:border-border/60 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm',
 );
 
 const BACKGROUND_PRESET_GROUP_ID = 'preset-backgrounds';
@@ -295,7 +295,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       <ScrollArea className="max-h-[70vh] px-5">
         <Tabs defaultValue="background" className="w-full py-5">
-          <TabsList className="grid w-full grid-cols-4 gap-3 rounded-3xl bg-muted/40 p-2">
+          <TabsList className="grid w-full grid-cols-2 gap-2 rounded-full border border-border/60 bg-muted/40 p-2 sm:grid-cols-4 sm:gap-3 sm:p-2.5">
             <TabsTrigger value="background" className={TAB_TRIGGER_CLASSES}>
               Background
             </TabsTrigger>
@@ -349,61 +349,62 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
             {backgroundMode === 'solid' && (
               <div className="space-y-3 rounded-xl border border-border/60 bg-muted/30 px-4 py-4">
-                <Label className="flex items-center gap-2 text-sm font-semibold">
-                  <Droplet className="h-4 w-4" />
-                  Solid colour
-                </Label>
                 <div className="flex items-center justify-between">
-                  {backgroundColorLabel ? (
-                    <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      {backgroundColorLabel}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">Choose a colour</span>
-                  )}
-                  <Popover open={backgroundPaletteOpen} onOpenChange={setBackgroundPaletteOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        type="button"
-                        className="flex h-9 w-9 items-center justify-center rounded-full border border-border/60 bg-background/80 p-0 shadow-sm"
-                      >
-                        <span
-                          className="h-5 w-5 rounded-full border border-white/70 shadow-inner"
-                          style={backgroundSwatchStyle}
-                        />
-                        <span className="sr-only">Select background colour</span>
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent
-                      side="bottom"
-                      align="end"
-                      sideOffset={12}
-                      collisionPadding={24}
-                      className="z-[3000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
-                    >
-                      <div className="w-[360px] space-y-4 p-4">
-                        <ColorTray
-                          sections={backgroundColorSections}
-                          selectedId={backgroundSelectedId}
-                          onSelect={handleBackgroundPaletteSelect}
-                          swatchSize="md"
-                        />
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="color"
-                            value={resolvedSolidHex}
-                            onChange={event => handleCustomBackgroundColor(event.target.value)}
-                            className="h-11 w-full cursor-pointer rounded-2xl border border-border"
+                  <div className="flex items-center gap-2">
+                    <Droplet className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm font-semibold text-foreground">Solid colour</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {backgroundColorLabel && (
+                      <span className="text-xs font-medium text-muted-foreground">{backgroundColorLabel}</span>
+                    )}
+                    <Popover open={backgroundPaletteOpen} onOpenChange={setBackgroundPaletteOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          type="button"
+                          className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
+                        >
+                          <span
+                            className={cn(
+                              'h-5 w-5 rounded-full border border-white/70 shadow-inner',
+                              backgroundColorOption?.swatchClassName,
+                            )}
+                            style={backgroundSwatchStyle}
                           />
-                          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                            Custom
-                          </span>
+                          <span className="sr-only">Select background colour</span>
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        side="bottom"
+                        align="center"
+                        sideOffset={12}
+                        collisionPadding={24}
+                        className="z-[3000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
+                      >
+                        <div className="w-[360px] space-y-4 p-4">
+                          <ColorTray
+                            sections={backgroundColorSections}
+                            selectedId={backgroundSelectedId}
+                            onSelect={handleBackgroundPaletteSelect}
+                            swatchSize="md"
+                          />
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              value={resolvedSolidHex}
+                              onChange={event => handleCustomBackgroundColor(event.target.value)}
+                              className="h-11 w-full cursor-pointer rounded-2xl border border-border"
+                            />
+                            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                              Custom
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    </PopoverContent>
-                  </Popover>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
                 </div>
               </div>
             )}
