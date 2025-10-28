@@ -91,6 +91,9 @@ const sanitiseData = (rows?: ChartDataRow[]): ChartDataRow[] => {
   }));
 };
 
+const createValueDrafts = (rows: ChartDataRow[]): string[] =>
+  rows.map(row => (Number.isFinite(row.value) ? String(row.value) : '0'));
+
 const sanitiseConfig = (config?: ChartConfig): ChartConfig => {
   const merged = { ...DEFAULT_CHART_CONFIG, ...(config ?? {}) };
   return {
@@ -114,6 +117,9 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   onApply,
 }) => {
   const [chartData, setChartData] = useState<ChartDataRow[]>(() => sanitiseData(initialData));
+  const [valueDrafts, setValueDrafts] = useState<string[]>(() =>
+    createValueDrafts(sanitiseData(initialData)),
+  );
   const [config, setConfig] = useState<ChartConfig>(() => sanitiseConfig(initialConfig));
   const [isInitialised, setIsInitialised] = useState(false);
   const configRef = useRef(config);
@@ -127,6 +133,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       const nextData = sanitiseData(initialData);
       const nextConfig = sanitiseConfig(initialConfig);
       setChartData(nextData);
+      setValueDrafts(createValueDrafts(nextData));
       setConfig(nextConfig);
       configRef.current = nextConfig;
       setIsInitialised(true);
@@ -190,21 +197,34 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       emitApply(next, configRef.current);
       return next;
     });
+    setValueDrafts(prev => [...prev, '0']);
   };
 
   const updateRow = (index: number, field: 'label' | 'value', value: string | number) => {
+    if (field === 'label') {
+      setChartData(prev => {
+        const next = prev.map((row, rowIndex) =>
+          rowIndex === index
+            ? { ...row, label: typeof value === 'string' ? value : String(value) }
+            : row,
+        );
+        emitApply(next, configRef.current);
+        return next;
+      });
+      return;
+    }
+
+    const nextValue = typeof value === 'string' ? value : String(value);
+    setValueDrafts(prev => prev.map((draft, rowIndex) => (rowIndex === index ? nextValue : draft)));
+
     setChartData(prev => {
       const next = prev.map((row, rowIndex) => {
         if (rowIndex !== index) {
           return row;
         }
 
-        if (field === 'value') {
-          const numericValue = typeof value === 'number' ? value : Number.parseFloat(value);
-          return { ...row, value: Number.isFinite(numericValue) ? numericValue : 0 };
-        }
-
-        return { ...row, label: typeof value === 'string' ? value : String(value) };
+        const numericValue = Number.parseFloat(nextValue);
+        return { ...row, value: Number.isFinite(numericValue) ? numericValue : 0 };
       });
 
       emitApply(next, configRef.current);
@@ -217,6 +237,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       if (prev.length <= 1) {
         return prev;
       }
+      setValueDrafts(prevDrafts => prevDrafts.filter((_, rowIndex) => rowIndex !== index));
       const next = prev.filter((_, rowIndex) => rowIndex !== index);
       emitApply(next, configRef.current);
       return next;
@@ -553,7 +574,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                     />
                     <Input
                       type="number"
-                      value={row.value}
+                      value={valueDrafts[index] ?? String(row.value ?? '')}
                       onChange={event => updateRow(index, 'value', event.target.value)}
                       className="h-11 rounded-xl border-2 border-border/50 bg-card/50 transition-all hover:border-primary/50 focus:border-primary"
                       placeholder="0"
