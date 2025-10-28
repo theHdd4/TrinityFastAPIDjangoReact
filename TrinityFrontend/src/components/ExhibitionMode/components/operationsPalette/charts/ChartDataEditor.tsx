@@ -147,6 +147,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   const [config, setConfig] = useState<ChartConfig>(() => sanitiseConfig(initialConfig));
   const [isInitialised, setIsInitialised] = useState(false);
   const configRef = useRef(config);
+  const skipInitialSyncRef = useRef(false);
 
   useEffect(() => {
     configRef.current = config;
@@ -160,6 +161,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       setDraftRows(createDraftRows(nextData));
       setConfig(nextConfig);
       configRef.current = nextConfig;
+      skipInitialSyncRef.current = true;
       setIsInitialised(true);
       return;
     }
@@ -216,18 +218,12 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   };
 
   const addRow = () => {
-    setDraftRows(prev => {
-      const nextDrafts = [...prev, { label: 'New Item', value: '0' }];
-      const nextData = convertDraftsToChartData(nextDrafts);
-      setChartData(nextData);
-      emitApply(nextData, configRef.current);
-      return nextDrafts;
-    });
+    setDraftRows(prev => [...prev, { label: 'New Item', value: '0' }]);
   };
 
   const updateRow = (index: number, field: 'label' | 'value', value: string | number) => {
-    setDraftRows(prev => {
-      const nextDrafts = prev.map((row, rowIndex) => {
+    setDraftRows(prev =>
+      prev.map((row, rowIndex) => {
         if (rowIndex !== index) {
           return row;
         }
@@ -243,13 +239,8 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
           ...row,
           value: typeof value === 'string' ? value : String(value ?? ''),
         };
-      });
-
-      const nextData = convertDraftsToChartData(nextDrafts);
-      setChartData(nextData);
-      emitApply(nextData, configRef.current);
-      return nextDrafts;
-    });
+      }),
+    );
   };
 
   const deleteRow = (index: number) => {
@@ -258,13 +249,25 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
         return prev;
       }
 
-      const nextDrafts = prev.filter((_, rowIndex) => rowIndex !== index);
-      const nextData = convertDraftsToChartData(nextDrafts);
-      setChartData(nextData);
-      emitApply(nextData, configRef.current);
-      return nextDrafts;
+      return prev.filter((_, rowIndex) => rowIndex !== index);
     });
   };
+
+  useEffect(() => {
+    if (!isInitialised) {
+      return;
+    }
+
+    const nextData = convertDraftsToChartData(draftRows);
+    setChartData(nextData);
+
+    if (skipInitialSyncRef.current) {
+      skipInitialSyncRef.current = false;
+      return;
+    }
+
+    emitApply(nextData, configRef.current);
+  }, [draftRows, isInitialised]);
 
   const handleConfigChange = (partial: Partial<ChartConfig>) => {
     const nextConfig = { ...config, ...partial };
