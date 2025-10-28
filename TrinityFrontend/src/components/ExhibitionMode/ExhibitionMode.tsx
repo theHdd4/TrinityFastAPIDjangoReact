@@ -22,7 +22,7 @@ import { SlideThumbnails } from './components/SlideThumbnails';
 import { SlideNotes } from './components/SlideNotes';
 import { GridView } from './components/GridView';
 import { ExportDialog } from './components/ExportDialog';
-import { ImagePanel, type ImageSelectionMetadata } from './components/Images';
+import { ImagePanel, type ImageSelectionRequest } from './components/Images';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -47,6 +47,7 @@ import {
   type ChartDataRow,
   type ChartPanelResult,
 } from './components/operationsPalette/charts';
+import { ThemesPanel } from './components/operationsPalette/themes';
 import {
   buildChartRendererPropsFromManifest,
   buildTableDataFromManifest,
@@ -201,6 +202,7 @@ const ExhibitionMode = () => {
     | { type: 'shapes' }
     | { type: 'images' }
     | { type: 'charts' }
+    | { type: 'themes' }
     | null
   >(null);
   const [chartPanelData, setChartPanelData] = useState<ChartDataRow[]>(DEFAULT_CHART_DATA);
@@ -1268,7 +1270,12 @@ const ExhibitionMode = () => {
     }
 
     setOperationsPanelState(prev => {
-      if (prev?.type === 'notes' || prev?.type === 'shapes' || prev?.type === 'images') {
+      if (
+        prev?.type === 'notes' ||
+        prev?.type === 'shapes' ||
+        prev?.type === 'images' ||
+        prev?.type === 'themes'
+      ) {
         return prev;
       }
       return null;
@@ -1319,9 +1326,20 @@ const ExhibitionMode = () => {
     setOperationsPanelState(prev => (prev?.type === 'images' ? null : prev));
   }, []);
 
+  const handleOpenThemesPanel = useCallback(() => {
+    if (!canEdit) {
+      return;
+    }
+    setOperationsPanelState(prev => (prev?.type === 'themes' ? null : { type: 'themes' }));
+  }, [canEdit]);
+
+  const handleCloseThemesPanel = useCallback(() => {
+    setOperationsPanelState(prev => (prev?.type === 'themes' ? null : prev));
+  }, []);
+
   const handleImagePanelSelect = useCallback(
-    (imageUrl: string, metadata: ImageSelectionMetadata) => {
-      if (!canEdit) {
+    (selections: ImageSelectionRequest[]) => {
+      if (!canEdit || selections.length === 0) {
         return;
       }
 
@@ -1336,19 +1354,29 @@ const ExhibitionMode = () => {
         return value > max ? value : max;
       }, 1);
 
-      const imageObject = createImageSlideObject(
-        generateImageObjectId(),
-        imageUrl,
-        {
-          name: metadata.title ?? null,
-          source: metadata.source,
-        },
-        {
-          zIndex: nextZIndex + 1,
-        },
-      );
+      const baseZIndex = nextZIndex + 1;
 
-      addSlideObject(targetCard.id, imageObject);
+      selections.forEach((selection, index) => {
+        const imageObject = createImageSlideObject(
+          generateImageObjectId(),
+          selection.imageUrl,
+          {
+            name: selection.metadata.title ?? null,
+            source: selection.metadata.source,
+          },
+          {
+            zIndex: baseZIndex + index,
+          },
+        );
+
+        if (index > 0) {
+          imageObject.x += 28 * index;
+          imageObject.y += 28 * index;
+        }
+
+        addSlideObject(targetCard.id, imageObject);
+      });
+
       setOperationsPanelState(prev => (prev?.type === 'images' ? null : prev));
     },
     [
@@ -1648,6 +1676,10 @@ const ExhibitionMode = () => {
       );
     }
 
+    if (operationsPanelState.type === 'themes') {
+      return <ThemesPanel onClose={handleCloseThemesPanel} />;
+    }
+
     if (operationsPanelState.type === 'charts') {
       return (
         <ChartPanel
@@ -1676,6 +1708,7 @@ const ExhibitionMode = () => {
     handleCloseShapesPanel,
     handleCloseChartsPanel,
     handleCloseImagesPanel,
+    handleCloseThemesPanel,
     handleImagePanelSelect,
     handleNotesChange,
     handleShapeSelect,
@@ -1905,6 +1938,7 @@ const ExhibitionMode = () => {
             onOpenShapesPanel={handleOpenShapesPanel}
             onOpenImagesPanel={handleOpenImagesPanel}
             onOpenChartPanel={handleOpenChartsPanel}
+            onOpenThemesPanel={handleOpenThemesPanel}
             canEdit={canEdit}
             positionPanel={operationsPalettePanel}
           />

@@ -1,5 +1,5 @@
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
 wikipedia
 numpy
@@ -21,3 +21,4 @@ jsonschema
 polars>=0.20.0
 numba>=0.58.0
 python-multipart>=0.0.6
+websockets

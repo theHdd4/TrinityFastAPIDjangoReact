@@ -22,7 +22,7 @@ async def create_laboratory_card(payload: LaboratoryCardRequest) -> LaboratoryCa
 
     atom_response = LaboratoryAtomResponse(
         id=atom_instance_id,
-        atom_id=atom_id,
+        atomId=atom_id,  # Use alias field name for Pydantic v2 compatibility
         source=payload.source,
         llm=payload.llm,
         settings=payload.settings,
