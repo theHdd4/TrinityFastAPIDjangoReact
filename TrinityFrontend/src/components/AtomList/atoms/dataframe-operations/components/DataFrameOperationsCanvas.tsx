@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { 
   Pagination,
   PaginationContent,
@@ -875,6 +876,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const saveSuccessTimeout = useRef<number | null>(null);
   const [savedFiles, setSavedFiles] = useState<any[]>([]);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveFileName, setSaveFileName] = useState('');
 
   // Add local state for editing value
   const [editingCellValue, setEditingCellValue] = useState<string>('');
@@ -1038,25 +1041,36 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     fetchSavedDataFrames();
   }, []);
 
-  const handleSaveDataFrame = async () => {
+  // Open save modal with default filename
+  const handleSaveDataFrame = () => {
+    if (!data) return;
+
+    // Determine next serial number for DF_OPS files
+    const maxSerial = savedFiles.reduce((max, f) => {
+      const m = f.object_name?.match(/dataframe operations\/DF_OPS_(\d+)_/);
+      return m ? Math.max(max, parseInt(m[1], 10)) : max;
+    }, 0);
+    const nextSerial = maxSerial + 1;
+
+    // Base name from current file without extension
+    const baseName = data.fileName ? data.fileName.replace(/\.[^/.]+$/, '') : `dataframe_${Date.now()}`;
+    const defaultFilename = `DF_OPS_${nextSerial}_${baseName}`;
+    
+    setSaveFileName(defaultFilename);
+    setShowSaveModal(true);
+  };
+
+  // Actually save the DataFrame with the chosen filename
+  const confirmSaveDataFrame = async () => {
+    if (!data) return;
+    
     setSaveLoading(true);
     setSaveError(null);
     setSaveSuccess(false);
     try {
-      if (!data) throw new Error('No DataFrame loaded');
-
       const csv_data = toCSV();
 
-      // Determine next serial number for DF_OPS files
-      const maxSerial = savedFiles.reduce((max, f) => {
-        const m = f.object_name?.match(/dataframe operations\/DF_OPS_(\d+)_/);
-        return m ? Math.max(max, parseInt(m[1], 10)) : max;
-      }, 0);
-      const nextSerial = maxSerial + 1;
-
-      // Base name from current file without extension
-      const baseName = data.fileName ? data.fileName.replace(/\.[^/.]+$/, '') : `dataframe_${Date.now()}`;
-      const filename = `DF_OPS_${nextSerial}_${baseName}.arrow`;
+      const filename = saveFileName.trim() ? `${saveFileName.trim()}.arrow` : `dataframe_${Date.now()}.arrow`;
 
       // 🔧 REVERTED TO ORIGINAL APPROACH: Always use CSV
       // This ensures all UI changes (deletions, filters, search) are captured
@@ -1078,6 +1092,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       }
       const result = await response.json();
       setSaveSuccess(true);
+      setShowSaveModal(false);
       if (saveSuccessTimeout.current) clearTimeout(saveSuccessTimeout.current);
       saveSuccessTimeout.current = setTimeout(() => setSaveSuccess(false), 2000);
       
@@ -1095,6 +1110,63 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       toast({
         title: 'DataFrame Saved',
         description: result?.message ?? `${filename} saved successfully with ${processedData.filteredRows.length} filtered rows.`,
+        variant: 'default',
+      });
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save DataFrame');
+      toast({
+        title: 'Save Error',
+        description: err instanceof Error ? err.message : 'Failed to save DataFrame',
+        variant: 'destructive',
+      });
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
+  // Save to original file (update the input file)
+  const handleSaveToOriginalFile = async () => {
+    if (!data) return;
+    if (!settings.selectedFile) {
+      toast({ title: 'Error', description: 'No input file found', variant: 'destructive' });
+      return;
+    }
+    
+    setSaveLoading(true);
+    setSaveError(null);
+    setSaveSuccess(false);
+    try {
+      const csv_data = toCSV();
+      
+      // Use the original file path
+      let filename = settings.selectedFile;
+      // Remove .arrow extension if present (backend will add it back)
+      if (filename.endsWith('.arrow')) {
+        filename = filename.replace('.arrow', '');
+      }
+
+      const payload: Record<string, unknown> = { 
+        csv_data, 
+        filename,
+        overwrite_original: true 
+      };
+      
+      const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        throw new Error(`Save failed: ${response.statusText}`);
+      }
+      const result = await response.json();
+      setSaveSuccess(true);
+      if (saveSuccessTimeout.current) clearTimeout(saveSuccessTimeout.current);
+      saveSuccessTimeout.current = setTimeout(() => setSaveSuccess(false), 2000);
+      
+      toast({
+        title: 'File Updated',
+        description: result?.message ?? 'Original file updated successfully.',
         variant: 'default',
       });
     } catch (err) {
@@ -3488,6 +3560,23 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             </div>
             <div className="relative flex items-center gap-2">
               <Button
+                onClick={handleSaveToOriginalFile}
+                disabled={saveLoading}
+                className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-2"
+              >
+                {saveLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>Save</span>
+                  </>
+                )}
+              </Button>
+              <Button
                 onClick={handleSaveDataFrame}
                 disabled={saveLoading}
                 className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2"
@@ -3500,7 +3589,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 ) : (
                   <>
                     <Save className="w-4 h-4" />
-                    <span>Save DataFrame</span>
+                    <span>Save As</span>
                   </>
                 )}
               </Button>
@@ -4998,6 +5087,47 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
         </div>
       )}
+
+      {/* Save DataFrame Modal */}
+      <Dialog open={showSaveModal} onOpenChange={setShowSaveModal}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Save DataFrame</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <label className="text-sm font-medium text-gray-700 mb-2 block">
+              File Name
+            </label>
+            <Input
+              value={saveFileName}
+              onChange={(e) => setSaveFileName(e.target.value)}
+              placeholder="Enter file name"
+              className="w-full"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && saveFileName.trim()) {
+                  confirmSaveDataFrame();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowSaveModal(false)}
+              disabled={saveLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSaveDataFrame}
+              disabled={saveLoading || !saveFileName.trim()}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {saveLoading ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

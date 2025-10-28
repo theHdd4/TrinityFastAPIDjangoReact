@@ -514,6 +514,7 @@ class SaveRequest(BaseModel):
     csv_data: str | None = None
     filename: str | None = None
     df_id: str | None = None
+    overwrite_original: bool = False
     
     class Config:
         # Allow extra fields for forward compatibility
@@ -592,16 +593,26 @@ async def save_dataframe(payload: SaveRequest):
                 logger.error(f"❌ [SAVE] Even fallback parsing failed: {fallback_exc}")
                 raise HTTPException(status_code=400, detail=f"Invalid csv_data: {exc}") from exc
 
-    filename = (payload.filename or "").strip()
-    if not filename:
-        stub = (session_id or str(uuid.uuid4())).replace("-", "")[:8]
-        filename = f"{stub}_dataframe_ops.arrow"
-    if not filename.endswith(".arrow"):
-        filename += ".arrow"
+    # Handle filename based on overwrite_original flag
+    if payload.overwrite_original:
+        # Overwrite original file - use filename as-is
+        if not payload.filename:
+            raise HTTPException(status_code=400, detail="filename is required when overwriting original file")
+        if not payload.filename.endswith('.arrow'):
+            payload.filename += '.arrow'
+        object_name = payload.filename
+        logger.info(f"🔄 [SAVE] Overwriting original file: {object_name}")
+    else:
+        # Normal save - create new file in dataframe operations folder
+        filename = (payload.filename or "").strip()
+        if not filename:
+            stub = (session_id or str(uuid.uuid4())).replace("-", "")[:8]
+            filename = f"{stub}_dataframe_ops.arrow"
+        if not filename.endswith(".arrow"):
+            filename += ".arrow"
 
-    logger.info(f"💾 [SAVE] Target filename: {filename}")
+        logger.info(f"💾 [SAVE] Target filename: {filename}")
 
-    try:
         prefix = await get_object_prefix()
         dfops_prefix = f"{prefix}dataframe operations/"
         logger.info(f"📁 [SAVE] MinIO prefix: {dfops_prefix}")
@@ -614,6 +625,11 @@ async def save_dataframe(payload: SaveRequest):
 
         object_name = f"{dfops_prefix}{filename}"
         logger.info(f"🎯 [SAVE] Full object name: {object_name}")
+    
+    # Set message based on operation type
+    message = "Original file updated successfully" if payload.overwrite_original else "DataFrame saved successfully"
+
+    try:
 
         # Add detailed dtype validation and conversion logging
         logger.info(f"🔍 [SAVE] Pre-save DataFrame inspection:")
@@ -670,7 +686,8 @@ async def save_dataframe(payload: SaveRequest):
             "result_file": object_name,
             "shape": df.shape,
             "columns": list(df.columns),
-            "message": "DataFrame saved successfully",
+            "message": message,
+            "overwrite_original": payload.overwrite_original,
         }
         if session_id:
             response["df_id"] = session_id
