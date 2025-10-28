@@ -211,6 +211,7 @@ services:
       - "traefik.http.routers.trinity-ai.entrypoints=web"
       - "traefik.http.routers.trinity-ai.priority=100"
       - "traefik.http.services.trinity-ai.loadbalancer.server.port=8002"
+      - "traefik.http.services.trinity-ai.loadbalancer.passhostheader=true"
     restart: always
 
   frontend:
