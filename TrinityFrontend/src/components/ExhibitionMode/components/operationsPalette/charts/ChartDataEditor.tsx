@@ -91,8 +91,32 @@ const sanitiseData = (rows?: ChartDataRow[]): ChartDataRow[] => {
   }));
 };
 
-const createValueDrafts = (rows: ChartDataRow[]): string[] =>
-  rows.map(row => (Number.isFinite(row.value) ? String(row.value) : '0'));
+type DraftRow = {
+  label: string;
+  value: string;
+};
+
+const createDraftRows = (rows: ChartDataRow[]): DraftRow[] =>
+  rows.map(row => ({
+    label: row.label ?? '',
+    value: Number.isFinite(row.value) ? String(row.value) : '0',
+  }));
+
+const parseDraftValue = (value: string): number => {
+  const numericValue = Number.parseFloat(value);
+  if (!Number.isFinite(numericValue)) {
+    return 0;
+  }
+  return numericValue;
+};
+
+const convertDraftsToChartData = (rows: DraftRow[]): ChartDataRow[] =>
+  sanitiseData(
+    rows.map(row => ({
+      label: row.label ?? '',
+      value: parseDraftValue(row.value ?? ''),
+    })),
+  );
 
 const sanitiseConfig = (config?: ChartConfig): ChartConfig => {
   const merged = { ...DEFAULT_CHART_CONFIG, ...(config ?? {}) };
@@ -117,8 +141,8 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   onApply,
 }) => {
   const [chartData, setChartData] = useState<ChartDataRow[]>(() => sanitiseData(initialData));
-  const [valueDrafts, setValueDrafts] = useState<string[]>(() =>
-    createValueDrafts(sanitiseData(initialData)),
+  const [draftRows, setDraftRows] = useState<DraftRow[]>(() =>
+    createDraftRows(sanitiseData(initialData)),
   );
   const [config, setConfig] = useState<ChartConfig>(() => sanitiseConfig(initialConfig));
   const [isInitialised, setIsInitialised] = useState(false);
@@ -133,7 +157,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       const nextData = sanitiseData(initialData);
       const nextConfig = sanitiseConfig(initialConfig);
       setChartData(nextData);
-      setValueDrafts(createValueDrafts(nextData));
+      setDraftRows(createDraftRows(nextData));
       setConfig(nextConfig);
       configRef.current = nextConfig;
       setIsInitialised(true);
@@ -192,55 +216,53 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   };
 
   const addRow = () => {
-    setChartData(prev => {
-      const next = [...prev, { label: 'New Item', value: 0 }];
-      emitApply(next, configRef.current);
-      return next;
+    setDraftRows(prev => {
+      const nextDrafts = [...prev, { label: 'New Item', value: '0' }];
+      const nextData = convertDraftsToChartData(nextDrafts);
+      setChartData(nextData);
+      emitApply(nextData, configRef.current);
+      return nextDrafts;
     });
-    setValueDrafts(prev => [...prev, '0']);
   };
 
   const updateRow = (index: number, field: 'label' | 'value', value: string | number) => {
-    if (field === 'label') {
-      setChartData(prev => {
-        const next = prev.map((row, rowIndex) =>
-          rowIndex === index
-            ? { ...row, label: typeof value === 'string' ? value : String(value) }
-            : row,
-        );
-        emitApply(next, configRef.current);
-        return next;
-      });
-      return;
-    }
-
-    const nextValue = typeof value === 'string' ? value : String(value);
-    setValueDrafts(prev => prev.map((draft, rowIndex) => (rowIndex === index ? nextValue : draft)));
-
-    setChartData(prev => {
-      const next = prev.map((row, rowIndex) => {
+    setDraftRows(prev => {
+      const nextDrafts = prev.map((row, rowIndex) => {
         if (rowIndex !== index) {
           return row;
         }
 
-        const numericValue = Number.parseFloat(nextValue);
-        return { ...row, value: Number.isFinite(numericValue) ? numericValue : 0 };
+        if (field === 'label') {
+          return {
+            ...row,
+            label: typeof value === 'string' ? value : String(value ?? ''),
+          };
+        }
+
+        return {
+          ...row,
+          value: typeof value === 'string' ? value : String(value ?? ''),
+        };
       });
 
-      emitApply(next, configRef.current);
-      return next;
+      const nextData = convertDraftsToChartData(nextDrafts);
+      setChartData(nextData);
+      emitApply(nextData, configRef.current);
+      return nextDrafts;
     });
   };
 
   const deleteRow = (index: number) => {
-    setChartData(prev => {
+    setDraftRows(prev => {
       if (prev.length <= 1) {
         return prev;
       }
-      setValueDrafts(prevDrafts => prevDrafts.filter((_, rowIndex) => rowIndex !== index));
-      const next = prev.filter((_, rowIndex) => rowIndex !== index);
-      emitApply(next, configRef.current);
-      return next;
+
+      const nextDrafts = prev.filter((_, rowIndex) => rowIndex !== index);
+      const nextData = convertDraftsToChartData(nextDrafts);
+      setChartData(nextData);
+      emitApply(nextData, configRef.current);
+      return nextDrafts;
     });
   };
 
@@ -253,8 +275,9 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
   const handleSave = () => {
     const normalisedConfig: ChartConfig = { ...config };
-    onApply?.(chartData.map(item => ({ ...item })), normalisedConfig);
-    onSave(chartData.map(item => ({ ...item })), normalisedConfig);
+    const outputData = chartData.map(item => ({ ...item }));
+    onApply?.(outputData, normalisedConfig);
+    onSave(outputData, normalisedConfig);
     onClose();
   };
 
@@ -564,7 +587,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                   <div />
                 </div>
 
-                {chartData.map((row, index) => (
+                {draftRows.map((row, index) => (
                   <div key={index} className="group grid animate-fade-in grid-cols-[1fr,140px,48px] gap-3">
                     <Input
                       value={row.label}
@@ -574,7 +597,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                     />
                     <Input
                       type="number"
-                      value={valueDrafts[index] ?? String(row.value ?? '')}
+                      value={row.value}
                       onChange={event => updateRow(index, 'value', event.target.value)}
                       className="h-11 rounded-xl border-2 border-border/50 bg-card/50 transition-all hover:border-primary/50 focus:border-primary"
                       placeholder="0"
@@ -584,7 +607,7 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                       size="icon"
                       onClick={() => deleteRow(index)}
                       className="h-11 w-11 rounded-xl opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-                      disabled={chartData.length <= 1}
+                      disabled={draftRows.length <= 1}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
