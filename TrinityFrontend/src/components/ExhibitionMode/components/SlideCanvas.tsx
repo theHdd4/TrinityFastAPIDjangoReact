@@ -58,7 +58,7 @@ import type { TextBoxFormatting } from './operationsPalette/textBox/types';
 import { TextBoxPositionPanel } from './operationsPalette/textBox/TextBoxPositionPanel';
 import { CardFormattingPanel } from './operationsPalette/CardFormattingPanel';
 import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
-import { SlideShapeObject, ShapeRenderer, findShapeDefinition } from './operationsPalette/shapes';
+import { SlideShapeObject } from './operationsPalette/shapes';
 import type { ShapeObjectProps } from './operationsPalette/shapes/constants';
 import { SlideChart, ChartDataEditor, parseChartObjectProps, isEditableChartType } from './operationsPalette/charts';
 import type { ChartConfig, ChartDataRow } from './operationsPalette/charts';
@@ -4018,28 +4018,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const shouldShowTitle = !isFeatureOverviewAtom && !isChartMakerAtom && !isEvaluateModelsFeatureAtom;
 
           const renderObject = () => {
-            const shapeProps = object.props as Record<string, unknown> | undefined;
-            const rawShapeId = isShapeObject ? shapeProps?.shapeId : null;
-            const shapeId = typeof rawShapeId === 'string' ? rawShapeId : null;
-            const shapeDefinition = shapeId ? findShapeDefinition(shapeId) : null;
-            const shapeSelectionOverlay =
-              isShapeObject && isSelected && shapeDefinition ? (
-                <div
-                  className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center text-yellow-400"
-                  aria-hidden="true"
-                >
-                  <ShapeRenderer
-                    definition={shapeDefinition}
-                    fill="transparent"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    strokeStyle="dotted"
-                    opacity={1}
-                    className="h-full w-full"
-                  />
-                </div>
-              ) : null;
-
             return (
               <div
                 className="absolute group"
@@ -4053,7 +4031,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
                 onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
               >
-              {isSelected && !(isTextBoxObject && isEditingTextBox) && !isShapeObject && (
+              {isSelected && !(isTextBoxObject && isEditingTextBox) && (
                 <div
                   className={cn(
                     'pointer-events-none absolute inset-0 z-40 border border-dotted border-yellow-400 transition-all duration-200',
@@ -4093,7 +4071,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   transformOrigin: rotation !== 0 ? 'center center' : undefined,
                 }}
               >
-                {shapeSelectionOverlay}
                 {isAtomObject(object) && shouldShowTitle && (
                   <div className="flex items-center gap-2 border-b border-border/60 bg-muted/10 px-4 py-2">
                     <div className={`h-2.5 w-2.5 rounded-full ${object.props.atom.color}`} />
