@@ -20,15 +20,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -118,9 +110,9 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   };
 
   const colorSchemeGroups = useMemo(() => {
-    return COLOR_SCHEMES.reduce<Record<string, typeof COLOR_SCHEMES>>((acc, scheme) => {
-      const group = acc[scheme.category] ?? [];
-      acc[scheme.category] = [...group, scheme];
+    return COLOR_SCHEMES.reduce<Record<string, typeof COLOR_SCHEMES[number][]>>((acc, scheme) => {
+      const current = acc[scheme.category] ?? [];
+      acc[scheme.category] = [...current, scheme];
       return acc;
     }, {});
   }, []);
@@ -145,10 +137,270 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     : config.type === 'blank'
       ? 'Blank diagrams do not require tabular data.'
       : 'Calendar diagrams generate their layout automatically.';
-  const legendPositionLabel = useMemo(() => {
-    const match = legendPositions.find(option => option.id === config.legendPosition);
-    return match ? match.name : legendPositions[1]?.name ?? 'Bottom';
-  }, [config.legendPosition]);
+  const colors = useMemo(() => selectedScheme.colors, [selectedScheme]);
+
+  const renderChartLegend = () => {
+    if (!isEditableChartType(config.type) || chartData.length === 0) {
+      return null;
+    }
+
+    const orientation = config.legendPosition === 'left' || config.legendPosition === 'right' ? 'vertical' : 'horizontal';
+
+    return (
+      <div
+        className={cn(
+          orientation === 'vertical'
+            ? 'flex flex-col gap-3 items-start'
+            : 'flex flex-wrap gap-3 justify-center',
+        )}
+      >
+        {chartData.map((item, index) => (
+          <div
+            key={`${item.label}-${index}`}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card/50 border border-border/30 hover:border-primary/40 transition-all hover:scale-105 group"
+            style={{ animationDelay: `${index * 100}ms` }}
+          >
+            <span
+              className="w-3.5 h-3.5 rounded-full ring-2 ring-offset-1 ring-offset-card group-hover:scale-125 transition-transform"
+              style={{
+                backgroundColor: colors[index % colors.length],
+                boxShadow: `0 0 8px ${colors[index % colors.length]}40`,
+              }}
+            />
+            <span className="text-sm font-medium text-foreground">{item.label}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderEditableChartPreview = () => {
+    if (!isEditableChartType(config.type)) {
+      return null;
+    }
+
+    if (chartData.length === 0) {
+      return (
+        <div className="w-full h-64 flex items-center justify-center text-sm text-muted-foreground">
+          Add chart data to see the preview
+        </div>
+      );
+    }
+
+    if (config.type === 'pie' || config.type === 'donut') {
+      const total = chartData.reduce((sum, item) => sum + item.value, 0);
+      let currentAngle = -90;
+
+      return (
+        <div className="relative w-full h-64 flex items-center justify-center">
+          <svg width="220" height="220" viewBox="0 0 220 220" className="transform -rotate-90">
+            {chartData.map((item, index) => {
+              const percentage = total === 0 ? 0 : (item.value / total) * 360;
+              const startAngle = currentAngle;
+              const endAngle = currentAngle + percentage;
+              currentAngle = endAngle;
+
+              const radius = 90;
+              const innerRadius = config.type === 'donut' ? 50 : 0;
+
+              const startX = 110 + radius * Math.cos((startAngle * Math.PI) / 180);
+              const startY = 110 + radius * Math.sin((startAngle * Math.PI) / 180);
+              const endX = 110 + radius * Math.cos((endAngle * Math.PI) / 180);
+              const endY = 110 + radius * Math.sin((endAngle * Math.PI) / 180);
+
+              const innerStartX = 110 + innerRadius * Math.cos((startAngle * Math.PI) / 180);
+              const innerStartY = 110 + innerRadius * Math.sin((startAngle * Math.PI) / 180);
+              const innerEndX = 110 + innerRadius * Math.cos((endAngle * Math.PI) / 180);
+              const innerEndY = 110 + innerRadius * Math.sin((endAngle * Math.PI) / 180);
+
+              const largeArcFlag = percentage > 180 ? 1 : 0;
+
+              const pathData = config.type === 'donut'
+                ? `M ${startX} ${startY} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endX} ${endY} L ${innerEndX} ${innerEndY} A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${innerStartX} ${innerStartY} Z`
+                : `M 110 110 L ${startX} ${startY} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endX} ${endY} Z`;
+
+              return (
+                <path
+                  key={`${item.label}-${index}`}
+                  d={pathData}
+                  fill={colors[index % colors.length]}
+                  className="transition-all duration-300 hover:opacity-80"
+                />
+              );
+            })}
+          </svg>
+        </div>
+      );
+    }
+
+    if (config.type === 'column' || config.type === 'bar') {
+      const maxValue = Math.max(...chartData.map(item => item.value), 0);
+      const safeMax = maxValue === 0 ? 1 : maxValue;
+      const isBar = config.type === 'bar';
+
+      return (
+        <div
+          className={cn(
+            'w-full h-64 flex gap-4 p-4',
+            isBar ? 'flex-col justify-center' : 'items-end justify-center',
+          )}
+        >
+          {chartData.map((item, index) => {
+            const percentage = (item.value / safeMax) * 100;
+
+            if (isBar) {
+              return (
+                <div key={`${item.label}-${index}`} className="flex gap-2 items-center">
+                  {config.showLabels && (
+                    <span className="text-xs text-muted-foreground font-medium min-w-[60px]">{item.label}</span>
+                  )}
+                  <div
+                    className="rounded-lg transition-all duration-300 hover:opacity-80"
+                    style={{
+                      backgroundColor: colors[index % colors.length],
+                      width: `${Math.max(0, percentage)}%`,
+                      minWidth: item.value > 0 ? '4px' : '0',
+                      height: '40px',
+                    }}
+                  />
+                  {config.showValues && (
+                    <span className="text-xs font-semibold text-foreground">{item.value}</span>
+                  )}
+                </div>
+              );
+            }
+
+            return (
+              <div key={`${item.label}-${index}`} className="flex flex-col items-center justify-end gap-2">
+                <div
+                  className="w-10 rounded-lg transition-all duration-300 hover:opacity-80"
+                  style={{
+                    backgroundColor: colors[index % colors.length],
+                    height: `${Math.max(0, percentage)}%`,
+                    minHeight: item.value > 0 ? '4px' : '0',
+                  }}
+                />
+                {config.showLabels && (
+                  <span className="text-xs text-muted-foreground font-medium text-center">{item.label}</span>
+                )}
+                {config.showValues && (
+                  <span className="text-xs font-semibold text-foreground">{item.value}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    const maxValue = Math.max(...chartData.map(item => item.value), 0);
+    const safeMax = maxValue === 0 ? 1 : maxValue;
+    const points = chartData
+      .map((item, index) => {
+        const x = chartData.length <= 1 ? 160 : (index / (chartData.length - 1)) * 320;
+        const y = 200 - (item.value / safeMax) * 180;
+        return `${x},${y}`;
+      })
+      .join(' ');
+
+    return (
+      <div className="w-full h-64 flex items-center justify-center">
+        <svg width="340" height="220" viewBox="0 0 340 220">
+          <polyline
+            points={points}
+            fill="none"
+            stroke={colors[0]}
+            strokeWidth={3}
+            className="transition-all duration-300"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          {chartData.map((item, index) => {
+            const x = chartData.length <= 1 ? 160 : (index / (chartData.length - 1)) * 320;
+            const y = 200 - (item.value / safeMax) * 180;
+            return (
+              <g key={`${item.label}-${index}`}>
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={5}
+                  fill={colors[index % colors.length]}
+                  className="transition-all duration-300 hover:r-7"
+                />
+                {config.showValues && (
+                  <text x={x} y={y - 12} textAnchor="middle" fontSize={12} fontWeight="bold">
+                    {item.value}
+                  </text>
+                )}
+                {config.showLabels && (
+                  <text x={x} y={212} textAnchor="middle" fontSize={12}>
+                    {item.label}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    );
+  };
+
+  const renderPreviewCard = () => {
+    if (!isEditableChartType(config.type)) {
+      return (
+        <div className="rounded-xl border border-border/40 bg-card p-6 shadow-sm">
+          <div className="w-full h-64 rounded-lg bg-muted/20 border border-border/30 flex items-center justify-center overflow-hidden">
+            <SlideChart data={chartData} config={config} className="w-full h-full max-w-full" />
+          </div>
+        </div>
+      );
+    }
+
+    const chartContent = renderEditableChartPreview();
+    const legend = renderChartLegend();
+
+    if (!legend) {
+      return (
+        <div className="rounded-xl border border-border/40 bg-card p-8 shadow-sm">
+          {chartContent}
+        </div>
+      );
+    }
+
+    if (config.legendPosition === 'left') {
+      return (
+        <div className="rounded-xl border border-border/40 bg-card p-8 shadow-sm">
+          <div className="flex items-stretch gap-6">
+            <div className="pr-6 border-r border-border/20 flex flex-col justify-center">{legend}</div>
+            <div className="flex-1">{chartContent}</div>
+          </div>
+        </div>
+      );
+    }
+
+    if (config.legendPosition === 'right') {
+      return (
+        <div className="rounded-xl border border-border/40 bg-card p-8 shadow-sm">
+          <div className="flex items-stretch gap-6">
+            <div className="flex-1">{chartContent}</div>
+            <div className="pl-6 border-l border-border/20 flex flex-col justify-center">{legend}</div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="rounded-xl border border-border/40 bg-card p-8 shadow-sm">
+        {config.legendPosition === 'top' && (
+          <div className="pb-6 mb-6 border-b border-border/20">{legend}</div>
+        )}
+        {chartContent}
+        {config.legendPosition === 'bottom' && (
+          <div className="mt-8 pt-6 border-t border-border/20">{legend}</div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <Dialog open={open} onOpenChange={state => { if (!state) onClose(); }}>
@@ -263,11 +515,7 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
             <ScrollArea className="flex-1">
               <div className="p-6 space-y-6">
-                <div className="rounded-xl border border-border/40 bg-card p-6 shadow-sm">
-                  <div className="w-full h-64 rounded-lg bg-muted/20 border border-border/30 flex items-center justify-center overflow-hidden">
-                    <SlideChart data={chartData} config={config} className="w-full h-full max-w-full" />
-                  </div>
-                </div>
+                {renderPreviewCard()}
 
                 <div className="pt-2 pb-1 border-b-2 border-primary/20">
                   <h4 className="text-base font-bold text-primary flex items-center gap-2">
@@ -345,51 +593,53 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                     </div>
                     Colour scheme
                   </Label>
-                  <Select
-                    value={config.colorScheme}
-                    onValueChange={value => setConfig(prev => ({ ...prev, colorScheme: value }))}
-                  >
-                    <SelectTrigger className="h-12 rounded-xl border border-border/60 bg-gradient-to-r from-primary/5 via-card to-secondary/5 px-4 shadow-sm hover:border-primary/40">
-                      <div className="flex flex-1 items-center gap-3">
-                        <span className="flex gap-1.5">
-                          {selectedScheme.colors.slice(0, 5).map(color => (
-                            <span
-                              key={`${selectedScheme.id}-${color}`}
-                              className="h-5 w-5 rounded-md border border-border/40"
-                              style={{ backgroundColor: color }}
-                            />
-                          ))}
-                        </span>
-                        <span className="text-sm font-semibold text-foreground">{selectedScheme.name}</span>
-                      </div>
-                      <SelectValue aria-hidden style={{ display: 'none' }} />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl border border-border/60 bg-popover/95 backdrop-blur-sm">
+
+                  <ScrollArea className="h-80 w-full rounded-lg border border-border/60 bg-card">
+                    <div className="p-3 space-y-3">
                       {Object.entries(colorSchemeGroups).map(([category, schemes]) => (
-                        <SelectGroup key={category}>
-                          <SelectLabel className="px-2 pt-2 text-[0.65rem] uppercase tracking-wide text-muted-foreground">
-                            {category}
-                          </SelectLabel>
-                          {schemes.map(scheme => (
-                            <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
-                              <div className="flex items-center gap-3">
-                                <span className="flex gap-1.5">
+                        <div key={category} className="mb-3">
+                          <div className="px-2 py-1 mb-2">
+                            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                              {category}
+                            </span>
+                          </div>
+                          <div className="space-y-1">
+                            {schemes.map(scheme => (
+                              <button
+                                key={scheme.id}
+                                type="button"
+                                onClick={() => setConfig(prev => ({ ...prev, colorScheme: scheme.id }))}
+                                className={cn(
+                                  'w-full flex items-center gap-3 p-2.5 rounded-lg transition-colors',
+                                  config.colorScheme === scheme.id
+                                    ? 'bg-primary/10 border border-primary/30'
+                                    : 'hover:bg-muted/50',
+                                )}
+                              >
+                                <div className="flex gap-1 shrink-0">
                                   {scheme.colors.slice(0, 5).map(color => (
-                                    <span
+                                    <div
                                       key={`${scheme.id}-${color}`}
-                                      className="h-5 w-5 rounded-md border border-border/40"
+                                      className="h-6 w-6 rounded-md border border-border/40"
                                       style={{ backgroundColor: color }}
                                     />
                                   ))}
+                                </div>
+                                <span
+                                  className={cn(
+                                    'text-sm font-medium flex-1 text-left',
+                                    config.colorScheme === scheme.id ? 'text-primary' : 'text-foreground',
+                                  )}
+                                >
+                                  {scheme.name}
                                 </span>
-                                <span className="text-sm font-medium text-foreground">{scheme.name}</span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       ))}
-                    </SelectContent>
-                  </Select>
+                    </div>
+                  </ScrollArea>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -424,13 +674,12 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                       setConfig(prev => ({ ...prev, legendPosition: value as ChartConfig['legendPosition'] }))
                     }
                   >
-                    <SelectTrigger className="h-12 rounded-xl border border-border/60 bg-card/70 px-4 hover-border-primary/40">
-                      <span className="text-sm font-semibold text-foreground flex-1 text-left">{legendPositionLabel}</span>
-                      <SelectValue aria-hidden style={{ display: 'none' }} />
+                    <SelectTrigger className="h-11 bg-card border border-border/60 hover:border-primary/40 rounded-lg">
+                      <SelectValue placeholder="Select position" />
                     </SelectTrigger>
-                    <SelectContent className="rounded-xl border border-border/60 bg-popover/95 backdrop-blur-sm">
+                    <SelectContent className="rounded-lg">
                       {legendPositions.map(pos => (
-                        <SelectItem key={pos.id} value={pos.id} className="rounded-lg">
+                        <SelectItem key={pos.id} value={pos.id} className="rounded-md">
                           {pos.name}
                         </SelectItem>
                       ))}
