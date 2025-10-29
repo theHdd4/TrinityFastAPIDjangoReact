@@ -802,13 +802,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
     setCardinalityError(null);
     
     try {
-      const formData = new FormData();
-      formData.append('validator_atom_id', atom.settings.validator_atom_id || '');
-      formData.append('file_key', atom.settings.dataSource || '');
-      formData.append('bucket_name', 'trinity');
-      formData.append('object_names', atom.settings.dataSource || '');
-      
-      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
+      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(atom.settings.dataSource || '')}`;
+      const res = await fetch(url);
       const data = await res.json();
       
       if (data.status === 'SUCCESS' && data.cardinality) {

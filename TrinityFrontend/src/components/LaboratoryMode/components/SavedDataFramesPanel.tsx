@@ -391,9 +391,17 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     if (!filename.endsWith('.arrow')) {
       filename += '.arrow';
     }
+    
+    // Remove the prefix (client/app/project) from the object path
+    // and preserve only the folder structure after the prefix
+    const relativePath = obj.startsWith(prefix) ? obj.substring(prefix.length) : obj;
+    const lastSlashIndex = relativePath.lastIndexOf('/');
+    const folderPath = lastSlashIndex !== -1 ? relativePath.substring(0, lastSlashIndex + 1) : '';
+    const newFilePath = folderPath + filename;
+    
     const form = new FormData();
     form.append('object_name', obj);
-    form.append('new_filename', filename);
+    form.append('new_filename', newFilePath);
     const res = await fetch(`${VALIDATE_API}/rename_dataframe`, { method: 'POST', body: form });
     if (res.ok) {
       const data = await res.json();

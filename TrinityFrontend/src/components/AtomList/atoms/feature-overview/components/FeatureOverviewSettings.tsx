@@ -193,16 +193,8 @@ const FeatureOverviewSettings: React.FC<FeatureOverviewSettingsProps> = ({ atomI
       onSettingsChange({ loadingStatus: 'Fetching column summary' });
       
       // Use create column cardinality endpoint instead of column_summary
-      const formData = new FormData();
-      formData.append('validator_atom_id', atomId);
-      formData.append('file_key', activeSource);
-      formData.append('bucket_name', 'trinity');
-      formData.append('object_names', activeSource);
-
-      const res = await fetch(`${GROUPBY_API}/cardinality`, {
-        method: 'POST',
-        body: formData,
-      });
+      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(activeSource)}`;
+      const res = await fetch(url);
       
       let numeric: string[] = [];
       let summary: ColumnInfo[] = [];

@@ -340,13 +340,20 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
 
   const getUniqueValuesForColumn = (column: string) => {
     // Use backend-provided unique values if available
-    if (typedData && (typedData.unique_values || typedData.uniqueValuesByColumn)) {
-      const uniqueMap = typedData.unique_values || typedData.uniqueValuesByColumn;
+    // Prioritize uniqueValuesByColumn (new) over unique_values (legacy)
+    if (typedData && (typedData.uniqueValuesByColumn || typedData.unique_values)) {
+      const uniqueMap = typedData.uniqueValuesByColumn || typedData.unique_values;
       if (uniqueMap && uniqueMap[column]) {
+        // console.log(`[ChartMakerCanvas] Found unique values for column "${column}" from backend:`, uniqueMap[column]);
         return uniqueMap[column];
+      } else {
+        console.log(`[ChartMakerCanvas] Column "${column}" not found in uniqueMap. Available columns:`, Object.keys(uniqueMap || {}));
       }
+    } else {
+      console.log(`[ChartMakerCanvas] No uniqueValuesByColumn data available. typedData:`, typedData);
     }
     // Fallback to frontend calculation
+    console.log(`[ChartMakerCanvas] Using fallback calculation for column "${column}"`);
     if (!typedData || !Array.isArray(typedData.rows)) return [];
     const values = new Set(typedData.rows.map(row => String(row[column])));
     return Array.from(values).filter(v => v !== '');

@@ -1160,31 +1160,15 @@ async def get_createcolumn_configuration(
         print(f"Error retrieving createcolumn configuration: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve createcolumn configuration: {str(e)}")
 
-@router.post("/cardinality")
+@router.get("/cardinality")
 async def get_cardinality_data(
-    validator_atom_id: str = Form(...),
-    file_key: str = Form(...),
-    bucket_name: str = Form(...),
-    object_names: str = Form(...),
+    object_name: str = Query(..., description="Object name/path of the dataframe"),
 ):
     """Return cardinality data for columns in the dataset."""
     try:
-        # Get the current object prefix
-        prefix = await get_object_prefix()
-        
-        # Construct the full object path
-        full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
-        
-        print(f"🔍 CreateColumn Cardinality file path resolution:")
-        print(f"  Original object_names: {object_names}")
-        print(f"  Current prefix: {prefix}")
-        print(f"  Full object path: {full_object_path}")
-        
-        # Load the dataframe
-        df = get_minio_df(bucket=bucket_name, file_key=full_object_path)
+        # Load the dataframe using object_name as-is (it already contains the full path)
+        df = get_minio_df(bucket="trinity", file_key=object_name)
         df.columns = df.columns.str.strip().str.lower()
-        
-        print(f"✅ Successfully loaded dataframe for cardinality with shape: {df.shape}")
         
         # Generate cardinality data
         cardinality_data = []
