@@ -23,6 +23,7 @@ import { SlideThumbnails } from './components/SlideThumbnails';
 import { SlideNotes } from './components/SlideNotes';
 import { GridView } from './components/GridView';
 import { ExportDialog } from './components/ExportDialog';
+import { ShareDialog } from './components/ShareDialog';
 import { ImagePanel, type ImageSelectionRequest } from './components/Images';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -919,40 +920,11 @@ const ExhibitionMode = () => {
     }
   }, [canEdit, cards, isSaving, persistCardsLocally, slideObjectsByCardId, toast]);
 
-  const handleShare = useCallback(async () => {
-    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
-      return;
-    }
+  const [isShareOpen, setIsShareOpen] = useState(false);
 
-    const shareUrl = window.location.href;
-    const nav = navigator as Navigator & {
-      share?: (data: { title?: string; url?: string; text?: string }) => Promise<void>;
-      clipboard?: Clipboard;
-    };
-
-    try {
-      if (typeof nav.share === 'function') {
-        await nav.share({ title: 'Exhibition Mode', url: shareUrl });
-        toast({ title: 'Share', description: 'Opened the share dialog for your exhibition.' });
-        return;
-      }
-
-      if (nav.clipboard && typeof nav.clipboard.writeText === 'function') {
-        await nav.clipboard.writeText(shareUrl);
-        toast({ title: 'Link copied', description: 'Copied the exhibition link to your clipboard.' });
-        return;
-      }
-
-      throw new Error('Sharing not supported');
-    } catch (error) {
-      console.warn('Share action unavailable', error);
-      toast({
-        title: 'Share unavailable',
-        description: 'Your browser does not support sharing from this page.',
-        variant: 'destructive',
-      });
-    }
-  }, [toast]);
+  const handleShare = useCallback(() => {
+    setIsShareOpen(true);
+  }, []);
 
   const handleDragStart = (atom: DroppedAtom, cardId: string, origin: 'catalogue' | 'slide' = 'catalogue') => {
     if (!canEdit) return;
@@ -2131,6 +2103,12 @@ const ExhibitionMode = () => {
         open={isExportOpen}
         onOpenChange={setIsExportOpen}
         totalSlides={exhibitedCards.length}
+      />
+
+      <ShareDialog
+        open={isShareOpen}
+        onOpenChange={setIsShareOpen}
+        projectName={context?.project_name ?? 'Exhibition Project'}
       />
     </div>
   );
