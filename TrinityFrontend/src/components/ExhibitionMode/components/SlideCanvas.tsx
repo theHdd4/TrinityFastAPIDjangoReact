@@ -22,6 +22,7 @@ import {
   Lock,
   Unlock,
   MessageSquarePlus,
+  Edit3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -59,6 +60,8 @@ import { CardFormattingPanel } from './operationsPalette/CardFormattingPanel';
 import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
 import { SlideShapeObject } from './operationsPalette/shapes';
 import type { ShapeObjectProps } from './operationsPalette/shapes/constants';
+import { SlideChart, ChartDataEditor, parseChartObjectProps, isEditableChartType } from './operationsPalette/charts';
+import type { ChartConfig, ChartDataRow } from './operationsPalette/charts';
 import {
   DEFAULT_TABLE_COLS,
   DEFAULT_TABLE_ROWS,
@@ -1876,6 +1879,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     const [activeTextToolbar, setActiveTextToolbar] = useState<{ id: string; node: ReactNode } | null>(null);
     const [clipboard, setClipboard] = useState<SlideObject[]>([]);
     const [styleClipboard, setStyleClipboard] = useState<Record<string, string> | null>(null);
+    const [chartEditorTarget, setChartEditorTarget] = useState<{
+      objectId: string;
+      data: ChartDataRow[];
+      config: ChartConfig;
+    } | null>(null);
     const focusCanvas = useCallback(() => {
       const node = internalRef.current;
       if (node && typeof node.focus === 'function') {
@@ -1884,6 +1892,41 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     }, []);
 
     const objectsMap = useMemo(() => new Map(objects.map(object => [object.id, object])), [objects]);
+    useEffect(() => {
+      if (!chartEditorTarget) {
+        return;
+      }
+      if (!objectsMap.has(chartEditorTarget.objectId)) {
+        setChartEditorTarget(null);
+      }
+    }, [chartEditorTarget, objectsMap]);
+
+    const handleChartEditorSave = useCallback(
+      (data: ChartDataRow[], updatedConfig: ChartConfig) => {
+        if (!chartEditorTarget) {
+          return;
+        }
+        const target = objectsMap.get(chartEditorTarget.objectId);
+        if (!target) {
+          setChartEditorTarget(null);
+          return;
+        }
+
+        const nextProps = {
+          ...(target.props ?? {}),
+          chartData: data.map(row => ({ ...row })),
+          chartConfig: { ...updatedConfig },
+        } as Record<string, unknown>;
+
+        onBulkUpdate({
+          [chartEditorTarget.objectId]: {
+            props: nextProps,
+          },
+        });
+        setChartEditorTarget(null);
+      },
+      [chartEditorTarget, objectsMap, onBulkUpdate],
+    );
     const selectedObjects = useMemo(
       () =>
         selectedIds
@@ -3907,6 +3950,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               ? extractTextBoxFormatting(object.props as Record<string, unknown> | undefined)
               : null;
             const tableState = isTableObject ? readTableState(object) : null;
+            const chartProps = isChartObject
+              ? parseChartObjectProps(object.props as Record<string, unknown> | undefined)
+              : null;
             const atomId =
               isAtomObject(object) && typeof object.props.atom.atomId === 'string'
                 ? object.props.atom.atomId
@@ -4087,10 +4133,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onSendToBack={() => onSendToBack([object.id])}
                       onInteract={onInteract}
                     />
-                  ) : isChartObject ? (
-                    <div
-                      className="flex h-full w-full items-center justify-center rounded-2xl border border-dashed border-border/60 bg-muted/10"
-                      aria-label="Unavailable chart placeholder"
+                  ) : isChartObject && chartProps ? (
+                    <SlideChart
+                      data={chartProps.chartData}
+                      config={chartProps.chartConfig}
+                      className="h-full w-full"
                     />
                   ) : (
                     <div
@@ -4198,6 +4245,35 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               disableLink={selectionLocked}
               disableComment={selectionLocked}
               disableApplyColors={!canApplyColorsGlobally}
+              renderAdditionalContent={
+                isChartObject
+                  ? closeMenu => (
+                      <ContextMenuItem
+                        disabled={
+                          !canEdit ||
+                          !chartProps ||
+                          !isEditableChartType(chartProps.chartConfig.type)
+                        }
+                        onSelect={event => {
+                          event.preventDefault();
+                          closeMenu();
+                          if (!canEdit || !chartProps || !isEditableChartType(chartProps.chartConfig.type)) {
+                            return;
+                          }
+                          setChartEditorTarget({
+                            objectId: object.id,
+                            data: chartProps.chartData,
+                            config: chartProps.chartConfig,
+                          });
+                        }}
+                        className="gap-3"
+                      >
+                        <Edit3 className="h-4 w-4" />
+                        Edit chart data
+                      </ContextMenuItem>
+                    )
+                  : undefined
+              }
             >
               {renderObject()}
             </SlideObjectContextMenu>
@@ -4327,6 +4403,13 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             <ContextMenuShortcut>Ctrl+Alt+N</ContextMenuShortcut>
           </ContextMenuItem>
         </ContextMenuContent>
+        <ChartDataEditor
+          open={Boolean(chartEditorTarget)}
+          onClose={() => setChartEditorTarget(null)}
+          onSave={handleChartEditorSave}
+          initialData={chartEditorTarget?.data}
+          initialConfig={chartEditorTarget?.config}
+        />
       </ContextMenu>
     );
   },

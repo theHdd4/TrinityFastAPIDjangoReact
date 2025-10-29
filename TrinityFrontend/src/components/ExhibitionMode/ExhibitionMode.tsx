@@ -35,6 +35,8 @@ import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv
 import { createTextBoxSlideObject } from './components/operationsPalette/textBox/constants';
 import { createTableSlideObject } from './components/operationsPalette/tables/constants';
 import { ShapesPanel, createShapeSlideObject, type ShapeDefinition } from './components/operationsPalette/shapes';
+import { ChartPanel, createChartSlideObject } from './components/operationsPalette/charts';
+import type { ChartConfig, ChartDataRow } from './components/operationsPalette/charts';
 import {
   createImageSlideObject,
   generateImageObjectId,
@@ -247,6 +249,13 @@ const ExhibitionMode = () => {
       return (crypto as Crypto).randomUUID();
     }
     return `shape-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }, []);
+
+  const generateChartId = useCallback(() => {
+    if (typeof crypto !== 'undefined' && typeof (crypto as Crypto).randomUUID === 'function') {
+      return (crypto as Crypto).randomUUID();
+    }
+    return `chart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }, []);
 
   const clearAutoAdvanceTimer = useCallback(() => {
@@ -1385,6 +1394,10 @@ const ExhibitionMode = () => {
     setOperationsPanelState(prev => (prev?.type === 'charts' ? null : { type: 'charts' }));
   }, [canEdit]);
 
+  const handleCloseChartsPanel = useCallback(() => {
+    setOperationsPanelState(prev => (prev?.type === 'charts' ? null : prev));
+  }, []);
+
   const handleOpenImagesPanel = useCallback(() => {
     if (!canEdit) {
       return;
@@ -1645,6 +1658,45 @@ const ExhibitionMode = () => {
     );
   }, [addSlideObject, currentSlide, exhibitedCards, generateTableId, slideObjectsByCardId]);
 
+  const handleCreateChart = useCallback(
+    (data: ChartDataRow[], chartConfig: ChartConfig) => {
+      if (!canEdit) {
+        return;
+      }
+
+      const targetCard = exhibitedCards[currentSlide];
+      if (!targetCard) {
+        return;
+      }
+
+      const existingObjects = slideObjectsByCardId[targetCard.id] ?? [];
+      const existingCharts = existingObjects.filter(object => object.type === 'chart').length;
+      const offset = existingCharts * 32;
+      const nextZIndex = existingObjects.reduce((max, object) => {
+        const value = typeof object.zIndex === 'number' ? object.zIndex : 1;
+        return value > max ? value : max;
+      }, 1) + 1;
+
+      const chartObject = createChartSlideObject(generateChartId(), data, chartConfig, {
+        x: 184 + offset,
+        y: 184 + offset,
+        zIndex: nextZIndex,
+      });
+
+      addSlideObject(targetCard.id, chartObject);
+      setOperationsPanelState(prev => (prev?.type === 'charts' ? null : prev));
+    },
+    [
+      addSlideObject,
+      canEdit,
+      currentSlide,
+      exhibitedCards,
+      generateChartId,
+      setOperationsPanelState,
+      slideObjectsByCardId,
+    ],
+  );
+
   const handleShapeSelect = useCallback(
     (shape: ShapeDefinition) => {
       if (!canEdit) {
@@ -1744,7 +1796,13 @@ const ExhibitionMode = () => {
       case 'themes':
         return <ThemesPanel onClose={handleCloseThemesPanel} />;
       case 'charts':
-        return <div className="w-full h-full" aria-label="Charts panel" />;
+        return (
+          <ChartPanel
+            onInsertChart={handleCreateChart}
+            onClose={handleCloseChartsPanel}
+            canEdit={canEdit}
+          />
+        );
       case 'settings': {
         const targetCard = exhibitedCards[currentSlide];
         const handleReset = () => {
@@ -1780,9 +1838,11 @@ const ExhibitionMode = () => {
     handleCloseSettingsPanel,
     handleCloseShapesPanel,
     handleCloseThemesPanel,
+    handleCloseChartsPanel,
     handleImagePanelSelect,
     handleNotesChange,
     handlePresentationChange,
+    handleCreateChart,
     handleRemoveAccentImage,
     handleSettingsNotesPosition,
     handleSettingsNotesToggle,
