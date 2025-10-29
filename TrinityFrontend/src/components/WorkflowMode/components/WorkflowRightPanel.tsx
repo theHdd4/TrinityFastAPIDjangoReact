@@ -211,21 +211,19 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
 
   return (
     <div className="flex h-full">
-      {/* Panel Area - Shows when active */}
-      {activePanel === 'trinityAI' && (
-        <div className="h-full flex flex-col bg-white border-r border-gray-200">
-          <WorkflowAIPanel 
-            isCollapsed={false}
-            onToggle={() => setActivePanel(null)}
-            workflowContext={{
-              workflowName: localStorage.getItem('workflow-name') || 'Untitled Workflow',
-              canvasMolecules: JSON.parse(localStorage.getItem('workflow-canvas-molecules') || '[]'),
-              customMolecules: JSON.parse(localStorage.getItem('workflow-custom-molecules') || '[]')
-            }}
-            onMoleculeAdd={onMoleculeAdd}
-          />
-        </div>
-      )}
+      {/* Panel Area - Always mounted to preserve state */}
+      <div className={`h-full flex flex-col bg-white border-r border-gray-200 ${activePanel === 'trinityAI' ? '' : 'hidden'}`}>
+        <WorkflowAIPanel 
+          isCollapsed={activePanel !== 'trinityAI'}
+          onToggle={() => setActivePanel(activePanel === 'trinityAI' ? null : 'trinityAI')}
+          workflowContext={{
+            workflowName: localStorage.getItem('workflow-name') || 'Untitled Workflow',
+            canvasMolecules: JSON.parse(localStorage.getItem('workflow-canvas-molecules') || '[]'),
+            customMolecules: JSON.parse(localStorage.getItem('workflow-custom-molecules') || '[]')
+          }}
+          onMoleculeAdd={onMoleculeAdd}
+        />
+      </div>
       
       {activePanel === 'atoms' && (
         <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
