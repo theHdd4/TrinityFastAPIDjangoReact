@@ -245,14 +245,6 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         return false;
       }
 
-      try {
-        if (document.queryCommandSupported && !document.queryCommandSupported(command)) {
-          return false;
-        }
-      } catch {
-        // Ignore queryCommandSupported errors and attempt to run the command.
-      }
-
       textRef.current?.focus();
       restoreSelection();
 
