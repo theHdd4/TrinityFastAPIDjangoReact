@@ -22,6 +22,7 @@ import {
   Lock,
   Unlock,
   MessageSquarePlus,
+  Edit3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -59,6 +60,8 @@ import { CardFormattingPanel } from './operationsPalette/CardFormattingPanel';
 import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
 import { SlideShapeObject } from './operationsPalette/shapes';
 import type { ShapeObjectProps } from './operationsPalette/shapes/constants';
+import { SlideChart, ChartDataEditor, parseChartObjectProps, isEditableChartType } from './operationsPalette/charts';
+import type { ChartConfig, ChartDataRow } from './operationsPalette/charts';
 import {
   DEFAULT_TABLE_COLS,
   DEFAULT_TABLE_ROWS,
@@ -1181,12 +1184,15 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     updateTextBoxGeometry,
   ]);
 
-  const handleAtomRemove = (atomId: string) => {
-    if (!canEdit) {
-      return;
-    }
-    onRemoveAtom?.(atomId);
-  };
+  const handleAtomRemove = useCallback(
+    (atomId: string) => {
+      if (!canEdit) {
+        return;
+      }
+      onRemoveAtom?.(atomId);
+    },
+    [canEdit, onRemoveAtom],
+  );
 
   const handleDragOver = (e: React.DragEvent) => {
     if (!canEdit || !draggedAtom) {
@@ -1421,40 +1427,38 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         )}
 
         <div className="space-y-4">
-          {!presentationMode && canEdit && activeTextToolbar && (
-            <div className="relative mb-4 flex w-full justify-center">
-              <div className="z-30 drop-shadow-xl">{activeTextToolbar}</div>
-            </div>
-          )}
-
-          {!presentationMode && (
-            <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
-              <div className="flex items-center gap-2 text-foreground">
-                <User className="h-4 w-4" />
-                <span className="font-semibold">Exhibition presenter:</span>
-                <span>{presenterLabel}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-foreground" />
-                <span className="font-semibold text-foreground">Last edited:</span>
-                <span>{formattedLastEdited}</span>
-              </div>
-            </div>
-          )}
-
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+          <div className="relative">
+            {!presentationMode && canEdit && (
               <div
                 className={cn(
-                  'relative overflow-hidden shadow-2xl transition-all duration-300',
-                  presentationMode ? 'w-auto' : 'w-full',
-                  slideBackgroundClass,
-                  settings.fullBleed
-                    ? 'rounded-none border-0'
-                    : 'rounded-[28px] border border-border/60',
-                  isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
-                  !canEdit && !presentationMode && 'opacity-90'
+                  'pointer-events-none absolute inset-x-0 top-0 flex justify-center transition-all duration-200',
+                  activeTextToolbar ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2',
                 )}
+              >
+                {activeTextToolbar && (
+                  <div className="pointer-events-auto z-30 drop-shadow-xl">{activeTextToolbar}</div>
+                )}
+              </div>
+            )}
+
+            <div
+              className={cn(
+                'flex flex-col gap-4',
+                !presentationMode && canEdit ? 'pt-16' : undefined,
+              )}
+            >
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+                <div
+                  className={cn(
+                    'relative overflow-hidden shadow-2xl transition-all duration-300',
+                    presentationMode ? 'w-auto' : 'w-full',
+                    slideBackgroundClass,
+                    settings.fullBleed
+                      ? 'rounded-none border-0'
+                      : 'rounded-[28px] border border-border/60',
+                    isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
+                    !canEdit && !presentationMode && 'opacity-90'
+                  )}
                 style={
                   presentationMode
                     ? {
@@ -1593,55 +1597,29 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             </div>
           </div>
 
-          {showOverview && (
-            <div className={cn('px-8 pb-8 flex flex-col flex-1 min-h-0 overflow-hidden', layoutConfig.overviewOuterClass)}>
-              <div
-                className={cn(
-                  'bg-muted/30 rounded-xl border border-border p-6 flex-1 overflow-y-auto',
-                  layoutConfig.overviewContainerClass
-                )}
-              >
-                <h2 className="text-2xl font-bold text-foreground mb-6">Components Overview</h2>
-
-                <div className={cn('grid gap-4', layoutConfig.gridClass)}>
-                  {atomObjects.map(object => {
-                    const atom = object.props.atom;
-                    return (
-                      <div
-                        key={object.id}
-                        className="relative group p-6 border-2 border-border bg-card rounded-xl hover:shadow-lg hover:border-primary/50 transition-all duration-300"
-                      >
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
-                          <h3 className="font-semibold text-foreground text-lg group-hover:text-primary transition-colors">
-                            {atom.title}
-                          </h3>
-                        </div>
-                        <div className="inline-block px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full mb-3">
-                          {atom.category}
-                        </div>
-                        <div className="text-sm text-muted-foreground space-y-3">
-                          <ExhibitedAtomRenderer atom={atom} variant="compact" />
-                        </div>
-
-                        {canEdit && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="absolute top-3 right-3 h-8 w-8 text-muted-foreground hover:text-destructive"
-                            onClick={() => handleAtomRemove(atom.id)}
-                            type="button"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+          {!presentationMode && (
+            <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-2 text-foreground">
+                <User className="h-4 w-4" />
+                <span className="font-semibold">Exhibition presenter:</span>
+                <span>{presenterLabel}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-foreground" />
+                <span className="font-semibold text-foreground">Last edited:</span>
+                <span>{formattedLastEdited}</span>
               </div>
             </div>
           )}
+          <OverviewSection
+            visible={showOverview}
+            outerClassName={layoutConfig.overviewOuterClass}
+            containerClassName={layoutConfig.overviewContainerClass}
+            gridClassName={layoutConfig.gridClass}
+            atomObjects={atomObjects}
+            canEdit={canEdit}
+            onRemoveAtom={handleAtomRemove}
+          />
 
           {viewMode === 'horizontal' && !presentationMode && (
             <div className="mt-6 text-center">
@@ -1653,6 +1631,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         </div>
       </div>
     </div>
+  </div>
   );
 };
 
@@ -1778,6 +1757,81 @@ const LayoutOverlay: React.FC<{
   }
 };
 
+interface OverviewSectionProps {
+  visible: boolean;
+  outerClassName: string;
+  containerClassName: string;
+  gridClassName: string;
+  atomObjects: (SlideObject & { props: { atom: DroppedAtom } })[];
+  canEdit: boolean;
+  onRemoveAtom: (atomId: string) => void;
+}
+
+const OverviewSection: React.FC<OverviewSectionProps> = ({
+  visible,
+  outerClassName,
+  containerClassName,
+  gridClassName,
+  atomObjects,
+  canEdit,
+  onRemoveAtom,
+}) => {
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <div className={cn('px-8 pb-8 flex flex-col flex-1 min-h-0 overflow-hidden', outerClassName)}>
+      <div
+        className={cn(
+          'bg-muted/30 rounded-xl border border-border p-6 flex-1 overflow-y-auto',
+          containerClassName,
+        )}
+      >
+        <h2 className="text-2xl font-bold text-foreground mb-6">Components Overview</h2>
+
+        <div className={cn('grid gap-4', gridClassName)}>
+          {atomObjects.map(object => {
+            const atom = object.props.atom;
+
+            return (
+              <div
+                key={object.id}
+                className="relative group p-6 border-2 border-border bg-card rounded-xl hover:shadow-lg hover:border-primary/50 transition-all duration-300"
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
+                  <h3 className="font-semibold text-foreground text-lg group-hover:text-primary transition-colors">
+                    {atom.title}
+                  </h3>
+                </div>
+                <div className="inline-block px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full mb-3">
+                  {atom.category}
+                </div>
+                <div className="text-sm text-muted-foreground space-y-3">
+                  <ExhibitedAtomRenderer atom={atom} variant="compact" />
+                </div>
+
+                {canEdit && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="absolute top-3 right-3 h-8 w-8 text-muted-foreground hover:text-destructive"
+                    onClick={() => onRemoveAtom(atom.id)}
+                    type="button"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 type CanvasStageProps = {
   canEdit: boolean;
   objects: SlideObject[];
@@ -1876,6 +1930,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     const [activeTextToolbar, setActiveTextToolbar] = useState<{ id: string; node: ReactNode } | null>(null);
     const [clipboard, setClipboard] = useState<SlideObject[]>([]);
     const [styleClipboard, setStyleClipboard] = useState<Record<string, string> | null>(null);
+    const [chartEditorTarget, setChartEditorTarget] = useState<{
+      objectId: string;
+      data: ChartDataRow[];
+      config: ChartConfig;
+    } | null>(null);
     const focusCanvas = useCallback(() => {
       const node = internalRef.current;
       if (node && typeof node.focus === 'function') {
@@ -1884,6 +1943,41 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     }, []);
 
     const objectsMap = useMemo(() => new Map(objects.map(object => [object.id, object])), [objects]);
+    useEffect(() => {
+      if (!chartEditorTarget) {
+        return;
+      }
+      if (!objectsMap.has(chartEditorTarget.objectId)) {
+        setChartEditorTarget(null);
+      }
+    }, [chartEditorTarget, objectsMap]);
+
+    const handleChartEditorSave = useCallback(
+      (data: ChartDataRow[], updatedConfig: ChartConfig) => {
+        if (!chartEditorTarget) {
+          return;
+        }
+        const target = objectsMap.get(chartEditorTarget.objectId);
+        if (!target) {
+          setChartEditorTarget(null);
+          return;
+        }
+
+        const nextProps = {
+          ...(target.props ?? {}),
+          chartData: data.map(row => ({ ...row })),
+          chartConfig: { ...updatedConfig },
+        } as Record<string, unknown>;
+
+        onBulkUpdate({
+          [chartEditorTarget.objectId]: {
+            props: nextProps,
+          },
+        });
+        setChartEditorTarget(null);
+      },
+      [chartEditorTarget, objectsMap, onBulkUpdate],
+    );
     const selectedObjects = useMemo(
       () =>
         selectedIds
@@ -3907,6 +4001,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               ? extractTextBoxFormatting(object.props as Record<string, unknown> | undefined)
               : null;
             const tableState = isTableObject ? readTableState(object) : null;
+            const chartProps = isChartObject
+              ? parseChartObjectProps(object.props as Record<string, unknown> | undefined)
+              : null;
             const atomId =
               isAtomObject(object) && typeof object.props.atom.atomId === 'string'
                 ? object.props.atom.atomId
@@ -4087,10 +4184,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onSendToBack={() => onSendToBack([object.id])}
                       onInteract={onInteract}
                     />
-                  ) : isChartObject ? (
-                    <div
-                      className="flex h-full w-full items-center justify-center rounded-2xl border border-dashed border-border/60 bg-muted/10"
-                      aria-label="Unavailable chart placeholder"
+                  ) : isChartObject && chartProps ? (
+                    <SlideChart
+                      data={chartProps.chartData}
+                      config={chartProps.chartConfig}
+                      className="h-full w-full"
                     />
                   ) : (
                     <div
@@ -4198,6 +4296,44 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               disableLink={selectionLocked}
               disableComment={selectionLocked}
               disableApplyColors={!canApplyColorsGlobally}
+              renderAdditionalContent={
+                isChartObject
+                  ? closeMenu => (
+                      <ContextMenuItem
+                        disabled={
+                          !canEdit ||
+                          !chartProps ||
+                          !isEditableChartType(chartProps.chartConfig.type)
+                        }
+                        onSelect={event => {
+                          event.preventDefault();
+                          const isValidTarget =
+                            canEdit &&
+                            chartProps &&
+                            isEditableChartType(chartProps.chartConfig.type);
+                          const payload = isValidTarget
+                            ? {
+                                objectId: object.id,
+                                data: chartProps.chartData,
+                                config: chartProps.chartConfig,
+                              }
+                            : null;
+                          closeMenu();
+                          if (!payload) {
+                            return;
+                          }
+                          setTimeout(() => {
+                            setChartEditorTarget(payload);
+                          }, 0);
+                        }}
+                        className="gap-3"
+                      >
+                        <Edit3 className="h-4 w-4" />
+                        Edit chart data
+                      </ContextMenuItem>
+                    )
+                  : undefined
+              }
             >
               {renderObject()}
             </SlideObjectContextMenu>
@@ -4327,6 +4463,13 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             <ContextMenuShortcut>Ctrl+Alt+N</ContextMenuShortcut>
           </ContextMenuItem>
         </ContextMenuContent>
+        <ChartDataEditor
+          open={Boolean(chartEditorTarget)}
+          onClose={() => setChartEditorTarget(null)}
+          onSave={handleChartEditorSave}
+          initialData={chartEditorTarget?.data}
+          initialConfig={chartEditorTarget?.config}
+        />
       </ContextMenu>
     );
   },
