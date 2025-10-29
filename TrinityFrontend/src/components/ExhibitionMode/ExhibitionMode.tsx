@@ -732,6 +732,23 @@ const ExhibitionMode = () => {
         return true;
       }
 
+      if (typeof document !== 'undefined') {
+        const activeElement = document.activeElement;
+        if (isEditableTarget(activeElement)) {
+          return true;
+        }
+
+        const selection = document.getSelection();
+        const selectionElement =
+          selection?.anchorNode instanceof HTMLElement
+            ? selection.anchorNode
+            : selection?.anchorNode?.parentElement ?? null;
+
+        if (isEditableTarget(selectionElement)) {
+          return true;
+        }
+      }
+
       if (typeof event.composedPath === 'function') {
         const path = event.composedPath();
         for (const node of path) {
