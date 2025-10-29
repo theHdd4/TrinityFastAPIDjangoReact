@@ -35,19 +35,12 @@ import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv
 import { createTextBoxSlideObject } from './components/operationsPalette/textBox/constants';
 import { createTableSlideObject } from './components/operationsPalette/tables/constants';
 import { ShapesPanel, createShapeSlideObject, type ShapeDefinition } from './components/operationsPalette/shapes';
+import { ChartPanel, createChartSlideObject } from './components/operationsPalette/charts';
+import type { ChartConfig, ChartDataRow } from './components/operationsPalette/charts';
 import {
   createImageSlideObject,
   generateImageObjectId,
 } from './components/operationsPalette/images/constants';
-import {
-  ChartPanel,
-  createChartSlideObject,
-  DEFAULT_CHART_CONFIG,
-  DEFAULT_CHART_DATA,
-  type ChartConfig,
-  type ChartDataRow,
-  type ChartPanelResult,
-} from './components/operationsPalette/charts';
 import { ThemesPanel } from './components/operationsPalette/themes';
 import { SettingsPanel } from './components/operationsPalette/tools/settings';
 import {
@@ -210,8 +203,6 @@ const ExhibitionMode = () => {
     | { type: 'settings' }
     | null
   >(null);
-  const [chartPanelData, setChartPanelData] = useState<ChartDataRow[]>(DEFAULT_CHART_DATA);
-  const [chartPanelConfig, setChartPanelConfig] = useState<ChartConfig>(DEFAULT_CHART_CONFIG);
   const [notes, setNotes] = useState<Record<number, string>>(() => {
     if (typeof window === 'undefined') {
       return {};
@@ -1668,7 +1659,11 @@ const ExhibitionMode = () => {
   }, [addSlideObject, currentSlide, exhibitedCards, generateTableId, slideObjectsByCardId]);
 
   const handleCreateChart = useCallback(
-    (result: ChartPanelResult) => {
+    (data: ChartDataRow[], chartConfig: ChartConfig) => {
+      if (!canEdit) {
+        return;
+      }
+
       const targetCard = exhibitedCards[currentSlide];
       if (!targetCard) {
         return;
@@ -1677,23 +1672,29 @@ const ExhibitionMode = () => {
       const existingObjects = slideObjectsByCardId[targetCard.id] ?? [];
       const existingCharts = existingObjects.filter(object => object.type === 'chart').length;
       const offset = existingCharts * 32;
+      const nextZIndex = existingObjects.reduce((max, object) => {
+        const value = typeof object.zIndex === 'number' ? object.zIndex : 1;
+        return value > max ? value : max;
+      }, 1) + 1;
 
-      addSlideObject(
-        targetCard.id,
-        createChartSlideObject(
-          generateChartId(),
-          {
-            x: 160 + offset,
-            y: 160 + offset,
-          },
-          {
-            data: result.data,
-            config: result.config,
-          },
-        ),
-      );
+      const chartObject = createChartSlideObject(generateChartId(), data, chartConfig, {
+        x: 184 + offset,
+        y: 184 + offset,
+        zIndex: nextZIndex,
+      });
+
+      addSlideObject(targetCard.id, chartObject);
+      setOperationsPanelState(prev => (prev?.type === 'charts' ? null : prev));
     },
-    [addSlideObject, currentSlide, exhibitedCards, generateChartId, slideObjectsByCardId],
+    [
+      addSlideObject,
+      canEdit,
+      currentSlide,
+      exhibitedCards,
+      generateChartId,
+      setOperationsPanelState,
+      slideObjectsByCardId,
+    ],
   );
 
   const handleShapeSelect = useCallback(
@@ -1797,19 +1798,9 @@ const ExhibitionMode = () => {
       case 'charts':
         return (
           <ChartPanel
+            onInsertChart={handleCreateChart}
             onClose={handleCloseChartsPanel}
-            onInsert={result => {
-              setChartPanelData(result.data);
-              setChartPanelConfig(result.config);
-              handleCreateChart(result);
-              setOperationsPanelState(null);
-            }}
-            initialData={chartPanelData}
-            initialConfig={chartPanelConfig}
-            onStateChange={({ data, config }) => {
-              setChartPanelData(data);
-              setChartPanelConfig(config);
-            }}
+            canEdit={canEdit}
           />
         );
       case 'settings': {
@@ -1839,21 +1830,19 @@ const ExhibitionMode = () => {
     }
   }, [
     canEdit,
-    chartPanelConfig,
-    chartPanelData,
     currentPresentationSettings,
     currentSlide,
     exhibitedCards,
-    handleCloseChartsPanel,
     handleCloseImagesPanel,
     handleCloseNotesPanel,
     handleCloseSettingsPanel,
     handleCloseShapesPanel,
     handleCloseThemesPanel,
-    handleCreateChart,
+    handleCloseChartsPanel,
     handleImagePanelSelect,
     handleNotesChange,
     handlePresentationChange,
+    handleCreateChart,
     handleRemoveAccentImage,
     handleSettingsNotesPosition,
     handleSettingsNotesToggle,

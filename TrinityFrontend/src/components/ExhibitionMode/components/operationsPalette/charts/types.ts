@@ -1,20 +1,6 @@
-import type { LucideIcon } from 'lucide-react';
-
-export type ChartType =
-  | 'verticalBar'
-  | 'horizontalBar'
-  | 'line'
-  | 'area'
-  | 'pie'
-  | 'donut'
-  | 'blank'
-  | 'calendar'
-  | 'gantt';
-
-export interface ChartDataRow {
-  label: string;
-  value: number;
-}
+export type EditableChartType = 'column' | 'bar' | 'line' | 'pie' | 'donut';
+export type DiagramChartType = 'blank' | 'calendar' | 'gantt';
+export type ChartType = EditableChartType | DiagramChartType;
 
 export interface ChartConfig {
   type: ChartType;
@@ -26,22 +12,12 @@ export interface ChartConfig {
   legendPosition: 'top' | 'bottom' | 'left' | 'right';
 }
 
-export interface ChartColorScheme {
-  id: string;
-  name: string;
-  colors: string[];
-  category?: string;
+export interface ChartDataRow {
+  label: string;
+  value: number;
 }
 
-export interface ChartTypeDefinition {
-  id: ChartType;
-  name: string;
-  icon: LucideIcon;
-  colorClass: string;
-  gradient: string;
-}
-
-export interface ChartPanelResult {
-  data: ChartDataRow[];
-  config: ChartConfig;
+export interface ChartObjectProps {
+  chartData: ChartDataRow[];
+  chartConfig: ChartConfig;
 }

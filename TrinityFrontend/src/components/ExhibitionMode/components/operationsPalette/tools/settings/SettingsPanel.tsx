@@ -1,6 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Calendar,
   Clock,
   Droplet,
   Eye,
@@ -9,11 +8,12 @@ import {
   Image as ImageIcon,
   Layers,
   Lock,
+  MessageSquare,
   Monitor,
+  Move,
   Palette,
   Smartphone,
   Tablet,
-  Type,
   Unlock,
   Zap,
   X,
@@ -25,6 +25,7 @@ import { Separator } from '@/components/ui/separator';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Select,
   SelectContent,
@@ -33,18 +34,22 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import {
-  ColorTray,
-  DEFAULT_SOLID_COLOR_OPTIONS,
-  type ColorTrayOption,
-  type ColorTraySection,
-} from '@/templates/color-tray';
 import type {
   PresentationSettings,
   SlideNotesPosition,
+  SlideNumberPosition,
+  SlideshowTransition,
 } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { DEFAULT_PRESENTATION_SETTINGS } from '@/components/ExhibitionMode/store/exhibitionStore';
+import {
+  ColorTray,
+  DEFAULT_SOLID_COLOR_OPTIONS,
+  DEFAULT_SOLID_SECTION,
+  createSolidToken,
+  isSolidToken,
+  solidTokenToHex,
+} from '@/templates/color-tray';
+import type { ColorTrayOption, ColorTraySection } from '@/templates/color-tray';
 import { cn } from '@/lib/utils';
 
 const GRADIENT_DIRECTIONS = [
@@ -69,78 +74,38 @@ const TRANSITION_OPTIONS = [
 ] as const;
 
 const NOTES_POSITIONS: SlideNotesPosition[] = ['bottom', 'right'];
+const SLIDE_NUMBER_POSITIONS: SlideNumberPosition[] = [
+  'top-left',
+  'top-right',
+  'bottom-left',
+  'bottom-right',
+];
 
-const TAB_TRIGGER_CLASSES = cn(
-  'relative flex min-w-0 items-center justify-center rounded-2xl border border-transparent px-4 py-2 text-sm font-semibold text-muted-foreground transition-all duration-200',
-  'whitespace-nowrap leading-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-  'hover:text-foreground data-[state=active]:border-border/70 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm',
-);
+const SOLID_COLOR_SECTIONS: readonly ColorTraySection[] = [
+  {
+    id: DEFAULT_SOLID_SECTION.id,
+    label: DEFAULT_SOLID_SECTION.label,
+    options: DEFAULT_SOLID_COLOR_OPTIONS,
+  },
+];
 
-const BACKGROUND_PRESET_GROUP_ID = 'preset-backgrounds';
-const BACKGROUND_PRESET_GROUP_LABEL = 'Presets';
+const findOptionById = (
+  sections: readonly ColorTraySection[],
+  id: string | null,
+): ColorTrayOption | undefined => {
+  if (!id) {
+    return undefined;
+  }
 
-const buildBackgroundPresetOptions = (defaultHex: string): readonly ColorTrayOption[] =>
-  (
-    [
-      {
-        id: 'default',
-        label: 'Default',
-        value: defaultHex,
-        tooltip: `Default (${defaultHex.toUpperCase()})`,
-        swatchClassName: 'bg-card',
-        swatchStyle: { backgroundColor: defaultHex },
-        ariaLabel: 'Use default slide background',
-      },
-      {
-        id: 'ivory',
-        label: 'Ivory',
-        value: '#fef3c7',
-        tooltip: 'Ivory (#FEF3C7)',
-        swatchStyle: { backgroundColor: '#fef3c7' },
-      },
-      {
-        id: 'slate',
-        label: 'Soft Slate',
-        value: '#e2e8f0',
-        tooltip: 'Soft Slate (#E2E8F0)',
-        swatchStyle: { backgroundColor: '#e2e8f0' },
-      },
-      {
-        id: 'charcoal',
-        label: 'Charcoal Mist',
-        value: '#d4d4d4',
-        tooltip: 'Charcoal Mist (#D4D4D4)',
-        swatchStyle: { backgroundColor: '#d4d4d4' },
-      },
-      {
-        id: 'indigo',
-        label: 'Indigo Haze',
-        value: '#e0e7ff',
-        tooltip: 'Indigo Haze (#E0E7FF)',
-        swatchStyle: { backgroundColor: '#e0e7ff' },
-      },
-      {
-        id: 'emerald',
-        label: 'Emerald Veil',
-        value: '#d1fae5',
-        tooltip: 'Emerald Veil (#D1FAE5)',
-        swatchStyle: { backgroundColor: '#d1fae5' },
-      },
-      {
-        id: 'rose',
-        label: 'Rose Quartz',
-        value: '#ffe4e6',
-        tooltip: 'Rose Quartz (#FFE4E6)',
-        swatchStyle: { backgroundColor: '#ffe4e6' },
-      },
-    ] as const
-  ).map((option, index) => ({
-    ...option,
-    groupId: BACKGROUND_PRESET_GROUP_ID,
-    groupLabel: BACKGROUND_PRESET_GROUP_LABEL,
-    groupOrder: -1,
-    toneOrder: index,
-  }));
+  for (const section of sections) {
+    const match = section.options.find(option => option.id === id);
+    if (match) {
+      return match;
+    }
+  }
+
+  return undefined;
+};
 
 interface SettingsPanelProps {
   settings: PresentationSettings;
@@ -152,6 +117,43 @@ interface SettingsPanelProps {
   notesVisible?: boolean;
 }
 
+const sanitiseHex = (value: string): string => {
+  const trimmed = value.replace(/\s+/g, '');
+  if (!trimmed) {
+    return '#';
+  }
+
+  const prefixed = trimmed.startsWith('#') ? trimmed.slice(1) : trimmed.replace(/#/g, '');
+  const cleaned = prefixed.replace(/[^0-9a-fA-F]/g, '').slice(0, 6);
+  return `#${cleaned}`;
+};
+
+const normaliseHexLength = (hex: string): string => {
+  if (/^#[0-9a-fA-F]{3}$/.test(hex)) {
+    const digits = hex.slice(1);
+    return `#${digits
+      .split('')
+      .map(character => character.repeat(2))
+      .join('')}`.toLowerCase();
+  }
+
+  return hex.toLowerCase();
+};
+
+const resolveHexColor = (value: string | undefined | null, fallback: string): string => {
+  const candidate = value ?? fallback;
+  const sanitised = sanitiseHex(candidate);
+
+  if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(sanitised)) {
+    return normaliseHexLength(sanitised);
+  }
+
+  const fallbackSanitised = sanitiseHex(fallback);
+  return normaliseHexLength(
+    /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(fallbackSanitised) ? fallbackSanitised : '#ffffff',
+  );
+};
+
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   settings,
   onChange,
@@ -161,322 +163,475 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onNotesPositionChange,
   notesVisible = false,
 }) => {
-  const backgroundMode = settings.backgroundMode && settings.backgroundMode !== 'preset'
-    ? settings.backgroundMode
-    : 'solid';
-  const gridSize = useMemo(() => {
-    const value = Number.isFinite(settings.gridSize) ? Number(settings.gridSize) : 20;
-    return Math.min(200, Math.max(4, Math.round(value)));
-  }, [settings.gridSize]);
-  const backgroundOpacity = Math.min(100, Math.max(0, settings.backgroundOpacity ?? 100));
-  const transitionDuration = Math.min(2000, Math.max(100, settings.transitionDuration ?? 450));
-  const autoAdvanceDuration = Math.max(1, Math.round(settings.autoAdvanceDuration ?? settings.slideshowDuration ?? 8));
-  const showSlideNumber = settings.showSlideNumber ?? true;
+  const backgroundMode = useMemo(() => {
+    const mode = settings.backgroundMode ?? DEFAULT_PRESENTATION_SETTINGS.backgroundMode;
+    if (mode === 'preset') {
+      return 'solid';
+    }
 
-  const resolvedSolidHex = useMemo(() => {
-    const candidate = settings.backgroundSolidColor ?? DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
-    return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(candidate)
-      ? candidate
-      : DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
+    return mode;
+  }, [settings.backgroundMode]);
+
+  const showGrid = settings.showGrid ?? DEFAULT_PRESENTATION_SETTINGS.showGrid;
+  const showGuides = settings.showGuides ?? DEFAULT_PRESENTATION_SETTINGS.showGuides;
+  const snapToGrid = settings.snapToGrid ?? DEFAULT_PRESENTATION_SETTINGS.snapToGrid;
+  const gridSize = settings.gridSize ?? DEFAULT_PRESENTATION_SETTINGS.gridSize;
+  const showSlideNumber = settings.showSlideNumber ?? DEFAULT_PRESENTATION_SETTINGS.showSlideNumber;
+  const slideNumberPosition = settings.slideNumberPosition ?? DEFAULT_PRESENTATION_SETTINGS.slideNumberPosition;
+  const transitionEffect = settings.transitionEffect ?? settings.slideshowTransition ?? DEFAULT_PRESENTATION_SETTINGS.transitionEffect;
+  const transitionDuration = settings.transitionDuration ?? DEFAULT_PRESENTATION_SETTINGS.transitionDuration;
+  const autoAdvance = settings.autoAdvance ?? DEFAULT_PRESENTATION_SETTINGS.autoAdvance;
+  const autoAdvanceDuration = settings.autoAdvanceDuration ?? settings.slideshowDuration ?? DEFAULT_PRESENTATION_SETTINGS.autoAdvanceDuration;
+  const highContrast = settings.highContrast ?? DEFAULT_PRESENTATION_SETTINGS.highContrast;
+  const largeText = settings.largeText ?? DEFAULT_PRESENTATION_SETTINGS.largeText;
+  const reducedMotion = settings.reducedMotion ?? DEFAULT_PRESENTATION_SETTINGS.reducedMotion;
+  const backgroundLocked = settings.backgroundLocked ?? DEFAULT_PRESENTATION_SETTINGS.backgroundLocked;
+  const backgroundOpacity = settings.backgroundOpacity ?? DEFAULT_PRESENTATION_SETTINGS.backgroundOpacity;
+
+  const safeGridSize = Math.min(200, Math.max(4, gridSize));
+  const safeBackgroundOpacity = Math.min(100, Math.max(0, backgroundOpacity));
+  const safeTransitionDuration = Math.min(2000, Math.max(100, transitionDuration));
+  const safeAutoAdvanceDuration = Math.min(60, Math.max(1, autoAdvanceDuration));
+
+  const resolvedSolidColor = useMemo(() => {
+    const color = settings.backgroundSolidColor ?? DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
+    return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(color) ? color : DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
   }, [settings.backgroundSolidColor]);
 
-  const [backgroundPaletteOpen, setBackgroundPaletteOpen] = useState(false);
-  const [backgroundHexInput, setBackgroundHexInput] = useState(resolvedSolidHex.toUpperCase());
+  const [solidColorInput, setSolidColorInput] = useState(resolvedSolidColor.toUpperCase());
+  const [solidColorPopoverOpen, setSolidColorPopoverOpen] = useState(false);
+  const solidColorTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const [gradientStartPopoverOpen, setGradientStartPopoverOpen] = useState(false);
+  const [gradientEndPopoverOpen, setGradientEndPopoverOpen] = useState(false);
 
   useEffect(() => {
-    setBackgroundHexInput(resolvedSolidHex.toUpperCase());
-  }, [resolvedSolidHex]);
+    setSolidColorInput(resolvedSolidColor.toUpperCase());
+  }, [resolvedSolidColor]);
 
-  const backgroundColorSections = useMemo<readonly ColorTraySection[]>(() => {
-    const defaultHex = DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
-    const presets = buildBackgroundPresetOptions(defaultHex);
-    return [
-      {
-        id: 'solids',
-        label: 'Solid colors',
-        options: [...presets, ...DEFAULT_SOLID_COLOR_OPTIONS] as readonly ColorTrayOption[],
-      },
-    ];
-  }, []);
+  const solidColorToken = useMemo(() => createSolidToken(resolvedSolidColor), [resolvedSolidColor]);
+  const solidColorOption = useMemo(
+    () => findOptionById(SOLID_COLOR_SECTIONS, solidColorToken),
+    [solidColorToken],
+  );
 
-  const backgroundColorOption = useMemo(() => {
-    const normalized = resolvedSolidHex.toLowerCase();
-    for (const section of backgroundColorSections) {
-      for (const option of section.options) {
-        if (typeof option.value === 'string' && option.value.toLowerCase() === normalized) {
-          return option;
-        }
-      }
+  const solidColorSwatchStyle = useMemo(() => {
+    if (solidColorOption?.swatchStyle) {
+      return solidColorOption.swatchStyle;
     }
-    return undefined;
-  }, [backgroundColorSections, resolvedSolidHex]);
+    if (solidColorOption?.value) {
+      return { background: solidColorOption.value };
+    }
+    return { backgroundColor: resolvedSolidColor };
+  }, [resolvedSolidColor, solidColorOption]);
 
-  const backgroundSelectedId = backgroundColorOption?.id;
-  const backgroundColorLabel = backgroundColorOption?.label ?? resolvedSolidHex.toUpperCase();
-  const backgroundSwatchStyle = backgroundColorOption?.swatchStyle ?? { backgroundColor: resolvedSolidHex };
+  const solidColorLabel = useMemo(() => {
+    if (solidColorOption?.label) {
+      return solidColorOption.label;
+    }
+    return solidColorInput;
+  }, [solidColorInput, solidColorOption]);
 
-  const handleBackgroundPaletteSelect = useCallback(
-    (option: ColorTrayOption) => {
-      if (typeof option.value === 'string') {
-        onChange({ backgroundMode: 'solid', backgroundSolidColor: option.value });
-      }
-      setBackgroundPaletteOpen(false);
-    },
-    [onChange],
+  const gradientStartHex = useMemo(
+    () => resolveHexColor(settings.backgroundGradientStart, DEFAULT_PRESENTATION_SETTINGS.backgroundGradientStart),
+    [settings.backgroundGradientStart],
+  );
+  const gradientEndHex = useMemo(
+    () => resolveHexColor(settings.backgroundGradientEnd, DEFAULT_PRESENTATION_SETTINGS.backgroundGradientEnd),
+    [settings.backgroundGradientEnd],
   );
 
-  const handleCustomBackgroundColor = useCallback(
-    (hex: string) => {
-      if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(hex)) {
-        setBackgroundHexInput(hex.toUpperCase());
-        onChange({ backgroundMode: 'solid', backgroundSolidColor: hex });
-      }
-    },
-    [onChange],
+  const gradientStartToken = useMemo(() => createSolidToken(gradientStartHex), [gradientStartHex]);
+  const gradientEndToken = useMemo(() => createSolidToken(gradientEndHex), [gradientEndHex]);
+
+  const gradientStartOption = useMemo(
+    () => findOptionById(SOLID_COLOR_SECTIONS, gradientStartToken),
+    [gradientStartToken],
+  );
+  const gradientEndOption = useMemo(
+    () => findOptionById(SOLID_COLOR_SECTIONS, gradientEndToken),
+    [gradientEndToken],
   );
 
-  const handleBackgroundHexInputChange = useCallback(
-    (value: string) => {
-      const trimmed = value.replace(/\s+/g, '').toUpperCase();
-      const prefixed = trimmed.startsWith('#') ? trimmed : `#${trimmed.replace(/#/g, '')}`;
-      const sanitized = `#${prefixed
-        .replace(/[^0-9A-F#]/g, '')
-        .replace(/#/g, '')
-        .slice(0, 6)}`;
-      setBackgroundHexInput(sanitized);
-      if (/^#([0-9A-F]{3}|[0-9A-F]{6})$/.test(sanitized)) {
-        onChange({ backgroundMode: 'solid', backgroundSolidColor: sanitized.toLowerCase() });
-      }
-    },
-    [onChange],
+  const gradientStartLabel = useMemo(
+    () => gradientStartOption?.label ?? gradientStartHex.toUpperCase(),
+    [gradientStartHex, gradientStartOption],
+  );
+  const gradientEndLabel = useMemo(
+    () => gradientEndOption?.label ?? gradientEndHex.toUpperCase(),
+    [gradientEndHex, gradientEndOption],
   );
 
-  const handleBackgroundModeChange = (mode: 'solid' | 'gradient' | 'image') => {
-    onChange({ backgroundMode: mode });
-    if (mode === 'image' && !settings.backgroundImageUrl) {
-      onChange({ backgroundImageUrl: '' });
+  const gradientStartSwatchStyle = useMemo(() => {
+    if (gradientStartOption?.swatchStyle) {
+      return gradientStartOption.swatchStyle;
+    }
+    if (gradientStartOption?.value) {
+      return { background: gradientStartOption.value };
+    }
+    return { backgroundColor: gradientStartHex };
+  }, [gradientStartHex, gradientStartOption]);
+
+  const gradientEndSwatchStyle = useMemo(() => {
+    if (gradientEndOption?.swatchStyle) {
+      return gradientEndOption.swatchStyle;
+    }
+    if (gradientEndOption?.value) {
+      return { background: gradientEndOption.value };
+    }
+    return { backgroundColor: gradientEndHex };
+  }, [gradientEndHex, gradientEndOption]);
+
+  const handleBackgroundTypeChange = (type: 'solid' | 'gradient' | 'image') => {
+    onChange({ backgroundMode: type });
+  };
+
+  const handleSolidColorCommit = (value: string) => {
+    const sanitised = sanitiseHex(value).toUpperCase();
+    setSolidColorInput(sanitised);
+
+    if (/^#([0-9A-F]{3}|[0-9A-F]{6})$/.test(sanitised)) {
+      onChange({ backgroundMode: 'solid', backgroundSolidColor: sanitised.toLowerCase() });
+    }
+  };
+
+  const handleSolidColorSelect = (option: ColorTrayOption) => {
+    let nextHex: string | null = null;
+
+    if (typeof option.value === 'string' && option.value.startsWith('#')) {
+      nextHex = option.value;
+    } else if (isSolidToken(option.id)) {
+      nextHex = solidTokenToHex(option.id);
+    }
+
+    if (nextHex) {
+      handleSolidColorCommit(nextHex);
     }
   };
 
   const handleGradientChange = (partial: Partial<PresentationSettings>) => {
-    onChange({
-      backgroundMode: 'gradient',
-      ...partial,
-    });
+    onChange({ backgroundMode: 'gradient', ...partial });
+  };
+
+  const handleGradientColorCommit = (
+    key: 'backgroundGradientStart' | 'backgroundGradientEnd',
+    value: string,
+  ) => {
+    const sanitised = resolveHexColor(value, key === 'backgroundGradientStart'
+      ? DEFAULT_PRESENTATION_SETTINGS.backgroundGradientStart
+      : DEFAULT_PRESENTATION_SETTINGS.backgroundGradientEnd);
+
+    handleGradientChange({ [key]: sanitised } as Partial<PresentationSettings>);
+  };
+
+  const handleGradientColorSelect = (
+    key: 'backgroundGradientStart' | 'backgroundGradientEnd',
+    option: ColorTrayOption,
+  ) => {
+    let nextHex: string | null = null;
+
+    if (typeof option.value === 'string' && option.value.startsWith('#')) {
+      nextHex = option.value;
+    } else if (isSolidToken(option.id)) {
+      nextHex = solidTokenToHex(option.id);
+    }
+
+    if (nextHex) {
+      handleGradientColorCommit(key, nextHex);
+    }
   };
 
   const handleAutoAdvanceToggle = (value: boolean) => {
     onChange({
       autoAdvance: value,
-      autoAdvanceDuration,
-      slideshowDuration: autoAdvanceDuration,
+      autoAdvanceDuration: safeAutoAdvanceDuration,
+      slideshowDuration: safeAutoAdvanceDuration,
     });
   };
 
   const handleAutoAdvanceDurationChange = (value: number) => {
-    const safe = Math.max(1, value);
+    const safeValue = Math.min(60, Math.max(1, Math.round(value)));
     onChange({
-      autoAdvanceDuration: safe,
-      slideshowDuration: safe,
+      autoAdvanceDuration: safeValue,
+      slideshowDuration: safeValue,
     });
-  };
-
-  const handleTransitionChange = (value: string) => {
-    const candidate = value as PresentationSettings['transitionEffect'];
-    onChange({
-      transitionEffect: candidate,
-      slideshowTransition: candidate === 'slide' || candidate === 'zoom' ? candidate : 'fade',
-    });
-  };
-
-  const handleNotesToggle = (value: boolean) => {
-    onToggleNotes?.(value);
-    onChange({ slideNotesVisible: value });
-  };
-
-  const handleNotesPosition = (position: SlideNotesPosition) => {
-    onChange({ slideNotesPosition: position });
-    onNotesPositionChange?.(position);
   };
 
   return (
-    <div className="w-full shrink-0 rounded-[28px] border border-border/60 bg-gradient-to-br from-background via-background/98 to-card shadow-[0_40px_90px_-45px_rgba(15,23,42,0.45)]">
-      <div className="flex items-center justify-between border-b border-border/50 px-6 py-5">
+    <div className="flex h-full w-full shrink-0 flex-col overflow-hidden rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
+      <div className="flex items-center justify-between border-b border-border/60 bg-muted/40 px-5 py-4">
         <div className="flex items-center gap-3">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <Palette className="h-4 w-4" />
-          </span>
-          <div className="space-y-1">
-            <h3 className="text-lg font-semibold text-foreground">Slide Settings</h3>
-            <p className="text-xs text-muted-foreground">Configure slide behaviour and appearance.</p>
+          <div className="rounded-lg bg-primary/10 p-2">
+            <Monitor className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold">Slide Settings</h2>
+            <p className="text-xs text-muted-foreground">Configure slide behavior and appearance</p>
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={onClose}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+          onClick={onClose}
+        >
           <X className="h-4 w-4" />
         </Button>
       </div>
 
-      <ScrollArea className="max-h-[70vh] px-6">
-        <Tabs defaultValue="background" className="w-full py-6">
-          <TabsList className="grid w-full grid-cols-2 gap-3 rounded-3xl border border-border/50 bg-muted/40 p-2 sm:grid-cols-4">
-            <TabsTrigger value="background" className={TAB_TRIGGER_CLASSES}>
+      <ScrollArea className="flex-1 px-5 py-5 pr-3">
+        <Tabs defaultValue="background" className="w-full">
+          <TabsList className="mb-5 grid w-full grid-cols-4 gap-2 rounded-xl border border-border/60 bg-muted/40 p-1">
+            <TabsTrigger value="background" className="h-9 rounded-lg text-[11px] font-semibold">
               Background
             </TabsTrigger>
-            <TabsTrigger value="behavior" className={TAB_TRIGGER_CLASSES}>
-              Behaviour
+            <TabsTrigger value="behavior" className="h-9 rounded-lg text-[11px] font-semibold">
+              Behavior
             </TabsTrigger>
-            <TabsTrigger value="transitions" className={TAB_TRIGGER_CLASSES}>
+            <TabsTrigger value="transitions" className="h-9 rounded-lg text-[11px] font-semibold">
               Transitions
             </TabsTrigger>
-            <TabsTrigger value="accessibility" className={TAB_TRIGGER_CLASSES}>
+            <TabsTrigger value="accessibility" className="h-9 rounded-lg text-[11px] font-semibold">
               Access
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="background" className="space-y-6 pt-4">
-            <div className="space-y-4 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
+          <TabsContent value="background" className="space-y-6">
+            <div className="space-y-4">
               <Label className="flex items-center gap-2 text-sm font-semibold">
-                <Palette className="h-4 w-4" />
+                <Palette className="h-3.5 w-3.5" />
                 Background Type
               </Label>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="flex gap-2">
                 <Button
                   variant={backgroundMode === 'solid' ? 'default' : 'outline'}
                   size="sm"
-                  className="h-10 justify-center rounded-xl text-sm"
-                  onClick={() => handleBackgroundModeChange('solid')}
+                  onClick={() => handleBackgroundTypeChange('solid')}
+                  className="flex-1 h-8 gap-1 px-2 text-[11px]"
                 >
-                  <Droplet className="mr-2 h-4 w-4" />
+                  <Droplet className="h-3 w-3" />
                   Solid
                 </Button>
                 <Button
                   variant={backgroundMode === 'gradient' ? 'default' : 'outline'}
                   size="sm"
-                  className="h-10 justify-center rounded-xl text-sm"
-                  onClick={() => handleBackgroundModeChange('gradient')}
+                  onClick={() => handleBackgroundTypeChange('gradient')}
+                  className="flex-1 h-8 gap-1 px-2 text-[11px]"
                 >
-                  <Layers className="mr-2 h-4 w-4" />
+                  <Layers className="h-3 w-3" />
                   Gradient
                 </Button>
                 <Button
                   variant={backgroundMode === 'image' ? 'default' : 'outline'}
                   size="sm"
-                  className="h-10 justify-center rounded-xl text-sm"
-                  onClick={() => handleBackgroundModeChange('image')}
+                  onClick={() => handleBackgroundTypeChange('image')}
+                  className="flex-1 h-8 gap-1 px-2 text-[11px]"
                 >
-                  <ImageIcon className="mr-2 h-4 w-4" />
+                  <ImageIcon className="h-3 w-3" />
                   Image
                 </Button>
               </div>
             </div>
 
             {backgroundMode === 'solid' && (
-              <div className="space-y-4 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-2">
-                    <Droplet className="h-4 w-4 text-muted-foreground" />
-                    <div className="flex flex-col">
-                      <span className="text-sm font-semibold text-foreground">Color</span>
-                      {backgroundColorLabel && (
-                        <span className="text-xs text-muted-foreground">{backgroundColorLabel}</span>
-                      )}
-                    </div>
+              <div className="space-y-3">
+                <Label className="text-xs font-semibold uppercase text-muted-foreground">Solid Color</Label>
+                <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                  <div className="flex flex-col">
+                    <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {solidColorLabel}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground/80">{solidColorInput}</span>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <Popover open={backgroundPaletteOpen} onOpenChange={setBackgroundPaletteOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          type="button"
-                          className="flex h-9 w-9 items-center justify-center rounded-full border border-border/50 p-0"
-                        >
-                          <span
-                            className={cn(
-                              'h-5 w-5 rounded-full border border-white/70 shadow-inner',
-                              backgroundColorOption?.swatchClassName,
-                            )}
-                            style={backgroundSwatchStyle}
-                          />
-                          <span className="sr-only">Select background colour</span>
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        side="left"
-                        align="center"
-                        sideOffset={16}
-                        collisionPadding={24}
-                        className="z-[3000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
+                  <Popover open={solidColorPopoverOpen} onOpenChange={setSolidColorPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        ref={solidColorTriggerRef}
+                        className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
                       >
-                        <div className="w-[360px] space-y-4 p-4">
-                          <ColorTray
-                            sections={backgroundColorSections}
-                            selectedId={backgroundSelectedId}
-                            onSelect={handleBackgroundPaletteSelect}
-                            swatchSize="md"
-                          />
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="color"
-                              value={resolvedSolidHex}
-                              onChange={event => handleCustomBackgroundColor(event.target.value)}
-                              className="h-11 w-full cursor-pointer rounded-2xl border border-border"
-                            />
-                            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                              Custom
-                            </span>
-                          </div>
+                        <span
+                          className={cn('h-5 w-5 rounded-full border border-white/70 shadow-inner')}
+                          style={solidColorSwatchStyle}
+                        />
+                        <span className="sr-only">Select solid background color</span>
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent
+                      side="left"
+                      align="center"
+                      sideOffset={16}
+                      collisionPadding={24}
+                      className="z-[3200] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
+                    >
+                      <div className="w-[320px] space-y-4 p-4">
+                        <ColorTray
+                          sections={SOLID_COLOR_SECTIONS}
+                          selectedId={solidColorOption?.id ?? solidColorToken}
+                          onSelect={option => {
+                            handleSolidColorSelect(option);
+                            setSolidColorPopoverOpen(false);
+                          }}
+                          defaultSectionId={DEFAULT_SOLID_SECTION.id}
+                        />
+                        <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={solidColorInput}
+                        onChange={event => handleSolidColorCommit(event.target.value)}
+                        className="h-10 w-full cursor-pointer rounded-2xl border border-border"
+                      />
+                          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Custom
+                          </span>
                         </div>
-                      </PopoverContent>
-                    </Popover>
-                    <Input
-                      value={backgroundHexInput}
-                      onChange={event => handleBackgroundHexInputChange(event.target.value)}
-                      className="h-9 w-28 rounded-xl border-border/60 text-center text-xs font-semibold uppercase tracking-wide"
-                      maxLength={7}
-                    />
-                  </div>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                 </div>
+                <Input
+                  value={solidColorInput}
+                  onChange={event => setSolidColorInput(sanitiseHex(event.target.value).toUpperCase())}
+                  onBlur={event => handleSolidColorCommit(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') {
+                      handleSolidColorCommit((event.target as HTMLInputElement).value);
+                    }
+                  }}
+                  placeholder="#FFFFFF"
+                  className="h-9 text-sm"
+                />
               </div>
             )}
 
             {backgroundMode === 'gradient' && (
-              <div className="space-y-4 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium text-muted-foreground">Start</Label>
-                    <Input
-                      type="color"
-                      value={settings.backgroundGradientStart ?? '#667eea'}
-                      onChange={event =>
-                        handleGradientChange({ backgroundGradientStart: event.target.value })
-                      }
-                      className="h-11 w-full cursor-pointer rounded-2xl border border-border"
-                    />
+              <div className="space-y-4">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Palette className="h-3.5 w-3.5 text-muted-foreground" />
+                      <Label className="text-sm font-medium">Gradient Start</Label>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-medium text-muted-foreground">{gradientStartLabel}</span>
+                      <Popover open={gradientStartPopoverOpen} onOpenChange={setGradientStartPopoverOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
+                          >
+                            <span
+                              className={cn('h-5 w-5 rounded-full border border-white/70 shadow-inner')}
+                              style={gradientStartSwatchStyle}
+                            />
+                            <span className="sr-only">Select gradient start color</span>
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          side="left"
+                          align="center"
+                          sideOffset={16}
+                          collisionPadding={24}
+                          className="z-[3200] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
+                        >
+                          <div className="w-[320px] space-y-4 p-4">
+                            <ColorTray
+                              sections={SOLID_COLOR_SECTIONS}
+                              selectedId={gradientStartOption?.id ?? gradientStartToken}
+                              onSelect={option => {
+                                handleGradientColorSelect('backgroundGradientStart', option);
+                                setGradientStartPopoverOpen(false);
+                              }}
+                              defaultSectionId={DEFAULT_SOLID_SECTION.id}
+                            />
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={gradientStartHex}
+                                onChange={event => handleGradientColorCommit('backgroundGradientStart', event.target.value)}
+                                className="h-10 w-full cursor-pointer rounded-2xl border border-border"
+                              />
+                              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                                Custom
+                              </span>
+                            </div>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium text-muted-foreground">End</Label>
-                    <Input
-                      type="color"
-                      value={settings.backgroundGradientEnd ?? '#764ba2'}
-                      onChange={event => handleGradientChange({ backgroundGradientEnd: event.target.value })}
-                      className="h-11 w-full cursor-pointer rounded-2xl border border-border"
-                    />
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Palette className="h-3.5 w-3.5 text-muted-foreground" />
+                      <Label className="text-sm font-medium">Gradient End</Label>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-medium text-muted-foreground">{gradientEndLabel}</span>
+                      <Popover open={gradientEndPopoverOpen} onOpenChange={setGradientEndPopoverOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
+                          >
+                            <span
+                              className={cn('h-5 w-5 rounded-full border border-white/70 shadow-inner')}
+                              style={gradientEndSwatchStyle}
+                            />
+                            <span className="sr-only">Select gradient end color</span>
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          side="left"
+                          align="center"
+                          sideOffset={16}
+                          collisionPadding={24}
+                          className="z-[3200] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
+                        >
+                          <div className="w-[320px] space-y-4 p-4">
+                            <ColorTray
+                              sections={SOLID_COLOR_SECTIONS}
+                              selectedId={gradientEndOption?.id ?? gradientEndToken}
+                              onSelect={option => {
+                                handleGradientColorSelect('backgroundGradientEnd', option);
+                                setGradientEndPopoverOpen(false);
+                              }}
+                              defaultSectionId={DEFAULT_SOLID_SECTION.id}
+                            />
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={gradientEndHex}
+                                onChange={event => handleGradientColorCommit('backgroundGradientEnd', event.target.value)}
+                                className="h-10 w-full cursor-pointer rounded-2xl border border-border"
+                              />
+                              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                                Custom
+                              </span>
+                            </div>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
                   </div>
                 </div>
+
                 <div className="space-y-2">
-                  <Label className="text-xs font-medium text-muted-foreground">Direction</Label>
+                  <Label className="text-xs font-semibold uppercase text-muted-foreground">Direction</Label>
                   <Select
-                    value={settings.backgroundGradientDirection ?? '135deg'}
+                    value={settings.backgroundGradientDirection ?? DEFAULT_PRESENTATION_SETTINGS.backgroundGradientDirection}
                     onValueChange={value => handleGradientChange({ backgroundGradientDirection: value })}
                   >
-                    <SelectTrigger className="rounded-xl border-border/60">
+                    <SelectTrigger className="h-9 text-sm">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent className="bg-background">
-                      {GRADIENT_DIRECTIONS.map(option => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
+                    <SelectContent>
+                      {GRADIENT_DIRECTIONS.map(direction => (
+                        <SelectItem key={direction.value} value={direction.value}>
+                          {direction.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -486,192 +641,200 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             )}
 
             {backgroundMode === 'image' && (
-              <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
-                <Label className="flex items-center gap-2 text-sm font-semibold">
+              <div className="space-y-3">
+                <Label>Background Image</Label>
+                <Button variant="outline" disabled className="w-full justify-start gap-2">
                   <ImageIcon className="h-4 w-4" />
-                  Image URL
-                </Label>
-                <Input
-                  placeholder="https://example.com/background.jpg"
-                  value={settings.backgroundImageUrl ?? ''}
-                  onChange={event =>
-                    onChange({
-                      backgroundMode: 'image',
-                      backgroundImageUrl: event.target.value.trim(),
-                    })
-                  }
-                  className="rounded-xl border-border/60"
-                />
+                  Choose Image (coming soon)
+                </Button>
               </div>
             )}
 
-            <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
-              <Label className="text-sm font-semibold text-foreground">
-                Background Opacity {backgroundOpacity}%
-              </Label>
+            <div className="space-y-2">
+              <Label>Opacity: {safeBackgroundOpacity}%</Label>
               <Slider
+                value={[safeBackgroundOpacity]}
+                onValueChange={([value]) =>
+                  onChange({
+                    backgroundOpacity: Math.min(100, Math.max(0, Math.round(value))),
+                  })
+                }
                 min={0}
                 max={100}
                 step={1}
-                value={[backgroundOpacity]}
-                onValueChange={([value]) => onChange({ backgroundOpacity: value })}
               />
             </div>
           </TabsContent>
 
-          <TabsContent value="behavior" className="space-y-5 pt-4">
-            <div className="flex items-center justify-between rounded-2xl border border-border/50 bg-background/70 px-5 py-4">
-              <div className="flex items-center gap-2">
-                {settings.backgroundLocked ? (
-                  <Lock className="h-4 w-4 text-destructive" />
-                ) : (
-                  <Unlock className="h-4 w-4 text-muted-foreground" />
-                )}
-                <div>
-                  <p className="text-sm font-semibold text-foreground">Lock Background</p>
-                  <p className="text-xs text-muted-foreground">Prevent background adjustments on this slide.</p>
+          <TabsContent value="behavior" className="space-y-6">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                <div className="flex items-center gap-3">
+                  {backgroundLocked ? <Lock className="h-4 w-4 text-destructive" /> : <Unlock className="h-4 w-4 text-muted-foreground" />}
+                  <div>
+                    <Label className="text-[13px] font-medium">Lock Slide Background</Label>
+                    <p className="text-[11px] leading-4 text-muted-foreground">Prevent accidental changes to the background</p>
+                  </div>
                 </div>
+                <Switch checked={backgroundLocked} onCheckedChange={value => onChange({ backgroundLocked: value })} />
               </div>
-              <Switch
-                checked={Boolean(settings.backgroundLocked)}
-                onCheckedChange={value => onChange({ backgroundLocked: value })}
-              />
-            </div>
 
-            <div className="space-y-4 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
-              <Label className="flex items-center gap-2 text-sm font-semibold">
-                <Grid3x3 className="h-4 w-4" />
-                Canvas Guides
-              </Label>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Eye className="h-4 w-4" />
-                    Show Grid
-                  </div>
-                  <Switch
-                    checked={Boolean(settings.showGrid)}
-                    onCheckedChange={value => onChange({ showGrid: value })}
-                  />
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Type className="h-4 w-4" />
-                    Show Guides
-                  </div>
-                  <Switch
-                    checked={Boolean(settings.showGuides)}
-                    onCheckedChange={value => onChange({ showGuides: value })}
-                  />
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Layers className="h-4 w-4" />
-                    Snap to Grid
-                  </div>
-                  <Switch
-                    checked={Boolean(settings.snapToGrid ?? true)}
-                    onCheckedChange={value => onChange({ snapToGrid: value })}
-                  />
-                </div>
-                {settings.snapToGrid !== false && (
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium text-muted-foreground">Grid Size {gridSize}px</Label>
-                    <Slider
-                      min={4}
-                      max={120}
-                      step={2}
-                      value={[gridSize]}
-                      onValueChange={([value]) => onChange({ gridSize: value })}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
+              <Separator />
 
-            <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
-              <Label className="flex items-center gap-2 text-sm font-semibold">
-                <Hash className="h-4 w-4" />
-                Slide Numbering
-              </Label>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Show Slide Number</span>
-                <Switch
-                  checked={showSlideNumber}
-                  onCheckedChange={value => onChange({ showSlideNumber: value })}
-                />
-              </div>
-              {showSlideNumber && (
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-muted-foreground">Position</Label>
-                  <Select
-                    value={settings.slideNumberPosition ?? 'bottom-right'}
-                    onValueChange={value =>
-                      onChange({
-                        slideNumberPosition: value as PresentationSettings['slideNumberPosition'],
-                      })
-                    }
-                  >
-                    <SelectTrigger className="rounded-xl border-border/60">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-background">
-                      <SelectItem value="top-left">Top Left</SelectItem>
-                      <SelectItem value="top-right">Top Right</SelectItem>
-                      <SelectItem value="bottom-left">Bottom Left</SelectItem>
-                      <SelectItem value="bottom-right">Bottom Right</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
+              <div className="space-y-4">
+                <Label className="flex items-center gap-2 text-base font-semibold">
+                  <Grid3x3 className="h-4 w-4" />
+                  Grid & Guides
+                </Label>
 
-            <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
-              <Label className="flex items-center gap-2 text-sm font-semibold">
-                <Calendar className="h-4 w-4" />
-                Speaker Notes
-              </Label>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Show Notes Panel</span>
-                <Switch checked={notesVisible} onCheckedChange={handleNotesToggle} />
-              </div>
-              {notesVisible && (
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-muted-foreground">Position</Label>
-                  <Select
-                    value={settings.slideNotesPosition ?? 'bottom'}
-                    onValueChange={value => handleNotesPosition(value as SlideNotesPosition)}
-                  >
-                    <SelectTrigger className="rounded-xl border-border/60">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-background">
-                      {NOTES_POSITIONS.map(position => (
-                        <SelectItem key={position} value={position}>
-                          {position === 'bottom' ? 'Bottom' : 'Right Side'}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="space-y-4 rounded-lg bg-muted/50 p-3">
+                  <div className="flex items-center justify-between text-[13px]">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Eye className="h-4 w-4" />
+                      Show Grid
+                    </div>
+                    <Switch checked={showGrid} onCheckedChange={value => onChange({ showGrid: value })} />
+                  </div>
+                  <div className="flex items-center justify-between text-[13px]">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Eye className="h-4 w-4" />
+                      Show Guides
+                    </div>
+                    <Switch checked={showGuides} onCheckedChange={value => onChange({ showGuides: value })} />
+                  </div>
+                  <div className="flex items-center justify-between text-[13px]">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Move className="h-4 w-4" />
+                      Snap to Grid
+                    </div>
+                    <Switch checked={snapToGrid} onCheckedChange={value => onChange({ snapToGrid: value })} />
+                  </div>
+
+                  {showGrid && (
+                    <div className="space-y-2 rounded-lg bg-background p-3">
+                      <Label className="text-[11px] font-semibold uppercase text-muted-foreground">
+                        Grid Size: {safeGridSize}px
+                      </Label>
+                      <Slider
+                        value={[safeGridSize]}
+                        onValueChange={([value]) =>
+                          onChange({
+                            gridSize: Math.min(200, Math.max(4, Math.round(value))),
+                          })
+                        }
+                        min={4}
+                        max={200}
+                        step={2}
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <Label className="flex items-center gap-2 text-sm font-semibold">
+                  <Hash className="h-4 w-4" />
+                  Slide Numbering
+                </Label>
+
+                <div className="space-y-4 rounded-lg bg-muted/50 p-3">
+                  <div className="flex items-center justify-between text-[13px]">
+                    <Label className="text-muted-foreground">Show Slide Number</Label>
+                    <Switch checked={showSlideNumber} onCheckedChange={value => onChange({ showSlideNumber: value })} />
+                  </div>
+
+                  {showSlideNumber && (
+                    <div className="space-y-2">
+                      <Label className="text-[11px] font-semibold uppercase text-muted-foreground">Position</Label>
+                      <Select
+                        value={slideNumberPosition}
+                        onValueChange={value =>
+                          onChange({
+                            slideNumberPosition: value as SlideNumberPosition,
+                          })
+                        }
+                      >
+                        <SelectTrigger className="h-9 text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {SLIDE_NUMBER_POSITIONS.map(position => (
+                            <SelectItem key={position} value={position} className="capitalize">
+                              {position.replace('-', ' ')}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <Label className="flex items-center gap-2 text-sm font-semibold">
+                  <MessageSquare className="h-4 w-4" />
+                  Speaker Notes
+                </Label>
+
+                <div className="space-y-4 rounded-lg bg-muted/50 p-3">
+                  <div className="flex items-center justify-between text-[13px]">
+                    <Label className="text-muted-foreground">Show Notes Panel</Label>
+                    <Switch checked={notesVisible} onCheckedChange={value => onToggleNotes?.(value)} />
+                  </div>
+
+                  {notesVisible && (
+                    <div className="space-y-2">
+                      <Label className="text-[11px] font-semibold uppercase text-muted-foreground">Position</Label>
+                      <Select
+                        value={settings.slideNotesPosition ?? DEFAULT_PRESENTATION_SETTINGS.slideNotesPosition}
+                        onValueChange={value => onNotesPositionChange?.(value as SlideNotesPosition)}
+                      >
+                        <SelectTrigger className="h-9 text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {NOTES_POSITIONS.map(position => (
+                            <SelectItem key={position} value={position} className="capitalize">
+                              {position === 'bottom' ? 'Bottom' : 'Right Side'}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </TabsContent>
 
-          <TabsContent value="transitions" className="space-y-5 pt-4">
-            <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
+          <TabsContent value="transitions" className="space-y-6">
+            <div className="space-y-4">
               <Label className="flex items-center gap-2 text-sm font-semibold">
                 <Zap className="h-4 w-4" />
                 Transition Effect
               </Label>
               <Select
-                value={(settings.transitionEffect as string) ?? settings.slideshowTransition ?? 'fade'}
-                onValueChange={handleTransitionChange}
+                value={transitionEffect}
+                onValueChange={value => {
+                  const partial: Partial<PresentationSettings> = {
+                    transitionEffect: value as PresentationSettings['transitionEffect'],
+                  };
+
+                  if (value !== 'none') {
+                    partial.slideshowTransition = value as SlideshowTransition;
+                  }
+
+                  onChange(partial);
+                }}
               >
-                <SelectTrigger className="rounded-xl border-border/60">
+                <SelectTrigger className="h-9 text-sm">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-background">
+                <SelectContent>
                   {TRANSITION_OPTIONS.map(option => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
@@ -679,91 +842,134 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   ))}
                 </SelectContent>
               </Select>
-              <div className="space-y-2">
-                <Label className="text-xs font-medium text-muted-foreground">Duration {transitionDuration}ms</Label>
+
+              <div className="space-y-2 rounded-lg bg-muted/50 p-3 text-[13px]">
+                <Label className="text-[11px] font-semibold uppercase text-muted-foreground">
+                  Duration: {safeTransitionDuration}ms
+                </Label>
                 <Slider
+                  value={[safeTransitionDuration]}
+                  onValueChange={([value]) =>
+                    onChange({
+                      transitionDuration: Math.min(2000, Math.max(100, Math.round(value))),
+                    })
+                  }
                   min={100}
                   max={2000}
                   step={50}
-                  value={[transitionDuration]}
-                  onValueChange={([value]) => onChange({ transitionDuration: value })}
                 />
               </div>
             </div>
 
-            <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
+            <Separator />
+
+            <div className="space-y-4">
               <Label className="flex items-center gap-2 text-sm font-semibold">
                 <Clock className="h-4 w-4" />
-                Auto Advance
+                Auto-Advance
               </Label>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Enable Auto Advance</span>
-                <Switch checked={Boolean(settings.autoAdvance)} onCheckedChange={handleAutoAdvanceToggle} />
+
+              <div className="flex items-start justify-between gap-3 rounded-lg bg-muted/50 p-3">
+                <div className="space-y-1">
+                  <Label className="text-[13px] font-medium leading-4">Enable Auto-Advance</Label>
+                  <p className="text-[11px] leading-4 text-muted-foreground">Automatically advance to the next slide</p>
+                </div>
+                <Switch checked={autoAdvance} onCheckedChange={handleAutoAdvanceToggle} />
               </div>
-              {settings.autoAdvance && (
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-muted-foreground">Delay {autoAdvanceDuration}s</Label>
+
+              {autoAdvance && (
+                <div className="space-y-2 rounded-lg bg-muted/50 p-3 text-[13px]">
+                  <Label className="text-[11px] font-semibold uppercase text-muted-foreground">
+                    Duration: {safeAutoAdvanceDuration}s
+                  </Label>
                   <Slider
+                    value={[safeAutoAdvanceDuration]}
+                    onValueChange={([value]) => handleAutoAdvanceDurationChange(value)}
                     min={1}
                     max={60}
                     step={1}
-                    value={[autoAdvanceDuration]}
-                    onValueChange={([value]) => handleAutoAdvanceDurationChange(value)}
                   />
                 </div>
               )}
             </div>
           </TabsContent>
 
-          <TabsContent value="accessibility" className="space-y-5 pt-4">
-            <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">High Contrast</p>
-                  <p className="text-xs text-muted-foreground">Boost colour separation for readability.</p>
+          <TabsContent value="accessibility" className="space-y-6">
+            <div className="space-y-4">
+              <Label className="flex items-center gap-2 text-sm font-semibold">
+                <Eye className="h-4 w-4" />
+                Accessibility Options
+              </Label>
+
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-2.5 rounded-lg bg-muted/50 px-3 py-2.5">
+                  <div className="max-w-[72%] space-y-1">
+                    <Label className="text-[12px] font-medium leading-4">High Contrast Mode</Label>
+                    <p className="text-[11px] leading-[1.1rem] text-muted-foreground">Enhance visibility for text and elements</p>
+                  </div>
+                  <Switch
+                    className="shrink-0"
+                    checked={highContrast}
+                    onCheckedChange={value => onChange({ highContrast: value })}
+                  />
                 </div>
-                <Switch
-                  checked={Boolean(settings.highContrast)}
-                  onCheckedChange={value => onChange({ highContrast: value })}
-                />
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">Larger Text</p>
-                  <p className="text-xs text-muted-foreground">Increase base typography scale.</p>
+
+                <div className="flex items-start justify-between gap-2.5 rounded-lg bg-muted/50 px-3 py-2.5">
+                  <div className="max-w-[72%] space-y-1">
+                    <Label className="text-[12px] font-medium leading-4">Large Text</Label>
+                    <p className="text-[11px] leading-[1.1rem] text-muted-foreground">Increase base font size for readability</p>
+                  </div>
+                  <Switch
+                    className="shrink-0"
+                    checked={largeText}
+                    onCheckedChange={value => onChange({ largeText: value })}
+                  />
                 </div>
-                <Switch
-                  checked={Boolean(settings.largeText)}
-                  onCheckedChange={value => onChange({ largeText: value })}
-                />
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">Reduced Motion</p>
-                  <p className="text-xs text-muted-foreground">Minimise animations during playback.</p>
+
+                <div className="flex items-start justify-between gap-2.5 rounded-lg bg-muted/50 px-3 py-2.5">
+                  <div className="max-w-[72%] space-y-1">
+                    <Label className="text-[12px] font-medium leading-4">Reduced Motion</Label>
+                    <p className="text-[11px] leading-[1.1rem] text-muted-foreground">Minimize animations and transitions</p>
+                  </div>
+                  <Switch
+                    className="shrink-0"
+                    checked={reducedMotion}
+                    onCheckedChange={value => onChange({ reducedMotion: value })}
+                  />
                 </div>
-                <Switch
-                  checked={Boolean(settings.reducedMotion)}
-                  onCheckedChange={value => onChange({ reducedMotion: value })}
-                />
               </div>
             </div>
 
-            <div className="space-y-3 rounded-2xl border border-border/50 bg-background/70 px-5 py-5">
-              <Label className="text-sm font-semibold text-foreground">Responsive Preview</Label>
-              <div className="grid grid-cols-3 gap-2">
-                <Button variant="outline" size="sm" className="justify-start">
-                  <Monitor className="mr-2 h-4 w-4" />
+            <Separator />
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase text-muted-foreground">Responsive Preview</Label>
+              <div className="flex gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 px-2 py-1.5 text-[11px]"
+                  disabled
+                >
+                  <Monitor className="mr-1.5 h-3.5 w-3.5" />
                   Desktop
                 </Button>
-                <Button variant="outline" size="sm" className="justify-start">
-                  <Tablet className="mr-2 h-4 w-4" />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 px-2 py-1.5 text-[11px]"
+                  disabled
+                >
+                  <Tablet className="mr-1.5 h-3.5 w-3.5" />
                   Tablet
                 </Button>
-                <Button variant="outline" size="sm" className="justify-start">
-                  <Smartphone className="mr-2 h-4 w-4" />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 px-2 py-1.5 text-[11px]"
+                  disabled
+                >
+                  <Smartphone className="mr-1.5 h-3.5 w-3.5" />
                   Mobile
                 </Button>
               </div>
@@ -772,19 +978,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </Tabs>
       </ScrollArea>
 
-      <div className="flex items-center justify-between border-t border-border/50 px-6 py-5">
-        <Button variant="outline" onClick={onClose}>
-          Close
+      <div className="flex items-center justify-between border-t border-border/60 bg-muted/40 px-4 py-3">
+        <Button variant="outline" size="sm" className="px-3 text-[12px]" onClick={onClose}>
+          Cancel
         </Button>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={onReset}>
-            Reset
+        <div className="flex gap-1.5">
+          <Button variant="outline" size="sm" className="px-3 text-[12px]" onClick={onReset}>
+            Reset to Defaults
           </Button>
-          <Button onClick={onClose}>Apply</Button>
+          <Button size="sm" className="px-3 text-[12px]" onClick={onClose}>
+            Apply Settings
+          </Button>
         </div>
       </div>
     </div>
   );
 };
-
-export default SettingsPanel;
