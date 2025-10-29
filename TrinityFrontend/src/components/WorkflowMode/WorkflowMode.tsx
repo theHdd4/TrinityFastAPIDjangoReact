@@ -10,7 +10,7 @@ import MoleculeList from '@/components/MoleculeList/MoleculeList';
 import WorkflowRightPanel from './components/WorkflowRightPanel';
 import CreateMoleculeDialog from './components/CreateMoleculeDialog';
 import { useToast } from '@/hooks/use-toast';
-import { MOLECULES_API } from '@/lib/api';
+import { MOLECULES_API, LABORATORY_PROJECT_STATE_API } from '@/lib/api';
 import { ReactFlowProvider } from 'reactflow';
 import './WorkflowMode.css';
 
@@ -32,6 +32,15 @@ const WorkflowMode = () => {
   const [isRightPanelToolVisible, setIsRightPanelToolVisible] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  // Track pending deletions for Laboratory sync
+  const [pendingDeletions, setPendingDeletions] = useState<{
+    deletedMolecules: string[];
+    deletedAtoms: { moleculeId: string; atomId: string }[];
+  }>({
+    deletedMolecules: [],
+    deletedAtoms: []
+  });
 
   // Load workflow state on component mount - always try MongoDB first, then localStorage
   useEffect(() => {
@@ -445,6 +454,14 @@ const WorkflowMode = () => {
   const handleMoveAtomToAtomList = (atomId: string, fromMoleculeId: string) => {
     console.log('Moving atom to atom list:', atomId, 'from molecule:', fromMoleculeId);
     
+    // Track atom deletion for Laboratory sync
+    setPendingDeletions(prev => ({
+      ...prev,
+      deletedAtoms: [...prev.deletedAtoms, { moleculeId: fromMoleculeId, atomId: atomId }]
+    }));
+    
+    console.log(`📝 Tracked atom deletion: ${atomId} from molecule ${fromMoleculeId} (will sync to Laboratory on save)`);
+    
     // Update customMolecules state
     setCustomMolecules(prev => 
       prev.map(mol => 
@@ -481,6 +498,14 @@ const WorkflowMode = () => {
 
   // Handle molecule removal
   const handleMoleculeRemove = (moleculeId: string) => {
+    // Track molecule deletion for Laboratory sync
+    setPendingDeletions(prev => ({
+      ...prev,
+      deletedMolecules: [...prev.deletedMolecules, moleculeId]
+    }));
+    
+    console.log(`📝 Tracked molecule deletion: ${moleculeId} (will sync to Laboratory on save)`);
+    
     // Remove from both canvasMolecules and customMolecules
     setCanvasMolecules(prev => prev.filter(mol => mol.id !== moleculeId));
     setCustomMolecules(prev => prev.filter(mol => mol.id !== moleculeId));
@@ -494,7 +519,7 @@ const WorkflowMode = () => {
 
 
   // Handle workflow rendering to Laboratory mode
-  const handleRenderWorkflow = useCallback(() => {
+  const handleRenderWorkflow = useCallback(async () => {
     // Check if all molecules have at least one atom
     const moleculesWithAtoms = canvasMolecules.filter(mol => mol.atoms && mol.atoms.length > 0);
     
@@ -514,6 +539,20 @@ const WorkflowMode = () => {
         variant: 'destructive'
       });
       return;
+    }
+
+    // Save workflow configuration to MongoDB before rendering
+    try {
+      console.log('💾 Saving workflow configuration to MongoDB before rendering...');
+      await saveWorkflowConfiguration();
+      console.log('✅ Workflow configuration saved to MongoDB successfully');
+    } catch (error) {
+      console.error('❌ Failed to save workflow configuration to MongoDB:', error);
+      toast({
+        title: 'Save Warning',
+        description: 'Workflow will be rendered but configuration may not be saved to database',
+        variant: 'destructive'
+      });
     }
 
     // Function to convert atom names to atom IDs for Laboratory mode
@@ -543,7 +582,7 @@ const WorkflowMode = () => {
     
     toast({
       title: 'Workflow Rendered',
-      description: 'Workflow has been prepared for Laboratory mode'
+      description: 'Workflow has been prepared for Laboratory mode and saved to database'
     });
 
     // Navigate to Laboratory mode
@@ -580,6 +619,22 @@ const WorkflowMode = () => {
 
       if (response.ok) {
         const result = await response.json();
+        
+        // Sync changes to Laboratory collection
+        try {
+          await syncLaboratoryCollectionOnWorkflowSave(canvasMolecules, pendingDeletions);
+          console.log('✅ Workflow changes synced to Laboratory collection');
+          
+          // Clear pending deletions after successful sync
+          setPendingDeletions({
+            deletedMolecules: [],
+            deletedAtoms: []
+          });
+        } catch (syncError) {
+          console.error('❌ Failed to sync Workflow changes to Laboratory collection:', syncError);
+          // Don't show error to user, just log it
+        }
+        
         toast({
           title: "Workflow Saved",
           description: `Workflow configuration has been saved successfully`,
@@ -595,6 +650,137 @@ const WorkflowMode = () => {
         description: "Failed to save workflow configuration. Please try again.",
         variant: "destructive",
       });
+    }
+  };
+
+  // Sync Workflow changes to Laboratory collection
+  const syncLaboratoryCollectionOnWorkflowSave = async (canvasMolecules: any[], pendingDeletions: { deletedMolecules: string[]; deletedAtoms: { moleculeId: string; atomId: string }[] }) => {
+    try {
+      console.log('🔄 Syncing Workflow changes to Laboratory collection...');
+      
+      // Get current Laboratory configuration to preserve existing atom settings
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      
+      // Fetch current Laboratory configuration
+      const labResponse = await fetch(`${LABORATORY_PROJECT_STATE_API}/get/${env.CLIENT_NAME}/${env.APP_NAME}/${env.PROJECT_NAME}`, {
+        method: 'GET',
+        credentials: 'include',
+      });
+      
+      let existingCards = [];
+      let existingWorkflowMolecules = [];
+      
+      if (labResponse.ok) {
+        const labData = await labResponse.json();
+        existingCards = labData.cards || [];
+        existingWorkflowMolecules = labData.workflow_molecules || [];
+      }
+      
+      // Create a map of existing atom settings by molecule_id + atom_name
+      const existingAtomSettings = new Map();
+      existingCards.forEach(card => {
+        card.atoms.forEach(atom => {
+          const key = `${atom.moleculeId}-${atom.atomId}`;
+          existingAtomSettings.set(key, atom.settings);
+        });
+      });
+      
+      // Process deletions first - remove deleted molecules and atoms from existing cards
+      let updatedCards = [...existingCards];
+      
+      // Remove cards belonging to deleted molecules
+      if (pendingDeletions.deletedMolecules.length > 0) {
+        console.log('🗑️ Removing cards for deleted molecules:', pendingDeletions.deletedMolecules);
+        updatedCards = updatedCards.filter(card => 
+          !pendingDeletions.deletedMolecules.includes(card.moleculeId)
+        );
+      }
+      
+      // Remove atoms from cards based on atom deletions
+      if (pendingDeletions.deletedAtoms.length > 0) {
+        console.log('🗑️ Removing atoms from cards:', pendingDeletions.deletedAtoms);
+        updatedCards = updatedCards.map(card => {
+          const atomsToRemove = pendingDeletions.deletedAtoms
+            .filter(deletion => deletion.moleculeId === card.moleculeId)
+            .map(deletion => deletion.atomId);
+          
+          if (atomsToRemove.length > 0) {
+            return {
+              ...card,
+              atoms: card.atoms.filter(atom => !atomsToRemove.includes(atom.atomId))
+            };
+          }
+          return card;
+        });
+      }
+      
+      // Convert workflow molecules to Laboratory format, preserving existing settings
+      const newCards = [];
+      const newWorkflowMolecules = [];
+      let cardIndex = 0;
+      
+      canvasMolecules.forEach(molecule => {
+        const card = {
+          id: `card-${cardIndex}`,
+          atoms: [],
+          isExhibited: false,
+          collapsed: false,
+          scroll_position: 0,
+          moleculeId: molecule.id,
+          moleculeTitle: molecule.title
+        };
+        
+        molecule.atoms.forEach((atomName: string, atomIndex: number) => {
+          const settingsKey = `${molecule.id}-${atomName}`;
+          const existingSettings = existingAtomSettings.get(settingsKey) || {};
+          
+          const atom = {
+            id: `${molecule.id}-${atomName}-${atomIndex}`,
+            atomId: atomName,
+            title: atomName,
+            category: "Atom",
+            color: "bg-gray-400",
+            source: "manual",
+            settings: existingSettings, // Preserve existing settings
+            moleculeId: molecule.id,
+            moleculeTitle: molecule.title
+          };
+          
+          card.atoms.push(atom);
+        });
+        
+        if (card.atoms.length > 0) {
+          newCards.push(card);
+          newWorkflowMolecules.push({
+            moleculeId: molecule.id,
+            moleculeTitle: molecule.title,
+            atoms: molecule.atoms
+          });
+          cardIndex++;
+        }
+      });
+      
+      // Combine existing cards (after deletions) with new cards
+      const finalCards = [...updatedCards, ...newCards];
+      
+      // Save updated Laboratory configuration
+      await fetch(`${LABORATORY_PROJECT_STATE_API}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          cards: finalCards,
+          workflow_molecules: newWorkflowMolecules,
+          client_name: env.CLIENT_NAME || 'default_client',
+          app_name: env.APP_NAME || 'default_app',
+          project_name: env.PROJECT_NAME || 'default_project'
+        })
+      });
+      
+      console.log('✅ Workflow changes synced to Laboratory collection with preserved settings');
+    } catch (error) {
+      console.error('❌ Failed to sync Workflow changes to Laboratory collection:', error);
     }
   };
 
@@ -887,6 +1073,27 @@ const WorkflowMode = () => {
           </div>
         </div>
       </div>
+
+      {/* Pending Deletions Indicator */}
+      {(() => {
+        const totalDeletions = pendingDeletions.deletedMolecules.length + pendingDeletions.deletedAtoms.length;
+        if (totalDeletions === 0) return null;
+        
+        return (
+          <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-6 py-3 mx-6 rounded-md mb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <span className="text-sm font-medium">
+                  📝 {totalDeletions} pending deletion{totalDeletions > 1 ? 's' : ''} 
+                  {pendingDeletions.deletedMolecules.length > 0 && ` (${pendingDeletions.deletedMolecules.length} molecules)`}
+                  {pendingDeletions.deletedAtoms.length > 0 && ` (${pendingDeletions.deletedAtoms.length} atoms)`}
+                </span>
+                <span className="text-xs ml-2 text-yellow-600">Will sync to Laboratory when you save</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="flex-1 flex overflow-visible" style={{ minHeight: 0 }}>
         {/* Molecule Library - LEFT SIDE */}

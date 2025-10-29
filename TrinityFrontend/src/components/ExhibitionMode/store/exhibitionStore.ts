@@ -519,25 +519,19 @@ const dedupeAtoms = (atoms: DroppedAtom[]): DroppedAtom[] => {
   const seen = new Set<string>();
   const result: DroppedAtom[] = [];
 
-  console.log('🔍 ExhibitionStore - dedupeAtoms input:', atoms);
   atoms.forEach(atom => {
     // For EvaluateModelsFeature, just use the id since it's already unique (graph.id-combinationName)
     const key = atom.id ?? atom.atomId;
-    console.log('🔍 ExhibitionStore - dedupeAtoms processing atom:', atom.atomId, 'id:', atom.id, 'title:', atom.title, 'key:', key);
     if (!key) {
-      console.log('🔍 ExhibitionStore - dedupeAtoms skipping atom (no key):', atom);
       return;
     }
     if (seen.has(key)) {
-      console.log('🔍 ExhibitionStore - dedupeAtoms DUPLICATE FOUND! Skipping:', atom.atomId, 'key:', key);
       return;
     }
     seen.add(key);
     result.push(atom);
-    console.log('🔍 ExhibitionStore - dedupeAtoms ADDED:', atom.atomId, 'key:', key);
   });
 
-  console.log('🔍 ExhibitionStore - dedupeAtoms result:', result);
   return result;
 };
 
@@ -689,7 +683,6 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     return null;
   }
 
-  console.log('🔍 ExhibitionStore - normalizeAtom input:', component);
   const candidate = component as Partial<DroppedAtom & ExhibitionComponentPayload>;
 
   const resolvedId = isNonEmptyString(candidate.id) ? candidate.id.trim() : undefined;
@@ -765,7 +758,6 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     color,
     metadata,
   };
-  console.log('🔍 ExhibitionStore - normalizeAtom result:', result);
   return result;
 };
 
@@ -961,9 +953,7 @@ const computeCatalogueCards = (cards: LayoutCard[]): LayoutCard[] => {
 };
 
 const normaliseCatalogueComponent = (component: ExhibitionComponentPayload, atomName: string): DroppedAtom | null => {
-  console.log('🔍 ExhibitionStore - normaliseCatalogueComponent input:', component);
   const normalised = normalizeAtom(component);
-  console.log('🔍 ExhibitionStore - normaliseCatalogueComponent normalized:', normalised);
   if (!normalised) {
     return null;
   }
@@ -1019,18 +1009,13 @@ const buildCardFromEntry = (entry: ExhibitionAtomPayload, index: number): Layout
   const atomName = rawName || identifier;
 
   const extractedComponents = extractExhibitedComponents(entry as AtomEntryLike);
-  console.log('🔍 ExhibitionStore - buildCardFromEntry for:', atomName, 'extracted components:', extractedComponents);
 
   const components = extractedComponents
     .map((component, index) => {
-      console.log(`🔍 ExhibitionStore - Processing component ${index}:`, component);
       const normalized = normaliseCatalogueComponent(component, atomName);
-      console.log(`🔍 ExhibitionStore - Normalized component ${index}:`, normalized);
       return normalized;
     })
     .filter((component): component is DroppedAtom => component !== null);
-
-  console.log('🔍 ExhibitionStore - buildCardFromEntry normalized components:', components);
 
   if (components.length === 0) {
     return null;

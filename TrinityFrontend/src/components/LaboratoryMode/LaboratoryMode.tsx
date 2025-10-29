@@ -48,6 +48,18 @@ const LaboratoryMode = () => {
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
   const skipInitialLabCleanupRef = useRef(true);
+  
+  // Ref for CanvasArea to access sync function
+  const canvasAreaRef = useRef<{ syncWorkflowCollection: () => Promise<void> }>(null);
+  
+  // State for pending changes indicator
+  const [pendingChanges, setPendingChanges] = useState<{
+    deletedMolecules: string[];
+    deletedAtoms: { moleculeId: string; atomId: string }[];
+  }>({
+    deletedMolecules: [],
+    deletedAtoms: []
+  });
   const reduceMotionRef = useRef(initialReduceMotion);
   const [isPreparingAnimation, setIsPreparingAnimation] = useState(!initialReduceMotion);
 
@@ -301,6 +313,18 @@ const LaboratoryMode = () => {
       }
 
       const storageSuccess = persistLaboratoryConfig(sanitized);
+      
+      // Sync changes to Workflow collection
+      if (canvasAreaRef.current) {
+        try {
+          await canvasAreaRef.current.syncWorkflowCollection();
+          console.log('✅ Laboratory changes synced to Workflow collection');
+        } catch (syncError) {
+          console.error('❌ Failed to sync Laboratory changes to Workflow collection:', syncError);
+          // Don't show error to user, just log it
+        }
+      }
+      
       if (storageSuccess) {
         toast({
           title: 'Configuration Saved',
@@ -405,6 +429,27 @@ const LaboratoryMode = () => {
         </div>
       </div>
 
+      {/* Pending Changes Indicator */}
+      {(() => {
+        const totalChanges = pendingChanges.deletedMolecules.length + pendingChanges.deletedAtoms.length;
+        if (totalChanges === 0) return null;
+        
+        return (
+          <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-6 py-3 mx-6 rounded-md mb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+                <span className="text-sm font-medium">
+                  📝 {totalChanges} pending change{totalChanges > 1 ? 's' : ''} 
+                  {pendingChanges.deletedMolecules.length > 0 && ` (${pendingChanges.deletedMolecules.length} molecules)`}
+                  {pendingChanges.deletedAtoms.length > 0 && ` (${pendingChanges.deletedAtoms.length} atoms)`}
+                </span>
+                <span className="text-xs ml-2 text-yellow-600">Will sync when you save</span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
         <div className="flex-1 flex overflow-hidden">
           {/* Atoms Sidebar */}
           <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
@@ -425,12 +470,14 @@ const LaboratoryMode = () => {
             }
           >
             <CanvasArea
+              ref={canvasAreaRef}
               onAtomSelect={handleAtomSelect}
               onCardSelect={handleCardSelect}
               selectedCardId={selectedCardId}
               onToggleSettingsPanel={toggleSettingsPanel}
               onToggleHelpPanel={toggleHelpPanel}
               canEdit={canEdit}
+              onPendingChangesUpdate={setPendingChanges}
             />
           </div>
 
