@@ -42,7 +42,8 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
         ? 'text-right'
         : 'text-center';
   const legendPosition = config.legendPosition ?? 'bottom';
-  const legendVisible = isEditableChartType(config.type) && chartData.length > 0;
+  const legendVisible =
+    isEditableChartType(config.type) && chartData.length > 0 && (config.showLabels ?? true);
   const legendOrientation = legendPosition === 'left' || legendPosition === 'right' ? 'vertical' : 'horizontal';
 
   const renderLegend = (extraClass?: string) => {

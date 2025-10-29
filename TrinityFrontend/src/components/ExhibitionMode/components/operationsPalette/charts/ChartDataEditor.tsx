@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
   LineChart,
@@ -87,6 +87,14 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     return candidate;
   });
 
+  const [legendPosition, setLegendPosition] = useState<ChartConfig['legendPosition']>(
+    () => config.legendPosition ?? DEFAULT_CHART_CONFIG.legendPosition,
+  );
+
+  useEffect(() => {
+    setLegendPosition(config.legendPosition ?? DEFAULT_CHART_CONFIG.legendPosition);
+  }, [config.legendPosition]);
+
   const addRow = () => {
     setChartData(prev => [...prev, { label: 'New Item', value: 0 }]);
   };
@@ -140,7 +148,7 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   const colors = useMemo(() => selectedScheme.colors, [selectedScheme]);
 
   const renderChartLegend = () => {
-    if (!isEditableChartType(config.type) || chartData.length === 0) {
+    if (!config.showLabels || !isEditableChartType(config.type) || chartData.length === 0) {
       return null;
     }
 
@@ -686,11 +694,11 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                 <div className="space-y-3">
                   <Label className="text-sm font-semibold">Legend Position</Label>
                   <Select
-                    modal={false}
-                    value={config.legendPosition ?? DEFAULT_CHART_CONFIG.legendPosition}
-                    onValueChange={value =>
-                      setConfig(prev => ({ ...prev, legendPosition: value as ChartConfig['legendPosition'] }))
-                    }
+                    value={legendPosition}
+                    onValueChange={value => {
+                      setLegendPosition(value as ChartConfig['legendPosition']);
+                      setConfig(prev => ({ ...prev, legendPosition: value as ChartConfig['legendPosition'] }));
+                    }}
                   >
                     <SelectTrigger className="h-11 bg-card border border-border/60 hover:border-primary/40 rounded-lg">
                       <SelectValue placeholder="Select position" />
