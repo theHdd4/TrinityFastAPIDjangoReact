@@ -101,7 +101,24 @@ const NumberFilterComponent: React.FC<NumberFilterComponentProps> = ({
       .map(row => Number(row[column]))
       .filter(v => !isNaN(v))
       .sort((a, b) => a - b);
-    return [...new Set(values)].map(v => v.toString());
+    
+    const stringValues = [...new Set(values)].map(v => v.toString());
+    
+    // Check if there are any blank/NaN values
+    const hasBlank = data.rows.some(row => {
+      const val = row[column];
+      return val === null || val === undefined || val === '' ||
+             (typeof val === 'string' && val.trim() === '') ||
+             (typeof val === 'number' && Number.isNaN(val)) ||
+             isNaN(Number(val));
+    });
+    
+    // Add "(blank)" option if there are blanks
+    if (hasBlank) {
+      return ['(blank)', ...stringValues];
+    }
+    
+    return stringValues;
   }, [data.rows, column]);
 
   // Get statistics for this column
@@ -1045,15 +1062,15 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const handleSaveDataFrame = () => {
     if (!data) return;
 
-    // Determine next serial number for DF_OPS files
-    const maxSerial = savedFiles.reduce((max, f) => {
-      const m = f.object_name?.match(/dataframe operations\/DF_OPS_(\d+)_/);
-      return m ? Math.max(max, parseInt(m[1], 10)) : max;
-    }, 0);
-    const nextSerial = maxSerial + 1;
+      // Determine next serial number for DF_OPS files
+      const maxSerial = savedFiles.reduce((max, f) => {
+        const m = f.object_name?.match(/dataframe operations\/DF_OPS_(\d+)_/);
+        return m ? Math.max(max, parseInt(m[1], 10)) : max;
+      }, 0);
+      const nextSerial = maxSerial + 1;
 
-    // Base name from current file without extension
-    const baseName = data.fileName ? data.fileName.replace(/\.[^/.]+$/, '') : `dataframe_${Date.now()}`;
+      // Base name from current file without extension
+      const baseName = data.fileName ? data.fileName.replace(/\.[^/.]+$/, '') : `dataframe_${Date.now()}`;
     const defaultFilename = `DF_OPS_${nextSerial}_${baseName}`;
     
     setSaveFileName(defaultFilename);
@@ -1474,7 +1491,18 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
             }
           } else {
             // Multi-select filter for strings
-            return filterValue.includes(safeToString(cellValue));
+            const cellStr = safeToString(cellValue);
+            
+            // Check if filter includes "(blank)" and cell is blank
+            if (filterValue.includes('(blank)')) {
+              const isBlank = cellValue === null || cellValue === undefined || 
+                             cellValue === '' || 
+                             (typeof cellValue === 'string' && cellValue.trim() === '') ||
+                             (typeof cellValue === 'number' && Number.isNaN(cellValue));
+              if (isBlank) return true;
+            }
+            
+            return filterValue.includes(cellStr);
           }
         } else if (filterValue && typeof filterValue === 'object' && 'min' in filterValue && 'max' in filterValue) {
           // Range filter object
@@ -1508,22 +1536,23 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     data.headers.forEach(header => {
       const sourceCol = duplicateMap[header] || header;
       const filtersToApply = Object.entries(appliedFilters).filter(([col]) => col !== header);
-      const needsCurrentRows =
-        !originalHeaders.has(sourceCol) ||
-        filtersToApply.some(([col]) => {
-          const filterCol = duplicateMap[col] || col;
-          return !originalHeaders.has(filterCol);
-        });
-
-      let rowsForHeader = needsCurrentRows
-        ? [...currentRows]
-        : [...(originalData?.rows.filter((_, index) => !permanentlyDeletedRows.has(index)) || currentRows)];
+      
+      // 🔧 FIX: Always use currentRows to reflect latest cell edits
+      // Previously used originalData when needsCurrentRows was false, causing stale filter values
+      let rowsForHeader = [...currentRows];
 
       filtersToApply.forEach(([col, val]) => {
         const filterCol = duplicateMap[col] || col;
         rowsForHeader = rowsForHeader.filter(row => {
           const cell = row[filterCol];
           if (Array.isArray(val)) {
+            // Special handling for "(blank)" filter
+            if (val.includes('(blank)')) {
+              const isBlank = cell === null || cell === undefined || cell === '' || 
+                             (typeof cell === 'string' && cell.trim() === '') ||
+                             (typeof cell === 'number' && Number.isNaN(cell));
+              if (isBlank) return true;
+            }
             return val.includes(safeToString(cell));
           }
           if (val && typeof val === 'object' && 'min' in val && 'max' in val) {
@@ -1536,15 +1565,21 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         });
       });
 
-      let values = Array.from(new Set(rowsForHeader.map(row => safeToString(row[sourceCol]))))
-        .filter((v): v is string => v !== '')
-        .sort();
-
-      if (values.length === 0 && !needsCurrentRows) {
-        values = Array.from(new Set(currentRows.map(row => safeToString(row[sourceCol]))))
-          .filter((v): v is string => v !== '')
-          .sort();
-      }
+      // Get unique values including detection of blanks
+      const allRowValues = rowsForHeader.map(row => {
+        const val = row[sourceCol];
+        // Check if value is blank (NULL, empty string, whitespace, NaN)
+        if (val === null || val === undefined || val === '' || 
+            (typeof val === 'string' && val.trim() === '') ||
+            (typeof val === 'number' && Number.isNaN(val))) {
+          return '(blank)';
+        }
+        return safeToString(val);
+      });
+      
+      // 🔧 FIX: Removed unnecessary fallback that used originalData
+      // Now we always work with currentRows, so no fallback needed
+      let values = Array.from(new Set(allRowValues)).sort() as string[];
 
       uniqueValues[header] = values.slice(0, 50);
     });
@@ -1721,8 +1756,35 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
   const activeFileId = settings.fileId || fileId;
   if (!data || !activeFileId) { setEditingHeader(null); return; }
+  
+  // 🔧 FIX: colIdx is the visible column index, need to map to actual column
+  const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+  
+  console.log('[DataFrameOperations] commitHeaderEdit DEBUG:', {
+    colIdx,
+    visibleHeadersLength: visibleHeaders.length,
+    visibleHeaders,
+    allHeaders: data.headers,
+    hiddenColumns: data.hiddenColumns
+  });
+  
+  if (colIdx < 0 || colIdx >= visibleHeaders.length) {
+    console.error('[DataFrameOperations] Invalid colIdx for header edit:', colIdx, 'visibleHeaders.length:', visibleHeaders.length);
+    setEditingHeader(null);
+    return;
+  }
+  
+  const oldHeader = visibleHeaders[colIdx];
+  
+  if (!oldHeader) {
+    console.error('[DataFrameOperations] Column header is undefined for colIdx:', colIdx);
+    setEditingHeader(null);
+    return;
+  }
+  
   const newHeader = value !== undefined ? value : editingHeaderValue;
-  const oldHeader = data.headers[colIdx];
+  console.log('[DataFrameOperations] Renaming column:', oldHeader, '→', newHeader);
+  
   if (newHeader === oldHeader) { setEditingHeader(null); return; }
   
   // Check if the column has been deleted
@@ -1744,13 +1806,19 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     // Update the columnOrder state
     setColumnOrder(updatedColumnOrder);
     
-    // Now manually preserve the column order instead of using filterBackendResponse
-    // which relies on the OLD columnOrder state (React state updates are async)
+    // 🔧 FIX: Preserve ALL columns (including hidden) in data.headers
+    // Hidden columns should stay in headers array, just marked as hidden
     const currentHiddenColumns = data.hiddenColumns || [];
     const currentDeletedColumns = data.deletedColumns || [];
     
-    // Filter out hidden and deleted columns from backend response
-    const columnsToFilter = [...currentHiddenColumns, ...currentDeletedColumns];
+    console.log('[DataFrameOperations] commitHeaderEdit - preserving columns:', {
+      backendHeaders: resp.headers,
+      hiddenColumns: currentHiddenColumns,
+      deletedColumns: currentDeletedColumns
+    });
+    
+    // Filter out ONLY deleted columns (keep hidden columns in headers)
+    const columnsToFilter = [...currentDeletedColumns];
     const availableHeaders = resp.headers.filter((header: string) => !columnsToFilter.includes(header));
     
     // Use the UPDATED column order (not the state which is async)
@@ -1765,32 +1833,22 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       orderedHeaders = [...orderedHeaders, ...newColumns];
     }
     
-    
-    // Filter rows to match ordered headers
-    const filteredRows = resp.rows.map((row: any) => {
-      const filteredRow: any = {};
-      orderedHeaders.forEach((header: string) => {
-        if (row.hasOwnProperty(header)) {
-          filteredRow[header] = row[header];
-        }
-      });
-      return filteredRow;
+    console.log('[DataFrameOperations] commitHeaderEdit - final headers:', {
+      orderedHeaders,
+      willBeVisible: orderedHeaders.filter(h => !currentHiddenColumns.includes(h))
     });
     
-    // Normalize column types
+    // Keep ALL columns in rows (including hidden), let rendering handle visibility
+    const allRows = resp.rows;
+    
+    // Normalize column types for ALL columns
     const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
-    const filteredColumnTypes: any = {};
-    orderedHeaders.forEach((header: string) => {
-      if (columnTypes[header]) {
-        filteredColumnTypes[header] = columnTypes[header];
-      }
-    });
     
     onDataChange({
       headers: orderedHeaders,
-      rows: filteredRows,
+      rows: allRows,
       fileName: data.fileName,
-      columnTypes: filteredColumnTypes,
+      columnTypes: columnTypes,
       pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)).map(p => p === oldHeader ? newHeader : p),
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
@@ -1850,6 +1908,14 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
          hiddenColumns: currentHiddenColumns,
          deletedColumns: currentDeletedColumns,
        });
+       
+       // Close any open filter dropdowns to force refresh when reopened
+       setContextMenu(null);
+       
+       // Force refresh to update filters with new values (delayed to ensure state update)
+       setTimeout(() => {
+         setForceRefresh(prev => prev + 1);
+       }, 50);
     } catch (err) {
       handleApiError('Edit cell failed', err);
     }
@@ -1885,6 +1951,14 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
          hiddenColumns: currentHiddenColumns,
          deletedColumns: currentDeletedColumns,
        });
+       
+       // Close any open filter dropdowns to force refresh when reopened
+       setContextMenu(null);
+       
+       // Force refresh to update filters (delayed to ensure state update)
+       setTimeout(() => {
+         setForceRefresh(prev => prev + 1);
+       }, 50);
     } catch (err) {
       handleApiError('Insert row failed', err);
     }
@@ -1945,6 +2019,14 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const newRows = [...data.rows];
     if (newRows[idx]) newRows[idx][col] = '';
     onDataChange({ ...data, rows: newRows });
+    
+    // Close any open filter dropdowns to force refresh when reopened
+    setContextMenu(null);
+    
+    // Force refresh to update filters with blank values (delayed to ensure state update)
+    setTimeout(() => {
+      setForceRefresh(prev => prev + 1);
+    }, 50);
   };
 
   const handleDragStart = (col: string) => {
@@ -2050,7 +2132,10 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
 
 const handleSortAsc = (colIdx: number) => {
   if (!data) return;
-  const col = data.headers[colIdx];
+  // 🔧 FIX: colIdx is the visible column index, map to actual column
+  const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+  const col = visibleHeaders[colIdx];
+  if (!col) return;
   handleSort(col, 'asc');
   addToHistory('Sort', `Sorted column "${col}" in ascending order`);
   setContextMenu(null);
@@ -2059,7 +2144,10 @@ const handleSortAsc = (colIdx: number) => {
 
 const handleSortDesc = (colIdx: number) => {
   if (!data) return;
-  const col = data.headers[colIdx];
+  // 🔧 FIX: colIdx is the visible column index, map to actual column
+  const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+  const col = visibleHeaders[colIdx];
+  if (!col) return;
   handleSort(col, 'desc');
   addToHistory('Sort', `Sorted column "${col}" in descending order`);
   setContextMenu(null);
@@ -2269,8 +2357,13 @@ const handleHeaderClick = (header: string) => {
       deletedColumns: currentDeletedColumns,
     });
     
-    // Force a refresh to ensure the UI updates with the new data
+    // Close any open filter dropdowns to force refresh when reopened
+    setContextMenu(null);
+    
+    // Force a refresh AFTER data updates (delay to ensure state is updated)
+    setTimeout(() => {
     setForceRefresh(prev => prev + 1);
+    }, 100);
     
     // Don't re-apply filters - let the data update naturally
     // The processedData will automatically reflect the new data with existing filters
@@ -2404,7 +2497,31 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleDeleteColumn = async (colIdx: number) => {
     resetSaveSuccess();
     if (!data || !fileId) return;
-    if (colIdx < 0 || colIdx >= data.headers.length) return;
+    
+    // 🔧 FIX: colIdx is the visible column index, need to map to actual column
+    const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+    
+    console.log('[DataFrameOperations] handleDeleteColumn DEBUG:', {
+      colIdx,
+      visibleHeadersLength: visibleHeaders.length,
+      visibleHeaders,
+      allHeaders: data.headers,
+      hiddenColumns: data.hiddenColumns,
+      multiSelectedSize: multiSelectedColumns.size
+    });
+    
+    if (colIdx < 0 || colIdx >= visibleHeaders.length) {
+      console.error('[DataFrameOperations] Invalid colIdx:', colIdx, 'visibleHeaders.length:', visibleHeaders.length);
+      return;
+    }
+    const col = visibleHeaders[colIdx];
+    
+    if (!col) {
+      console.error('[DataFrameOperations] Column is undefined for colIdx:', colIdx);
+      return;
+    }
+    
+    console.log('[DataFrameOperations] Column to delete:', col);
     
     // Save current state before making changes
     saveToUndoStack(data);
@@ -2419,15 +2536,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       });
     } else {
       // Delete single column (original behavior)
-      const col = data.headers[colIdx];
-      
-      console.log('[DataFrameOperations] Deleting single column:', col);
-      console.log('[DataFrameOperations] fileId:', fileId);
-      console.log('[DataFrameOperations] data.hiddenColumns:', data.hiddenColumns);
-      console.log('[DataFrameOperations] data.headers:', data.headers);
-      
-      // Save current state before making changes
-      saveToUndoStack(data);
+      console.log('[DataFrameOperations] Proceeding with single column delete for:', col);
       
       // ALWAYS do frontend-only delete to avoid backend sync issues
       // The backend API is unreliable and causes 404 errors
@@ -2979,6 +3088,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     // Save current state before making changes
     saveToUndoStack(data);
     
+    // 📝 NOTE: colIdx here is the visible column index, which is correct for freeze pane
+    // We want to freeze the first N visible columns (colIdx + 1)
     // Set frozen columns to the index + 1 (since we want to freeze up to and including this column)
     // The # column is always included when freeze pane is active
     const newFrozenColumns = colIdx + 1;
@@ -3077,14 +3188,27 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleUnhideColumn = (col: string) => {
     if (!data) return;
     
+    console.log('[DataFrameOperations] handleUnhideColumn called for:', col);
+    console.log('[DataFrameOperations] Current state:', {
+      allHeaders: data.headers,
+      hiddenColumns: data.hiddenColumns,
+      columnExists: data.headers.includes(col)
+    });
+    
     // Save current state before making changes
     saveToUndoStack(data);
     
     // Remove column from hidden columns list
+    const updatedHiddenColumns = (data.hiddenColumns || []).filter(c => c !== col);
     const updatedData = {
       ...data,
-      hiddenColumns: (data.hiddenColumns || []).filter(c => c !== col)
+      hiddenColumns: updatedHiddenColumns
     };
+    
+    console.log('[DataFrameOperations] After unhide:', {
+      updatedHiddenColumns,
+      shouldBeVisible: data.headers.filter(h => !updatedHiddenColumns.includes(h))
+    });
     
     onDataChange(updatedData);
     
@@ -3745,7 +3869,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       </div>
                     </TableHead>
                   )}
-                  {Array.isArray(data?.headers) && data.headers.filter(header => !(data.hiddenColumns || []).includes(header)).map((header, colIdx) => {
+                  {Array.isArray(data?.headers) && (() => {
+                    const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+                    console.log('[DataFrameOperations] Rendering headers:', {
+                      allHeaders: data.headers,
+                      hiddenColumns: data.hiddenColumns,
+                      visibleHeaders
+                    });
+                    return visibleHeaders;
+                  })().map((header, colIdx) => {
                     // Get the original column index for API calls
                     const originalColIdx = data.headers.indexOf(header);
                     // Check if there are hidden columns before this one
@@ -3825,6 +3957,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       }}
                       onDoubleClick={() => {
                         // Always allow header editing regardless of enableEditing setting
+                        console.log('[DataFrameOperations] Double-click on header:', {
+                          header,
+                          colIdx,
+                          visibleHeaders: data.headers.filter(h => !(data.hiddenColumns || []).includes(h)),
+                          allHeaders: data.headers,
+                          hiddenColumns: data.hiddenColumns
+                        });
                         setEditingHeader(colIdx);
                         setEditingHeaderValue(header);
                       }}
