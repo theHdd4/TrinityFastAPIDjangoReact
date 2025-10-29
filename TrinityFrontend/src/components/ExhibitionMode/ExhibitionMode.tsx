@@ -39,15 +39,6 @@ import {
   createImageSlideObject,
   generateImageObjectId,
 } from './components/operationsPalette/images/constants';
-import {
-  ChartPanel,
-  createChartSlideObject,
-  DEFAULT_CHART_CONFIG,
-  DEFAULT_CHART_DATA,
-  type ChartConfig,
-  type ChartDataRow,
-  type ChartPanelResult,
-} from './components/operationsPalette/charts';
 import { ThemesPanel } from './components/operationsPalette/themes';
 import { SettingsPanel } from './components/operationsPalette/tools/settings';
 import {
@@ -210,8 +201,6 @@ const ExhibitionMode = () => {
     | { type: 'settings' }
     | null
   >(null);
-  const [chartPanelData, setChartPanelData] = useState<ChartDataRow[]>(DEFAULT_CHART_DATA);
-  const [chartPanelConfig, setChartPanelConfig] = useState<ChartConfig>(DEFAULT_CHART_CONFIG);
   const [notes, setNotes] = useState<Record<number, string>>(() => {
     if (typeof window === 'undefined') {
       return {};
@@ -258,13 +247,6 @@ const ExhibitionMode = () => {
       return (crypto as Crypto).randomUUID();
     }
     return `shape-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  }, []);
-
-  const generateChartId = useCallback(() => {
-    if (typeof crypto !== 'undefined' && typeof (crypto as Crypto).randomUUID === 'function') {
-      return (crypto as Crypto).randomUUID();
-    }
-    return `chart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }, []);
 
   const clearAutoAdvanceTimer = useCallback(() => {
@@ -1403,10 +1385,6 @@ const ExhibitionMode = () => {
     setOperationsPanelState(prev => (prev?.type === 'charts' ? null : { type: 'charts' }));
   }, [canEdit]);
 
-  const handleCloseChartsPanel = useCallback(() => {
-    setOperationsPanelState(prev => (prev?.type === 'charts' ? null : prev));
-  }, []);
-
   const handleOpenImagesPanel = useCallback(() => {
     if (!canEdit) {
       return;
@@ -1667,35 +1645,6 @@ const ExhibitionMode = () => {
     );
   }, [addSlideObject, currentSlide, exhibitedCards, generateTableId, slideObjectsByCardId]);
 
-  const handleCreateChart = useCallback(
-    (result: ChartPanelResult) => {
-      const targetCard = exhibitedCards[currentSlide];
-      if (!targetCard) {
-        return;
-      }
-
-      const existingObjects = slideObjectsByCardId[targetCard.id] ?? [];
-      const existingCharts = existingObjects.filter(object => object.type === 'chart').length;
-      const offset = existingCharts * 32;
-
-      addSlideObject(
-        targetCard.id,
-        createChartSlideObject(
-          generateChartId(),
-          {
-            x: 160 + offset,
-            y: 160 + offset,
-          },
-          {
-            data: result.data,
-            config: result.config,
-          },
-        ),
-      );
-    },
-    [addSlideObject, currentSlide, exhibitedCards, generateChartId, slideObjectsByCardId],
-  );
-
   const handleShapeSelect = useCallback(
     (shape: ShapeDefinition) => {
       if (!canEdit) {
@@ -1795,23 +1744,7 @@ const ExhibitionMode = () => {
       case 'themes':
         return <ThemesPanel onClose={handleCloseThemesPanel} />;
       case 'charts':
-        return (
-          <ChartPanel
-            onClose={handleCloseChartsPanel}
-            onInsert={result => {
-              setChartPanelData(result.data);
-              setChartPanelConfig(result.config);
-              handleCreateChart(result);
-              setOperationsPanelState(null);
-            }}
-            initialData={chartPanelData}
-            initialConfig={chartPanelConfig}
-            onStateChange={({ data, config }) => {
-              setChartPanelData(data);
-              setChartPanelConfig(config);
-            }}
-          />
-        );
+        return <div className="w-full h-full" aria-label="Charts panel" />;
       case 'settings': {
         const targetCard = exhibitedCards[currentSlide];
         const handleReset = () => {
@@ -1839,18 +1772,14 @@ const ExhibitionMode = () => {
     }
   }, [
     canEdit,
-    chartPanelConfig,
-    chartPanelData,
     currentPresentationSettings,
     currentSlide,
     exhibitedCards,
-    handleCloseChartsPanel,
     handleCloseImagesPanel,
     handleCloseNotesPanel,
     handleCloseSettingsPanel,
     handleCloseShapesPanel,
     handleCloseThemesPanel,
-    handleCreateChart,
     handleImagePanelSelect,
     handleNotesChange,
     handlePresentationChange,
