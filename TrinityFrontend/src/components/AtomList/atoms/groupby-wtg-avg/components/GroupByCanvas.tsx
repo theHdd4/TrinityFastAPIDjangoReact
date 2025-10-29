@@ -279,13 +279,8 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     setCardinalityError(null);
     
     try {
-      const formData = new FormData();
-      formData.append('validator_atom_id', settings.validator_atom_id || '');
-      formData.append('file_key', settings.dataSource || '');
-      formData.append('bucket_name', 'trinity');
-      formData.append('object_names', settings.dataSource || '');
-      
-      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
+      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(settings.dataSource)}`;
+      const res = await fetch(url);
       const data = await res.json();
       
       if (data.status === 'SUCCESS' && data.cardinality) {

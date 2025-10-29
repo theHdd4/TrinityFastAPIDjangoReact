@@ -416,7 +416,17 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
                           Changes Applied
                         </Badge>
                       )}
-                      {metadata && metadata.columns.some(col => col.missing_count > 0) && (
+                      {metadata && metadata.columns.some(col => {
+                        // Only show badge if there are unhandled missing values
+                        const hasMissingValues = col.missing_count > 0;
+                        if (!hasMissingValues) return false;
+                        
+                        // Check if user has selected a strategy other than 'none' or 'Keep as Missing'
+                        const strategy = missingValueStrategies[file.name]?.[col.name]?.strategy;
+                        const isUnhandled = !strategy || strategy === 'none';
+                        
+                        return isUnhandled;
+                      }) && (
                         <Badge className="bg-red-100 text-red-800 border-red-300 text-xs px-2 py-0.5">
                           <AlertCircle className="w-3 h-3 mr-1" />
                           Missing Values

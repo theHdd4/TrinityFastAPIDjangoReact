@@ -134,12 +134,11 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
         fallbackMeasures.includes(measure)
       );
       
-      // If no valid measures or data source changed, select all available measures
+      // If no valid measures or data source changed, select all available measures for the settings panel
       if (validSelectedMeasures.length === 0 || 
           JSON.stringify(validSelectedMeasures) !== JSON.stringify(localSelectedMeasures)) {
         updateSettings(atomId, { 
-          selectedMeasureNames: fallbackMeasures,
-          selectedMeasures: fallbackMeasures 
+          selectedMeasureNames: fallbackMeasures
         });
       }
     }
@@ -263,8 +262,8 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
       const defaultIdentifiers = uniqueIdentifiers.length > 0 ? uniqueIdentifiers : fallbackIdentifiers;
       updateSettings(atomId, { selectedIdentifiers: defaultIdentifiers });
     }
-    if (fallbackMeasures.length > 0 && (!Array.isArray(settings.selectedMeasures) || settings.selectedMeasures.length === 0)) {
-      updateSettings(atomId, { selectedMeasures: fallbackMeasures });
+    if (fallbackMeasures.length > 0 && (!Array.isArray(settings.selectedMeasureNames) || settings.selectedMeasureNames.length === 0)) {
+      updateSettings(atomId, { selectedMeasureNames: fallbackMeasures });
     }
     const allAggs = ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'];
     if ((!Array.isArray(settings.selectedAggregationMethods) || settings.selectedAggregationMethods.length === 0)) {
@@ -322,6 +321,7 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                         label={identifier}
                         checked={isSelected}
                         onCheckedChange={() => toggleIdentifier(identifier)}
+                        labelClassName="text-ms cursor-pointer capitalize truncate max-w-full"
                       />
                     </div>
                   );
@@ -353,6 +353,7 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                         label={measure}
                         checked={isSelected}
                         onCheckedChange={() => toggleMeasure(measure)}
+                        labelClassName="text-ms cursor-pointer capitalize truncate max-w-full"
                       />
                     </div>
                   );
@@ -377,6 +378,7 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                         label={agg}
                         checked={isSelected}
                         onCheckedChange={() => toggleAggregationMethod(agg)}
+                        labelClassName="text-ms cursor-pointer capitalize truncate max-w-full"
                       />
                     </div>
                   );

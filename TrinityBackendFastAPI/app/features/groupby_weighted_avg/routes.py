@@ -507,32 +507,15 @@ async def get_latest_groupby_result_from_minio(
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Unable to fetch merged data: {str(e)}")
 
-@router.post("/cardinality")
+@router.get("/cardinality")
 async def get_cardinality_data(
-    validator_atom_id: str = Form(...),
-    file_key: str = Form(...),
-    bucket_name: str = Form(...),
-    object_names: str = Form(...),
+    object_name: str = Query(..., description="Object name/path of the dataframe"),
 ):
     """Return cardinality data for columns in the dataset."""
     try:
-        # Get the current object prefix
-        from app.features.data_upload_validate.app.routes import get_object_prefix
-        prefix = await get_object_prefix()
-        
-        # Construct the full object path
-        full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
-        
-        print(f"🔍 GroupBy Cardinality file path resolution:")
-        print(f"  Original object_names: {object_names}")
-        print(f"  Current prefix: {prefix}")
-        print(f"  Full object path: {full_object_path}")
-        
-        # Load the dataframe
-        df = get_minio_df(bucket=bucket_name, file_key=full_object_path)
+        # Load the dataframe using object_name as-is (it already contains the full path)
+        df = get_minio_df(bucket="trinity", file_key=object_name)
         df = clean_columns(df)
-        
-        print(f"✅ Successfully loaded dataframe for cardinality with shape: {df.shape}")
         
         # Generate cardinality data
         cardinality_data = []
