@@ -1424,40 +1424,38 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         )}
 
         <div className="space-y-4">
-          {!presentationMode && canEdit && activeTextToolbar && (
-            <div className="relative mb-4 flex w-full justify-center">
-              <div className="z-30 drop-shadow-xl">{activeTextToolbar}</div>
-            </div>
-          )}
-
-          {!presentationMode && (
-            <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
-              <div className="flex items-center gap-2 text-foreground">
-                <User className="h-4 w-4" />
-                <span className="font-semibold">Exhibition presenter:</span>
-                <span>{presenterLabel}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-foreground" />
-                <span className="font-semibold text-foreground">Last edited:</span>
-                <span>{formattedLastEdited}</span>
-              </div>
-            </div>
-          )}
-
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+          <div className="relative">
+            {!presentationMode && canEdit && (
               <div
                 className={cn(
-                  'relative overflow-hidden shadow-2xl transition-all duration-300',
-                  presentationMode ? 'w-auto' : 'w-full',
-                  slideBackgroundClass,
-                  settings.fullBleed
-                    ? 'rounded-none border-0'
-                    : 'rounded-[28px] border border-border/60',
-                  isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
-                  !canEdit && !presentationMode && 'opacity-90'
+                  'pointer-events-none absolute inset-x-0 top-0 flex justify-center transition-all duration-200',
+                  activeTextToolbar ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2',
                 )}
+              >
+                {activeTextToolbar && (
+                  <div className="pointer-events-auto z-30 drop-shadow-xl">{activeTextToolbar}</div>
+                )}
+              </div>
+            )}
+
+            <div
+              className={cn(
+                'flex flex-col gap-4',
+                !presentationMode && canEdit ? 'pt-16' : undefined,
+              )}
+            >
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+                <div
+                  className={cn(
+                    'relative overflow-hidden shadow-2xl transition-all duration-300',
+                    presentationMode ? 'w-auto' : 'w-full',
+                    slideBackgroundClass,
+                    settings.fullBleed
+                      ? 'rounded-none border-0'
+                      : 'rounded-[28px] border border-border/60',
+                    isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
+                    !canEdit && !presentationMode && 'opacity-90'
+                  )}
                 style={
                   presentationMode
                     ? {
@@ -1595,6 +1593,21 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
 
             </div>
           </div>
+
+          {!presentationMode && (
+            <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-2 text-foreground">
+                <User className="h-4 w-4" />
+                <span className="font-semibold">Exhibition presenter:</span>
+                <span>{presenterLabel}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-foreground" />
+                <span className="font-semibold text-foreground">Last edited:</span>
+                <span>{formattedLastEdited}</span>
+              </div>
+            </div>
+          )}
 
           {showOverview && (
             <div className={cn('px-8 pb-8 flex flex-col flex-1 min-h-0 overflow-hidden', layoutConfig.overviewOuterClass)}>
