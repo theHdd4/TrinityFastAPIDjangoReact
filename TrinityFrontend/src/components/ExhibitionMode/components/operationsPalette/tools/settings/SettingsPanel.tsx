@@ -40,7 +40,6 @@ import type {
   SlideshowTransition,
 } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { DEFAULT_PRESENTATION_SETTINGS } from '@/components/ExhibitionMode/store/exhibitionStore';
-import { cn } from '@/lib/utils';
 
 const GRADIENT_DIRECTIONS = [
   { value: '0deg', label: 'Top to Bottom' },
@@ -70,25 +69,6 @@ const SLIDE_NUMBER_POSITIONS: SlideNumberPosition[] = [
   'bottom-left',
   'bottom-right',
 ];
-
-const ACCENT_COLOR = '#FACC15';
-const ACCENT_DARK = '#B45309';
-const BORDER_COLOR = '#E5E7EB';
-const MUTED_SURFACE = '#F9FAFB';
-
-const TAB_TRIGGER_CLASSES = cn(
-  'rounded-full px-4 py-2 text-sm font-semibold text-[#6B7280] transition-all duration-200',
-  'data-[state=active]:bg-white data-[state=active]:text-[#111827] data-[state=active]:shadow-sm'
-);
-
-const OPTION_BUTTON_BASE =
-  'flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold transition-all duration-200';
-const OPTION_BUTTON_INACTIVE = 'border-[var(--border-color)] bg-[var(--muted-surface)] text-[#6B7280] hover:bg-[#F3F4F6]';
-const OPTION_BUTTON_ACTIVE = 'border-[var(--accent-color)] bg-[#FFF4CC] text-[#111827] shadow-sm';
-
-const CARD_BASE = 'rounded-2xl border border-[var(--border-color)] bg-white px-5 py-4 shadow-sm';
-const CARD_SUBTLE =
-  'rounded-2xl border border-dashed border-[var(--border-color)] bg-[var(--muted-surface)] px-4 py-3 text-sm';
 
 interface SettingsPanelProps {
   settings: PresentationSettings;
@@ -195,90 +175,63 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   return (
-    <div
-      className="flex h-full w-full flex-col overflow-hidden bg-white text-[#111827]"
-      style={{
-        ['--accent-color' as string]: ACCENT_COLOR,
-        ['--accent-dark' as string]: ACCENT_DARK,
-        ['--border-color' as string]: BORDER_COLOR,
-        ['--muted-surface' as string]: MUTED_SURFACE,
-      }}
-    >
-      <div className="flex items-center justify-between border-b border-[var(--border-color)] px-8 py-6">
+    <div className="flex h-full flex-col border-l border-border bg-background">
+      <div className="flex items-center justify-between border-b border-border bg-muted/30 p-6">
         <div className="flex items-center gap-3">
-          <div className="rounded-xl bg-[#FFF4CC] p-2 text-[var(--accent-dark)]">
-            <Monitor className="h-5 w-5" />
+          <div className="rounded-lg bg-primary/10 p-2">
+            <Monitor className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h2 className="text-xl font-semibold tracking-tight">Slide Settings</h2>
-            <p className="text-sm text-[#6B7280]">Configure slide behavior and appearance</p>
+            <h2 className="text-xl font-bold">Slide Settings</h2>
+            <p className="text-sm text-muted-foreground">Configure slide behavior and appearance</p>
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-10 w-10 rounded-full border border-transparent text-[#6B7280] transition-colors hover:border-[var(--border-color)] hover:bg-[var(--muted-surface)] hover:text-[#111827]"
-          onClick={onClose}
-        >
+        <Button variant="ghost" size="icon" className="rounded-full hover:bg-muted" onClick={onClose}>
           <X className="h-5 w-5" />
         </Button>
       </div>
 
-      <ScrollArea className="flex-1 px-8 py-8">
+      <ScrollArea className="flex-1 p-6">
         <Tabs defaultValue="background" className="w-full">
-          <TabsList className="mb-8 grid w-full grid-cols-4 gap-2 rounded-full border border-[var(--border-color)] bg-[var(--muted-surface)] p-1">
-            <TabsTrigger value="background" className={TAB_TRIGGER_CLASSES}>
-              Background
-            </TabsTrigger>
-            <TabsTrigger value="behavior" className={TAB_TRIGGER_CLASSES}>
-              Behavior
-            </TabsTrigger>
-            <TabsTrigger value="transitions" className={TAB_TRIGGER_CLASSES}>
-              Transitions
-            </TabsTrigger>
-            <TabsTrigger value="accessibility" className={TAB_TRIGGER_CLASSES}>
-              Access
-            </TabsTrigger>
+          <TabsList className="mb-6 grid w-full grid-cols-4">
+            <TabsTrigger value="background">Background</TabsTrigger>
+            <TabsTrigger value="behavior">Behavior</TabsTrigger>
+            <TabsTrigger value="transitions">Transitions</TabsTrigger>
+            <TabsTrigger value="accessibility">Access</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="background" className="mt-2 space-y-8">
+          <TabsContent value="background" className="space-y-6">
             <div className="space-y-4">
-              <Label className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-[#6B7280]">
-                <Palette className="h-4 w-4 text-[var(--accent-dark)]" />
+              <Label className="flex items-center gap-2 text-base font-semibold">
+                <Palette className="h-4 w-4" />
                 Background Type
               </Label>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="flex gap-2">
                 <Button
-                  type="button"
+                  variant={backgroundMode === 'solid' ? 'default' : 'outline'}
+                  size="sm"
                   onClick={() => handleBackgroundTypeChange('solid')}
-                  className={cn(
-                    OPTION_BUTTON_BASE,
-                    backgroundMode === 'solid' ? OPTION_BUTTON_ACTIVE : OPTION_BUTTON_INACTIVE
-                  )}
+                  className="flex-1"
                 >
-                  <Droplet className="h-4 w-4" />
+                  <Droplet className="mr-2 h-4 w-4" />
                   Solid
                 </Button>
                 <Button
-                  type="button"
+                  variant={backgroundMode === 'gradient' ? 'default' : 'outline'}
+                  size="sm"
                   onClick={() => handleBackgroundTypeChange('gradient')}
-                  className={cn(
-                    OPTION_BUTTON_BASE,
-                    backgroundMode === 'gradient' ? OPTION_BUTTON_ACTIVE : OPTION_BUTTON_INACTIVE
-                  )}
+                  className="flex-1"
                 >
-                  <Layers className="h-4 w-4" />
+                  <Layers className="mr-2 h-4 w-4" />
                   Gradient
                 </Button>
                 <Button
-                  type="button"
+                  variant={backgroundMode === 'image' ? 'default' : 'outline'}
+                  size="sm"
                   onClick={() => handleBackgroundTypeChange('image')}
-                  className={cn(
-                    OPTION_BUTTON_BASE,
-                    backgroundMode === 'image' ? OPTION_BUTTON_ACTIVE : OPTION_BUTTON_INACTIVE
-                  )}
+                  className="flex-1"
                 >
-                  <ImageIcon className="h-4 w-4" />
+                  <ImageIcon className="mr-2 h-4 w-4" />
                   Image
                 </Button>
               </div>
@@ -286,13 +239,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
             {backgroundMode === 'solid' && (
               <div className="space-y-3">
-                <Label className="text-sm font-semibold text-[#374151]">Color</Label>
-                <div className="flex gap-3">
+                <Label>Color</Label>
+                <div className="flex gap-2">
                   <Input
                     type="color"
                     value={solidColorInput}
                     onChange={event => handleSolidColorCommit(event.target.value)}
-                    className="h-11 w-20 cursor-pointer rounded-xl border border-[var(--border-color)] bg-white p-1"
+                    className="h-10 w-20 cursor-pointer"
                   />
                   <Input
                     value={solidColorInput}
@@ -303,7 +256,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         handleSolidColorCommit((event.target as HTMLInputElement).value);
                       }
                     }}
-                    className="h-11 flex-1 rounded-xl border-[var(--border-color)] text-sm uppercase text-[#111827] focus-visible:border-[var(--accent-color)] focus-visible:ring-[var(--accent-color)]"
                     placeholder="#FFFFFF"
                   />
                 </div>
@@ -311,39 +263,37 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             )}
 
             {backgroundMode === 'gradient' && (
-              <div className="space-y-5">
-                <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <Label className="text-sm font-semibold text-[#374151]">Start Color</Label>
+                    <Label>Start Color</Label>
                     <Input
                       type="color"
                       value={settings.backgroundGradientStart ?? DEFAULT_PRESENTATION_SETTINGS.backgroundGradientStart}
                       onChange={event => handleGradientChange({ backgroundGradientStart: event.target.value })}
-                      className="h-11 w-full cursor-pointer rounded-xl border border-[var(--border-color)] bg-white p-1"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-sm font-semibold text-[#374151]">End Color</Label>
+                    <Label>End Color</Label>
                     <Input
                       type="color"
                       value={settings.backgroundGradientEnd ?? DEFAULT_PRESENTATION_SETTINGS.backgroundGradientEnd}
                       onChange={event => handleGradientChange({ backgroundGradientEnd: event.target.value })}
-                      className="h-11 w-full cursor-pointer rounded-xl border border-[var(--border-color)] bg-white p-1"
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-[#374151]">Direction</Label>
+                  <Label>Direction</Label>
                   <Select
                     value={settings.backgroundGradientDirection ?? DEFAULT_PRESENTATION_SETTINGS.backgroundGradientDirection}
                     onValueChange={value => handleGradientChange({ backgroundGradientDirection: value })}
                   >
-                    <SelectTrigger className="h-11 rounded-xl border-[var(--border-color)] text-sm text-[#111827] focus-visible:border-[var(--accent-color)] focus-visible:ring-[var(--accent-color)]">
+                    <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent className="rounded-xl border border-[var(--border-color)] bg-white text-[#111827]">
+                    <SelectContent>
                       {GRADIENT_DIRECTIONS.map(direction => (
-                        <SelectItem key={direction.value} value={direction.value} className="text-sm">
+                        <SelectItem key={direction.value} value={direction.value}>
                           {direction.label}
                         </SelectItem>
                       ))}
@@ -355,20 +305,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
             {backgroundMode === 'image' && (
               <div className="space-y-3">
-                <Label className="text-sm font-semibold text-[#374151]">Background Image</Label>
-                <Button
-                  variant="outline"
-                  disabled
-                  className="h-11 w-full justify-start gap-2 rounded-xl border-[var(--border-color)] bg-[var(--muted-surface)] text-sm font-semibold text-[#6B7280]"
-                >
+                <Label>Background Image</Label>
+                <Button variant="outline" disabled className="w-full justify-start gap-2">
                   <ImageIcon className="h-4 w-4" />
                   Choose Image (coming soon)
                 </Button>
               </div>
             )}
 
-            <div className="space-y-3">
-              <Label className="text-sm font-semibold text-[#374151]">Opacity: {safeBackgroundOpacity}%</Label>
+            <div className="space-y-2">
+              <Label>Opacity: {safeBackgroundOpacity}%</Label>
               <Slider
                 value={[safeBackgroundOpacity]}
                 onValueChange={([value]) =>
@@ -379,126 +325,106 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 min={0}
                 max={100}
                 step={1}
-                className="[&_.bg-primary]:bg-[var(--accent-color)] [&_.bg-secondary]:bg-[#F3F4F6] [&_.border-primary]:border-[var(--accent-color)]"
               />
             </div>
           </TabsContent>
 
-          <TabsContent value="behavior" className="mt-2 space-y-8">
-            <div className="space-y-5">
-              <div className={CARD_BASE}>
+          <TabsContent value="behavior" className="space-y-6">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between rounded-lg bg-muted/50 p-4">
                 <div className="flex items-center gap-3">
-                  {backgroundLocked ? (
-                    <Lock className="h-4 w-4 text-[var(--accent-dark)]" />
-                  ) : (
-                    <Unlock className="h-4 w-4 text-[#9CA3AF]" />
-                  )}
+                  {backgroundLocked ? <Lock className="h-4 w-4 text-destructive" /> : <Unlock className="h-4 w-4 text-muted-foreground" />}
                   <div>
-                    <p className="text-sm font-semibold">Lock Slide Background</p>
-                    <p className="text-xs text-[#6B7280]">Prevent accidental changes to the background</p>
+                    <Label className="font-medium">Lock Slide Background</Label>
+                    <p className="text-xs text-muted-foreground">Prevent accidental changes to the background</p>
                   </div>
                 </div>
-                <Switch
-                  checked={backgroundLocked}
-                  onCheckedChange={value => onChange({ backgroundLocked: value })}
-                  className="data-[state=checked]:bg-[var(--accent-color)]"
-                />
+                <Switch checked={backgroundLocked} onCheckedChange={value => onChange({ backgroundLocked: value })} />
               </div>
 
-              <Separator className="border-[var(--border-color)]" />
+              <Separator />
 
               <div className="space-y-4">
-                <Label className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-[#6B7280]">
-                  <Grid3x3 className="h-4 w-4 text-[var(--accent-dark)]" />
+                <Label className="flex items-center gap-2 text-base font-semibold">
+                  <Grid3x3 className="h-4 w-4" />
                   Grid & Guides
                 </Label>
 
-                <div className={CARD_BASE}>
-                  <div className="flex flex-col gap-4">
-                    <div className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2 text-[#374151]">
-                        <Eye className="h-4 w-4 text-[#9CA3AF]" />
-                        Show Grid
-                      </div>
-                      <Switch
-                        checked={showGrid}
-                        onCheckedChange={value => onChange({ showGrid: value })}
-                        className="data-[state=checked]:bg-[var(--accent-color)]"
-                      />
+                <div className="space-y-4 rounded-lg bg-muted/50 p-4">
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Eye className="h-4 w-4" />
+                      Show Grid
                     </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2 text-[#374151]">
-                        <Eye className="h-4 w-4 text-[#9CA3AF]" />
-                        Show Guides
-                      </div>
-                      <Switch
-                        checked={showGuides}
-                        onCheckedChange={value => onChange({ showGuides: value })}
-                        className="data-[state=checked]:bg-[var(--accent-color)]"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2 text-[#374151]">
-                        <Move className="h-4 w-4 text-[#9CA3AF]" />
-                        Snap to Grid
-                      </div>
-                      <Switch
-                        checked={snapToGrid}
-                        onCheckedChange={value => onChange({ snapToGrid: value })}
-                        className="data-[state=checked]:bg-[var(--accent-color)]"
-                      />
-                    </div>
+                    <Switch checked={showGrid} onCheckedChange={value => onChange({ showGrid: value })} />
                   </div>
-                </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Eye className="h-4 w-4" />
+                      Show Guides
+                    </div>
+                    <Switch checked={showGuides} onCheckedChange={value => onChange({ showGuides: value })} />
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Move className="h-4 w-4" />
+                      Snap to Grid
+                    </div>
+                    <Switch checked={snapToGrid} onCheckedChange={value => onChange({ snapToGrid: value })} />
+                  </div>
 
-                {showGrid && (
-                  <div className={CARD_SUBTLE}>
-                    <Label className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">
-                      Grid Size: {safeGridSize}px
-                    </Label>
-                    <Slider
-                      value={[safeGridSize]}
-                      onValueChange={([value]) => onChange({ gridSize: Math.min(200, Math.max(4, Math.round(value))) })}
-                      min={4}
-                      max={200}
-                      step={4}
-                      className="mt-3 [&_.bg-primary]:bg-[var(--accent-color)] [&_.bg-secondary]:bg-[#EDEEF2] [&_.border-primary]:border-[var(--accent-color)]"
-                    />
-                  </div>
-                )}
+                  {showGrid && (
+                    <div className="space-y-2 rounded-lg bg-background p-4">
+                      <Label className="text-xs font-semibold uppercase text-muted-foreground">
+                        Grid Size: {safeGridSize}px
+                      </Label>
+                      <Slider
+                        value={[safeGridSize]}
+                        onValueChange={([value]) =>
+                          onChange({
+                            gridSize: Math.min(200, Math.max(4, Math.round(value))),
+                          })
+                        }
+                        min={4}
+                        max={200}
+                        step={2}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <Separator className="border-[var(--border-color)]" />
+              <Separator />
 
               <div className="space-y-4">
-                <Label className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-[#6B7280]">
-                  <Hash className="h-4 w-4 text-[var(--accent-dark)]" />
+                <Label className="flex items-center gap-2 text-base font-semibold">
+                  <Hash className="h-4 w-4" />
                   Slide Numbering
                 </Label>
 
-                <div className={CARD_BASE}>
-                  <div className="flex items-center justify-between text-sm text-[#374151]">
-                    Show Slide Number
-                    <Switch
-                      checked={showSlideNumber}
-                      onCheckedChange={value => onChange({ showSlideNumber: value })}
-                      className="data-[state=checked]:bg-[var(--accent-color)]"
-                    />
+                <div className="space-y-4 rounded-lg bg-muted/50 p-4">
+                  <div className="flex items-center justify-between text-sm">
+                    <Label className="text-muted-foreground">Show Slide Number</Label>
+                    <Switch checked={showSlideNumber} onCheckedChange={value => onChange({ showSlideNumber: value })} />
                   </div>
 
                   {showSlideNumber && (
-                    <div className="mt-4 space-y-2">
-                      <Label className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Position</Label>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold uppercase text-muted-foreground">Position</Label>
                       <Select
                         value={slideNumberPosition}
-                        onValueChange={value => onChange({ slideNumberPosition: value as SlideNumberPosition })}
+                        onValueChange={value =>
+                          onChange({
+                            slideNumberPosition: value as SlideNumberPosition,
+                          })
+                        }
                       >
-                        <SelectTrigger className="h-11 rounded-xl border-[var(--border-color)] text-sm text-[#111827] focus-visible:border-[var(--accent-color)] focus-visible:ring-[var(--accent-color)]">
+                        <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent className="rounded-xl border border-[var(--border-color)] bg-white text-[#111827]">
+                        <SelectContent>
                           {SLIDE_NUMBER_POSITIONS.map(position => (
-                            <SelectItem key={position} value={position} className="text-sm capitalize">
+                            <SelectItem key={position} value={position} className="capitalize">
                               {position.replace('-', ' ')}
                             </SelectItem>
                           ))}
@@ -509,37 +435,33 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </div>
               </div>
 
-              <Separator className="border-[var(--border-color)]" />
+              <Separator />
 
               <div className="space-y-4">
-                <Label className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-[#6B7280]">
-                  <MessageSquare className="h-4 w-4 text-[var(--accent-dark)]" />
+                <Label className="flex items-center gap-2 text-base font-semibold">
+                  <MessageSquare className="h-4 w-4" />
                   Speaker Notes
                 </Label>
 
-                <div className={CARD_BASE}>
-                  <div className="flex items-center justify-between text-sm text-[#374151]">
-                    Show Notes Panel
-                    <Switch
-                      checked={notesVisible}
-                      onCheckedChange={value => onToggleNotes?.(value)}
-                      className="data-[state=checked]:bg-[var(--accent-color)]"
-                    />
+                <div className="space-y-4 rounded-lg bg-muted/50 p-4">
+                  <div className="flex items-center justify-between text-sm">
+                    <Label className="text-muted-foreground">Show Notes Panel</Label>
+                    <Switch checked={notesVisible} onCheckedChange={value => onToggleNotes?.(value)} />
                   </div>
 
                   {notesVisible && (
-                    <div className="mt-4 space-y-2">
-                      <Label className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Position</Label>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold uppercase text-muted-foreground">Position</Label>
                       <Select
                         value={settings.slideNotesPosition ?? DEFAULT_PRESENTATION_SETTINGS.slideNotesPosition}
                         onValueChange={value => onNotesPositionChange?.(value as SlideNotesPosition)}
                       >
-                        <SelectTrigger className="h-11 rounded-xl border-[var(--border-color)] text-sm text-[#111827] focus-visible:border-[var(--accent-color)] focus-visible:ring-[var(--accent-color)]">
+                        <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent className="rounded-xl border border-[var(--border-color)] bg-white text-[#111827]">
+                        <SelectContent>
                           {NOTES_POSITIONS.map(position => (
-                            <SelectItem key={position} value={position} className="text-sm capitalize">
+                            <SelectItem key={position} value={position} className="capitalize">
                               {position === 'bottom' ? 'Bottom' : 'Right Side'}
                             </SelectItem>
                           ))}
@@ -552,10 +474,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
           </TabsContent>
 
-          <TabsContent value="transitions" className="mt-2 space-y-8">
-            <div className="space-y-5">
-              <Label className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-[#6B7280]">
-                <Zap className="h-4 w-4 text-[var(--accent-dark)]" />
+          <TabsContent value="transitions" className="space-y-6">
+            <div className="space-y-4">
+              <Label className="flex items-center gap-2 text-base font-semibold">
+                <Zap className="h-4 w-4" />
                 Transition Effect
               </Label>
               <Select
@@ -572,20 +494,20 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   onChange(partial);
                 }}
               >
-                <SelectTrigger className="h-11 rounded-xl border-[var(--border-color)] text-sm text-[#111827] focus-visible:border-[var(--accent-color)] focus-visible:ring-[var(--accent-color)]">
+                <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="rounded-xl border border-[var(--border-color)] bg-white text-[#111827]">
+                <SelectContent>
                   {TRANSITION_OPTIONS.map(option => (
-                    <SelectItem key={option.value} value={option.value} className="text-sm">
+                    <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
 
-              <div className={CARD_SUBTLE}>
-                <Label className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">
+              <div className="space-y-2 rounded-lg bg-muted/50 p-4 text-sm">
+                <Label className="text-xs font-semibold uppercase text-muted-foreground">
                   Duration: {safeTransitionDuration}ms
                 </Label>
                 <Slider
@@ -598,34 +520,29 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   min={100}
                   max={2000}
                   step={50}
-                  className="mt-3 [&_.bg-primary]:bg-[var(--accent-color)] [&_.bg-secondary]:bg-[#EDEEF2] [&_.border-primary]:border-[var(--accent-color)]"
                 />
               </div>
             </div>
 
-            <Separator className="border-[var(--border-color)]" />
+            <Separator />
 
             <div className="space-y-4">
-              <Label className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-[#6B7280]">
-                <Clock className="h-4 w-4 text-[var(--accent-dark)]" />
+              <Label className="flex items-center gap-2 text-base font-semibold">
+                <Clock className="h-4 w-4" />
                 Auto-Advance
               </Label>
 
-              <div className={CARD_BASE}>
+              <div className="flex items-center justify-between rounded-lg bg-muted/50 p-4">
                 <div>
-                  <p className="text-sm font-semibold text-[#374151]">Enable Auto-Advance</p>
-                  <p className="text-xs text-[#6B7280]">Automatically advance to the next slide</p>
+                  <Label className="font-medium">Enable Auto-Advance</Label>
+                  <p className="text-xs text-muted-foreground">Automatically advance to the next slide</p>
                 </div>
-                <Switch
-                  checked={autoAdvance}
-                  onCheckedChange={handleAutoAdvanceToggle}
-                  className="data-[state=checked]:bg-[var(--accent-color)]"
-                />
+                <Switch checked={autoAdvance} onCheckedChange={handleAutoAdvanceToggle} />
               </div>
 
               {autoAdvance && (
-                <div className={CARD_SUBTLE}>
-                  <Label className="text-xs font-semibold uppercase tracking-wide text-[#6B7280]">
+                <div className="space-y-2 rounded-lg bg-muted/50 p-4 text-sm">
+                  <Label className="text-xs font-semibold uppercase text-muted-foreground">
                     Duration: {safeAutoAdvanceDuration}s
                   </Label>
                   <Slider
@@ -634,91 +551,61 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     min={1}
                     max={60}
                     step={1}
-                    className="mt-3 [&_.bg-primary]:bg-[var(--accent-color)] [&_.bg-secondary]:bg-[#EDEEF2] [&_.border-primary]:border-[var(--accent-color)]"
                   />
                 </div>
               )}
             </div>
           </TabsContent>
 
-          <TabsContent value="accessibility" className="mt-2 space-y-8">
-            <div className="space-y-5">
-              <Label className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-[#6B7280]">
-                <Eye className="h-4 w-4 text-[var(--accent-dark)]" />
+          <TabsContent value="accessibility" className="space-y-6">
+            <div className="space-y-4">
+              <Label className="flex items-center gap-2 text-base font-semibold">
+                <Eye className="h-4 w-4" />
                 Accessibility Options
               </Label>
 
               <div className="space-y-4">
-                <div className={CARD_BASE}>
+                <div className="flex items-center justify-between rounded-lg bg-muted/50 p-4">
                   <div>
-                    <p className="text-sm font-semibold text-[#374151]">High Contrast Mode</p>
-                    <p className="text-xs text-[#6B7280]">Enhance visibility for text and elements</p>
+                    <Label className="font-medium">High Contrast Mode</Label>
+                    <p className="text-xs text-muted-foreground">Enhance visibility for text and elements</p>
                   </div>
-                  <Switch
-                    checked={highContrast}
-                    onCheckedChange={value => onChange({ highContrast: value })}
-                    className="data-[state=checked]:bg-[var(--accent-color)]"
-                  />
+                  <Switch checked={highContrast} onCheckedChange={value => onChange({ highContrast: value })} />
                 </div>
 
-                <div className={CARD_BASE}>
+                <div className="flex items-center justify-between rounded-lg bg-muted/50 p-4">
                   <div>
-                    <p className="text-sm font-semibold text-[#374151]">Large Text</p>
-                    <p className="text-xs text-[#6B7280]">Increase base font size for readability</p>
+                    <Label className="font-medium">Large Text</Label>
+                    <p className="text-xs text-muted-foreground">Increase base font size for readability</p>
                   </div>
-                  <Switch
-                    checked={largeText}
-                    onCheckedChange={value => onChange({ largeText: value })}
-                    className="data-[state=checked]:bg-[var(--accent-color)]"
-                  />
+                  <Switch checked={largeText} onCheckedChange={value => onChange({ largeText: value })} />
                 </div>
 
-                <div className={CARD_BASE}>
+                <div className="flex items-center justify-between rounded-lg bg-muted/50 p-4">
                   <div>
-                    <p className="text-sm font-semibold text-[#374151]">Reduced Motion</p>
-                    <p className="text-xs text-[#6B7280]">Minimize animations and transitions</p>
+                    <Label className="font-medium">Reduced Motion</Label>
+                    <p className="text-xs text-muted-foreground">Minimize animations and transitions</p>
                   </div>
-                  <Switch
-                    checked={reducedMotion}
-                    onCheckedChange={value => onChange({ reducedMotion: value })}
-                    className="data-[state=checked]:bg-[var(--accent-color)]"
-                  />
+                  <Switch checked={reducedMotion} onCheckedChange={value => onChange({ reducedMotion: value })} />
                 </div>
               </div>
             </div>
 
-            <Separator className="border-[var(--border-color)]" />
+            <Separator />
 
             <div className="space-y-3">
-              <Label className="text-sm font-semibold uppercase tracking-wide text-[#6B7280]">
-                Responsive Preview
-              </Label>
-              <div className="grid grid-cols-3 gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-11 justify-center gap-2 rounded-xl border-[var(--border-color)] bg-[var(--muted-surface)] text-sm font-semibold text-[#6B7280]"
-                  disabled
-                >
-                  <Monitor className="h-4 w-4" />
+              <Label className="text-base font-semibold">Responsive Preview</Label>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="flex-1" disabled>
+                  <Monitor className="mr-2 h-4 w-4" />
                   Desktop
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-11 justify-center gap-2 rounded-xl border-[var(--border-color)] bg-[var(--muted-surface)] text-sm font-semibold text-[#6B7280]"
-                  disabled
-                >
-                  <Tablet className="h-4 w-4" />
+                <Button variant="outline" size="sm" className="flex-1" disabled>
+                  <Tablet className="mr-2 h-4 w-4" />
                   Tablet
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-11 justify-center gap-2 rounded-xl border-[var(--border-color)] bg-[var(--muted-surface)] text-sm font-semibold text-[#6B7280]"
-                  disabled
-                >
-                  <Smartphone className="h-4 w-4" />
+                <Button variant="outline" size="sm" className="flex-1" disabled>
+                  <Smartphone className="mr-2 h-4 w-4" />
                   Mobile
                 </Button>
               </div>
@@ -727,28 +614,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </Tabs>
       </ScrollArea>
 
-      <div className="flex items-center justify-between border-t border-[var(--border-color)] px-8 py-6">
-        <Button
-          variant="outline"
-          onClick={onClose}
-          className="h-11 rounded-xl border-[var(--border-color)] px-6 text-sm font-semibold text-[#111827] hover:bg-[var(--muted-surface)]"
-        >
+      <div className="flex items-center justify-between border-t border-border bg-muted/30 p-6">
+        <Button variant="outline" onClick={onClose}>
           Cancel
         </Button>
-        <div className="flex gap-3">
-          <Button
-            variant="outline"
-            onClick={onReset}
-            className="h-11 rounded-xl border-[var(--border-color)] px-6 text-sm font-semibold text-[#111827] hover:bg-[var(--muted-surface)]"
-          >
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={onReset}>
             Reset to Defaults
           </Button>
-          <Button
-            onClick={onClose}
-            className="h-11 rounded-xl bg-[var(--accent-color)] px-6 text-sm font-semibold text-[#111827] transition-colors hover:bg-[#EAB308]"
-          >
-            Apply Settings
-          </Button>
+          <Button onClick={onClose}>Apply Settings</Button>
         </div>
       </div>
     </div>
