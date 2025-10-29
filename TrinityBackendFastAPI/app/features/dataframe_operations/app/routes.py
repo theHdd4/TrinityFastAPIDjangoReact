@@ -1029,8 +1029,21 @@ async def apply_udf(
 
 @router.post("/rename_column")
 async def rename_column(df_id: str = Body(...), old_name: str = Body(...), new_name: str = Body(...)):
+    import logging
+    logger = logging.getLogger("dataframe_operations.rename")
+    
     df = _get_df(df_id)
+    logger.info(f"🔵 [RENAME] Renaming column - df_id: {df_id}, old_name: '{old_name}', new_name: '{new_name}'")
+    logger.info(f"📊 [RENAME] Current columns in dataframe: {df.columns}")
+    logger.info(f"📊 [RENAME] Column exists: {old_name in df.columns}")
+    
+    if old_name not in df.columns:
+        logger.error(f"❌ [RENAME] Column '{old_name}' not found in dataframe. Available: {df.columns}")
+        raise HTTPException(status_code=400, detail=f"Column '{old_name}' not found. Available columns: {df.columns}")
+    
     df = df.rename({old_name: new_name})
+    logger.info(f"✅ [RENAME] After rename - columns: {df.columns}")
+    
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
     return result
