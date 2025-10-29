@@ -249,7 +249,7 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
       </div>
     );
   } else {
-    const maxValue = Math.max(...chartData.map(item => item.value), 0);
+    const maxValue = Math.max(...chartData.map(item => Math.abs(item.value)), 0);
     const isBar = config.type === 'bar';
 
     chartContent = (
@@ -261,19 +261,44 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
         )}
       >
         {chartData.map((item, index) => {
-          const height = maxValue === 0 ? 0 : (item.value / maxValue) * 100;
+          const ratio = maxValue === 0 ? 0 : Math.max(0, Math.abs(item.value)) / maxValue;
+          const percentage = ratio * 100;
+
+          if (isBar) {
+            return (
+              <div
+                key={item.label}
+                className="flex items-center gap-3 animate-fade-in"
+                style={{ animationDelay: `${index * 150}ms` }}
+              >
+                {config.showLabels && <span className="text-xs text-muted-foreground w-8">{item.label}</span>}
+                <div
+                  className="flex-1 h-8 rounded-r-lg transition-all hover:opacity-80 hover:scale-x-105 animate-scale-in origin-left"
+                  style={{
+                    width: `${percentage}%`,
+                    minWidth: Math.abs(item.value) > 0 ? '4px' : '0',
+                    background: colors[index % colors.length],
+                    animationDelay: `${index * 150}ms`,
+                  }}
+                />
+                {config.showValues && <span className="text-xs font-semibold">{item.value}</span>}
+              </div>
+            );
+          }
+
           return (
             <div
               key={item.label}
-              className={cn('flex gap-2', isBar ? 'flex-row items-center' : 'flex-col items-center justify-end')}
+              className="h-full flex-1 flex flex-col justify-end items-center gap-2 animate-fade-in"
+              style={{ animationDelay: `${index * 150}ms` }}
             >
               <div
-                className="rounded-lg transition-all"
+                className="w-full rounded-t-lg transition-all hover:opacity-80 hover:scale-105 animate-scale-in"
                 style={{
-                  backgroundColor: colors[index % colors.length],
-                  [isBar ? 'width' : 'height']: `${height}%`,
-                  [isBar ? 'height' : 'width']: '42px',
-                  [isBar ? 'minWidth' : 'minHeight']: '20px',
+                  height: `${percentage}%`,
+                  minHeight: Math.abs(item.value) > 0 ? '4px' : '0',
+                  background: colors[index % colors.length],
+                  animationDelay: `${index * 150}ms`,
                 }}
               />
               {config.showLabels && <span className="text-xs text-muted-foreground">{item.label}</span>}

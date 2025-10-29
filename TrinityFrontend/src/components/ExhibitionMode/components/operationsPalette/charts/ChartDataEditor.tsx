@@ -350,22 +350,19 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                     onValueChange={value => setConfig(prev => ({ ...prev, colorScheme: value }))}
                   >
                     <SelectTrigger className="h-12 rounded-xl border border-border/60 bg-gradient-to-r from-primary/5 via-card to-secondary/5 px-4 shadow-sm hover:border-primary/40">
-                      <SelectValue asChild>
-                        <div className="flex items-center justify-between w-full">
-                          <div className="flex items-center gap-3">
-                            <span className="flex gap-1.5">
-                              {selectedScheme.colors.slice(0, 5).map(color => (
-                                <span
-                                  key={`${selectedScheme.id}-${color}`}
-                                  className="h-5 w-5 rounded-md border border-border/40"
-                                  style={{ backgroundColor: color }}
-                                />
-                              ))}
-                            </span>
-                            <span className="text-sm font-semibold text-foreground">{selectedScheme.name}</span>
-                          </div>
-                        </div>
-                      </SelectValue>
+                      <div className="flex flex-1 items-center gap-3">
+                        <span className="flex gap-1.5">
+                          {selectedScheme.colors.slice(0, 5).map(color => (
+                            <span
+                              key={`${selectedScheme.id}-${color}`}
+                              className="h-5 w-5 rounded-md border border-border/40"
+                              style={{ backgroundColor: color }}
+                            />
+                          ))}
+                        </span>
+                        <span className="text-sm font-semibold text-foreground">{selectedScheme.name}</span>
+                      </div>
+                      <SelectValue aria-hidden style={{ display: 'none' }} />
                     </SelectTrigger>
                     <SelectContent className="rounded-xl border border-border/60 bg-popover/95 backdrop-blur-sm">
                       {Object.entries(colorSchemeGroups).map(([category, schemes]) => (
@@ -427,12 +424,9 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                       setConfig(prev => ({ ...prev, legendPosition: value as ChartConfig['legendPosition'] }))
                     }
                   >
-                    <SelectTrigger className="h-12 rounded-xl border border-border/60 bg-card/70 px-4 hover:border-primary/40">
-                      <SelectValue asChild>
-                        <div className="flex items-center justify-between w-full text-sm font-semibold">
-                          <span>{legendPositionLabel}</span>
-                        </div>
-                      </SelectValue>
+                    <SelectTrigger className="h-12 rounded-xl border border-border/60 bg-card/70 px-4 hover-border-primary/40">
+                      <span className="text-sm font-semibold text-foreground flex-1 text-left">{legendPositionLabel}</span>
+                      <SelectValue aria-hidden style={{ display: 'none' }} />
                     </SelectTrigger>
                     <SelectContent className="rounded-xl border border-border/60 bg-popover/95 backdrop-blur-sm">
                       {legendPositions.map(pos => (
