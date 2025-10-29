@@ -109,6 +109,17 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
     }
   };
 
+  // Auto-fetch metadata for all uploaded files immediately after upload
+  useEffect(() => {
+    uploadedFiles.forEach(file => {
+      // Only fetch if we don't have metadata yet and we're not currently loading
+      if (!filesMetadata[file.name] && !loading[file.name] && file.path && file.path !== '') {
+        fetchFileMetadata(file);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadedFiles.map(f => f.name).join(',')]);
+
   const toggleFile = (fileName: string) => {
     setOpenFiles(prev => {
       const newSet = new Set(prev);
