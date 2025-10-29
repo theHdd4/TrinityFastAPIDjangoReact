@@ -1449,6 +1449,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             >
               <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
                 <div
+                  data-exhibition-slide="true"
+                  data-exhibition-slide-id={card.id}
                   className={cn(
                     'relative overflow-hidden shadow-2xl transition-all duration-300',
                     presentationMode ? 'w-auto' : 'w-full',
@@ -1548,7 +1550,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                 )}
 
                 {!presentationMode && (
-                  <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+                  <div
+                    data-exhibition-export-ignore="true"
+                    className="absolute top-3 right-3 z-20 flex items-center gap-2"
+                  >
                     <Button
                       size="icon"
                       variant="secondary"
@@ -4027,6 +4032,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
           const renderObject = () => (
             <div
+              data-exhibition-object-id={object.id}
               className="absolute group"
               style={{
                 left: object.x,

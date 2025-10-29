@@ -25,6 +25,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
 }) => {
   const [isExporting, setIsExporting] = useState(false);
   const exhibitedCards = useExhibitionStore(state => state.exhibitedCards);
+  const slideObjectsByCardId = useExhibitionStore(state => state.slideObjectsByCardId);
 
   const handleExport = async (format: 'PDF' | 'PowerPoint' | 'Images') => {
     if (exhibitedCards.length === 0) {
@@ -38,10 +39,8 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
     try {
       const slides = exhibitedCards.map(card => ({
         id: card.id,
-        textBoxes: card.textBoxes,
-        images: card.images,
-        charts: card.charts,
-        tables: card.tables,
+        card,
+        objects: slideObjectsByCardId[card.id] ?? [],
       }));
 
       switch (format) {
