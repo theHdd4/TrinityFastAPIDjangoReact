@@ -173,15 +173,28 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
 
   if (config.type === 'line') {
     const maxValue = Math.max(...chartData.map(item => item.value), 0);
-    const points = chartData.map((item, index) => {
-      const x = chartData.length <= 1 ? 180 : (index / (chartData.length - 1)) * 360;
-      const y = 220 - (maxValue === 0 ? 0 : (item.value / maxValue) * 180);
-      return `${x},${y}`;
-    }).join(' ');
+    const points = chartData
+      .map((item, index) => {
+        const x = chartData.length <= 1 ? 180 : (index / (chartData.length - 1)) * 360;
+        const y = 220 - (maxValue === 0 ? 0 : (item.value / maxValue) * 180);
+        return `${x},${y}`;
+      })
+      .join(' ');
 
     return (
-      <div className={cn('h-full w-full p-6 flex items-center', justifyClass, textAlignClass, className)}>
-        <svg width="400" height="240" viewBox="0 0 400 240">
+      <div
+        className={cn(
+          'h-full w-full p-6 flex items-center justify-center overflow-hidden',
+          justifyClass,
+          textAlignClass,
+          className,
+        )}
+      >
+        <svg
+          className="h-full w-full max-w-full"
+          viewBox="0 0 400 240"
+          preserveAspectRatio="xMidYMid meet"
+        >
           <polyline
             points={points}
             fill="none"
