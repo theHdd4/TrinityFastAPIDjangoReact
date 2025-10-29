@@ -31,40 +31,16 @@ const CATEGORY_COLOR_MAP: Record<string, string> = {
 
 export const ShapesPanel: React.FC<ShapesPanelProps> = ({ onSelectShape, onClose, canEdit = true }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-
-  const categoryLookup = useMemo(() => {
-    const lookup = new Map<string, string>();
-    SHAPE_CATEGORIES.forEach(category => {
-      lookup.set(category.id, category.label);
-    });
-    return lookup;
-  }, []);
-
-  const availableCategories = useMemo(
-    () =>
-      SHAPE_CATEGORIES.map(category => ({
-        ...category,
-        count: SHAPE_DEFINITIONS.filter(shape => shape.categoryId === category.id).length,
-      })).filter(category => category.count > 0),
-    [],
-  );
-
-  const filteredShapes = useMemo(() => {
+  const filteredCategories = useMemo(() => {
     const normalisedQuery = searchQuery.trim();
 
-    return SHAPE_DEFINITIONS.filter(shape => {
-      if (selectedCategory && shape.categoryId !== selectedCategory) {
-        return false;
-      }
-
-      return matchesShapeQuery(shape, normalisedQuery);
-    });
-  }, [searchQuery, selectedCategory]);
-
-  const handleCategorySelect = (categoryId: string | null) => {
-    setSelectedCategory(categoryId);
-  };
+    return SHAPE_CATEGORIES.map(category => ({
+      ...category,
+      shapes: SHAPE_DEFINITIONS.filter(
+        shape => shape.categoryId === category.id && matchesShapeQuery(shape, normalisedQuery),
+      ),
+    })).filter(category => category.shapes.length > 0);
+  }, [searchQuery]);
 
   return (
     <div className="w-full shrink-0 rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
@@ -91,7 +67,7 @@ export const ShapesPanel: React.FC<ShapesPanelProps> = ({ onSelectShape, onClose
           </Button>
         </div>
 
-        <div className="space-y-4 border-b border-border/60 px-5 py-5">
+        <div className="border-b border-border/60 px-5 py-5">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -103,83 +79,58 @@ export const ShapesPanel: React.FC<ShapesPanelProps> = ({ onSelectShape, onClose
               aria-label="Search shapes"
             />
           </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant={selectedCategory === null ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => handleCategorySelect(null)}
-              className="rounded-full"
-            >
-              All Shapes
-            </Button>
-            {availableCategories.map(category => {
-              const isActive = selectedCategory === category.id;
-              return (
-                <Button
-                  key={category.id}
-                  type="button"
-                  variant={isActive ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => handleCategorySelect(category.id)}
-                  className="rounded-full"
-                >
-                  <span className={cn('mr-1 text-xs', CATEGORY_COLOR_MAP[category.id] ?? 'text-muted-foreground')}>●</span>
-                  {category.label}
-                </Button>
-              );
-            })}
-          </div>
         </div>
 
         <ScrollArea className="flex-1 px-5 py-6 pr-3">
-          {filteredShapes.length > 0 ? (
-            <div className="grid grid-cols-2 gap-4">
-              {filteredShapes.map(shape => {
-                const categoryLabel = categoryLookup.get(shape.categoryId);
-                return (
-                  <button
-                    key={shape.id}
-                    type="button"
-                    onClick={() => onSelectShape(shape)}
-                    className={cn(
-                      'group relative flex flex-col items-center gap-3 rounded-2xl border border-border/60 bg-card/40 p-4 transition-all duration-300 hover:border-primary hover:bg-primary/5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
-                      !canEdit && 'cursor-not-allowed opacity-60 hover:border-border/60 hover:bg-card/40 hover:shadow-none',
-                    )}
-                    disabled={!canEdit}
-                    aria-label={`Add ${shape.label}`}
-                  >
-                    <div className="flex h-20 w-full items-center justify-center rounded-xl bg-background">
-                      <ShapeRenderer
-                        definition={shape}
-                        className="h-16 w-16 text-foreground transition-colors duration-300 group-hover:text-primary"
-                      />
-                    </div>
-                    <div className="flex flex-col items-center gap-1 text-center">
-                      <span className="text-xs font-semibold text-foreground/80 group-hover:text-foreground leading-tight">
-                        {shape.label}
-                      </span>
-                      {categoryLabel && (
-                        <span
-                          className={cn(
-                            'text-[0.65rem] font-medium uppercase tracking-wide text-muted-foreground/80',
-                            CATEGORY_COLOR_MAP[shape.categoryId] ?? 'text-muted-foreground',
-                          )}
-                        >
-                          {categoryLabel}
-                        </span>
+          {filteredCategories.length > 0 ? (
+            <div className="space-y-8">
+              {filteredCategories.map(category => (
+                <section key={category.id} className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        'text-xs font-semibold uppercase tracking-wide text-muted-foreground/80',
+                        CATEGORY_COLOR_MAP[category.id] ?? 'text-muted-foreground',
                       )}
-                    </div>
-                  </button>
-                );
-              })}
+                    >
+                      ●
+                    </span>
+                    <h4 className="text-sm font-semibold text-foreground">{category.label}</h4>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    {category.shapes.map(shape => (
+                      <button
+                        key={shape.id}
+                        type="button"
+                        onClick={() => onSelectShape(shape)}
+                        className={cn(
+                          'group relative flex flex-col items-center gap-3 rounded-2xl border border-border/60 bg-card/40 p-4 transition-all duration-300 hover:border-primary hover:bg-primary/5 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                          !canEdit && 'cursor-not-allowed opacity-60 hover:border-border/60 hover:bg-card/40 hover:shadow-none',
+                        )}
+                        disabled={!canEdit}
+                        aria-label={`Add ${shape.label}`}
+                      >
+                        <div className="flex h-20 w-full items-center justify-center rounded-xl bg-background">
+                          <ShapeRenderer
+                            definition={shape}
+                            fill="currentColor"
+                            className="h-16 w-16 text-foreground transition-colors duration-300 group-hover:text-yellow-400"
+                          />
+                        </div>
+                        <span className="text-xs font-semibold leading-tight text-foreground/80 group-hover:text-foreground">
+                          {shape.label}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
             </div>
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 py-12 text-center text-muted-foreground">
               <Shapes className="h-12 w-12 opacity-40" />
               <p className="text-sm font-semibold">No shapes found</p>
-              <p className="text-xs">Try a different search term or category.</p>
+              <p className="text-xs">Try a different search term.</p>
             </div>
           )}
         </ScrollArea>
