@@ -61,10 +61,13 @@ const resolveObjectDimensions = (
   fallbackElement: HTMLElement | null,
 ): { width: number; height: number } => {
   const fallbackRect = fallbackElement?.getBoundingClientRect();
-  const width =
-    typeof object.width === 'number' && object.width > 0 ? object.width : fallbackRect?.width ?? 0;
-  const height =
-    typeof object.height === 'number' && object.height > 0 ? object.height : fallbackRect?.height ?? 0;
+  const measuredWidth = fallbackRect?.width ?? 0;
+  const measuredHeight = fallbackRect?.height ?? 0;
+  const width = Math.max(typeof object.width === 'number' && object.width > 0 ? object.width : 0, measuredWidth);
+  const height = Math.max(
+    typeof object.height === 'number' && object.height > 0 ? object.height : 0,
+    measuredHeight,
+  );
 
   return { width, height };
 };
@@ -396,6 +399,8 @@ export const exportToPDF = async (slides: SlideExportData[], title: string = 'Pr
       width: Math.round(width),
       height: Math.round(height),
       filter: exportNodeFilter,
+      skipFonts: true,
+      fontEmbedCSS: '',
       style: {
         width: `${Math.round(width)}px`,
         height: `${Math.round(height)}px`,
@@ -410,10 +415,14 @@ export const exportToPDF = async (slides: SlideExportData[], title: string = 'Pr
       svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     }
 
-    const serialisedSvg = new XMLSerializer().serializeToString(svg);
     pdf.setFillColor(255, 255, 255);
     pdf.rect(0, 0, width, height, 'F');
-    pdf.addImage(serialisedSvg, 'SVG', 0, 0, width, height, undefined, 'FAST');
+    await pdf.svg(svg, {
+      x: 0,
+      y: 0,
+      width,
+      height,
+    });
   }
 
   if (!pdf) {
