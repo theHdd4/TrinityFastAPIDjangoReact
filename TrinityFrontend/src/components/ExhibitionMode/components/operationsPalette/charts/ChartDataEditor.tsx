@@ -39,7 +39,6 @@ import {
   diagramTypeOptions,
   DEFAULT_CHART_CONFIG,
   DEFAULT_CHART_DATA,
-  getColorSchemeColors,
   isEditableChartType,
 } from './utils';
 import SlideChart from './SlideChart';
@@ -96,8 +95,6 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     return candidate;
   });
 
-  const [legendPosition, setLegendPosition] = useState('bottom');
-
   const addRow = () => {
     setChartData(prev => [...prev, { label: 'New Item', value: 0 }]);
   };
@@ -120,7 +117,6 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     onClose();
   };
 
-  const chartColors = useMemo(() => getColorSchemeColors(config.colorScheme), [config.colorScheme]);
   const colorSchemeGroups = useMemo(() => {
     return COLOR_SCHEMES.reduce<Record<string, typeof COLOR_SCHEMES>>((acc, scheme) => {
       const group = acc[scheme.category] ?? [];
@@ -149,7 +145,10 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
     : config.type === 'blank'
       ? 'Blank diagrams do not require tabular data.'
       : 'Calendar diagrams generate their layout automatically.';
-  const showLegend = isEditableChartType(config.type) && chartData.length > 0;
+  const legendPositionLabel = useMemo(() => {
+    const match = legendPositions.find(option => option.id === config.legendPosition);
+    return match ? match.name : legendPositions[1]?.name ?? 'Bottom';
+  }, [config.legendPosition]);
 
   return (
     <Dialog open={open} onOpenChange={state => { if (!state) onClose(); }}>
@@ -264,26 +263,10 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
             <ScrollArea className="flex-1">
               <div className="p-6 space-y-6">
-                <div className="rounded-xl border border-border/40 bg-card p-6 shadow-sm space-y-6">
+                <div className="rounded-xl border border-border/40 bg-card p-6 shadow-sm">
                   <div className="w-full h-64 rounded-lg bg-muted/20 border border-border/30 flex items-center justify-center overflow-hidden">
                     <SlideChart data={chartData} config={config} className="w-full h-full max-w-full" />
                   </div>
-                  {showLegend && (
-                    <div className="flex flex-wrap gap-3 justify-center pt-4 border-t border-border/20">
-                      {chartData.map((item, index) => (
-                        <div
-                          key={`${item.label}-${index}`}
-                          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card/60 border border-border/30"
-                        >
-                          <div
-                            className="w-3.5 h-3.5 rounded-full"
-                            style={{ backgroundColor: chartColors[index % chartColors.length] }}
-                          />
-                          <span className="text-sm font-medium text-foreground">{item.label}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
 
                 <div className="pt-2 pb-1 border-b-2 border-primary/20">
@@ -438,13 +421,22 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
                 <div className="space-y-3">
                   <Label className="text-sm font-semibold">Legend Position</Label>
-                  <Select value={legendPosition} onValueChange={setLegendPosition}>
-                    <SelectTrigger className="h-11 bg-card border border-border/60 hover:border-primary/40 rounded-lg">
-                      <SelectValue />
+                  <Select
+                    value={config.legendPosition}
+                    onValueChange={value =>
+                      setConfig(prev => ({ ...prev, legendPosition: value as ChartConfig['legendPosition'] }))
+                    }
+                  >
+                    <SelectTrigger className="h-12 rounded-xl border border-border/60 bg-card/70 px-4 hover:border-primary/40">
+                      <SelectValue asChild>
+                        <div className="flex items-center justify-between w-full text-sm font-semibold">
+                          <span>{legendPositionLabel}</span>
+                        </div>
+                      </SelectValue>
                     </SelectTrigger>
-                    <SelectContent className="rounded-lg">
+                    <SelectContent className="rounded-xl border border-border/60 bg-popover/95 backdrop-blur-sm">
                       {legendPositions.map(pos => (
-                        <SelectItem key={pos.id} value={pos.id} className="rounded-md">
+                        <SelectItem key={pos.id} value={pos.id} className="rounded-lg">
                           {pos.name}
                         </SelectItem>
                       ))}

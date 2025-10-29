@@ -9,6 +9,7 @@ export interface ChartConfig {
   showValues: boolean;
   horizontalAlignment: 'left' | 'center' | 'right';
   axisIncludesZero: boolean;
+  legendPosition: 'top' | 'bottom' | 'left' | 'right';
 }
 
 export interface ChartDataRow {
