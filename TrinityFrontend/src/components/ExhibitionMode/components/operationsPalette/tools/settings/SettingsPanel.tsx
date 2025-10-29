@@ -702,48 +702,75 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 Accessibility Options
               </Label>
 
-              <div className="space-y-4">
-                <div className="flex items-start justify-between gap-3 rounded-lg bg-muted/50 p-3">
-                  <div className="max-w-[75%] space-y-1">
-                    <Label className="text-[13px] font-medium leading-4">High Contrast Mode</Label>
-                    <p className="text-[11px] leading-4 text-muted-foreground">Enhance visibility for text and elements</p>
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-2.5 rounded-lg bg-muted/50 px-3 py-2.5">
+                  <div className="max-w-[72%] space-y-1">
+                    <Label className="text-[12px] font-medium leading-4">High Contrast Mode</Label>
+                    <p className="text-[11px] leading-[1.1rem] text-muted-foreground">Enhance visibility for text and elements</p>
                   </div>
-                  <Switch checked={highContrast} onCheckedChange={value => onChange({ highContrast: value })} />
+                  <Switch
+                    className="shrink-0"
+                    checked={highContrast}
+                    onCheckedChange={value => onChange({ highContrast: value })}
+                  />
                 </div>
 
-                <div className="flex items-start justify-between gap-3 rounded-lg bg-muted/50 p-3">
-                  <div className="max-w-[75%] space-y-1">
-                    <Label className="text-[13px] font-medium leading-4">Large Text</Label>
-                    <p className="text-[11px] leading-4 text-muted-foreground">Increase base font size for readability</p>
+                <div className="flex items-start justify-between gap-2.5 rounded-lg bg-muted/50 px-3 py-2.5">
+                  <div className="max-w-[72%] space-y-1">
+                    <Label className="text-[12px] font-medium leading-4">Large Text</Label>
+                    <p className="text-[11px] leading-[1.1rem] text-muted-foreground">Increase base font size for readability</p>
                   </div>
-                  <Switch checked={largeText} onCheckedChange={value => onChange({ largeText: value })} />
+                  <Switch
+                    className="shrink-0"
+                    checked={largeText}
+                    onCheckedChange={value => onChange({ largeText: value })}
+                  />
                 </div>
 
-                <div className="flex items-start justify-between gap-3 rounded-lg bg-muted/50 p-3">
-                  <div className="max-w-[75%] space-y-1">
-                    <Label className="text-[13px] font-medium leading-4">Reduced Motion</Label>
-                    <p className="text-[11px] leading-4 text-muted-foreground">Minimize animations and transitions</p>
+                <div className="flex items-start justify-between gap-2.5 rounded-lg bg-muted/50 px-3 py-2.5">
+                  <div className="max-w-[72%] space-y-1">
+                    <Label className="text-[12px] font-medium leading-4">Reduced Motion</Label>
+                    <p className="text-[11px] leading-[1.1rem] text-muted-foreground">Minimize animations and transitions</p>
                   </div>
-                  <Switch checked={reducedMotion} onCheckedChange={value => onChange({ reducedMotion: value })} />
+                  <Switch
+                    className="shrink-0"
+                    checked={reducedMotion}
+                    onCheckedChange={value => onChange({ reducedMotion: value })}
+                  />
                 </div>
               </div>
             </div>
 
             <Separator />
 
-            <div className="space-y-3">
-              <Label className="text-sm font-semibold">Responsive Preview</Label>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="flex-1" disabled>
-                  <Monitor className="mr-2 h-4 w-4" />
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase text-muted-foreground">Responsive Preview</Label>
+              <div className="flex gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 px-2 py-1.5 text-[11px]"
+                  disabled
+                >
+                  <Monitor className="mr-1.5 h-3.5 w-3.5" />
                   Desktop
                 </Button>
-                <Button variant="outline" size="sm" className="flex-1" disabled>
-                  <Tablet className="mr-2 h-4 w-4" />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 px-2 py-1.5 text-[11px]"
+                  disabled
+                >
+                  <Tablet className="mr-1.5 h-3.5 w-3.5" />
                   Tablet
                 </Button>
-                <Button variant="outline" size="sm" className="flex-1" disabled>
-                  <Smartphone className="mr-2 h-4 w-4" />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 px-2 py-1.5 text-[11px]"
+                  disabled
+                >
+                  <Smartphone className="mr-1.5 h-3.5 w-3.5" />
                   Mobile
                 </Button>
               </div>
@@ -752,15 +779,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </Tabs>
       </ScrollArea>
 
-      <div className="flex items-center justify-between border-t border-border/60 bg-muted/40 px-5 py-4">
-        <Button variant="outline" size="sm" onClick={onClose}>
+      <div className="flex items-center justify-between border-t border-border/60 bg-muted/40 px-4 py-3">
+        <Button variant="outline" size="sm" className="px-3 text-[12px]" onClick={onClose}>
           Cancel
         </Button>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={onReset}>
+        <div className="flex gap-1.5">
+          <Button variant="outline" size="sm" className="px-3 text-[12px]" onClick={onReset}>
             Reset to Defaults
           </Button>
-          <Button size="sm" onClick={onClose}>
+          <Button size="sm" className="px-3 text-[12px]" onClick={onClose}>
             Apply Settings
           </Button>
         </div>
