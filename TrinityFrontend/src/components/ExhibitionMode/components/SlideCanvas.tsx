@@ -4256,15 +4256,24 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                         }
                         onSelect={event => {
                           event.preventDefault();
+                          const isValidTarget =
+                            canEdit &&
+                            chartProps &&
+                            isEditableChartType(chartProps.chartConfig.type);
+                          const payload = isValidTarget
+                            ? {
+                                objectId: object.id,
+                                data: chartProps.chartData,
+                                config: chartProps.chartConfig,
+                              }
+                            : null;
                           closeMenu();
-                          if (!canEdit || !chartProps || !isEditableChartType(chartProps.chartConfig.type)) {
+                          if (!payload) {
                             return;
                           }
-                          setChartEditorTarget({
-                            objectId: object.id,
-                            data: chartProps.chartData,
-                            config: chartProps.chartConfig,
-                          });
+                          setTimeout(() => {
+                            setChartEditorTarget(payload);
+                          }, 0);
                         }}
                         className="gap-3"
                       >

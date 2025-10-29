@@ -5,6 +5,9 @@ import {
   PieChart,
   Columns3,
   Circle,
+  LayoutGrid,
+  Calendar,
+  GanttChart,
   Zap,
   TrendingUp,
   Palette,
@@ -19,12 +22,13 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import type { ChartConfig, ChartDataRow, EditableChartType } from './types';
+import type { ChartConfig, ChartDataRow, EditableChartType, DiagramChartType } from './types';
 import {
   COLOR_SCHEMES,
   DEFAULT_CHART_CONFIG,
   DEFAULT_CHART_DATA,
   getColorSchemeColors,
+  isEditableChartType,
 } from './utils';
 import ChartDataEditor from './ChartDataEditor';
 import SlideChart from './SlideChart';
@@ -35,12 +39,26 @@ interface ChartPanelProps {
   canEdit?: boolean;
 }
 
-const chartTypeDefinitions: { id: EditableChartType; name: string; icon: React.ComponentType<{ className?: string }>; }[] = [
+const chartTypeDefinitions: {
+  id: EditableChartType;
+  name: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
   { id: 'column', name: 'Column', icon: Columns3 },
   { id: 'bar', name: 'Bar', icon: BarChart3 },
   { id: 'line', name: 'Line', icon: LineChart },
   { id: 'pie', name: 'Pie', icon: PieChart },
   { id: 'donut', name: 'Donut', icon: Circle },
+];
+
+const diagramTypeDefinitions: {
+  id: DiagramChartType;
+  name: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
+  { id: 'blank', name: 'Blank', icon: LayoutGrid },
+  { id: 'calendar', name: 'Calendar', icon: Calendar },
+  { id: 'gantt', name: 'Gantt', icon: GanttChart },
 ];
 
 const ChartPanel: React.FC<ChartPanelProps> = ({ onInsertChart, onClose, canEdit = true }) => {
@@ -77,6 +95,7 @@ const ChartPanel: React.FC<ChartPanelProps> = ({ onInsertChart, onClose, canEdit
     { id: 'right', icon: AlignRight, label: 'Right' },
   ] as const;
 
+  const isEditableType = isEditableChartType(config.type);
   const axisToggleVisible = config.type === 'column' || config.type === 'bar' || config.type === 'line';
 
   return (
@@ -126,34 +145,67 @@ const ChartPanel: React.FC<ChartPanelProps> = ({ onInsertChart, onClose, canEdit
             </div>
           </div>
 
-          <div className="space-y-3">
-            <Label className="text-sm font-semibold flex items-center gap-2">
-              <div className="p-1 rounded-md bg-primary/10">
-                <BarChart3 className="h-4 w-4 text-primary" />
+          <div className="space-y-5">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-md bg-primary/10">
+                  <BarChart3 className="h-4 w-4 text-primary" />
+                </div>
+                <Label className="text-sm font-semibold">Charts</Label>
               </div>
-              Chart type
-            </Label>
-            <div className="grid grid-cols-3 gap-3">
-              {chartTypeDefinitions.map(type => {
-                const Icon = type.icon;
-                const selected = config.type === type.id;
-                return (
-                  <button
-                    key={type.id}
-                    type="button"
-                    onClick={() => setConfig(prev => ({ ...prev, type: type.id }))}
-                    className={cn(
-                      'group flex flex-col gap-2 items-center justify-center p-4 rounded-2xl border transition-all',
-                      selected
-                        ? 'bg-primary text-primary-foreground border-primary shadow-lg'
-                        : 'border-border/60 bg-card hover:border-primary/40 hover:bg-muted/50',
-                    )}
-                  >
-                    <Icon className={cn('h-6 w-6', selected ? 'text-primary-foreground' : 'text-primary')} />
-                    <span className="text-xs font-semibold">{type.name}</span>
-                  </button>
-                );
-              })}
+              <div className="grid grid-cols-5 gap-3">
+                {chartTypeDefinitions.map(type => {
+                  const Icon = type.icon;
+                  const selected = config.type === type.id;
+                  return (
+                    <button
+                      key={type.id}
+                      type="button"
+                      onClick={() => setConfig(prev => ({ ...prev, type: type.id }))}
+                      className={cn(
+                        'group flex flex-col gap-2 items-center justify-center p-4 rounded-2xl border transition-all',
+                        selected
+                          ? 'bg-primary text-primary-foreground border-primary shadow-lg'
+                          : 'border-border/60 bg-card hover:border-primary/40 hover:bg-muted/50',
+                      )}
+                    >
+                      <Icon className={cn('h-6 w-6', selected ? 'text-primary-foreground' : 'text-primary')} />
+                      <span className="text-xs font-semibold">{type.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-md bg-secondary/10">
+                  <Zap className="h-4 w-4 text-secondary" />
+                </div>
+                <Label className="text-sm font-semibold">Freeform diagrams</Label>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {diagramTypeDefinitions.map(type => {
+                  const Icon = type.icon;
+                  const selected = config.type === type.id;
+                  return (
+                    <button
+                      key={type.id}
+                      type="button"
+                      onClick={() => setConfig(prev => ({ ...prev, type: type.id }))}
+                      className={cn(
+                        'group flex flex-col gap-2 items-center justify-center p-5 rounded-2xl border transition-all',
+                        selected
+                          ? 'bg-primary text-primary-foreground border-primary shadow-lg'
+                          : 'border-border/60 bg-card hover:border-primary/40 hover:bg-muted/50',
+                      )}
+                    >
+                      <Icon className={cn('h-6 w-6', selected ? 'text-primary-foreground' : 'text-primary')} />
+                      <span className="text-xs font-semibold">{type.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -267,8 +319,19 @@ const ChartPanel: React.FC<ChartPanelProps> = ({ onInsertChart, onClose, canEdit
           <div className="pt-2">
             <Button
               type="button"
-              onClick={() => setShowEditor(true)}
-              className="w-full h-12 rounded-xl font-semibold shadow hover:shadow-md transition-all bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-white"
+              onClick={() => {
+                if (!isEditableType) {
+                  return;
+                }
+                setShowEditor(true);
+              }}
+              disabled={!canEdit || !isEditableType}
+              className={cn(
+                'w-full h-12 rounded-xl font-semibold shadow transition-all bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-white',
+                !canEdit || !isEditableType
+                  ? 'opacity-60 cursor-not-allowed'
+                  : 'hover:shadow-md',
+              )}
             >
               <Database className="h-4 w-4 mr-2" />
               Edit chart data
