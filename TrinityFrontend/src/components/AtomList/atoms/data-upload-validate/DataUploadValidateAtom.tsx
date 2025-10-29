@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Info, Check, AlertCircle, Upload, Settings, BarChart3, Eye, ChevronDown, Plus, Pencil } from 'lucide-react';
+import { Info, Check, AlertCircle, Upload, Settings, ClipboardCheck, Eye, ChevronDown, Plus, Pencil } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,13 +12,17 @@ import {
   useLaboratoryStore,
   DataUploadSettings,
   createDefaultDataUploadSettings,
+  ColumnClassifierColumn,
+  ColumnClassifierFile,
 } from '@/components/LaboratoryMode/store/laboratoryStore';
-import { VALIDATE_API } from '@/lib/api';
+import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { logSessionState, updateSessionState, addNavigationItem } from '@/lib/session';
 import UploadSection from './components/upload/UploadSection';
 import RequiredFilesSection from './components/required-files/RequiredFilesSection';
+import ColumnClassifierCanvas from '../column-classifier/components/ColumnClassifierCanvas';
+import ColumnClassifierDimensionMapping from '../column-classifier/components/ColumnClassifierDimensionMapping';
 
 interface UploadedFileRef {
   name: string;
@@ -33,8 +37,12 @@ interface Props {
 const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const atom = useLaboratoryStore((state) => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore((state) => state.updateAtomSettings);
-  const settings: DataUploadSettings =
-    atom?.settings || createDefaultDataUploadSettings();
+  
+  // Make settings reactive by using it directly from the atom with a selector
+  const settings = useLaboratoryStore((state) => {
+    const currentAtom = state.getAtom(atomId);
+    return currentAtom?.settings as DataUploadSettings || createDefaultDataUploadSettings();
+  });
 
   const { toast } = useToast();
   const { user } = useAuth();
@@ -50,14 +58,46 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const [validationDetails, setValidationDetails] = useState<Record<string, any[]>>({});
   const [openValidatedFile, setOpenValidatedFile] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<Record<string, string>>({});
-  const [dataChanges, setDataChanges] = useState<{
-    dtypeChanges: Record<string, Record<string, string>>;
+  const [allFilesSaved, setAllFilesSaved] = useState(false);
+  const [isConfigStatusOpen, setIsConfigStatusOpen] = useState(false);
+  
+  // Use ref to store current data changes without triggering re-renders
+  const dataChangesRef = React.useRef<{
+    dtypeChanges: Record<string, Record<string, string | { dtype: string; format: string }>>;
     missingValueStrategies: Record<string, Record<string, { strategy: string; value?: string }>>;
-  }>({ dtypeChanges: {}, missingValueStrategies: {} });
+  }>({
+    dtypeChanges: settings.dtypeChanges || {},
+    missingValueStrategies: settings.missingValueStrategies || {},
+  });
+
+  // Function to update data changes in global store only (child manages UI state)
+  const handleDataChanges = React.useCallback((changes: {
+    dtypeChanges: Record<string, Record<string, string | { dtype: string; format: string }>>;
+    missingValueStrategies: Record<string, Record<string, { strategy: string; value?: string }>>;
+  }) => {
+    dataChangesRef.current = changes;
+    updateSettings(atomId, {
+      dtypeChanges: changes.dtypeChanges,
+      missingValueStrategies: changes.missingValueStrategies,
+    });
+  }, [atomId, updateSettings]);
+
+  // Function to update metadata in global store
+  const handleMetadataChange = React.useCallback((metadata: Record<string, any>) => {
+    updateSettings(atomId, {
+      filesMetadata: metadata,
+    });
+  }, [atomId, updateSettings]);
+  
+  // Read filesWithAppliedChanges from global store
+  const filesWithAppliedChanges = new Set(settings.filesWithAppliedChanges || []);
 
   useEffect(() => {
     setFileAssignments(settings.fileMappings || {});
   }, [settings.fileMappings]);
+
+  // Keep save button disabled and "Changes Applied" badge visible after saving
+  // Do NOT re-enable button or remove badge when new changes are made
 
   useEffect(() => {
     if (uploadedFiles.length === 0 && (settings.uploadedFiles?.length || 0) > 0) {
@@ -89,18 +129,24 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
           /* ignore */
         }
       }
+      // Clear global store (no need to update local state on unmount)
       updateSettings(atomId, {
         uploadedFiles: [],
         fileMappings: {},
         filePathMap: {},
         fileSizeMap: {},
         fileKeyMap: {},
+        dtypeChanges: {},
+        missingValueStrategies: {},
+        filesWithAppliedChanges: [],
+        filesMetadata: {},
       });
       updateSessionState(user?.id, { envvars: null });
     };
   }, [atomId, updateSettings, user?.id]);
 
   const handleFileUpload = async (files: File[]) => {
+    // Don't reset allFilesSaved - keep button disabled if already saved
     const uploaded: UploadedFileRef[] = [];
 
     const envStr = localStorage.getItem('env');
@@ -325,12 +371,31 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     const { [name]: _, ...restAssignments } = fileAssignments;
     const { [name]: __, ...restPaths } = settings.filePathMap || {};
     const { [name]: ___, ...restSizes } = settings.fileSizeMap || {};
+    const { [name]: ____, ...restDtypeChanges } = settings.dtypeChanges || {};
+    const { [name]: _____, ...restMissingValueStrategies } = settings.missingValueStrategies || {};
+    const { [name]: ______, ...restMetadata } = settings.filesMetadata || {};
+    const newFilesWithAppliedChanges = (settings.filesWithAppliedChanges || []).filter(f => f !== name);
+    
     setFileAssignments(restAssignments);
+    
+    // Update ref
+    const { [name]: _______, ...refRestDtypeChanges } = dataChangesRef.current.dtypeChanges;
+    const { [name]: ________, ...refRestMissingValueStrategies } = dataChangesRef.current.missingValueStrategies;
+    dataChangesRef.current = {
+      dtypeChanges: refRestDtypeChanges,
+      missingValueStrategies: refRestMissingValueStrategies,
+    };
+    
+    // Update global store
     updateSettings(atomId, {
       uploadedFiles: newUploads,
       fileMappings: restAssignments,
       filePathMap: restPaths,
       fileSizeMap: restSizes,
+      dtypeChanges: restDtypeChanges,
+      missingValueStrategies: restMissingValueStrategies,
+      filesWithAppliedChanges: newFilesWithAppliedChanges,
+      filesMetadata: restMetadata,
     });
     setValidationResults(prev => {
       const { [name]: _, ...rest } = prev;
@@ -527,22 +592,339 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     }, 1000);
   };
 
+  // Column Classifier Functions
+  const handleAutoClassify = async (objectName: string) => {
+    try {
+      const form = new FormData();
+      form.append('dataframe', objectName);
+      form.append('identifiers', '[]');
+      form.append('measures', '[]');
+      form.append('unclassified', '[]');
+
+      const res = await fetch(`${CLASSIFIER_API}/classify_columns`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include'
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        
+        const cols: ColumnClassifierColumn[] = [
+          ...data.final_classification.identifiers.map((name: string) => ({ name, category: 'identifiers' as const })),
+          ...data.final_classification.measures.map((name: string) => ({ name, category: 'measures' as const })),
+          ...data.final_classification.unclassified.map((name: string) => ({ name, category: 'unclassified' as const }))
+        ];
+        
+        updateSettings(atomId, {
+          classifierData: {
+            files: [{
+              fileName: objectName,
+              columns: cols,
+              customDimensions: {}
+            }],
+            activeFileIndex: 0
+          },
+          classifierSelectedFile: objectName,
+        });
+        
+        toast({ title: 'Columns classified successfully' });
+      } else {
+        toast({ title: 'Failed to classify columns', variant: 'destructive' });
+      }
+    } catch (error) {
+      console.error('Classification error:', error);
+      toast({ title: 'Error classifying columns', variant: 'destructive' });
+    }
+  };
+
+  // Auto-classify ALL files (creates tabs for each file)
+  const handleAutoClassifyAllFiles = async () => {
+    if (!settings.filePathMap) return;
+    
+    // Get all permanent paths (not temporary /tmp/ paths)
+    const filesToClassify = Object.entries(settings.filePathMap)
+      .filter(([_, path]) => path && !path.includes('/tmp/'))
+      .map(([fileName, path]) => ({ fileName, path }));
+    
+    if (filesToClassify.length === 0) return;
+    
+    console.log(`🎯 Auto-classifying ${filesToClassify.length} file(s)`);
+    
+    try {
+      const classifiedFiles: ColumnClassifierFile[] = [];
+      
+      for (const { fileName, path } of filesToClassify) {
+        const form = new FormData();
+        form.append('dataframe', path);
+        form.append('identifiers', '[]');
+        form.append('measures', '[]');
+        form.append('unclassified', '[]');
+
+        const res = await fetch(`${CLASSIFIER_API}/classify_columns`, {
+          method: 'POST',
+          body: form,
+          credentials: 'include'
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          
+          const cols: ColumnClassifierColumn[] = [
+            ...data.final_classification.identifiers.map((name: string) => ({ name, category: 'identifiers' as const })),
+            ...data.final_classification.measures.map((name: string) => ({ name, category: 'measures' as const })),
+            ...data.final_classification.unclassified.map((name: string) => ({ name, category: 'unclassified' as const }))
+          ];
+          
+          classifiedFiles.push({
+            fileName: fileName, // Use original filename for tab display
+            filePath: path, // Store MinIO path for saving configuration
+            columns: cols,
+            customDimensions: {}
+          });
+        }
+      }
+      
+      if (classifiedFiles.length > 0) {
+        updateSettings(atomId, {
+          classifierData: {
+            files: classifiedFiles,
+            activeFileIndex: 0
+          },
+          classifierSelectedFile: filesToClassify[0].path,
+        });
+        
+        toast({ 
+          title: `${classifiedFiles.length} file(s) classified successfully`,
+          description: classifiedFiles.map(f => f.fileName).join(', ')
+        });
+      }
+    } catch (error) {
+      console.error('Classification error:', error);
+      toast({ title: 'Classification failed', variant: 'destructive' });
+    }
+  };
+
+  const handleClassifierActiveFileChange = (fileIndex: number) => {
+    const classifierData = settings.classifierData || { files: [], activeFileIndex: 0 };
+    updateSettings(atomId, {
+      classifierData: {
+        ...classifierData,
+        activeFileIndex: fileIndex
+      }
+    });
+  };
+
+  const handleClassifierColumnMove = (
+    columnName: string | string[],
+    newCategory: string,
+    fileIndex?: number
+  ) => {
+    const classifierData = settings.classifierData || { files: [], activeFileIndex: 0 };
+    const targetFileIndex = fileIndex !== undefined ? fileIndex : classifierData.activeFileIndex;
+    const columnsToMove = Array.isArray(columnName) ? columnName : [columnName];
+
+    const updatedFiles = classifierData.files.map((file, index) => {
+      if (index !== targetFileIndex) return file;
+
+      const updatedCustom = { ...file.customDimensions };
+      columnsToMove.forEach(colName => {
+        Object.keys(updatedCustom).forEach(key => {
+          updatedCustom[key] = updatedCustom[key].filter(col => col !== colName);
+        });
+      });
+
+      let updatedColumns = file.columns;
+      if (newCategory === 'identifiers' || newCategory === 'measures' || newCategory === 'unclassified') {
+        updatedColumns = file.columns.map(col =>
+          columnsToMove.includes(col.name) ? { ...col, category: newCategory } : col
+        );
+      } else {
+        if (!updatedCustom[newCategory]) {
+          updatedCustom[newCategory] = [];
+        }
+        columnsToMove.forEach(colName => {
+          if (!updatedCustom[newCategory].includes(colName)) {
+            updatedCustom[newCategory].push(colName);
+          }
+        });
+      }
+
+      return {
+        ...file,
+        columns: updatedColumns,
+        customDimensions: updatedCustom
+      };
+    });
+
+    updateSettings(atomId, {
+      classifierData: { ...classifierData, files: updatedFiles }
+    });
+  };
+
+  const handleClassifierDimensionUpdate = (dimensions: Record<string, string[]>) => {
+    const classifierData = settings.classifierData || { files: [], activeFileIndex: 0 };
+    const updatedFiles = classifierData.files.map((file, index) =>
+      index === classifierData.activeFileIndex
+        ? { ...file, customDimensions: dimensions }
+        : file
+    );
+    updateSettings(atomId, {
+      classifierData: { ...classifierData, files: updatedFiles }
+    });
+  };
+
+  const handleClassifierRemoveDimension = (dimensionName: string) => {
+    const classifierData = settings.classifierData || { files: [], activeFileIndex: 0 };
+    const dims = (settings.classifierDimensions || []).filter(d => d !== dimensionName);
+    const updatedFiles = classifierData.files.map((file, index) => {
+      if (index !== classifierData.activeFileIndex) return file;
+      const updatedCustom = { ...file.customDimensions };
+      const removedCols = updatedCustom[dimensionName] || [];
+      delete updatedCustom[dimensionName];
+      updatedCustom['unattributed'] = Array.from(
+        new Set([...(updatedCustom['unattributed'] || []), ...removedCols])
+      );
+      return { ...file, customDimensions: updatedCustom };
+    });
+    updateSettings(atomId, {
+      classifierDimensions: dims,
+      classifierData: { ...classifierData, files: updatedFiles },
+    });
+  };
+
+  const handleSaveClassifierConfig = async () => {
+    const classifierData = settings.classifierData;
+    if (!classifierData || !classifierData.files.length) return;
+    
+    const currentFile = classifierData.files[classifierData.activeFileIndex];
+    const stored = localStorage.getItem('current-project');
+    const envStr = localStorage.getItem('env');
+    const project = stored ? JSON.parse(stored) : {};
+    const env = envStr ? JSON.parse(envStr) : {};
+
+    const identifiers = currentFile.columns
+      .filter(c => c.category === 'identifiers')
+      .map(c => c.name);
+    const measures = currentFile.columns
+      .filter(c => c.category === 'measures')
+      .map(c => c.name);
+
+    const payload: Record<string, any> = {
+      project_id: project.id || null,
+      client_name: env.CLIENT_NAME || '',
+      app_name: env.APP_NAME || '',
+      project_name: env.PROJECT_NAME || '',
+      identifiers,
+      measures,
+      dimensions: currentFile.customDimensions
+    };
+    // Use filePath (MinIO path) if available, otherwise fallback to fileName
+    if (currentFile.filePath) {
+      payload.file_name = currentFile.filePath;
+    } else if (currentFile.fileName) {
+      payload.file_name = currentFile.fileName;
+    }
+
+    try {
+      const res = await fetch(`${CLASSIFIER_API}/save_config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'include'
+      });
+
+      if (res.ok) {
+        // Mark this file as saved
+        const savedFiles = settings.classifierSavedFiles || [];
+        if (!savedFiles.includes(currentFile.fileName)) {
+          updateSettings(atomId, {
+            classifierSavedFiles: [...savedFiles, currentFile.fileName]
+          });
+        }
+        
+        toast({ 
+          title: 'Configuration Saved Successfully',
+          description: `File: ${currentFile.fileName}`
+        });
+        localStorage.setItem('column-classifier-config', JSON.stringify(payload));
+        updateSessionState(user?.id, {
+          identifiers,
+          measures,
+          dimensions: currentFile.customDimensions,
+        });
+        addNavigationItem(user?.id, {
+          atom: 'column-classifier',
+          identifiers,
+          measures,
+          dimensions: currentFile.customDimensions,
+        });
+        logSessionState(user?.id);
+      } else {
+        toast({ 
+          title: 'Unable to Save Configuration',
+          description: `File: ${currentFile.fileName}`,
+          variant: 'destructive' 
+        });
+        logSessionState(user?.id);
+      }
+    } catch (err) {
+      toast({ title: 'Unable to Save Configuration', variant: 'destructive' });
+      console.warn('classification save request failed', err);
+      logSessionState(user?.id);
+    }
+  };
+
+  // Auto-classify when toggle is turned ON after files are saved
+  useEffect(() => {
+    // Check if we have meaningful classification data (not just preview data)
+    const hasMeaningfulClassifierData = settings.classifierData && 
+      settings.classifierData.files && 
+      settings.classifierData.files.length > 0 &&
+      settings.classifierData.files.some(file => file.columns && file.columns.length > 0);
+    
+    // Only auto-classify if toggle is ON, no meaningful classification data, and files are saved with PERMANENT paths
+    if (settings.enableColumnClassifier && !hasMeaningfulClassifierData && settings.filePathMap) {
+      const permanentFiles = Object.entries(settings.filePathMap)
+        .filter(([_, path]) => path && !path.includes('/tmp/'));
+      
+      if (permanentFiles.length > 0) {
+        console.log(`✅ Auto-classifying ${permanentFiles.length} file(s) after toggle ON`);
+        handleAutoClassifyAllFiles();
+      } else {
+        console.log('⏸️ Skipping auto-classify - paths are temporary (wait for save)');
+      }
+    }
+  }, [settings.enableColumnClassifier, settings.filePathMap, settings.classifierData]);
+
   const handleSaveDataFrames = async () => {
     if (!settings.validatorId && settings.bypassMasterUpload) return;
     console.log('🔧 Running save dataframes util');
     
     // Apply data transformations if any changes were made
-    const hasChanges = Object.keys(dataChanges.dtypeChanges).length > 0 || 
-                      Object.keys(dataChanges.missingValueStrategies).length > 0;
+    const currentChanges = dataChangesRef.current;
+    console.log('🔍 Current dataChangesRef:', currentChanges);
+    console.log('🔍 Settings dtypeChanges:', settings.dtypeChanges);
+    console.log('🔍 Settings missingValueStrategies:', settings.missingValueStrategies);
+    
+    const hasChanges = Object.keys(currentChanges.dtypeChanges).length > 0 || 
+                      Object.keys(currentChanges.missingValueStrategies).length > 0;
     
     if (hasChanges) {
       console.log('🔧 Applying data transformations before saving...');
+      const filesWithChangesApplied: string[] = [];
+      
       for (const file of uploadedFiles) {
         const fileChanges = {
           file_path: file.path,
-          dtype_changes: dataChanges.dtypeChanges[file.name] || {},
-          missing_value_strategies: dataChanges.missingValueStrategies[file.name] || {},
+          dtype_changes: currentChanges.dtypeChanges[file.name] || {},
+          missing_value_strategies: currentChanges.missingValueStrategies[file.name] || {},
         };
+        
+        console.log(`📤 Sending transformations for ${file.name}:`, {
+          dtype_changes: fileChanges.dtype_changes,
+          missing_value_strategies: fileChanges.missing_value_strategies,
+        });
         
         // Only apply if there are actual changes for this file
         if (Object.keys(fileChanges.dtype_changes).length > 0 || 
@@ -557,6 +939,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
             
             if (response.ok) {
               console.log(`✅ Transformations applied to ${file.name}`);
+              filesWithChangesApplied.push(file.name);
             } else {
               const error = await response.json();
               toast({
@@ -575,6 +958,20 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
             return; // Stop saving if transformation fails
           }
         }
+      }
+      
+      // Mark files as having changes applied (but keep the configuration data)
+      if (filesWithChangesApplied.length > 0) {
+        const newFilesWithAppliedChanges = Array.from(new Set([
+          ...(settings.filesWithAppliedChanges || []),
+          ...filesWithChangesApplied
+        ]));
+        
+        // Keep the configuration in the store - don't delete it!
+        // This allows it to persist when saving/reloading
+        updateSettings(atomId, {
+          filesWithAppliedChanges: newFilesWithAppliedChanges,
+        });
       }
     }
     
@@ -712,14 +1109,19 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         });
       });
       setSaveStatus(prev => ({ ...prev, ...newStatus }));
-      // Clear temp paths so saved files persist in project state
-      const cleared: Record<string, string> = {};
-      uploadedFiles.forEach(f => {
-        cleared[f.name] = '';
+      // Save MinIO object names for later use (e.g., column classifier)
+      const savedPaths: Record<string, string> = {};
+      fileResults.forEach((result: any, idx: number) => {
+        const fileName = uploadedFiles[idx]?.name || result.file_key;
+        if (result.minio_upload?.object_name && fileName) {
+          // Use the user's original filename as key, not the arrow filename
+          savedPaths[fileName] = result.minio_upload.object_name;
+          console.log(`📦 Mapped ${fileName} → ${result.minio_upload.object_name}`);
+        }
       });
       updateSettings(atomId, {
         uploadedFiles: uploadedFiles.map(f => f.name),
-        filePathMap: { ...(settings.filePathMap || {}), ...cleared },
+        filePathMap: { ...(settings.filePathMap || {}), ...savedPaths },
         fileSizeMap: {
           ...(settings.fileSizeMap || {}),
           ...Object.fromEntries(uploadedFiles.map(f => [f.name, f.size])),
@@ -732,6 +1134,13 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         settings
       });
       logSessionState(user?.id);
+      setAllFilesSaved(true); // Disable save button after successful save
+      
+      // Auto-trigger column classification if toggle is enabled - classify ALL files
+      if (settings.enableColumnClassifier && fileResults.length > 0) {
+        console.log(`🔍 Auto-classifying all saved files after save`);
+        handleAutoClassifyAllFiles();
+      }
     } else {
       const err = await res.text();
       console.error('Save dataframes failed', res.status, err);
@@ -810,8 +1219,9 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     <div className="w-full h-full bg-gradient-to-br from-slate-50 to-blue-50 rounded-xl border border-gray-200 shadow-xl overflow-hidden flex">
       <div className="flex-1 flex flex-col">
         <div className="flex-1 p-6 bg-gray-50 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
-          <div className="flex h-full space-x-6 overflow-hidden">
-            <div className={settings.bypassMasterUpload ? "flex-1 min-w-0" : "w-full"}>
+          <div className="flex space-x-6">
+            <div className={settings.bypassMasterUpload ? "flex-1 min-w-0" : "w-full flex flex-col"}>
+              <div className={settings.enableColumnClassifier && settings.classifierData && settings.classifierData.files.length > 0 ? "" : "h-full"}>
               <UploadSection
                 uploadedFiles={uploadedFiles}
                 files={uploadedFilesList}
@@ -827,7 +1237,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 onFileSelect={handleFileSelect}
                 onValidateFiles={handleValidateFiles}
                 onSaveDataFrames={handleSaveDataFrames}
-                saveEnabled={allValid}
+                saveEnabled={allValid && !allFilesSaved}
                 disableValidation={!settings.bypassMasterUpload}
                 isDragOver={isDragOver}
                 requiredOptions={settings.requiredFiles || []}
@@ -835,8 +1245,131 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 saveStatus={saveStatus}
                 disabled={false}
                 useMasterFile={settings.bypassMasterUpload}
-                onDataChanges={setDataChanges}
+                onDataChanges={handleDataChanges}
+                filesWithAppliedChanges={filesWithAppliedChanges}
+                initialDtypeChanges={settings.dtypeChanges || {}}
+                initialMissingValueStrategies={settings.missingValueStrategies || {}}
+                initialFilesMetadata={settings.filesMetadata || {}}
+                onMetadataChange={handleMetadataChange}
               />
+              </div>
+
+              {/* Column Classifier Section */}
+              {settings.enableColumnClassifier && settings.classifierData && settings.classifierData.files.length > 0 && (
+                <div className="mt-6 w-full bg-white border border-gray-200 rounded-lg shadow-sm">
+                  <div className="p-4">
+                    {/* File Configuration Status */}
+                    {settings.classifierData.files.length > 1 && (
+                      <Collapsible open={isConfigStatusOpen} onOpenChange={setIsConfigStatusOpen}>
+                        <div className="mb-6 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-200 shadow-sm overflow-hidden">
+                          <CollapsibleTrigger className="w-full p-4 hover:bg-blue-100/50 transition-colors cursor-pointer">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center shadow-md">
+                                  <ClipboardCheck className="w-4 h-4 text-white" />
+                                </div>
+                                <div className="text-left">
+                                  <h4 className="text-sm font-bold text-gray-800">Configuration Status</h4>
+                                  <div className="flex items-center gap-3 text-xs text-gray-600">
+                                    <span className="flex items-center gap-1.5">
+                                      <span className="w-2.5 h-2.5 rounded-full border-2 border-green-500 bg-white"></span>
+                                      Saved
+                                    </span>
+                                    <span className="flex items-center gap-1.5">
+                                      <span className="w-2.5 h-2.5 rounded-full border-2 border-red-500 bg-white"></span>
+                                      Pending
+                                    </span>
+                                    <span className="text-gray-500">•</span>
+                                    <span>{(settings.classifierSavedFiles || []).length}/{settings.classifierData.files.length} completed</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <ChevronDown className={`w-5 h-5 text-gray-600 transition-transform duration-200 ${isConfigStatusOpen ? 'rotate-180' : ''}`} />
+                            </div>
+                          </CollapsibleTrigger>
+                          
+                          <CollapsibleContent>
+                            <div className="px-4 pb-4">
+                              <div className="flex flex-wrap gap-3">
+                                {settings.classifierData.files.map((file, index) => {
+                                  const isSaved = (settings.classifierSavedFiles || []).includes(file.fileName);
+                                  const isActive = settings.classifierData.activeFileIndex === index;
+                                  const fileName = file.fileName.length > 15 ? file.fileName.substring(0, 12) + '...' : file.fileName;
+                                  
+                                  return (
+                                    <div 
+                                      key={index} 
+                                      onClick={() => handleClassifierActiveFileChange(index)}
+                                      title={file.fileName}
+                                      className={`group relative flex items-center justify-center px-4 py-2 rounded-full border-3 transition-all duration-200 cursor-pointer ${
+                                        isSaved 
+                                          ? 'border-green-500 bg-green-50 hover:bg-green-100' 
+                                          : 'border-red-500 bg-red-50 hover:bg-red-100'
+                                      } ${
+                                        isActive 
+                                          ? 'ring-2 ring-blue-400 ring-offset-2 shadow-lg scale-105' 
+                                          : 'hover:shadow-md hover:scale-105'
+                                      }`}
+                                      style={{ borderWidth: '3px' }}
+                                    >
+                                      <span className={`text-xs font-semibold ${
+                                        isSaved ? 'text-green-700' : 'text-red-700'
+                                      }`}>
+                                        {fileName}
+                                      </span>
+                                      {isActive && (
+                                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </CollapsibleContent>
+                        </div>
+                      </Collapsible>
+                    )}
+                    
+                    <ColumnClassifierCanvas
+                      data={settings.classifierData}
+                      onColumnMove={handleClassifierColumnMove}
+                      onActiveFileChange={handleClassifierActiveFileChange}
+                      showColumnView={false}
+                      filterUnique={false}
+                      onFilterToggle={() => {}}
+                      hideDimensionInstructions={settings.classifierEnableDimensionMapping || false}
+                    />
+                    
+                    {settings.classifierEnableDimensionMapping && (
+                    <div className="mt-4">
+                      <ColumnClassifierDimensionMapping
+                        customDimensions={
+                          settings.classifierData.files[settings.classifierData.activeFileIndex]?.customDimensions || {}
+                        }
+                        onRemoveDimension={handleClassifierRemoveDimension}
+                        onDimensionUpdate={handleClassifierDimensionUpdate}
+                      />
+                      <Button
+                        onClick={handleSaveClassifierConfig}
+                        disabled={
+                          !settings.classifierEnableDimensionMapping ||
+                          !settings.classifierData.files.length ||
+                          Object.keys(
+                            settings.classifierData.files[settings.classifierData.activeFileIndex]?.customDimensions || {}
+                          ).length === 0 ||
+                          Object.values(
+                            settings.classifierData.files[settings.classifierData.activeFileIndex]?.customDimensions || {}
+                          ).every(c => c.length === 0)
+                        }
+                        className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black mt-4"
+                      >
+                        Save Configuration
+                      </Button>
+                    </div>
+                  )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {settings.bypassMasterUpload && (

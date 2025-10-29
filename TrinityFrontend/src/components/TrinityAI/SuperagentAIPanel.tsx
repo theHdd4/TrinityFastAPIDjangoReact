@@ -442,11 +442,27 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
               const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
               // Use environment variable or fallback to current hostname
               const wsHost = import.meta.env.VITE_TRINITY_AI_WS_HOST || window.location.hostname;
-              // const wsPort = import.meta.env.VITE_TRINITY_AI_WS_PORT || '8002';
-             
-              const isDevStack = window.location.port === '8081';
-              const wsPort = import.meta.env.VITE_TRINITY_AI_WS_PORT || (isDevStack ? '8005' : '8002');
-              const wsUrl = `${wsProtocol}//${wsHost}:${wsPort}/trinityai/superagent/orchestrate-ws`;
+              
+              // Determine port based on environment
+              // For domain access (trinity.quantmatrixai.com), use same port as page (default 80/443)
+              // This allows routing through Cloudflare → Traefik → trinity-ai service
+              let wsPort = '';
+              if (import.meta.env.VITE_TRINITY_AI_WS_PORT) {
+                // Explicit environment variable takes precedence
+                wsPort = `:${import.meta.env.VITE_TRINITY_AI_WS_PORT}`;
+              } else if (window.location.port === '8081') {
+                // Dev stack specific port
+                wsPort = ':8005';
+              } else if (window.location.port === '8080') {
+                // Production stack local access
+                wsPort = ':8080';
+              } else if (window.location.port) {
+                // Use whatever port the page was loaded from
+                wsPort = `:${window.location.port}`;
+              }
+              // If no port (domain access), wsPort remains empty (uses default 80/443 based on protocol)
+              
+              const wsUrl = `${wsProtocol}//${wsHost}${wsPort}/trinityai/superagent/orchestrate-ws`;
               
               console.log('🔗 Connecting to:', wsUrl);
               const ws = new WebSocket(wsUrl);
