@@ -43,6 +43,7 @@ export interface SlideExportData {
 }
 
 const DEFAULT_PPT_SLIDE_WIDTH_IN = 13.33;
+const DEFAULT_PPT_SLIDE_HEIGHT_IN = 7.5;
 const MINIMUM_SLIDE_INCHES = 1;
 const EXPORT_BACKGROUND = '#ffffff';
 const FALLBACK_SLIDE_WIDTH = 960;
@@ -51,6 +52,7 @@ const DEFAULT_CHART_SERIES_NAME = 'Series 1';
 const DEFAULT_SLIDE_BACKGROUND_COLOR = '#ffffff';
 const CANVAS_STAGE_HEIGHT = 520;
 const DEFAULT_PRESENTATION_WIDTH = 960;
+const DEFAULT_PRESENTATION_HEIGHT = 540;
 const TOP_LAYOUT_MIN_HEIGHT = 210;
 const BOTTOM_LAYOUT_MIN_HEIGHT = 220;
 const SIDE_LAYOUT_MIN_WIDTH = 280;
@@ -490,7 +492,10 @@ const applyElementFormatting = (
   const color = styles.color ?? styles['font-color'];
   const normalisedColor = normaliseColorValue(color);
   if (normalisedColor) {
-    next.color = normalisedColor;
+    const pptColor = toPptColorHex(normalisedColor);
+    if (pptColor) {
+      next.color = pptColor;
+    }
   }
 
   if (element.hasAttribute('data-font-weight') && element.getAttribute('data-font-weight') === 'bold') {
@@ -510,7 +515,7 @@ const createBaseTextOptions = (formatting: TextBoxFormatting): PptxGenJS.TextPro
   italic: formatting.italic,
   underline: formatting.underline,
   strike: formatting.strikethrough,
-  color: formatting.color,
+  color: toPptColorHex(formatting.color) ?? undefined,
 });
 
 const convertHtmlToTextRuns = (
@@ -901,7 +906,7 @@ const convertTableCell = (cell: TableCellData): PptxGenJS.TableCell => {
       strike: cell.formatting.strikethrough,
       fontFace: cell.formatting.fontFamily,
       fontSize: cell.formatting.fontSize,
-      color: cell.formatting.color,
+      color: toPptColorHex(cell.formatting.color) ?? undefined,
       align: cell.formatting.align as 'left' | 'center' | 'right',
     },
     colSpan: cell.colSpan && cell.colSpan > 1 ? cell.colSpan : undefined,
@@ -963,6 +968,9 @@ const tryAddEditableChartToSlide = (
     ];
 
     const palette = getColorSchemeColors(chartConfig.colorScheme);
+    const chartColors = palette
+      .map(color => toPptColorHex(color))
+      .filter((value): value is string => Boolean(value));
     const showValues = Boolean(chartConfig.showValues);
     const showLabels = Boolean(chartConfig.showLabels);
 
@@ -971,7 +979,7 @@ const tryAddEditableChartToSlide = (
       y: dimensions.y,
       w: clampChartDimension(dimensions.w),
       h: clampChartDimension(dimensions.h),
-      chartColors: palette.length > 0 ? [...palette] : undefined,
+      chartColors: chartColors.length > 0 ? chartColors : undefined,
       legendPos: PPT_LEGEND_POSITION_MAP[chartConfig.legendPosition] ?? 'b',
       showLegend: true,
       showCatAxisLabel: showLabels,
@@ -985,7 +993,7 @@ const tryAddEditableChartToSlide = (
 
     if (showValues) {
       chartOptions.dataLabelFontSize = Math.min(Math.max(Math.round(dimensions.h / 14), 8), 24);
-      chartOptions.dataLabelColor = '#1f2937';
+      chartOptions.dataLabelColor = toPptColorHex('#1f2937') ?? '1F2937';
       if (chartConfig.type === 'pie' || chartConfig.type === 'donut') {
         chartOptions.dataLabelShowPercent = true;
         chartOptions.dataLabelPosition = 'bestFit';
@@ -1057,180 +1065,197 @@ const sortObjectsByZIndex = (objects: SlideObject[]) => {
 export const exportToPowerPoint = async (slides: SlideExportData[], title: string = 'Presentation') => {
   ensureClientEnvironment();
 
+  if (!Array.isArray(slides) || slides.length === 0) {
+    throw new Error('No slides available to export.');
+  }
+
   const pptx = new pptxgen();
   pptx.author = 'Exhibition Mode';
   pptx.title = title;
   pptx.subject = 'Exported Presentation';
 
-  let layoutConfigured = false;
+  pptx.defineLayout({
+    name: 'TRINITY_LAYOUT',
+    width: Math.max(DEFAULT_PPT_SLIDE_WIDTH_IN, MINIMUM_SLIDE_INCHES),
+    height: Math.max(DEFAULT_PPT_SLIDE_HEIGHT_IN, MINIMUM_SLIDE_INCHES),
+  });
+  pptx.layout = 'TRINITY_LAYOUT';
+
+  const metrics: SlideMetrics = {
+    width: DEFAULT_PRESENTATION_WIDTH,
+    height: DEFAULT_PRESENTATION_HEIGHT,
+    widthInches: Math.max(DEFAULT_PPT_SLIDE_WIDTH_IN, MINIMUM_SLIDE_INCHES),
+    heightInches: Math.max(DEFAULT_PPT_SLIDE_HEIGHT_IN, MINIMUM_SLIDE_INCHES),
+  };
+
+  let slideCount = 0;
 
   for (const slideData of slides) {
-    const slideElement = getSlideElement(slideData.id);
-    const { width: slideWidth, height: slideHeight } = getElementDimensions(slideElement);
-    if (slideWidth <= 0 || slideHeight <= 0) {
-      continue;
-    }
-
-    const slideWidthInches = Math.max(DEFAULT_PPT_SLIDE_WIDTH_IN, MINIMUM_SLIDE_INCHES);
-    const slideHeightInches = Math.max((slideHeight / slideWidth) * slideWidthInches, MINIMUM_SLIDE_INCHES);
-
-    if (!layoutConfigured) {
-      pptx.defineLayout({ name: 'TRINITY_LAYOUT', width: slideWidthInches, height: slideHeightInches });
-      pptx.layout = 'TRINITY_LAYOUT';
-      layoutConfigured = true;
-    }
-
     const pptSlide = pptx.addSlide();
+    slideCount += 1;
+
+    const slideElement = getSlideElement(slideData.id);
     const objects = sortObjectsByZIndex(slideData.objects);
 
-    const metrics: SlideMetrics = {
-      width: slideWidth,
-      height: slideHeight,
-      widthInches: slideWidthInches,
-      heightInches: slideHeightInches,
-    };
+    try {
+      await addSlideBackground(pptSlide, slideData.card, metrics);
+    } catch (error) {
+      console.error('Failed to render slide background for PPT export', error);
+    }
 
-    await addSlideBackground(pptSlide, slideData.card, metrics);
-    await addLayoutOverlay(pptSlide, slideData.card, metrics);
+    try {
+      await addLayoutOverlay(pptSlide, slideData.card, metrics);
+    } catch (error) {
+      console.error('Failed to render slide overlay for PPT export', error);
+    }
 
     for (const object of objects) {
       const element = resolveObjectElement(slideElement, object.id);
-      const { width: objectWidth, height: objectHeight } = resolveObjectDimensions(object, element);
-      if (objectWidth <= 0 || objectHeight <= 0) {
-        continue;
-      }
+      const { width: resolvedWidth, height: resolvedHeight } = resolveObjectDimensions(object, element);
+      const widthCandidate = Number.isFinite(resolvedWidth) && resolvedWidth > 0 ? resolvedWidth : object.width;
+      const heightCandidate = Number.isFinite(resolvedHeight) && resolvedHeight > 0 ? resolvedHeight : object.height;
+      const objectWidth = Number.isFinite(widthCandidate) && widthCandidate > 0 ? widthCandidate : 1;
+      const objectHeight = Number.isFinite(heightCandidate) && heightCandidate > 0 ? heightCandidate : 1;
 
-      const x = pxToInches(object.x, slideWidth, slideWidthInches);
-      const y = pxToInches(object.y, slideHeight, slideHeightInches);
-      const w = pxToInches(objectWidth, slideWidth, slideWidthInches);
-      const h = pxToInches(objectHeight, slideHeight, slideHeightInches);
-      const rotation = typeof object.rotation === 'number' ? object.rotation : 0;
+      const baseX = Number.isFinite(object.x) ? object.x : 0;
+      const baseY = Number.isFinite(object.y) ? object.y : 0;
+      const rotation = Number.isFinite(object.rotation) ? object.rotation : 0;
 
-      if (object.type === 'shape') {
-        const shapeProps = (object.props ?? {}) as Partial<ShapeObjectProps>;
-        const shapeType = shapeProps?.shapeId ? PPT_SHAPE_TYPE_MAP[shapeProps.shapeId] : undefined;
+      const x = pxToInches(baseX, metrics.width, metrics.widthInches);
+      const y = pxToInches(baseY, metrics.height, metrics.heightInches);
+      const w = pxToInches(objectWidth, metrics.width, metrics.widthInches);
+      const h = pxToInches(objectHeight, metrics.height, metrics.heightInches);
 
-        if (shapeType) {
-          const fillColorHex = shapeProps.fill ? toPptColorHex(shapeProps.fill) : undefined;
-          const opacity = typeof shapeProps.opacity === 'number' ? Math.min(Math.max(shapeProps.opacity, 0), 1) : 1;
-          const strokeColorHex = shapeProps.stroke ? toPptColorHex(shapeProps.stroke) : undefined;
-          const strokeWidthPx = typeof shapeProps.strokeWidth === 'number' ? shapeProps.strokeWidth : 0;
-          const strokeWidthPt = strokeWidthPx > 0 ? Math.max(0.25, strokeWidthPx * 0.75) : 0;
-
-          pptSlide.addShape(shapeType, {
-            x,
-            y,
-            w,
-            h,
-            rotate: rotation,
-            fill: fillColorHex
-              ? { color: fillColorHex, transparency: Math.min(Math.max(1 - opacity, 0), 1) }
-              : undefined,
-            line:
-              strokeColorHex && strokeWidthPt > 0
-                ? { color: strokeColorHex, width: strokeWidthPt }
-                : { color: fillColorHex ?? 'FFFFFF', width: 0 },
-          });
-          continue;
-        }
-      }
-
-      if (object.type === 'text-box' || object.type === 'title') {
-        const formatting = extractTextBoxFormatting(object.props as Record<string, unknown> | undefined);
-        const baseTextOptions = createBaseTextOptions(formatting);
-        const textRuns = convertHtmlToTextRuns(formatting.text, formatting);
-        const fallbackText = htmlToPlainText(formatting.text) || ' ';
-        const runs: PptxGenJS.TextProps[] =
-          textRuns.length > 0
-            ? textRuns
-            : [
-                {
-                  text: fallbackText,
-                  options: { ...baseTextOptions },
-                },
-              ];
-
-        pptSlide.addText(runs, {
-          x,
-          y,
-          w,
-          h,
-          fontSize: baseTextOptions.fontSize,
-          fontFace: baseTextOptions.fontFace,
-          bold: baseTextOptions.bold,
-          italic: baseTextOptions.italic,
-          underline: baseTextOptions.underline,
-          strike: baseTextOptions.strike,
-          color: baseTextOptions.color,
-          align: formatting.align as 'left' | 'center' | 'right',
-          valign: 'top',
-          rotate: rotation,
-        });
-        continue;
-      }
-
-      if (object.type === 'image' || object.type === 'accent-image') {
-        const dataUrl = await normaliseImageData(
-          typeof (object.props as Record<string, unknown>)?.src === 'string'
-            ? ((object.props as Record<string, unknown>).src as string)
-            : undefined,
-        );
-
-        const pptData = normalisePptxImageData(dataUrl);
-        if (pptData) {
-          pptSlide.addImage({
-            data: pptData,
-            x,
-            y,
-            w,
-            h,
-            rotate: rotation,
-          });
-          continue;
-        }
-
+      const addFallbackImage = async () => {
         await addObjectImageFallback(
           pptSlide,
           slideElement,
           object,
-          slideWidth,
-          slideHeight,
-          slideWidthInches,
-          slideHeightInches,
+          metrics.width,
+          metrics.height,
+          metrics.widthInches,
+          metrics.heightInches,
         );
-        continue;
-      }
+      };
 
-      if (object.type === 'chart') {
-        const added = tryAddEditableChartToSlide(pptSlide, object, { x, y, w, h });
-        if (added) {
-          continue;
+      try {
+        if (object.type === 'shape') {
+          const shapeProps = (object.props ?? {}) as Partial<ShapeObjectProps>;
+          const shapeType = shapeProps?.shapeId ? PPT_SHAPE_TYPE_MAP[shapeProps.shapeId] : undefined;
+
+          if (shapeType) {
+            const fillColorHex = shapeProps.fill ? toPptColorHex(shapeProps.fill) : undefined;
+            const opacity = typeof shapeProps.opacity === 'number' ? Math.min(Math.max(shapeProps.opacity, 0), 1) : 1;
+            const strokeColorHex = shapeProps.stroke ? toPptColorHex(shapeProps.stroke) : undefined;
+            const strokeWidthPx = typeof shapeProps.strokeWidth === 'number' ? shapeProps.strokeWidth : 0;
+            const strokeWidthPt = strokeWidthPx > 0 ? Math.max(0.25, strokeWidthPx * 0.75) : 0;
+
+            pptSlide.addShape(shapeType, {
+              x,
+              y,
+              w,
+              h,
+              rotate: rotation,
+              fill: fillColorHex
+                ? { color: fillColorHex, transparency: Math.min(Math.max(1 - opacity, 0), 1) }
+                : undefined,
+              line:
+                strokeColorHex && strokeWidthPt > 0
+                  ? { color: strokeColorHex, width: strokeWidthPt }
+                  : { color: fillColorHex ?? 'FFFFFF', width: 0 },
+            });
+            continue;
+          }
         }
-      }
 
-      if (object.type === 'table') {
-        const rows = buildTableRows(object);
-        if (rows.length > 0) {
-          pptSlide.addTable(rows, {
+        if (object.type === 'text-box' || object.type === 'title') {
+          const formatting = extractTextBoxFormatting(object.props as Record<string, unknown> | undefined);
+          const baseTextOptions = createBaseTextOptions(formatting);
+          const textRuns = convertHtmlToTextRuns(formatting.text, formatting);
+          const fallbackText = htmlToPlainText(formatting.text) || ' ';
+          const runs: PptxGenJS.TextProps[] =
+            textRuns.length > 0
+              ? textRuns
+              : [
+                  {
+                    text: fallbackText,
+                    options: { ...baseTextOptions },
+                  },
+                ];
+
+          pptSlide.addText(runs, {
             x,
             y,
             w,
             h,
+            fontSize: baseTextOptions.fontSize,
+            fontFace: baseTextOptions.fontFace,
+            bold: baseTextOptions.bold,
+            italic: baseTextOptions.italic,
+            underline: baseTextOptions.underline,
+            strike: baseTextOptions.strike,
+            color: baseTextOptions.color,
+            align: formatting.align as 'left' | 'center' | 'right',
+            valign: 'top',
+            rotate: rotation,
           });
+          continue;
         }
+
+        if (object.type === 'image' || object.type === 'accent-image') {
+          const src =
+            typeof (object.props as Record<string, unknown>)?.src === 'string'
+              ? ((object.props as Record<string, unknown>).src as string)
+              : undefined;
+          const dataUrl = await normaliseImageData(src);
+          const pptData = normalisePptxImageData(dataUrl);
+          if (pptData) {
+            pptSlide.addImage({
+              data: pptData,
+              x,
+              y,
+              w,
+              h,
+              rotate: rotation,
+            });
+            continue;
+          }
+
+          await addFallbackImage();
+          continue;
+        }
+
+        if (object.type === 'chart') {
+          const added = tryAddEditableChartToSlide(pptSlide, object, { x, y, w, h });
+          if (added) {
+            continue;
+          }
+        }
+
+        if (object.type === 'table') {
+          const rows = buildTableRows(object);
+          if (rows.length > 0) {
+            pptSlide.addTable(rows, {
+              x,
+              y,
+              w,
+              h,
+            });
+            continue;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to add PPT object', error);
+        await addFallbackImage();
         continue;
       }
 
-      await addObjectImageFallback(
-        pptSlide,
-        slideElement,
-        object,
-        slideWidth,
-        slideHeight,
-        slideWidthInches,
-        slideHeightInches,
-      );
+      await addFallbackImage();
     }
+  }
+
+  if (slideCount === 0) {
+    throw new Error('No slides available to export.');
   }
 
   await pptx.writeFile({ fileName: `${title}.pptx` });
