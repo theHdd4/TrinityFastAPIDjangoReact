@@ -173,32 +173,13 @@ export const SlideShapeObject: React.FC<SlideShapeObjectProps> = ({
     );
   }
 
-  const selectionOverlay =
-    isSelected && definition ? (
-      <div
-        className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center text-yellow-400"
-        aria-hidden="true"
-      >
-        <ShapeRenderer
-          definition={definition}
-          fill="transparent"
-          stroke="currentColor"
-          strokeWidth={2}
-          strokeStyle="dotted"
-          opacity={1}
-          className="h-full w-full"
-        />
-      </div>
-    ) : null;
-
   return (
     <div
       className={cn(
-        'relative h-full w-full rounded-2xl border border-transparent bg-transparent transition-colors',
+        'h-full w-full rounded-2xl border border-transparent bg-transparent transition-colors',
         canEdit && 'hover:border-border/70',
       )}
     >
-      {selectionOverlay}
       <ShapeRenderer
         definition={definition}
         fill={parsed.fill}
