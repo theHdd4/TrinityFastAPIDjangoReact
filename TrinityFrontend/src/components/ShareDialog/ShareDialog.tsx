@@ -35,12 +35,14 @@ interface ShareDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectName?: string;
+  getShareLink?: () => string;
 }
 
 export const ShareDialog: React.FC<ShareDialogProps> = ({
   open,
   onOpenChange,
   projectName = 'Exhibition Project',
+  getShareLink,
 }) => {
   const [shareLink, setShareLink] = useState('');
   const [copied, setCopied] = useState(false);
@@ -70,9 +72,19 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       return;
     }
 
+    try {
+      const generatedLink = getShareLink?.();
+      if (generatedLink) {
+        setShareLink(generatedLink);
+        return;
+      }
+    } catch (error) {
+      console.error('Failed to generate share link', error);
+    }
+
     const uniqueLink = `${window.location.origin}/exhibition/shared/${Date.now()}`;
     setShareLink(uniqueLink);
-  }, [open]);
+  }, [open, getShareLink]);
 
   const handleCopy = async (value: string, successMessage: string) => {
     if (!value) {

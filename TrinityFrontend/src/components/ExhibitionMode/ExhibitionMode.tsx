@@ -2,6 +2,7 @@ import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } f
 import { Button } from '@/components/ui/button';
 import { ChevronRight, Download, FileText, Grid3x3, Save, Share2, Undo2 } from 'lucide-react';
 import Header from '@/components/Header';
+import ShareDialog from '@/components/ShareDialog/ShareDialog';
 import {
   useExhibitionStore,
   DEFAULT_PRESENTATION_SETTINGS,
@@ -165,6 +166,17 @@ const ExhibitionMode = () => {
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('exhibition:edit');
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const shareProjectName = useMemo(() => {
+    const context = projectContext ?? getActiveProjectContext();
+    return context?.project_name ?? 'Exhibition Project';
+  }, [projectContext]);
+  const getExhibitionShareLink = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return '';
+    }
+    return window.location.href;
+  }, []);
 
   const presenterDisplayName = useMemo(() => {
     const username = typeof user?.username === 'string' ? user.username.trim() : '';
@@ -919,41 +931,6 @@ const ExhibitionMode = () => {
     }
   }, [canEdit, cards, isSaving, persistCardsLocally, slideObjectsByCardId, toast]);
 
-  const handleShare = useCallback(async () => {
-    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
-      return;
-    }
-
-    const shareUrl = window.location.href;
-    const nav = navigator as Navigator & {
-      share?: (data: { title?: string; url?: string; text?: string }) => Promise<void>;
-      clipboard?: Clipboard;
-    };
-
-    try {
-      if (typeof nav.share === 'function') {
-        await nav.share({ title: 'Exhibition Mode', url: shareUrl });
-        toast({ title: 'Share', description: 'Opened the share dialog for your exhibition.' });
-        return;
-      }
-
-      if (nav.clipboard && typeof nav.clipboard.writeText === 'function') {
-        await nav.clipboard.writeText(shareUrl);
-        toast({ title: 'Link copied', description: 'Copied the exhibition link to your clipboard.' });
-        return;
-      }
-
-      throw new Error('Sharing not supported');
-    } catch (error) {
-      console.warn('Share action unavailable', error);
-      toast({
-        title: 'Share unavailable',
-        description: 'Your browser does not support sharing from this page.',
-        variant: 'destructive',
-      });
-    }
-  }, [toast]);
-
   const handleDragStart = (atom: DroppedAtom, cardId: string, origin: 'catalogue' | 'slide' = 'catalogue') => {
     if (!canEdit) return;
     setDraggedAtom({ atom, cardId, origin });
@@ -1569,7 +1546,7 @@ const ExhibitionMode = () => {
             variant="outline"
             size="sm"
             className="border-border text-foreground/80 font-medium"
-            onClick={handleShare}
+            onClick={() => setIsShareDialogOpen(true)}
             disabled={!hasSlides}
           >
             <Share2 className="w-4 h-4 mr-2" />
@@ -2126,6 +2103,13 @@ const ExhibitionMode = () => {
           onClose={() => setShowGridView(false)}
         />
       )}
+
+      <ShareDialog
+        open={isShareDialogOpen}
+        onOpenChange={setIsShareDialogOpen}
+        projectName={shareProjectName}
+        getShareLink={getExhibitionShareLink}
+      />
 
       <ExportDialog
         open={isExportOpen}
