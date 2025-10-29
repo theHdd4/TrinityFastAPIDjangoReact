@@ -1,0 +1,309 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "description": "Molecule composition patterns and typical atom combinations",
+    "last_updated": "2025-01-27"
+  },
+  "molecules": {
+    "data_ingestion_molecule": {
+      "name": "Data Ingestion",
+      "purpose": "Load and validate data from various sources",
+      "typical_atoms": [
+        "data-upload-validate",
+        "csv-import",
+        "json-import",
+        "database-connect"
+      ],
+      "atom_rules": {
+        "required": ["At least one data source atom"],
+        "optional": ["data-upload-validate for validation"],
+        "sequence": "Select ONE primary data source"
+      },
+      "next_molecules": ["data_preparation_molecule", "exploration_molecule"],
+      "example_use_cases": [
+        "Load sales data from CSV",
+        "Connect to production database",
+        "Import API response JSON"
+      ]
+    },
+    "data_preparation_molecule": {
+      "name": "Data Preparation",
+      "purpose": "Clean, transform, and prepare data for analysis",
+      "typical_atoms": [
+        "feature-overview",
+        "dataframe-operations",
+        "column-classifier",
+        "scope-selector",
+        "row-operations",
+        "create-column"
+      ],
+      "atom_rules": {
+        "required": ["At least one transformation atom"],
+        "optional": ["feature-overview for initial assessment"],
+        "sequence": "feature-overview → dataframe-operations → create-column"
+      },
+      "dependencies": ["data_ingestion_molecule"],
+      "next_molecules": ["aggregation_molecule", "analysis_molecule", "modeling_molecule"],
+      "example_use_cases": [
+        "Clean and filter customer data",
+        "Create calculated fields",
+        "Remove duplicates and outliers"
+      ]
+    },
+    "exploration_molecule": {
+      "name": "Data Exploration",
+      "purpose": "Explore and understand data characteristics",
+      "typical_atoms": [
+        "explore",
+        "feature-overview",
+        "descriptive-stats",
+        "correlation"
+      ],
+      "atom_rules": {
+        "required": ["At least one exploration atom"],
+        "typical_combination": "feature-overview + correlation OR explore alone",
+        "sequence": "feature-overview → descriptive-stats → correlation"
+      },
+      "dependencies": ["data_ingestion_molecule"],
+      "next_molecules": ["data_preparation_molecule", "analysis_molecule", "visualization_molecule"],
+      "example_use_cases": [
+        "Initial data assessment",
+        "Find relationships between variables",
+        "Understand data distributions"
+      ]
+    },
+    "aggregation_molecule": {
+      "name": "Data Aggregation",
+      "purpose": "Summarize and aggregate data by dimensions",
+      "typical_atoms": [
+        "groupby-wtg-avg",
+        "dataframe-operations"
+      ],
+      "atom_rules": {
+        "required": ["groupby-wtg-avg"],
+        "sequence": "groupby-wtg-avg is typically standalone"
+      },
+      "dependencies": ["data_preparation_molecule"],
+      "next_molecules": ["visualization_molecule", "reporting_molecule"],
+      "example_use_cases": [
+        "Calculate sales by region and month",
+        "Summarize KPIs by segment",
+        "Aggregate customer metrics"
+      ]
+    },
+    "data_combination_molecule": {
+      "name": "Data Combination",
+      "purpose": "Merge or concatenate multiple datasets",
+      "typical_atoms": [
+        "merge",
+        "concat"
+      ],
+      "atom_rules": {
+        "required": ["merge OR concat (choose one)"],
+        "sequence": "Select based on need: merge for joins, concat for stacking"
+      },
+      "dependencies": ["data_ingestion_molecule (multiple datasets)"],
+      "next_molecules": ["data_preparation_molecule", "aggregation_molecule"],
+      "example_use_cases": [
+        "Join customer and transaction data",
+        "Combine monthly files",
+        "Enrich data with lookup tables"
+      ]
+    },
+    "analysis_molecule": {
+      "name": "Statistical Analysis",
+      "purpose": "Perform statistical analysis and find patterns",
+      "typical_atoms": [
+        "correlation",
+        "descriptive-stats",
+        "trend-analysis"
+      ],
+      "atom_rules": {
+        "required": ["At least one analysis atom"],
+        "typical_combination": "correlation + descriptive-stats",
+        "sequence": "descriptive-stats → correlation → trend-analysis"
+      },
+      "dependencies": ["data_preparation_molecule"],
+      "next_molecules": ["modeling_molecule", "visualization_molecule"],
+      "example_use_cases": [
+        "Correlation analysis",
+        "Trend detection",
+        "Pattern discovery"
+      ]
+    },
+    "modeling_molecule": {
+      "name": "Machine Learning Modeling",
+      "purpose": "Build and evaluate predictive models",
+      "typical_atoms": [
+        "regression-feature-based",
+        "select-models-feature",
+        "evaluate-models-feature",
+        "build-model-feature-based"
+      ],
+      "atom_rules": {
+        "required": ["At least one modeling atom"],
+        "typical_sequence": "select-models-feature → build-model-feature-based → evaluate-models-feature",
+        "alternative_sequence": "regression-feature-based → evaluate-models-feature"
+      },
+      "dependencies": ["data_preparation_molecule", "analysis_molecule"],
+      "next_molecules": ["visualization_molecule", "reporting_molecule"],
+      "example_use_cases": [
+        "Price prediction model",
+        "Sales forecasting",
+        "Demand estimation"
+      ]
+    },
+    "forecasting_molecule": {
+      "name": "Time Series Forecasting",
+      "purpose": "Forecast future values using time series models",
+      "typical_atoms": [
+        "trend-analysis",
+        "auto-regressive-models",
+        "select-models-auto-regressive",
+        "evaluate-models-auto-regressive"
+      ],
+      "atom_rules": {
+        "required": ["auto-regressive-models"],
+        "recommended_sequence": "trend-analysis → select-models-auto-regressive → evaluate-models-auto-regressive",
+        "data_requirements": "Time series data with date column"
+      },
+      "dependencies": ["data_preparation_molecule"],
+      "next_molecules": ["visualization_molecule"],
+      "example_use_cases": [
+        "Monthly sales forecast",
+        "Demand prediction",
+        "Inventory planning"
+      ]
+    },
+    "segmentation_molecule": {
+      "name": "Customer Segmentation",
+      "purpose": "Segment data into meaningful clusters",
+      "typical_atoms": [
+        "clustering",
+        "groupby-wtg-avg"
+      ],
+      "atom_rules": {
+        "required": ["clustering"],
+        "recommended_sequence": "clustering → groupby-wtg-avg (to profile segments)"
+      },
+      "dependencies": ["data_preparation_molecule"],
+      "next_molecules": ["visualization_molecule", "reporting_molecule"],
+      "example_use_cases": [
+        "Customer segmentation",
+        "Market segmentation",
+        "Pattern-based grouping"
+      ]
+    },
+    "visualization_molecule": {
+      "name": "Data Visualization",
+      "purpose": "Create charts and visual representations",
+      "typical_atoms": [
+        "chart-maker",
+        "scatter-plot",
+        "histogram",
+        "text-box"
+      ],
+      "atom_rules": {
+        "required": ["At least one visualization atom"],
+        "typical_combination": "chart-maker (primary) + text-box (annotations)",
+        "sequence": "chart-maker → text-box"
+      },
+      "dependencies": ["Any previous molecule with data output"],
+      "next_molecules": ["reporting_molecule"],
+      "example_use_cases": [
+        "Sales dashboard",
+        "KPI visualization",
+        "Trend charts"
+      ]
+    },
+    "business_intelligence_molecule": {
+      "name": "Business Intelligence",
+      "purpose": "Specialized business calculations",
+      "typical_atoms": [
+        "base-price-estimator",
+        "promo-estimator"
+      ],
+      "atom_rules": {
+        "required": ["At least one BI atom"],
+        "sequence": "base-price-estimator → promo-estimator"
+      },
+      "dependencies": ["data_preparation_molecule"],
+      "next_molecules": ["optimization_molecule", "visualization_molecule"],
+      "example_use_cases": [
+        "Pricing strategy",
+        "Promotion ROI analysis",
+        "Revenue optimization"
+      ]
+    },
+    "optimization_molecule": {
+      "name": "Planning & Optimization",
+      "purpose": "Optimize business decisions and scenarios",
+      "typical_atoms": [
+        "scenario-planner",
+        "optimizer"
+      ],
+      "atom_rules": {
+        "required": ["At least one optimization atom"],
+        "sequence": "scenario-planner → optimizer"
+      },
+      "dependencies": ["data_preparation_molecule OR business_intelligence_molecule"],
+      "next_molecules": ["visualization_molecule"],
+      "example_use_cases": [
+        "Resource allocation",
+        "Budget optimization",
+        "What-if analysis"
+      ]
+    },
+    "reporting_molecule": {
+      "name": "Reporting & Documentation",
+      "purpose": "Create final reports with documentation",
+      "typical_atoms": [
+        "chart-maker",
+        "text-box"
+      ],
+      "atom_rules": {
+        "required": ["chart-maker AND text-box"],
+        "sequence": "chart-maker → text-box (for each insight)"
+      },
+      "dependencies": ["visualization_molecule OR any analysis molecule"],
+      "next_molecules": [],
+      "example_use_cases": [
+        "Executive reports",
+        "Dashboard with explanations",
+        "Insights documentation"
+      ]
+    }
+  },
+  "molecule_selection_guide": {
+    "by_user_intent": {
+      "load_data": ["data_ingestion_molecule"],
+      "clean_data": ["data_preparation_molecule"],
+      "explore_data": ["exploration_molecule"],
+      "combine_datasets": ["data_combination_molecule"],
+      "summarize": ["aggregation_molecule"],
+      "analyze": ["analysis_molecule"],
+      "predict": ["modeling_molecule"],
+      "forecast": ["forecasting_molecule"],
+      "segment": ["segmentation_molecule"],
+      "visualize": ["visualization_molecule"],
+      "optimize": ["optimization_molecule"],
+      "report": ["reporting_molecule"]
+    },
+    "by_keywords": {
+      "csv|excel|file|upload|import": ["data_ingestion_molecule"],
+      "clean|prepare|transform|filter": ["data_preparation_molecule"],
+      "explore|overview|profile|eda": ["exploration_molecule"],
+      "merge|join|concat|combine": ["data_combination_molecule"],
+      "groupby|aggregate|summarize|kpi": ["aggregation_molecule"],
+      "correlation|statistics|trend": ["analysis_molecule"],
+      "predict|model|regression|machine learning": ["modeling_molecule"],
+      "forecast|time series|arima": ["forecasting_molecule"],
+      "cluster|segment|group customers": ["segmentation_molecule"],
+      "chart|graph|plot|visualize": ["visualization_molecule"],
+      "optimize|scenario|planning": ["optimization_molecule"],
+      "report|dashboard|document": ["reporting_molecule"]
+    }
+  }
+}
+
+

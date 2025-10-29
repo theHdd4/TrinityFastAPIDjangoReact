@@ -48,6 +48,30 @@ if (typeof document !== 'undefined' && !document.querySelector('#trinity-ai-anim
   document.head.appendChild(style);
 }
 
+// Simple markdown parser for bold text
+const parseMarkdown = (text: string): string => {
+  if (!text) return '';
+  
+  // First, escape HTML to prevent XSS attacks
+  let processedText = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+  
+  // Replace **text** with <strong>text</strong>
+  processedText = processedText.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  
+  // Replace *text* with <em>text</em> (italic)
+  processedText = processedText.replace(/\*([^*]+?)\*/g, '<em>$1</em>');
+  
+  // Convert newlines to <br>
+  processedText = processedText.replace(/\n/g, '<br>');
+  
+  return processedText;
+};
+
 interface Message {
   id: string;
   content: string;
@@ -78,9 +102,20 @@ interface Chat {
 interface SuperagentAIPanelProps {
   isCollapsed: boolean;
   onToggle: () => void;
+  mode?: 'laboratory' | 'workflow';
+  workflowContext?: {
+    workflowName?: string;
+    canvasMolecules?: any[];
+    customMolecules?: any[];
+  };
 }
 
-const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ isCollapsed, onToggle }) => {
+const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ 
+  isCollapsed, 
+  onToggle, 
+  mode = 'laboratory',
+  workflowContext 
+}) => {
   // Chat management state
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string>('');
@@ -469,14 +504,16 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ isCollapsed, onTo
                   console.warn('Failed to load environment context:', error);
                 }
                 
-                // Send workflow request with project context
+                // Send workflow request with project context and mode
                 ws.send(JSON.stringify({
                   message: currentInput,
                   workflow_json: workflowJSON,
                   session_id: `session_${Date.now()}`,
                   client_name: envContext.client_name,
                   app_name: envContext.app_name,
-                  project_name: envContext.project_name
+                  project_name: envContext.project_name,
+                  mode: mode,
+                  workflow_context: workflowContext
                 }));
               };
               
@@ -982,7 +1019,7 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({ isCollapsed, onTo
                   <div
                     className="text-sm leading-relaxed font-medium font-inter"
                     dangerouslySetInnerHTML={{
-                      __html: message.content.replace(/\n/g, '<br>')
+                      __html: parseMarkdown(message.content)
                     }}
                   />
                 </div>
