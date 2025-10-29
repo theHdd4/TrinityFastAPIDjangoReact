@@ -1400,62 +1400,56 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     settings.reducedMotion && 'transition-none motion-reduce:transition-none',
   );
 
-  const renderOverviewSection = () => {
-    if (!showOverview) {
-      return null;
-    }
+  const overviewSection = showOverview ? (
+    <div className={cn('px-8 pb-8 flex flex-col flex-1 min-h-0 overflow-hidden', layoutConfig.overviewOuterClass)}>
+      <div
+        className={cn(
+          'bg-muted/30 rounded-xl border border-border p-6 flex-1 overflow-y-auto',
+          layoutConfig.overviewContainerClass,
+        )}
+      >
+        <h2 className="text-2xl font-bold text-foreground mb-6">Components Overview</h2>
 
-    return (
-      <div className={cn('px-8 pb-8 flex flex-col flex-1 min-h-0 overflow-hidden', layoutConfig.overviewOuterClass)}>
-        <div
-          className={cn(
-            'bg-muted/30 rounded-xl border border-border p-6 flex-1 overflow-y-auto',
-            layoutConfig.overviewContainerClass,
-          )}
-        >
-          <h2 className="text-2xl font-bold text-foreground mb-6">Components Overview</h2>
+        <div className={cn('grid gap-4', layoutConfig.gridClass)}>
+          {atomObjects.map(object => {
+            const atom = object.props.atom;
 
-          <div className={cn('grid gap-4', layoutConfig.gridClass)}>
-            {atomObjects.map(object => {
-              const atom = object.props.atom;
-
-              return (
-                <div
-                  key={object.id}
-                  className="relative group p-6 border-2 border-border bg-card rounded-xl hover:shadow-lg hover:border-primary/50 transition-all duration-300"
-                >
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
-                    <h3 className="font-semibold text-foreground text-lg group-hover:text-primary transition-colors">
-                      {atom.title}
-                    </h3>
-                  </div>
-                  <div className="inline-block px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full mb-3">
-                    {atom.category}
-                  </div>
-                  <div className="text-sm text-muted-foreground space-y-3">
-                    <ExhibitedAtomRenderer atom={atom} variant="compact" />
-                  </div>
-
-                  {canEdit && (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="absolute top-3 right-3 h-8 w-8 text-muted-foreground hover:text-destructive"
-                      onClick={() => handleAtomRemove(atom.id)}
-                      type="button"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  )}
+            return (
+              <div
+                key={object.id}
+                className="relative group p-6 border-2 border-border bg-card rounded-xl hover:shadow-lg hover:border-primary/50 transition-all duration-300"
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
+                  <h3 className="font-semibold text-foreground text-lg group-hover:text-primary transition-colors">
+                    {atom.title}
+                  </h3>
                 </div>
-              );
-            })}
-          </div>
+                <div className="inline-block px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full mb-3">
+                  {atom.category}
+                </div>
+                <div className="text-sm text-muted-foreground space-y-3">
+                  <ExhibitedAtomRenderer atom={atom} variant="compact" />
+                </div>
+
+                {canEdit && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="absolute top-3 right-3 h-8 w-8 text-muted-foreground hover:text-destructive"
+                    onClick={() => handleAtomRemove(atom.id)}
+                    type="button"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
-    );
-  };
+    </div>
+  ) : null;
 
   return (
     <div className={containerClassName} style={{ ...themeContext.containerStyle, ...accessibilityStyle }}>
@@ -1666,7 +1660,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             </div>
           )}
 
-          {renderOverviewSection()}
+          {overviewSection}
 
           {viewMode === 'horizontal' && !presentationMode && (
             <div className="mt-6 text-center">
