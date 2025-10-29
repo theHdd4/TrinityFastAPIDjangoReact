@@ -4034,10 +4034,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               {isSelected && !(isTextBoxObject && isEditingTextBox) && (
                 <div
                   className={cn(
-                    'pointer-events-none absolute inset-0 z-40 border border-dotted border-yellow-400 transition-all duration-200',
-                    suppressCardChrome || isShapeObject || isTextBoxObject || isTableObject || isChartObject
-                      ? 'rounded-[22px]'
-                      : 'rounded-[32px]'
+                    'pointer-events-none absolute -inset-1 z-40 border-2 border-dotted border-yellow-400 transition-all duration-200',
+                    (() => {
+                      if (isShapeObject) {
+                        return 'rounded-[12px]';
+                      }
+                      if (suppressCardChrome || isTextBoxObject || isTableObject || isChartObject) {
+                        return 'rounded-[22px]';
+                      }
+                      return 'rounded-[32px]';
+                    })(),
                   )}
                   aria-hidden="true"
                 />
