@@ -21,6 +21,15 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import type { ChartConfig, ChartDataRow, EditableChartType, DiagramChartType } from './types';
 import {
@@ -28,7 +37,6 @@ import {
   DEFAULT_CHART_CONFIG,
   DEFAULT_CHART_DATA,
   getColorSchemeColors,
-  isEditableChartType,
 } from './utils';
 import ChartDataEditor from './ChartDataEditor';
 import SlideChart from './SlideChart';
@@ -71,6 +79,17 @@ const ChartPanel: React.FC<ChartPanelProps> = ({ onInsertChart, onClose, canEdit
     [config.type, config.colorScheme, chartData.length],
   );
   const colorPreview = useMemo(() => getColorSchemeColors(config.colorScheme), [config.colorScheme]);
+  const colorSchemeGroups = useMemo(() => {
+    return COLOR_SCHEMES.reduce<Record<string, typeof COLOR_SCHEMES>>((acc, scheme) => {
+      const group = acc[scheme.category] ?? [];
+      acc[scheme.category] = [...group, scheme];
+      return acc;
+    }, {});
+  }, []);
+  const selectedScheme = useMemo(
+    () => COLOR_SCHEMES.find(scheme => scheme.id === config.colorScheme) ?? COLOR_SCHEMES[0],
+    [config.colorScheme],
+  );
 
   const handleInsert = () => {
     if (!canEdit) {
@@ -95,7 +114,6 @@ const ChartPanel: React.FC<ChartPanelProps> = ({ onInsertChart, onClose, canEdit
     { id: 'right', icon: AlignRight, label: 'Right' },
   ] as const;
 
-  const isEditableType = isEditableChartType(config.type);
   const axisToggleVisible = config.type === 'column' || config.type === 'bar' || config.type === 'line';
 
   return (
@@ -216,41 +234,54 @@ const ChartPanel: React.FC<ChartPanelProps> = ({ onInsertChart, onClose, canEdit
               </div>
               Colour palette
             </Label>
-            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-              {Object.entries(
-                COLOR_SCHEMES.reduce<Record<string, typeof COLOR_SCHEMES>>((acc, scheme) => {
-                  const group = acc[scheme.category] ?? [];
-                  acc[scheme.category] = [...group, scheme];
-                  return acc;
-                }, {}),
-              ).map(([category, schemes]) => (
-                <div key={category} className="space-y-1">
-                  <p className="text-[0.65rem] uppercase tracking-wide text-muted-foreground font-semibold px-1">{category}</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {schemes.map(scheme => (
-                      <button
-                        key={scheme.id}
-                        type="button"
-                        onClick={() => setConfig(prev => ({ ...prev, colorScheme: scheme.id }))}
-                        className={cn(
-                          'flex items-center gap-2 rounded-xl border px-3 py-2 transition-all text-left',
-                          config.colorScheme === scheme.id
-                            ? 'border-primary bg-primary/10 shadow-sm'
-                            : 'border-border/60 bg-card hover:border-primary/40',
-                        )}
-                      >
-                        <span className="flex gap-1">
-                          {scheme.colors.slice(0, 4).map((color, idx) => (
-                            <span key={`${scheme.id}-${idx}`} className="h-5 w-5 rounded-md border border-border/50" style={{ backgroundColor: color }} />
-                          ))}
-                        </span>
-                        <span className="text-xs font-medium flex-1">{scheme.name}</span>
-                      </button>
-                    ))}
+            <Select
+              value={config.colorScheme}
+              onValueChange={value => setConfig(prev => ({ ...prev, colorScheme: value }))}
+            >
+              <SelectTrigger className="h-12 rounded-xl border-2 border-border/60 bg-gradient-to-r from-primary/5 via-card to-secondary/5 px-4 hover:border-primary/40 shadow-sm">
+                <SelectValue asChild>
+                  <div className="flex items-center justify-between w-full">
+                    <div className="flex items-center gap-3">
+                      <span className="flex gap-1.5">
+                        {selectedScheme.colors.slice(0, 4).map(color => (
+                          <span
+                            key={`${selectedScheme.id}-${color}`}
+                            className="h-5 w-5 rounded-md border border-border/40"
+                            style={{ backgroundColor: color }}
+                          />
+                        ))}
+                      </span>
+                      <span className="text-sm font-semibold text-foreground">{selectedScheme.name}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-2 border-border/60 bg-popover/95 backdrop-blur-sm">
+                {Object.entries(colorSchemeGroups).map(([category, schemes]) => (
+                  <SelectGroup key={category}>
+                    <SelectLabel className="px-2 pt-2 text-[0.65rem] uppercase tracking-wide text-muted-foreground">
+                      {category}
+                    </SelectLabel>
+                    {schemes.map(scheme => (
+                      <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <span className="flex gap-1.5">
+                            {scheme.colors.slice(0, 4).map(color => (
+                              <span
+                                key={`${scheme.id}-${color}`}
+                                className="h-5 w-5 rounded-md border border-border/40"
+                                style={{ backgroundColor: color }}
+                              />
+                            ))}
+                          </span>
+                          <span className="text-sm font-medium text-foreground">{scheme.name}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -320,15 +351,15 @@ const ChartPanel: React.FC<ChartPanelProps> = ({ onInsertChart, onClose, canEdit
             <Button
               type="button"
               onClick={() => {
-                if (!isEditableType) {
+                if (!canEdit) {
                   return;
                 }
                 setShowEditor(true);
               }}
-              disabled={!canEdit || !isEditableType}
+              disabled={!canEdit}
               className={cn(
                 'w-full h-12 rounded-xl font-semibold shadow transition-all bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 text-white',
-                !canEdit || !isEditableType
+                !canEdit
                   ? 'opacity-60 cursor-not-allowed'
                   : 'hover:shadow-md',
               )}
