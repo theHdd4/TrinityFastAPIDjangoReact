@@ -175,29 +175,42 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   return (
-    <div className="flex h-full flex-col border-l border-border bg-background">
-      <div className="flex items-center justify-between border-b border-border bg-muted/30 p-6">
+    <div className="flex h-full w-full shrink-0 flex-col overflow-hidden rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
+      <div className="flex items-center justify-between border-b border-border/60 bg-muted/40 px-5 py-4">
         <div className="flex items-center gap-3">
           <div className="rounded-lg bg-primary/10 p-2">
             <Monitor className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h2 className="text-xl font-bold">Slide Settings</h2>
-            <p className="text-sm text-muted-foreground">Configure slide behavior and appearance</p>
+            <h2 className="text-lg font-semibold">Slide Settings</h2>
+            <p className="text-xs text-muted-foreground">Configure slide behavior and appearance</p>
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="rounded-full hover:bg-muted" onClick={onClose}>
-          <X className="h-5 w-5" />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+          onClick={onClose}
+        >
+          <X className="h-4 w-4" />
         </Button>
       </div>
 
-      <ScrollArea className="flex-1 p-6">
+      <ScrollArea className="flex-1 px-5 py-5 pr-3">
         <Tabs defaultValue="background" className="w-full">
-          <TabsList className="mb-6 grid w-full grid-cols-4">
-            <TabsTrigger value="background">Background</TabsTrigger>
-            <TabsTrigger value="behavior">Behavior</TabsTrigger>
-            <TabsTrigger value="transitions">Transitions</TabsTrigger>
-            <TabsTrigger value="accessibility">Access</TabsTrigger>
+          <TabsList className="mb-5 grid w-full grid-cols-4 gap-2 rounded-xl border border-border/60 bg-muted/40 p-1">
+            <TabsTrigger value="background" className="h-9 rounded-lg text-xs font-semibold">
+              Background
+            </TabsTrigger>
+            <TabsTrigger value="behavior" className="h-9 rounded-lg text-xs font-semibold">
+              Behavior
+            </TabsTrigger>
+            <TabsTrigger value="transitions" className="h-9 rounded-lg text-xs font-semibold">
+              Transitions
+            </TabsTrigger>
+            <TabsTrigger value="accessibility" className="h-9 rounded-lg text-xs font-semibold">
+              Access
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="background" className="space-y-6">
@@ -614,15 +627,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </Tabs>
       </ScrollArea>
 
-      <div className="flex items-center justify-between border-t border-border bg-muted/30 p-6">
-        <Button variant="outline" onClick={onClose}>
+      <div className="flex items-center justify-between border-t border-border/60 bg-muted/40 px-5 py-4">
+        <Button variant="outline" size="sm" onClick={onClose}>
           Cancel
         </Button>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={onReset}>
+          <Button variant="outline" size="sm" onClick={onReset}>
             Reset to Defaults
           </Button>
-          <Button onClick={onClose}>Apply Settings</Button>
+          <Button size="sm" onClick={onClose}>
+            Apply Settings
+          </Button>
         </div>
       </div>
     </div>
