@@ -18,8 +18,8 @@ export interface SlideExportData {
   objects: SlideObject[];
 }
 
-const PPT_SLIDE_WIDTH_IN = 13.33;
-const PPT_SLIDE_HEIGHT_IN = 7.5;
+const DEFAULT_PPT_SLIDE_WIDTH_IN = 13.33;
+const MINIMUM_SLIDE_INCHES = 1;
 const EXPORT_BACKGROUND = '#ffffff';
 const FALLBACK_SLIDE_WIDTH = 960;
 const FALLBACK_SLIDE_HEIGHT = 540;
@@ -44,6 +44,29 @@ const pxToInches = (value: number, totalPx: number, totalInches: number) => {
     return 0;
   }
   return (value / totalPx) * totalInches;
+};
+
+const resolveObjectElement = (
+  slideElement: HTMLElement | null,
+  objectId: string,
+): HTMLElement | null => {
+  if (!slideElement) {
+    return null;
+  }
+  return slideElement.querySelector(`[data-exhibition-object-id="${objectId}"]`) as HTMLElement | null;
+};
+
+const resolveObjectDimensions = (
+  object: SlideObject,
+  fallbackElement: HTMLElement | null,
+): { width: number; height: number } => {
+  const fallbackRect = fallbackElement?.getBoundingClientRect();
+  const width =
+    typeof object.width === 'number' && object.width > 0 ? object.width : fallbackRect?.width ?? 0;
+  const height =
+    typeof object.height === 'number' && object.height > 0 ? object.height : fallbackRect?.height ?? 0;
+
+  return { width, height };
 };
 
 const htmlToPlainText = (html: string): string => {
@@ -182,18 +205,20 @@ const addObjectImageFallback = async (
   object: SlideObject,
   slideWidth: number,
   slideHeight: number,
+  slideWidthInches: number,
+  slideHeightInches: number,
 ) => {
   if (!slideElement) {
     return;
   }
-  const element = slideElement.querySelector(`[data-exhibition-object-id="${object.id}"]`) as HTMLElement | null;
+  const element = resolveObjectElement(slideElement, object.id);
   if (!element) {
     return;
   }
-  const width =
-    typeof object.width === 'number' && object.width > 0 ? object.width : element.getBoundingClientRect().width;
-  const height =
-    typeof object.height === 'number' && object.height > 0 ? object.height : element.getBoundingClientRect().height;
+  const { width, height } = resolveObjectDimensions(object, element);
+  if (width <= 0 || height <= 0) {
+    return;
+  }
 
   const dataUrl = await captureElementAsPng(element, width, height);
   if (!dataUrl) {
@@ -202,10 +227,10 @@ const addObjectImageFallback = async (
 
   slide.addImage({
     data: dataUrl,
-    x: pxToInches(object.x, slideWidth, PPT_SLIDE_WIDTH_IN),
-    y: pxToInches(object.y, slideHeight, PPT_SLIDE_HEIGHT_IN),
-    w: pxToInches(width, slideWidth, PPT_SLIDE_WIDTH_IN),
-    h: pxToInches(height, slideHeight, PPT_SLIDE_HEIGHT_IN),
+    x: pxToInches(object.x, slideWidth, slideWidthInches),
+    y: pxToInches(object.y, slideHeight, slideHeightInches),
+    w: pxToInches(width, slideWidth, slideWidthInches),
+    h: pxToInches(height, slideHeight, slideHeightInches),
     rotate: typeof object.rotation === 'number' ? object.rotation : 0,
   });
 };
@@ -222,29 +247,42 @@ export const exportToPowerPoint = async (slides: SlideExportData[], title: strin
   ensureClientEnvironment();
 
   const pptx = new pptxgen();
-  pptx.defineLayout({ name: 'TRINITY_LAYOUT', width: PPT_SLIDE_WIDTH_IN, height: PPT_SLIDE_HEIGHT_IN });
-  pptx.layout = 'TRINITY_LAYOUT';
   pptx.author = 'Exhibition Mode';
   pptx.title = title;
   pptx.subject = 'Exported Presentation';
 
+  let layoutConfigured = false;
+
   for (const slideData of slides) {
     const slideElement = getSlideElement(slideData.id);
     const { width: slideWidth, height: slideHeight } = getElementDimensions(slideElement);
+    if (slideWidth <= 0 || slideHeight <= 0) {
+      continue;
+    }
+
+    const slideWidthInches = Math.max(DEFAULT_PPT_SLIDE_WIDTH_IN, MINIMUM_SLIDE_INCHES);
+    const slideHeightInches = Math.max((slideHeight / slideWidth) * slideWidthInches, MINIMUM_SLIDE_INCHES);
+
+    if (!layoutConfigured) {
+      pptx.defineLayout({ name: 'TRINITY_LAYOUT', width: slideWidthInches, height: slideHeightInches });
+      pptx.layout = 'TRINITY_LAYOUT';
+      layoutConfigured = true;
+    }
+
     const pptSlide = pptx.addSlide();
     const objects = sortObjectsByZIndex(slideData.objects);
 
     for (const object of objects) {
-      const objectWidth = typeof object.width === 'number' ? object.width : 0;
-      const objectHeight = typeof object.height === 'number' ? object.height : 0;
+      const element = resolveObjectElement(slideElement, object.id);
+      const { width: objectWidth, height: objectHeight } = resolveObjectDimensions(object, element);
       if (objectWidth <= 0 || objectHeight <= 0) {
         continue;
       }
 
-      const x = pxToInches(object.x, slideWidth, PPT_SLIDE_WIDTH_IN);
-      const y = pxToInches(object.y, slideHeight, PPT_SLIDE_HEIGHT_IN);
-      const w = pxToInches(objectWidth, slideWidth, PPT_SLIDE_WIDTH_IN);
-      const h = pxToInches(objectHeight, slideHeight, PPT_SLIDE_HEIGHT_IN);
+      const x = pxToInches(object.x, slideWidth, slideWidthInches);
+      const y = pxToInches(object.y, slideHeight, slideHeightInches);
+      const w = pxToInches(objectWidth, slideWidth, slideWidthInches);
+      const h = pxToInches(objectHeight, slideHeight, slideHeightInches);
       const rotation = typeof object.rotation === 'number' ? object.rotation : 0;
 
       if (object.type === 'text-box' || object.type === 'title') {
@@ -288,7 +326,15 @@ export const exportToPowerPoint = async (slides: SlideExportData[], title: strin
           continue;
         }
 
-        await addObjectImageFallback(pptSlide, slideElement, object, slideWidth, slideHeight);
+        await addObjectImageFallback(
+          pptSlide,
+          slideElement,
+          object,
+          slideWidth,
+          slideHeight,
+          slideWidthInches,
+          slideHeightInches,
+        );
         continue;
       }
 
@@ -305,7 +351,15 @@ export const exportToPowerPoint = async (slides: SlideExportData[], title: strin
         continue;
       }
 
-      await addObjectImageFallback(pptSlide, slideElement, object, slideWidth, slideHeight);
+      await addObjectImageFallback(
+        pptSlide,
+        slideElement,
+        object,
+        slideWidth,
+        slideHeight,
+        slideWidthInches,
+        slideHeightInches,
+      );
     }
   }
 
@@ -335,7 +389,6 @@ export const exportToPDF = async (slides: SlideExportData[], title: string = 'Pr
       });
     } else {
       pdf.addPage([width, height], orientation);
-      pdf.setPage(index + 1);
     }
 
     const svgMarkup = await toSvg(slideElement, {
@@ -351,10 +404,16 @@ export const exportToPDF = async (slides: SlideExportData[], title: string = 'Pr
 
     const parser = new DOMParser();
     const svg = parser.parseFromString(svgMarkup, 'image/svg+xml').documentElement;
+    svg.setAttribute('width', `${width}`);
+    svg.setAttribute('height', `${height}`);
+    if (!svg.getAttribute('viewBox')) {
+      svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    }
 
-    // svg2pdf augments the jsPDF instance with the svg method.
-    // @ts-expect-error - provided by svg2pdf.js at runtime
-    await pdf.svg(svg, { x: 0, y: 0, width, height });
+    const serialisedSvg = new XMLSerializer().serializeToString(svg);
+    pdf.setFillColor(255, 255, 255);
+    pdf.rect(0, 0, width, height, 'F');
+    pdf.addImage(serialisedSvg, 'SVG', 0, 0, width, height, undefined, 'FAST');
   }
 
   if (!pdf) {
