@@ -256,7 +256,9 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
       <div
         className={cn(
           'flex-1 h-full flex p-6 gap-4',
-          isBar ? ['flex-col justify-center', alignItemsClass] : ['items-end', justifyClass],
+          isBar
+            ? ['flex-col justify-center gap-3', alignItemsClass]
+            : ['items-end justify-center', justifyClass],
           textAlignClass,
         )}
       >
@@ -268,20 +270,27 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
             return (
               <div
                 key={item.label}
-                className="flex items-center gap-3 animate-fade-in"
+                className="flex w-full items-center gap-3 animate-fade-in"
                 style={{ animationDelay: `${index * 150}ms` }}
               >
-                {config.showLabels && <span className="text-xs text-muted-foreground w-8">{item.label}</span>}
-                <div
-                  className="flex-1 h-8 rounded-r-lg transition-all hover:opacity-80 hover:scale-x-105 animate-scale-in origin-left"
-                  style={{
-                    width: `${percentage}%`,
-                    minWidth: Math.abs(item.value) > 0 ? '4px' : '0',
-                    background: colors[index % colors.length],
-                    animationDelay: `${index * 150}ms`,
-                  }}
-                />
-                {config.showValues && <span className="text-xs font-semibold">{item.value}</span>}
+                {config.showLabels && (
+                  <span className="text-xs text-muted-foreground font-medium min-w-[64px] text-right">
+                    {item.label}
+                  </span>
+                )}
+                <div className="flex-1 h-10 rounded-lg bg-muted/40">
+                  <div
+                    className="h-full rounded-lg transition-all duration-300 hover:opacity-80"
+                    style={{
+                      width: `${percentage}%`,
+                      minWidth: Math.abs(item.value) > 0 ? '4px' : '0',
+                      background: colors[index % colors.length],
+                    }}
+                  />
+                </div>
+                {config.showValues && (
+                  <span className="text-xs font-semibold text-foreground min-w-[36px] text-right">{item.value}</span>
+                )}
               </div>
             );
           }

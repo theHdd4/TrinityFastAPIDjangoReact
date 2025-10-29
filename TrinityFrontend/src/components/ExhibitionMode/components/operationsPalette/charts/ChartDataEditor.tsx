@@ -233,55 +233,72 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       );
     }
 
-    if (config.type === 'column' || config.type === 'bar') {
+    if (config.type === 'bar') {
       const maxValue = Math.max(...chartData.map(item => item.value), 0);
       const safeMax = maxValue === 0 ? 1 : maxValue;
-      const isBar = config.type === 'bar';
 
       return (
-        <div
-          className={cn(
-            'w-full h-64 flex gap-4 p-4',
-            isBar ? 'flex-col justify-center' : 'items-end justify-center',
-          )}
-        >
+        <div className="w-full h-64 flex flex-col gap-3 justify-center p-6">
           {chartData.map((item, index) => {
             const percentage = (item.value / safeMax) * 100;
 
-            if (isBar) {
-              return (
-                <div key={`${item.label}-${index}`} className="flex gap-2 items-center">
-                  {config.showLabels && (
-                    <span className="text-xs text-muted-foreground font-medium min-w-[60px]">{item.label}</span>
-                  )}
+            return (
+              <div
+                key={`${item.label}-${index}`}
+                className="flex w-full items-center gap-3 animate-fade-in"
+                style={{ animationDelay: `${index * 120}ms` }}
+              >
+                {config.showLabels && (
+                  <span className="text-xs text-muted-foreground font-medium min-w-[64px] text-right">
+                    {item.label}
+                  </span>
+                )}
+                <div className="flex-1 h-10 rounded-lg bg-muted/40">
                   <div
-                    className="rounded-lg transition-all duration-300 hover:opacity-80"
+                    className="h-full rounded-lg transition-all duration-300 hover:opacity-80"
                     style={{
                       backgroundColor: colors[index % colors.length],
                       width: `${Math.max(0, percentage)}%`,
                       minWidth: item.value > 0 ? '4px' : '0',
-                      height: '40px',
                     }}
                   />
-                  {config.showValues && (
-                    <span className="text-xs font-semibold text-foreground">{item.value}</span>
-                  )}
                 </div>
-              );
-            }
+                {config.showValues && (
+                  <span className="text-xs font-semibold text-foreground min-w-[36px] text-right">{item.value}</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    if (config.type === 'column') {
+      const maxValue = Math.max(...chartData.map(item => Math.abs(item.value)), 0);
+      const safeMax = maxValue === 0 ? 1 : maxValue;
+
+      return (
+        <div className="w-full h-64 flex items-end justify-center gap-4 p-6">
+          {chartData.map((item, index) => {
+            const ratio = Math.max(0, Math.abs(item.value)) / safeMax;
+            const percentage = ratio * 100;
 
             return (
-              <div key={`${item.label}-${index}`} className="flex flex-col items-center justify-end gap-2">
+              <div
+                key={`${item.label}-${index}`}
+                className="flex h-full flex-1 max-w-[60px] flex-col items-center justify-end gap-2 animate-fade-in"
+                style={{ animationDelay: `${index * 120}ms` }}
+              >
                 <div
-                  className="w-10 rounded-lg transition-all duration-300 hover:opacity-80"
+                  className="w-full rounded-t-lg transition-all duration-300 hover:scale-105 hover:opacity-90"
                   style={{
+                    height: `${percentage}%`,
+                    minHeight: Math.abs(item.value) > 0 ? '4px' : '0',
                     backgroundColor: colors[index % colors.length],
-                    height: `${Math.max(0, percentage)}%`,
-                    minHeight: item.value > 0 ? '4px' : '0',
                   }}
                 />
                 {config.showLabels && (
-                  <span className="text-xs text-muted-foreground font-medium text-center">{item.label}</span>
+                  <span className="text-xs text-muted-foreground text-center font-medium">{item.label}</span>
                 )}
                 {config.showValues && (
                   <span className="text-xs font-semibold text-foreground">{item.value}</span>
@@ -669,7 +686,8 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
                 <div className="space-y-3">
                   <Label className="text-sm font-semibold">Legend Position</Label>
                   <Select
-                    value={config.legendPosition}
+                    modal={false}
+                    value={config.legendPosition ?? DEFAULT_CHART_CONFIG.legendPosition}
                     onValueChange={value =>
                       setConfig(prev => ({ ...prev, legendPosition: value as ChartConfig['legendPosition'] }))
                     }
