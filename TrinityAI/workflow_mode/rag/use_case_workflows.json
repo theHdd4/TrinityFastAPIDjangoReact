@@ -14,7 +14,7 @@
         {
           "molecule_number": 1,
           "molecule_name": "Data Preparation & Feature Selection",
-          "purpose": "Load data, classify columns, and select modeling scope",
+          "purpose": "Start with data upload and validation, followed by feature analysis. Understand your dataset to prepare for modeling.",
           "atoms": [
             {
               "id": "data-upload-validate",
@@ -41,7 +41,7 @@
         {
           "molecule_number": 2,
           "molecule_name": "Model Building & Selection",
-          "purpose": "Build and select best marketing mix model",
+          "purpose": "Use auto-regressive models for price forecasting. Evaluate model performance to ensure accuracy.",
           "atoms": [
             {
               "id": "build-model-feature-based",
@@ -62,7 +62,7 @@
         {
           "molecule_number": 3,
           "molecule_name": "Model Evaluation & Insights",
-          "purpose": "Evaluate model performance and extract marketing insights",
+          "purpose": "Create multiple pricing scenarios using the scenario planner. Visualize outcomes with interactive charts.",
           "atoms": [
             {
               "id": "evaluate-models-feature",
@@ -87,7 +87,7 @@
         {
           "molecule_number": 1,
           "molecule_name": "Customer Data Integration",
-          "purpose": "Load and merge customer, transaction, and behavioral data",
+          "purpose": "Start by loading customer and transaction data, then merge them together. Clean and prepare features for accurate predictions.",
           "atoms": [
             {
               "id": "csv-import",
@@ -113,7 +113,7 @@
         {
           "molecule_number": 2,
           "molecule_name": "Feature Engineering",
-          "purpose": "Create LTV-relevant features",
+          "purpose": "Create calculated columns for recency, frequency, and monetary metrics. Aggregate customer behavior to identify high-value patterns.",
           "atoms": [
             {
               "id": "create-column",
@@ -133,7 +133,7 @@
         {
           "molecule_number": 3,
           "molecule_name": "LTV Model & Prediction",
-          "purpose": "Build and evaluate LTV prediction model",
+          "purpose": "Use regression models for LTV prediction and evaluate accuracy. Visualize segments with charts to optimize strategies.",
           "atoms": [
             {
               "id": "regression-feature-based",
@@ -168,7 +168,7 @@
         {
           "molecule_number": 1,
           "molecule_name": "Historical Data Preparation",
-          "purpose": "Load and prepare historical sales/demand data",
+          "purpose": "Start with data upload and validation of historical sales data. Clean data and analyze patterns to understand trends.",
           "atoms": [
             {
               "id": "data-upload-validate",
@@ -194,7 +194,7 @@
         {
           "molecule_number": 2,
           "molecule_name": "Trend & Seasonality Analysis",
-          "purpose": "Identify demand patterns",
+          "purpose": "Use trend analysis to detect seasonal patterns and trends. Calculate statistics to prepare for accurate forecasting.",
           "atoms": [
             {
               "id": "trend-analysis",
@@ -214,7 +214,7 @@
         {
           "molecule_number": 3,
           "molecule_name": "Forecast Generation",
-          "purpose": "Generate demand forecasts",
+          "purpose": "Use auto-regressive models for demand forecasting. Evaluate performance and visualize forecasts with charts.",
           "atoms": [
             {
               "id": "auto-regressive-models",
@@ -248,7 +248,7 @@
         {
           "molecule_number": 1,
           "molecule_name": "Price & Sales Data Loading",
-          "purpose": "Combine pricing and sales data",
+          "purpose": "Start with loading pricing history and sales volume data. Merge them to create a unified dataset for analysis.",
           "atoms": [
             {
               "id": "csv-import",
@@ -274,7 +274,7 @@
         {
           "molecule_number": 2,
           "molecule_name": "Elasticity Calculation",
-          "purpose": "Calculate price elasticity metrics",
+          "purpose": "Create calculated columns for price and volume changes. Use regression to estimate elasticity coefficients by segment.",
           "atoms": [
             {
               "id": "create-column",
@@ -299,8 +299,8 @@
         },
         {
           "molecule_number": 3,
-          "molecule_name": "Price Optimization",
-          "purpose": "Recommend optimal prices",
+          "molecule_name": "Price Optimization & Scenario Planning",
+          "purpose": "Create multiple pricing scenarios using the scenario planner. Visualize outcomes with charts to optimize pricing.",
           "atoms": [
             {
               "id": "base-price-estimator",
@@ -334,7 +334,7 @@
         {
           "molecule_number": 1,
           "molecule_name": "Customer Feature Preparation",
-          "purpose": "Prepare customer engagement and usage features",
+          "purpose": "Connect to customer database and load activity data. Create churn indicators to identify at-risk customers.",
           "atoms": [
             {
               "id": "database-connect",
@@ -360,7 +360,7 @@
         {
           "molecule_number": 2,
           "molecule_name": "Churn Model Building",
-          "purpose": "Build and select churn prediction model",
+          "purpose": "Use machine learning models to predict churn risk. Compare algorithms and build the best performing model.",
           "atoms": [
             {
               "id": "select-models-feature",
@@ -380,7 +380,7 @@
         {
           "molecule_number": 3,
           "molecule_name": "Risk Scoring & Segmentation",
-          "purpose": "Score customers and create retention strategies",
+          "purpose": "Evaluate model accuracy and generate churn risk scores. Segment at-risk customers and visualize with charts.",
           "atoms": [
             {
               "id": "evaluate-models-feature",
@@ -414,7 +414,7 @@
         {
           "molecule_number": 1,
           "molecule_name": "Sales Data Integration",
-          "purpose": "Combine sales data from multiple sources",
+          "purpose": "Connect to sales database and load transaction data. Combine regional data for unified KPI tracking.",
           "atoms": [
             {
               "id": "database-connect",
@@ -434,7 +434,7 @@
         {
           "molecule_number": 2,
           "molecule_name": "KPI Calculation",
-          "purpose": "Calculate sales KPIs and metrics",
+          "purpose": "Aggregate sales by region, product, and time period. Create custom columns for growth rates and trends.",
           "atoms": [
             {
               "id": "groupby-wtg-avg",
@@ -460,7 +460,7 @@
         {
           "molecule_number": 3,
           "molecule_name": "Dashboard Visualization",
-          "purpose": "Create interactive sales dashboard",
+          "purpose": "Create interactive charts to visualize revenue and growth trends. Add executive summary insights for stakeholders.",
           "atoms": [
             {
               "id": "chart-maker",

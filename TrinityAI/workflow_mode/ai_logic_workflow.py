@@ -80,7 +80,7 @@ SUCCESS RESPONSE (when you can suggest a workflow):
       {{
         "molecule_number": 1,
         "molecule_name": "Descriptive Name",
-        "purpose": "What this molecule accomplishes",
+        "purpose": "Concise 2-line description (MAX 50 words). Line 1: action verb + brief operations. Line 2: brief outcome/value. Keep it short - detailed info goes in smart_response.",
         "atoms": [
           {{
             "id": "atom-id-from-available-atoms",
@@ -305,17 +305,35 @@ CONVERSATIONAL HANDLING EXAMPLES:
 4. Ensuring logical data flow between molecules
 5. Covering complete pipeline: data → analysis → modeling → evaluation → insights
 
-EXAMPLES OF INTELLIGENT MOLECULE GROUPINGS:
+EXAMPLES OF INTELLIGENT MOLECULE GROUPINGS WITH RICH DESCRIPTIONS:
 
-**MMM Example:**
-Molecule 1: Data Prep (data-upload-validate + column-classifier + scope-selector)
-Molecule 2: Modeling (build-model-feature-based + select-models-feature)
-Molecule 3: Evaluation (evaluate-models-feature)
+**MMM Example (Concise - Max 50 words each):**
+Molecule 1: Data Preparation
+Purpose: "Start with data upload and validation, followed by feature analysis. Understand your dataset to prepare for modeling."
 
-**Dashboard Example:**
-Molecule 1: Data Load (database-connect + dataframe-operations)
-Molecule 2: KPI Calc (groupby-wtg-avg + create-column)
-Molecule 3: Visualization (chart-maker + text-box)
+Molecule 2: Modeling & Evaluation
+Purpose: "Use auto-regressive models for price forecasting. Evaluate model performance to ensure accuracy."
+
+Molecule 3: Scenario Planning & Visualization
+Purpose: "Create multiple pricing scenarios using the scenario planner. Visualize outcomes with interactive charts."
+
+**Dashboard Example (Concise - Max 50 words each):**
+Molecule 1: Data Integration
+Purpose: "Connect to your database and perform data operations. Combine multiple sources for unified metrics."
+
+Molecule 2: KPI Calculation
+Purpose: "Calculate weighted averages and create custom columns. Transform data into actionable business metrics."
+
+Molecule 3: Visualization & Reporting
+Purpose: "Create interactive charts to visualize trends. Add insights to provide context for stakeholders."
+
+**MOLECULE DESCRIPTION FORMULA (STRICT):**
+Each molecule "purpose" must be EXACTLY 2 lines and MAXIMUM 50 words total:
+- Line 1: Start with action verbs (e.g., "Start with...", "Use...", "Create...") and briefly explain WHAT operations happen (20-25 words)
+- Line 2: Briefly explain WHY it matters - the business outcome or next step (20-25 words)
+- Keep it concise and actionable - NOT verbose or lengthy
+- The richness and detailed knowledge should be in the "smart_response" chat message, NOT in molecule descriptions
+- Example format: "Start with data upload and validation, followed by feature analysis. Understand your dataset characteristics to prepare for modeling."
 
 **CRITICAL RULES - READ THESE FIRST:**
 
@@ -338,6 +356,7 @@ Molecule 3: Visualization (chart-maker + text-box)
 12. **INTELLIGENT GROUPING**: Group 2-5 atoms per molecule based on their purpose and data dependencies
 13. **LOGICAL SEQUENCING**: Ensure each molecule flows into the next with proper data transformations
 14. **BUSINESS VALUE**: Think about what business outcome this workflow achieves
+15. **CONCISE MOLECULE DESCRIPTIONS**: Write EXACTLY 2-line purpose descriptions (MAX 50 words total) that briefly explain operations and value. Use action verbs like "Start with...", "Use...", "Create..." but keep it short. The detailed richness goes in the "smart_response" chat message above, NOT in molecule descriptions.
 
 **WORKFLOW DESIGN PHILOSOPHY**:
 - Simple tasks (basic dashboards): 3-4 molecules
