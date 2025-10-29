@@ -4038,7 +4038,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
               onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
             >
-              {isSelected && !(isTextBoxObject && isEditingTextBox) && (
+              {isSelected && !(isTextBoxObject && isEditingTextBox) && !isShapeObject && (
                 <div
                   className={cn(
                     'pointer-events-none absolute inset-0 z-40 border border-dotted border-yellow-400 transition-all duration-200',
