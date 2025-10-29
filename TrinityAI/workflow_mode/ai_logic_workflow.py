@@ -80,7 +80,7 @@ SUCCESS RESPONSE (when you can suggest a workflow):
       {{
         "molecule_number": 1,
         "molecule_name": "Descriptive Name",
-        "purpose": "Concise 2-line description (MAX 50 words). Line 1: action verb + brief operations. Line 2: brief outcome/value. Keep it short - detailed info goes in smart_response.",
+        "purpose": "Concise 2-line description (MAX 40 words). Line 1: action verb + brief operations. Line 2: brief outcome/value. Keep it short - detailed info goes in smart_response.",
         "atoms": [
           {{
             "id": "atom-id-from-available-atoms",
