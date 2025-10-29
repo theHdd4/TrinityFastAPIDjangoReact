@@ -41,6 +41,40 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
       : horizontalAlignment === 'right'
         ? 'text-right'
         : 'text-center';
+  const legendPosition = config.legendPosition ?? 'bottom';
+  const legendVisible = isEditableChartType(config.type) && chartData.length > 0;
+  const legendOrientation = legendPosition === 'left' || legendPosition === 'right' ? 'vertical' : 'horizontal';
+
+  const renderLegend = (extraClass?: string) => {
+    if (!legendVisible) {
+      return null;
+    }
+
+    return (
+      <div
+        className={cn(
+          'shrink-0',
+          legendOrientation === 'vertical'
+            ? 'flex flex-col gap-2 items-start'
+            : 'flex flex-wrap gap-3 justify-center',
+          extraClass,
+        )}
+      >
+        {chartData.map((item, index) => (
+          <div
+            key={`${item.label}-${index}`}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card/60 border border-border/30 shadow-sm"
+          >
+            <span
+              className="inline-block h-3.5 w-3.5 rounded-full"
+              style={{ backgroundColor: colors[index % colors.length] }}
+            />
+            <span className="text-sm font-medium text-foreground">{item.label}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   if (config.type === 'blank') {
     return (
@@ -108,13 +142,15 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
     );
   }
 
+  let chartContent: React.ReactNode;
+
   if (config.type === 'pie' || config.type === 'donut') {
     const total = chartData.reduce((sum, item) => sum + item.value, 0);
     let currentAngle = -90;
 
-    return (
-      <div className={cn('h-full w-full flex items-center p-4', justifyClass, textAlignClass, className)}>
-        <div className="relative">
+    chartContent = (
+      <div className={cn('flex-1 h-full flex items-center p-4', justifyClass, textAlignClass)}>
+        <div className="flex flex-col items-center gap-6">
           <svg width="220" height="220" viewBox="0 0 220 220" className="animate-fade-in">
             {chartData.map((item, index) => {
               const percentage = total === 0 ? 0 : (item.value / total) * 360;
@@ -154,9 +190,9 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
             })}
           </svg>
           {config.showLabels && (
-            <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 flex gap-3 flex-wrap justify-center">
+            <div className="flex flex-wrap justify-center gap-3 text-xs text-muted-foreground">
               {chartData.map((item, index) => (
-                <div key={item.label} className="flex items-center gap-2 text-xs text-muted-foreground">
+                <div key={item.label} className="flex items-center gap-2">
                   <span
                     className="inline-block h-3 w-3 rounded-sm"
                     style={{ background: colors[index % colors.length] }}
@@ -169,9 +205,7 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
         </div>
       </div>
     );
-  }
-
-  if (config.type === 'line') {
+  } else if (config.type === 'line') {
     const maxValue = Math.max(...chartData.map(item => item.value), 0);
     const points = chartData
       .map((item, index) => {
@@ -181,20 +215,9 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
       })
       .join(' ');
 
-    return (
-      <div
-        className={cn(
-          'h-full w-full p-6 flex items-center justify-center overflow-hidden',
-          justifyClass,
-          textAlignClass,
-          className,
-        )}
-      >
-        <svg
-          className="h-full w-full max-w-full"
-          viewBox="0 0 400 240"
-          preserveAspectRatio="xMidYMid meet"
-        >
+    chartContent = (
+      <div className={cn('flex-1 h-full flex items-center justify-center overflow-hidden p-6', justifyClass, textAlignClass)}>
+        <svg className="h-full w-full max-w-full" viewBox="0 0 400 240" preserveAspectRatio="xMidYMid meet">
           <polyline
             points={points}
             fill="none"
@@ -225,43 +248,80 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
         </svg>
       </div>
     );
+  } else {
+    const maxValue = Math.max(...chartData.map(item => item.value), 0);
+    const isBar = config.type === 'bar';
+
+    chartContent = (
+      <div
+        className={cn(
+          'flex-1 h-full flex p-6 gap-4',
+          isBar ? ['flex-col justify-center', alignItemsClass] : ['items-end', justifyClass],
+          textAlignClass,
+        )}
+      >
+        {chartData.map((item, index) => {
+          const height = maxValue === 0 ? 0 : (item.value / maxValue) * 100;
+          return (
+            <div
+              key={item.label}
+              className={cn('flex gap-2', isBar ? 'flex-row items-center' : 'flex-col items-center justify-end')}
+            >
+              <div
+                className="rounded-lg transition-all"
+                style={{
+                  backgroundColor: colors[index % colors.length],
+                  [isBar ? 'width' : 'height']: `${height}%`,
+                  [isBar ? 'height' : 'width']: '42px',
+                  [isBar ? 'minWidth' : 'minHeight']: '20px',
+                }}
+              />
+              {config.showLabels && <span className="text-xs text-muted-foreground">{item.label}</span>}
+              {config.showValues && <span className="text-xs font-semibold">{item.value}</span>}
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
-  const maxValue = Math.max(...chartData.map(item => item.value), 0);
-  const isBar = config.type === 'bar';
+  const outerClass = cn('h-full w-full', className);
+
+  if (!legendVisible) {
+    return <div className={cn(outerClass, 'flex')}>{chartContent}</div>;
+  }
+
+  if (legendPosition === 'top') {
+    return (
+      <div className={cn(outerClass, 'flex flex-col')}>
+        {renderLegend('mb-4')}
+        {chartContent}
+      </div>
+    );
+  }
+
+  if (legendPosition === 'bottom') {
+    return (
+      <div className={cn(outerClass, 'flex flex-col')}>
+        {chartContent}
+        {renderLegend('mt-4')}
+      </div>
+    );
+  }
+
+  if (legendPosition === 'left') {
+    return (
+      <div className={cn(outerClass, 'flex flex-row')}>
+        {renderLegend('mr-4')}
+        {chartContent}
+      </div>
+    );
+  }
 
   return (
-    <div
-      className={cn(
-        'h-full w-full flex p-6 gap-4',
-        isBar
-          ? ['flex-col justify-center', alignItemsClass]
-          : ['items-end', justifyClass],
-        textAlignClass,
-        className,
-      )}
-    >
-      {chartData.map((item, index) => {
-        const height = maxValue === 0 ? 0 : (item.value / maxValue) * 100;
-        return (
-          <div
-            key={item.label}
-            className={cn('flex gap-2', isBar ? 'flex-row items-center' : 'flex-col items-center justify-end')}
-          >
-            <div
-              className="rounded-lg transition-all"
-              style={{
-                backgroundColor: colors[index % colors.length],
-                [isBar ? 'width' : 'height']: `${height}%`,
-                [isBar ? 'height' : 'width']: '42px',
-                [isBar ? 'minWidth' : 'minHeight']: '20px',
-              }}
-            />
-            {config.showLabels && <span className="text-xs text-muted-foreground">{item.label}</span>}
-            {config.showValues && <span className="text-xs font-semibold">{item.value}</span>}
-          </div>
-        );
-      })}
+    <div className={cn(outerClass, 'flex flex-row-reverse')}>
+      {renderLegend('ml-4')}
+      {chartContent}
     </div>
   );
 };

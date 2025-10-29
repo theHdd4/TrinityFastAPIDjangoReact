@@ -74,6 +74,7 @@ export const DEFAULT_CHART_CONFIG: ChartConfig = {
   showValues: false,
   horizontalAlignment: 'center',
   axisIncludesZero: true,
+  legendPosition: 'bottom',
 };
 
 export const DEFAULT_CHART_WIDTH = 460;
@@ -102,6 +103,15 @@ const normaliseAlignment = (value: unknown): 'left' | 'center' | 'right' => {
     return value;
   }
   return DEFAULT_CHART_CONFIG.horizontalAlignment;
+};
+
+const normaliseLegendPosition = (
+  value: unknown,
+): 'top' | 'bottom' | 'left' | 'right' => {
+  if (value === 'top' || value === 'bottom' || value === 'left' || value === 'right') {
+    return value;
+  }
+  return DEFAULT_CHART_CONFIG.legendPosition;
 };
 
 export const getColorSchemeColors = (id: string): string[] => {
@@ -152,6 +162,7 @@ export const parseChartObjectProps = (
     axisIncludesZero: typeof configCandidate.axisIncludesZero === 'boolean'
       ? configCandidate.axisIncludesZero
       : DEFAULT_CHART_CONFIG.axisIncludesZero,
+    legendPosition: normaliseLegendPosition(configCandidate.legendPosition ?? configCandidate.legend_position),
   };
 
   return {
@@ -175,6 +186,10 @@ export const createChartSlideObject = (
     colorScheme: typeof config.colorScheme === 'string' && config.colorScheme
       ? config.colorScheme
       : DEFAULT_CHART_CONFIG.colorScheme,
+    legendPosition: normaliseLegendPosition(
+      (config as Record<string, unknown>).legendPosition ??
+        (config as Record<string, unknown>).legend_position,
+    ),
   };
 
   const base: SlideObject = {
