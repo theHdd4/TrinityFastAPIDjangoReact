@@ -128,6 +128,32 @@ const sanitiseHex = (value: string): string => {
   return `#${cleaned}`;
 };
 
+const normaliseHexLength = (hex: string): string => {
+  if (/^#[0-9a-fA-F]{3}$/.test(hex)) {
+    const digits = hex.slice(1);
+    return `#${digits
+      .split('')
+      .map(character => character.repeat(2))
+      .join('')}`.toLowerCase();
+  }
+
+  return hex.toLowerCase();
+};
+
+const resolveHexColor = (value: string | undefined | null, fallback: string): string => {
+  const candidate = value ?? fallback;
+  const sanitised = sanitiseHex(candidate);
+
+  if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(sanitised)) {
+    return normaliseHexLength(sanitised);
+  }
+
+  const fallbackSanitised = sanitiseHex(fallback);
+  return normaliseHexLength(
+    /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(fallbackSanitised) ? fallbackSanitised : '#ffffff',
+  );
+};
+
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   settings,
   onChange,
@@ -176,6 +202,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [solidColorPopoverOpen, setSolidColorPopoverOpen] = useState(false);
   const solidColorTriggerRef = useRef<HTMLButtonElement | null>(null);
 
+  const [gradientStartPopoverOpen, setGradientStartPopoverOpen] = useState(false);
+  const [gradientEndPopoverOpen, setGradientEndPopoverOpen] = useState(false);
+
   useEffect(() => {
     setSolidColorInput(resolvedSolidColor.toUpperCase());
   }, [resolvedSolidColor]);
@@ -202,6 +231,56 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
     return solidColorInput;
   }, [solidColorInput, solidColorOption]);
+
+  const gradientStartHex = useMemo(
+    () => resolveHexColor(settings.backgroundGradientStart, DEFAULT_PRESENTATION_SETTINGS.backgroundGradientStart),
+    [settings.backgroundGradientStart],
+  );
+  const gradientEndHex = useMemo(
+    () => resolveHexColor(settings.backgroundGradientEnd, DEFAULT_PRESENTATION_SETTINGS.backgroundGradientEnd),
+    [settings.backgroundGradientEnd],
+  );
+
+  const gradientStartToken = useMemo(() => createSolidToken(gradientStartHex), [gradientStartHex]);
+  const gradientEndToken = useMemo(() => createSolidToken(gradientEndHex), [gradientEndHex]);
+
+  const gradientStartOption = useMemo(
+    () => findOptionById(SOLID_COLOR_SECTIONS, gradientStartToken),
+    [gradientStartToken],
+  );
+  const gradientEndOption = useMemo(
+    () => findOptionById(SOLID_COLOR_SECTIONS, gradientEndToken),
+    [gradientEndToken],
+  );
+
+  const gradientStartLabel = useMemo(
+    () => gradientStartOption?.label ?? gradientStartHex.toUpperCase(),
+    [gradientStartHex, gradientStartOption],
+  );
+  const gradientEndLabel = useMemo(
+    () => gradientEndOption?.label ?? gradientEndHex.toUpperCase(),
+    [gradientEndHex, gradientEndOption],
+  );
+
+  const gradientStartSwatchStyle = useMemo(() => {
+    if (gradientStartOption?.swatchStyle) {
+      return gradientStartOption.swatchStyle;
+    }
+    if (gradientStartOption?.value) {
+      return { background: gradientStartOption.value };
+    }
+    return { backgroundColor: gradientStartHex };
+  }, [gradientStartHex, gradientStartOption]);
+
+  const gradientEndSwatchStyle = useMemo(() => {
+    if (gradientEndOption?.swatchStyle) {
+      return gradientEndOption.swatchStyle;
+    }
+    if (gradientEndOption?.value) {
+      return { background: gradientEndOption.value };
+    }
+    return { backgroundColor: gradientEndHex };
+  }, [gradientEndHex, gradientEndOption]);
 
   const handleBackgroundTypeChange = (type: 'solid' | 'gradient' | 'image') => {
     onChange({ backgroundMode: type });
@@ -232,6 +311,34 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   const handleGradientChange = (partial: Partial<PresentationSettings>) => {
     onChange({ backgroundMode: 'gradient', ...partial });
+  };
+
+  const handleGradientColorCommit = (
+    key: 'backgroundGradientStart' | 'backgroundGradientEnd',
+    value: string,
+  ) => {
+    const sanitised = resolveHexColor(value, key === 'backgroundGradientStart'
+      ? DEFAULT_PRESENTATION_SETTINGS.backgroundGradientStart
+      : DEFAULT_PRESENTATION_SETTINGS.backgroundGradientEnd);
+
+    handleGradientChange({ [key]: sanitised } as Partial<PresentationSettings>);
+  };
+
+  const handleGradientColorSelect = (
+    key: 'backgroundGradientStart' | 'backgroundGradientEnd',
+    option: ColorTrayOption,
+  ) => {
+    let nextHex: string | null = null;
+
+    if (typeof option.value === 'string' && option.value.startsWith('#')) {
+      nextHex = option.value;
+    } else if (isSolidToken(option.id)) {
+      nextHex = solidTokenToHex(option.id);
+    }
+
+    if (nextHex) {
+      handleGradientColorCommit(key, nextHex);
+    }
   };
 
   const handleAutoAdvanceToggle = (value: boolean) => {
@@ -369,12 +476,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           defaultSectionId={DEFAULT_SOLID_SECTION.id}
                         />
                         <div className="flex items-center gap-2">
-                          <input
-                            type="color"
-                            value={solidColorInput}
-                            onChange={event => handleSolidColorCommit(event.target.value)}
-                            className="h-10 w-full cursor-pointer rounded-2xl border border-border"
-                          />
+                      <input
+                        type="color"
+                        value={solidColorInput}
+                        onChange={event => handleSolidColorCommit(event.target.value)}
+                        className="h-10 w-full cursor-pointer rounded-2xl border border-border"
+                      />
                           <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                             Custom
                           </span>
@@ -400,26 +507,118 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
             {backgroundMode === 'gradient' && (
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-semibold uppercase text-muted-foreground">Start Color</Label>
-                    <Input
-                      type="color"
-                      value={settings.backgroundGradientStart ?? DEFAULT_PRESENTATION_SETTINGS.backgroundGradientStart}
-                      onChange={event => handleGradientChange({ backgroundGradientStart: event.target.value })}
-                      className="h-9"
-                    />
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Palette className="h-3.5 w-3.5 text-muted-foreground" />
+                      <Label className="text-sm font-medium">Gradient Start</Label>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-medium text-muted-foreground">{gradientStartLabel}</span>
+                      <Popover open={gradientStartPopoverOpen} onOpenChange={setGradientStartPopoverOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
+                          >
+                            <span
+                              className={cn('h-5 w-5 rounded-full border border-white/70 shadow-inner')}
+                              style={gradientStartSwatchStyle}
+                            />
+                            <span className="sr-only">Select gradient start color</span>
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          side="left"
+                          align="center"
+                          sideOffset={16}
+                          collisionPadding={24}
+                          className="z-[3200] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
+                        >
+                          <div className="w-[320px] space-y-4 p-4">
+                            <ColorTray
+                              sections={SOLID_COLOR_SECTIONS}
+                              selectedId={gradientStartOption?.id ?? gradientStartToken}
+                              onSelect={option => {
+                                handleGradientColorSelect('backgroundGradientStart', option);
+                                setGradientStartPopoverOpen(false);
+                              }}
+                              defaultSectionId={DEFAULT_SOLID_SECTION.id}
+                            />
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={gradientStartHex}
+                                onChange={event => handleGradientColorCommit('backgroundGradientStart', event.target.value)}
+                                className="h-10 w-full cursor-pointer rounded-2xl border border-border"
+                              />
+                              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                                Custom
+                              </span>
+                            </div>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs font-semibold uppercase text-muted-foreground">End Color</Label>
-                    <Input
-                      type="color"
-                      value={settings.backgroundGradientEnd ?? DEFAULT_PRESENTATION_SETTINGS.backgroundGradientEnd}
-                      onChange={event => handleGradientChange({ backgroundGradientEnd: event.target.value })}
-                      className="h-9"
-                    />
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Palette className="h-3.5 w-3.5 text-muted-foreground" />
+                      <Label className="text-sm font-medium">Gradient End</Label>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-medium text-muted-foreground">{gradientEndLabel}</span>
+                      <Popover open={gradientEndPopoverOpen} onOpenChange={setGradientEndPopoverOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="flex h-8 w-8 items-center justify-center rounded-full border border-border/50 p-0"
+                          >
+                            <span
+                              className={cn('h-5 w-5 rounded-full border border-white/70 shadow-inner')}
+                              style={gradientEndSwatchStyle}
+                            />
+                            <span className="sr-only">Select gradient end color</span>
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          side="left"
+                          align="center"
+                          sideOffset={16}
+                          collisionPadding={24}
+                          className="z-[3200] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
+                        >
+                          <div className="w-[320px] space-y-4 p-4">
+                            <ColorTray
+                              sections={SOLID_COLOR_SECTIONS}
+                              selectedId={gradientEndOption?.id ?? gradientEndToken}
+                              onSelect={option => {
+                                handleGradientColorSelect('backgroundGradientEnd', option);
+                                setGradientEndPopoverOpen(false);
+                              }}
+                              defaultSectionId={DEFAULT_SOLID_SECTION.id}
+                            />
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={gradientEndHex}
+                                onChange={event => handleGradientColorCommit('backgroundGradientEnd', event.target.value)}
+                                className="h-10 w-full cursor-pointer rounded-2xl border border-border"
+                              />
+                              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                                Custom
+                              </span>
+                            </div>
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                    </div>
                   </div>
                 </div>
+
                 <div className="space-y-2">
                   <Label className="text-xs font-semibold uppercase text-muted-foreground">Direction</Label>
                   <Select
