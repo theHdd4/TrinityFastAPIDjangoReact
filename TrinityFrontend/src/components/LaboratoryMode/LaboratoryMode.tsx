@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Play, Save, Share2, Undo2, List } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
+import ShareDialog from '@/components/ShareDialog/ShareDialog';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import {
   sanitizeLabConfig,
@@ -50,6 +51,11 @@ const LaboratoryMode = () => {
   const skipInitialLabCleanupRef = useRef(true);
   const reduceMotionRef = useRef(initialReduceMotion);
   const [isPreparingAnimation, setIsPreparingAnimation] = useState(!initialReduceMotion);
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const shareProjectName = useMemo(() => {
+    const context = getActiveProjectContext();
+    return context?.project_name ?? 'Laboratory Project';
+  }, []);
 
   useIsomorphicInsertionEffect(() => {
     const reduceMotion = prefersReducedMotion();
@@ -390,6 +396,7 @@ const LaboratoryMode = () => {
               size="sm"
               className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
               disabled={!canEdit}
+              onClick={() => canEdit && setIsShareDialogOpen(true)}
             >
               <Share2 className="w-4 h-4 mr-2" />
               Share
@@ -450,6 +457,12 @@ const LaboratoryMode = () => {
             />
           </div>
         </div>
+
+      <ShareDialog
+        open={isShareDialogOpen}
+        onOpenChange={setIsShareDialogOpen}
+        projectName={shareProjectName}
+      />
     </div>
   );
 };

@@ -13,6 +13,7 @@ import { useToast } from '@/hooks/use-toast';
 import { MOLECULES_API } from '@/lib/api';
 import { ReactFlowProvider } from 'reactflow';
 import './WorkflowMode.css';
+import ShareDialog from '@/components/ShareDialog/ShareDialog';
 
 interface SelectedAtom {
   atomName: string;
@@ -31,6 +32,7 @@ const WorkflowMode = () => {
   const [isAtomLibraryVisible, setIsAtomLibraryVisible] = useState(false);
   const [isRightPanelToolVisible, setIsRightPanelToolVisible] = useState(false);
   const [workflowName, setWorkflowName] = useState<string>('Untitled Workflow');
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -829,7 +831,7 @@ const WorkflowMode = () => {
               <Save className="w-4 h-4 mr-2" />
               Save
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => setIsShareDialogOpen(true)}>
               <Share2 className="w-4 h-4 mr-2" />
               Share
             </Button>
@@ -908,6 +910,11 @@ const WorkflowMode = () => {
 
       </div>
 
+      <ShareDialog
+        open={isShareDialogOpen}
+        onOpenChange={setIsShareDialogOpen}
+        projectName={workflowName}
+      />
     </div>
   );
 };
