@@ -215,6 +215,7 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   reducedMotion: false,
   slideNotesPosition: 'bottom',
   slideNotesVisible: false,
+  themeId: DEFAULT_EXHIBITION_THEME.id,
 };
 
 export interface PresentationSettings {
@@ -251,6 +252,7 @@ export interface PresentationSettings {
   reducedMotion?: boolean;
   slideNotesPosition?: SlideNotesPosition;
   slideNotesVisible?: boolean;
+  themeId?: string;
 }
 
 export interface DroppedAtom {
@@ -567,6 +569,10 @@ const ensurePresentationSettings = (
     ? candidate.backgroundMode
     : DEFAULT_PRESENTATION_SETTINGS.backgroundMode;
 
+  const backgroundLocked = typeof candidate.backgroundLocked === 'boolean'
+    ? candidate.backgroundLocked
+    : DEFAULT_PRESENTATION_SETTINGS.backgroundLocked ?? false;
+
   const backgroundSolidColor = isValidHexColor(candidate.backgroundSolidColor)
     ? candidate.backgroundSolidColor
     : DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
@@ -661,6 +667,10 @@ const ensurePresentationSettings = (
       ? candidate.slideNotesVisible
       : DEFAULT_PRESENTATION_SETTINGS.slideNotesVisible;
 
+  const themeId = isNonEmptyString(candidate.themeId)
+    ? candidate.themeId
+    : DEFAULT_PRESENTATION_SETTINGS.themeId;
+
   return {
     cardColor,
     cardWidth,
@@ -672,6 +682,7 @@ const ensurePresentationSettings = (
     backgroundColor,
     slideshowDuration,
     slideshowTransition,
+    backgroundLocked,
     backgroundMode,
     backgroundSolidColor,
     backgroundGradientStart,
@@ -694,8 +705,91 @@ const ensurePresentationSettings = (
     reducedMotion,
     slideNotesPosition,
     slideNotesVisible,
+    themeId,
   };
 };
+
+const clampOpacity = (value: number | undefined, fallback: number): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  const normalised = Math.min(100, Math.max(0, Math.round(value)));
+  return normalised;
+};
+
+const applyThemePresentation = (base: PresentationSettings, theme: ExhibitionTheme): PresentationSettings => {
+  const next: PresentationSettings = {
+    ...base,
+    themeId: theme.id,
+  };
+
+  const presentation = theme.presentation;
+  if (!presentation) {
+    return next;
+  }
+
+  if (typeof presentation.cardColor === 'string') {
+    next.cardColor = presentation.cardColor as PresentationSettings['cardColor'];
+  }
+
+  if (typeof presentation.cardWidth === 'string') {
+    next.cardWidth = presentation.cardWidth as PresentationSettings['cardWidth'];
+  }
+
+  if (typeof presentation.contentAlignment === 'string') {
+    next.contentAlignment = presentation.contentAlignment as PresentationSettings['contentAlignment'];
+  }
+
+  if (typeof presentation.fullBleed === 'boolean') {
+    next.fullBleed = presentation.fullBleed;
+  }
+
+  if (typeof presentation.backgroundMode === 'string') {
+    next.backgroundMode = presentation.backgroundMode;
+  }
+
+  if (typeof presentation.backgroundColor === 'string') {
+    next.backgroundColor = presentation.backgroundColor as PresentationSettings['backgroundColor'];
+  }
+
+  if (typeof presentation.backgroundSolidColor === 'string') {
+    next.backgroundSolidColor = presentation.backgroundSolidColor;
+  }
+
+  if (typeof presentation.backgroundGradientStart === 'string') {
+    next.backgroundGradientStart = presentation.backgroundGradientStart;
+  }
+
+  if (typeof presentation.backgroundGradientEnd === 'string') {
+    next.backgroundGradientEnd = presentation.backgroundGradientEnd;
+  }
+
+  if (typeof presentation.backgroundGradientDirection === 'string') {
+    next.backgroundGradientDirection = presentation.backgroundGradientDirection;
+  }
+
+  if (typeof presentation.backgroundOpacity === 'number') {
+    const fallback =
+      typeof next.backgroundOpacity === 'number'
+        ? next.backgroundOpacity
+        : DEFAULT_PRESENTATION_SETTINGS.backgroundOpacity ?? 100;
+    next.backgroundOpacity = clampOpacity(presentation.backgroundOpacity, fallback);
+  }
+
+  if ('accentImage' in presentation) {
+    next.accentImage = presentation.accentImage ?? null;
+  }
+
+  if ('accentImageName' in presentation) {
+    next.accentImageName = presentation.accentImageName ?? null;
+  }
+
+  return next;
+};
+
+const buildPresentationForTheme = (theme: ExhibitionTheme): PresentationSettings =>
+  applyThemePresentation({ ...DEFAULT_PRESENTATION_SETTINGS }, theme);
 
 const dedupeAtoms = (atoms: DroppedAtom[]): DroppedAtom[] => {
   const seen = new Set<string>();
@@ -1100,13 +1194,14 @@ const normaliseLayoutSlideObjects = (
   }, {} as Record<string, SlideObject[]>);
 };
 
-const createBlankSlide = (): LayoutCard =>
+const createBlankSlide = (theme?: ExhibitionTheme | null): LayoutCard =>
   withPresentationDefaults({
     id: `exhibition-slide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     atoms: [],
     catalogueAtoms: [],
     isExhibited: true,
     moleculeTitle: 'Untitled Slide',
+    presentationSettings: theme ? buildPresentationForTheme(theme) : undefined,
   });
 
 const normaliseProjectContext = (context?: ProjectContext | null): ProjectContext | null => {
@@ -1342,7 +1437,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       } else if (hasRemoteCards) {
         ensuredCards = [];
       } else {
-        ensuredCards = [createBlankSlide()];
+        ensuredCards = [createBlankSlide(state.activeTheme)];
         insertedBlankSlide = true;
       }
 
@@ -1477,7 +1572,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     let createdCard: LayoutCard | null = null;
 
     set(state => {
-      const newCard = createBlankSlide();
+      const newCard = createBlankSlide(state.activeTheme);
 
       createdCard = newCard;
 
@@ -1803,8 +1898,29 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         {} as Record<string, SlideObject[]>,
       );
 
+      const applyThemeToCards = (cards: LayoutCard[]): LayoutCard[] =>
+        cards.map(card => {
+          const currentSettings = ensurePresentationSettings(card.presentationSettings);
+          const nextSettings = currentSettings.backgroundLocked
+            ? { ...currentSettings, themeId: theme.id }
+            : applyThemePresentation(currentSettings, theme);
+
+          return {
+            ...card,
+            presentationSettings: nextSettings,
+          };
+        });
+
+      const cards = applyThemeToCards(state.cards);
+      const exhibitedCards = cards.filter(card => card.isExhibited);
+      const catalogueCards = applyThemeToCards(state.catalogueCards);
+
       return {
         activeTheme: theme,
+        cards,
+        exhibitedCards,
+        catalogueCards,
+        catalogueEntries: state.catalogueEntries,
         slideObjectsByCardId,
       };
     });
