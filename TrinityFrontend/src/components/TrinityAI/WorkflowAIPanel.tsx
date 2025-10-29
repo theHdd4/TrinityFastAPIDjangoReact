@@ -353,10 +353,16 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
               if (data.success === false) {
                 let content = '';
                 
-                // Prioritize answer field (simple, conversational) as main content
+                // Show answer first (direct response to the question), then smart_response (workflow guidance)
                 if (data.answer && data.answer.trim()) {
                   content = data.answer;
+                  
+                  // Add smart_response below the answer if it exists
+                  if (data.smart_response && data.smart_response.trim()) {
+                    content += '\n\n' + data.smart_response;
+                  }
                 } else if (data.smart_response && data.smart_response.trim()) {
+                  // If no answer, just show smart_response
                   content = data.smart_response;
                 } else if (data.message && data.message.trim()) {
                   content = data.message;
