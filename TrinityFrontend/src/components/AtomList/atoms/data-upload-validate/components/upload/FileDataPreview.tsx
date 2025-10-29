@@ -109,6 +109,17 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
     }
   };
 
+  // Auto-fetch metadata for all uploaded files immediately after upload
+  useEffect(() => {
+    uploadedFiles.forEach(file => {
+      // Only fetch if we don't have metadata yet and we're not currently loading
+      if (!filesMetadata[file.name] && !loading[file.name] && file.path && file.path !== '') {
+        fetchFileMetadata(file);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadedFiles.map(f => f.name).join(',')]);
+
   const toggleFile = (fileName: string) => {
     setOpenFiles(prev => {
       const newSet = new Set(prev);
@@ -416,7 +427,17 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
                           Changes Applied
                         </Badge>
                       )}
-                      {metadata && metadata.columns.some(col => col.missing_count > 0) && (
+                      {metadata && metadata.columns.some(col => {
+                        // Only show badge if there are unhandled missing values
+                        const hasMissingValues = col.missing_count > 0;
+                        if (!hasMissingValues) return false;
+                        
+                        // Check if user has selected a strategy other than 'none' or 'Keep as Missing'
+                        const strategy = missingValueStrategies[file.name]?.[col.name]?.strategy;
+                        const isUnhandled = !strategy || strategy === 'none';
+                        
+                        return isUnhandled;
+                      }) && (
                         <Badge className="bg-red-100 text-red-800 border-red-300 text-xs px-2 py-0.5">
                           <AlertCircle className="w-3 h-3 mr-1" />
                           Missing Values

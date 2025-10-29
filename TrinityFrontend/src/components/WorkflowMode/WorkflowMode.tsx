@@ -30,100 +30,49 @@ const WorkflowMode = () => {
   const [isRightPanelVisible, setIsRightPanelVisible] = useState(true);
   const [isAtomLibraryVisible, setIsAtomLibraryVisible] = useState(false);
   const [isRightPanelToolVisible, setIsRightPanelToolVisible] = useState(false);
+  const [workflowName, setWorkflowName] = useState<string>('Untitled Workflow');
   const { toast } = useToast();
   const navigate = useNavigate();
 
   // Load workflow state on component mount - always try MongoDB first, then localStorage
   useEffect(() => {
-    const loadWorkflowData = async () => {
-      console.log('🚀 Component mounted - attempting to load workflow data');
-      
+    const savedCanvasMolecules = localStorage.getItem('workflow-canvas-molecules');
+    const savedCustomMolecules = localStorage.getItem('workflow-custom-molecules');
+    const savedWorkflowName = localStorage.getItem('workflow-name');
+    
+    if (savedCanvasMolecules) {
       try {
-        // Always try MongoDB first (silent mode)
-        console.log('📡 Attempting to load from MongoDB...');
-        const mongoDataLoaded = await loadWorkflowConfiguration(false);
-        
-        if (mongoDataLoaded) {
-          console.log('✅ MongoDB data loaded successfully');
-          // Mark session as active after successful MongoDB load
-          sessionStorage.setItem('workflow-session-active', 'true');
-          return; // Exit early if MongoDB data was loaded
-        }
-        
-        console.log('⚠️ MongoDB returned no data, falling back to localStorage');
-        // Fallback to localStorage if MongoDB has no data
-        const savedCanvasMolecules = localStorage.getItem('workflow-canvas-molecules');
-        const savedCustomMolecules = localStorage.getItem('workflow-custom-molecules');
-        
-        if (savedCanvasMolecules) {
-          try {
-            const parsed = JSON.parse(savedCanvasMolecules);
-            setCanvasMolecules(parsed);
-            console.log('📦 Fallback: Loaded workflow from localStorage');
-          } catch (error) {
-            console.error('Error loading canvas molecules from localStorage:', error);
-          }
-        }
-        
-        if (savedCustomMolecules) {
-          try {
-            const parsed = JSON.parse(savedCustomMolecules);
-            setCustomMolecules(parsed);
-            console.log('📦 Fallback: Loaded custom molecules from localStorage');
-          } catch (error) {
-            console.error('Error loading custom molecules from localStorage:', error);
-          }
-        }
-        
-        // Mark session as active after loading (either from MongoDB or localStorage)
-        sessionStorage.setItem('workflow-session-active', 'true');
-        
+        const parsed = JSON.parse(savedCanvasMolecules);
+        setCanvasMolecules(parsed);
       } catch (error) {
-        console.error('❌ Error loading workflow data:', error);
-        
-        // Fallback to localStorage only
-        const savedCanvasMolecules = localStorage.getItem('workflow-canvas-molecules');
-        const savedCustomMolecules = localStorage.getItem('workflow-custom-molecules');
-        
-        if (savedCanvasMolecules) {
-          try {
-            const parsed = JSON.parse(savedCanvasMolecules);
-            setCanvasMolecules(parsed);
-            console.log('📦 Error fallback: Loaded workflow from localStorage');
-          } catch (error) {
-            console.error('Error loading canvas molecules from localStorage:', error);
-          }
-        }
-        
-        if (savedCustomMolecules) {
-          try {
-            const parsed = JSON.parse(savedCustomMolecules);
-            setCustomMolecules(parsed);
-            console.log('📦 Error fallback: Loaded custom molecules from localStorage');
-          } catch (error) {
-            console.error('Error loading custom molecules from localStorage:', error);
-          }
-        }
-        
-        // Mark session as active even after error fallback
-        sessionStorage.setItem('workflow-session-active', 'true');
+        console.error('Error loading canvas molecules:', error);
       }
-    };
+    }
+    
+    if (savedCustomMolecules) {
+      try {
+        const parsed = JSON.parse(savedCustomMolecules);
+        setCustomMolecules(parsed);
+      } catch (error) {
+        console.error('Error loading custom molecules:', error);
+      }
+    }
+    
+    if (savedWorkflowName) {
+      setWorkflowName(savedWorkflowName);
+    }
 
-    loadWorkflowData();
   }, []);
 
-  // Cleanup session storage when component unmounts (app close/refresh)
+  // Try to load saved workflow configuration from server on mount if no localStorage data
   useEffect(() => {
-    const handleBeforeUnload = () => {
-      sessionStorage.removeItem('workflow-session-active');
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    const savedCanvasMolecules = localStorage.getItem('workflow-canvas-molecules');
+    const savedCustomMolecules = localStorage.getItem('workflow-custom-molecules');
     
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
+    // Only try to load from server if no local data exists
+    if (!savedCanvasMolecules && !savedCustomMolecules) {
+      loadWorkflowConfiguration();
+    }
   }, []);
 
   // Save workflow state to localStorage whenever it changes
@@ -134,6 +83,10 @@ const WorkflowMode = () => {
   useEffect(() => {
     localStorage.setItem('workflow-custom-molecules', JSON.stringify(customMolecules));
   }, [customMolecules]);
+
+  useEffect(() => {
+    localStorage.setItem('workflow-name', workflowName);
+  }, [workflowName]);
 
   const handleMoleculeSelect = (moleculeId: string) => {
     setSelectedMoleculeId(moleculeId);
@@ -569,6 +522,7 @@ const WorkflowMode = () => {
         },
         credentials: 'include',
         body: JSON.stringify({
+          workflow_name: workflowName,
           canvas_molecules: canvasMolecules,
           custom_molecules: customMolecules,
           user_id: '', // Could be enhanced with actual user ID from session
@@ -644,19 +598,17 @@ const WorkflowMode = () => {
         console.log('📡 API response data:', result);
         
         if (result.workflow_data) {
-          const { canvas_molecules, custom_molecules } = result.workflow_data;
-          console.log('📡 Found workflow data - canvas_molecules:', canvas_molecules?.length || 0, 'custom_molecules:', custom_molecules?.length || 0);
+          const { workflow_name, canvas_molecules, custom_molecules } = result.workflow_data;
           
           // Update state with loaded data
+          setWorkflowName(workflow_name || 'Untitled Workflow');
           setCanvasMolecules(canvas_molecules || []);
           setCustomMolecules(custom_molecules || []);
           
-          if (showToast) {
-            toast({
-              title: "Workflow Loaded",
-              description: `Workflow configuration has been loaded successfully`,
-            });
-          }
+          toast({
+            title: "Workflow Loaded",
+            description: `Workflow "${workflow_name || 'Untitled Workflow'}" has been loaded successfully`,
+          });
           console.log('Workflow loaded:', result.workflow_data);
           return true; // Data was loaded successfully
         } else {
@@ -733,8 +685,10 @@ const WorkflowMode = () => {
   const clearWorkflowData = () => {
     setCanvasMolecules([]);
     setCustomMolecules([]);
+    setWorkflowName('Untitled Workflow');
     localStorage.removeItem('workflow-canvas-molecules');
     localStorage.removeItem('workflow-custom-molecules');
+    localStorage.removeItem('workflow-name');
     toast({
       title: 'Workflow Cleared',
       description: 'All molecules have been removed from the canvas'
@@ -854,8 +808,10 @@ const WorkflowMode = () => {
       {/* Workflow Header */}
       <div className="bg-card border-b border-border px-8 py-6 flex-shrink-0 relative z-20">
         <div className="flex items-center justify-between">
-              <div>
-            <h1 className="text-3xl font-semibold text-foreground mb-2">Workflow Mode</h1>
+          <div className="flex-1 max-w-2xl">
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-3xl font-semibold text-foreground">Workflow Mode</h1>
+            </div>
             <p className="text-muted-foreground">
               Drag molecules from the list onto the workflow canvas. Connect molecules by drawing arrows between them.
             </p>
@@ -946,6 +902,7 @@ const WorkflowMode = () => {
             assignedAtoms={assignedAtoms}
             onAtomLibraryVisibilityChange={handleAtomLibraryVisibilityChange}
             onRightPanelToolVisibilityChange={handleRightPanelToolVisibilityChange}
+            onMoleculeAdd={handleMoleculeAdd}
           />
         </div>
 

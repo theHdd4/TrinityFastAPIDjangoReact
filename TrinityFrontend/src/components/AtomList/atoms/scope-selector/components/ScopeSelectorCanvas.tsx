@@ -930,13 +930,8 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     setCardinalityError(null);
     
     try {
-      const formData = new FormData();
-      formData.append('validator_atom_id', '');
-      formData.append('file_key', data.dataSource);
-      formData.append('bucket_name', 'trinity');
-      formData.append('object_names', data.dataSource);
-      
-      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
+      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(data.dataSource)}`;
+      const res = await fetch(url);
       const data_result = await res.json();
       
       if (data_result.status === 'SUCCESS' && data_result.cardinality) {

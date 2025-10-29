@@ -1,46 +1,39 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  AreaChart,
   BarChart3,
-  Calendar,
-  Circle,
-  Columns3,
-  GanttChartSquare,
   LineChart,
   PieChart,
+  Columns3,
+  Circle,
+  LayoutGrid,
+  Calendar,
+  GanttChart,
   Plus,
-  Square,
   Trash2,
-  TrendingUp,
   X,
+  TrendingUp,
   Table as TableIcon,
   Palette as PaletteIcon,
+  Type,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
-import type { ChartColorScheme, ChartConfig, ChartDataRow } from './types';
+import type { ChartConfig, ChartDataRow, EditableChartType, DiagramChartType } from './types';
 import {
   COLOR_SCHEMES,
+  chartTypeOptions,
+  diagramTypeOptions,
   DEFAULT_CHART_CONFIG,
   DEFAULT_CHART_DATA,
-  applyAlphaToHex,
-  normalizeChartType,
-} from './constants';
+  isEditableChartType,
+} from './utils';
+import SlideChart from './SlideChart';
 
 interface ChartDataEditorProps {
   open: boolean;
@@ -48,380 +41,195 @@ interface ChartDataEditorProps {
   onSave: (data: ChartDataRow[], config: ChartConfig) => void;
   initialData?: ChartDataRow[];
   initialConfig?: ChartConfig;
-  onApply?: (data: ChartDataRow[], config: ChartConfig) => void;
 }
 
-const chartTypeGroups = [
-  {
-    label: 'Charts',
-    types: [
-      { id: 'verticalBar' as ChartConfig['type'], icon: Columns3, name: 'Column' },
-      { id: 'horizontalBar' as ChartConfig['type'], icon: BarChart3, name: 'Bar' },
-      { id: 'line' as ChartConfig['type'], icon: LineChart, name: 'Line' },
-      { id: 'area' as ChartConfig['type'], icon: AreaChart, name: 'Area' },
-      { id: 'pie' as ChartConfig['type'], icon: PieChart, name: 'Pie' },
-      { id: 'donut' as ChartConfig['type'], icon: Circle, name: 'Donut' },
-    ],
-  },
-  {
-    label: 'Diagrams',
-    types: [
-      { id: 'blank' as ChartConfig['type'], icon: Square, name: 'Blank' },
-      { id: 'calendar' as ChartConfig['type'], icon: Calendar, name: 'Calendar' },
-      { id: 'gantt' as ChartConfig['type'], icon: GanttChartSquare, name: 'Gantt' },
-    ],
-  },
+const chartTypes: { id: EditableChartType; icon: React.ComponentType<{ className?: string }>; name: string }[] = [
+  { id: 'column', icon: Columns3, name: 'Column' },
+  { id: 'bar', icon: BarChart3, name: 'Bar' },
+  { id: 'line', icon: LineChart, name: 'Line' },
+  { id: 'pie', icon: PieChart, name: 'Pie' },
+  { id: 'donut', icon: Circle, name: 'Donut' },
+];
+
+const diagramTypes: { id: DiagramChartType; icon: React.ComponentType<{ className?: string }>; name: string }[] = [
+  { id: 'blank', icon: LayoutGrid, name: 'Blank' },
+  { id: 'calendar', icon: Calendar, name: 'Calendar' },
+  { id: 'gantt', icon: GanttChart, name: 'Gantt' },
 ];
 
 const legendPositions = [
-  { id: 'top' as ChartConfig['legendPosition'], name: 'Top' },
-  { id: 'bottom' as ChartConfig['legendPosition'], name: 'Bottom' },
-  { id: 'left' as ChartConfig['legendPosition'], name: 'Left' },
-  { id: 'right' as ChartConfig['legendPosition'], name: 'Right' },
+  { id: 'top', name: 'Top' },
+  { id: 'bottom', name: 'Bottom' },
+  { id: 'left', name: 'Left' },
+  { id: 'right', name: 'Right' },
 ];
 
-const sanitiseData = (rows?: ChartDataRow[]): ChartDataRow[] => {
-  const source = rows && rows.length ? rows : DEFAULT_CHART_DATA;
-  return source.map(row => ({
-    label: row.label ?? '',
-    value:
-      row.value === undefined || row.value === null || Number.isNaN(Number(row.value))
-        ? 0
-        : Number(row.value),
-  }));
-};
-
-type DraftRow = {
-  label: string;
-  value: string;
-};
-
-const createDraftRows = (rows: ChartDataRow[]): DraftRow[] =>
-  rows.map(row => ({
-    label: row.label ?? '',
-    value: Number.isFinite(row.value) ? String(row.value) : '0',
-  }));
-
-const parseDraftValue = (value: string): number => {
-  const numericValue = Number.parseFloat(value);
-  if (!Number.isFinite(numericValue)) {
-    return 0;
-  }
-  return numericValue;
-};
-
-const convertDraftsToChartData = (rows: DraftRow[]): ChartDataRow[] =>
-  sanitiseData(
-    rows.map(row => ({
-      label: row.label ?? '',
-      value: parseDraftValue(row.value ?? ''),
-    })),
-  );
-
-const sanitiseConfig = (config?: ChartConfig): ChartConfig => {
-  const merged = { ...DEFAULT_CHART_CONFIG, ...(config ?? {}) };
-  return {
-    ...merged,
-    type: normalizeChartType(merged.type),
-    colorScheme: merged.colorScheme ?? DEFAULT_CHART_CONFIG.colorScheme,
-    showLabels: merged.showLabels ?? DEFAULT_CHART_CONFIG.showLabels,
-    showValues: merged.showValues ?? DEFAULT_CHART_CONFIG.showValues,
-    horizontalAlignment: merged.horizontalAlignment ?? DEFAULT_CHART_CONFIG.horizontalAlignment,
-    axisIncludesZero: merged.axisIncludesZero ?? DEFAULT_CHART_CONFIG.axisIncludesZero,
-    legendPosition: merged.legendPosition ?? DEFAULT_CHART_CONFIG.legendPosition,
-  };
-};
-
-export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
+const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   open,
   onClose,
   onSave,
   initialData,
   initialConfig,
-  onApply,
 }) => {
-  const [chartData, setChartData] = useState<ChartDataRow[]>(() => sanitiseData(initialData));
-  const [draftRows, setDraftRows] = useState<DraftRow[]>(() =>
-    createDraftRows(sanitiseData(initialData)),
+  const [chartData, setChartData] = useState<ChartDataRow[]>(
+    initialData && initialData.length > 0
+      ? initialData.map(row => ({ ...row }))
+      : [...DEFAULT_CHART_DATA],
   );
-  const [config, setConfig] = useState<ChartConfig>(() => sanitiseConfig(initialConfig));
-  const [isInitialised, setIsInitialised] = useState(false);
-  const configRef = useRef(config);
+
+  const [config, setConfig] = useState<ChartConfig>(() => {
+    const fallback: ChartConfig = { ...DEFAULT_CHART_CONFIG };
+    const candidate: ChartConfig = initialConfig ? { ...fallback, ...initialConfig } : { ...fallback };
+    const allowedTypes = new Set<string>([...chartTypeOptions, ...diagramTypeOptions]);
+    if (!allowedTypes.has(candidate.type)) {
+      candidate.type = fallback.type;
+    }
+    return candidate;
+  });
+
+  const [legendPosition, setLegendPosition] = useState<ChartConfig['legendPosition']>(
+    () => config.legendPosition ?? DEFAULT_CHART_CONFIG.legendPosition,
+  );
 
   useEffect(() => {
-    configRef.current = config;
-  }, [config]);
-
-  useEffect(() => {
-    if (open && !isInitialised) {
-      const nextData = sanitiseData(initialData);
-      const nextConfig = sanitiseConfig(initialConfig);
-      setChartData(nextData);
-      setDraftRows(createDraftRows(nextData));
-      setConfig(nextConfig);
-      configRef.current = nextConfig;
-      setIsInitialised(true);
-      return;
-    }
-
-    if (!open && isInitialised) {
-      setIsInitialised(false);
-    }
-  }, [open, initialData, initialConfig, isInitialised]);
-
-  const colors = useMemo(() => {
-    const scheme = COLOR_SCHEMES.find(s => s.id === config.colorScheme);
-    return scheme?.colors ?? COLOR_SCHEMES[0].colors;
-  }, [config.colorScheme]);
-
-  const clampDiagramValue = (value: number) => {
-    if (!Number.isFinite(value)) {
-      return 0;
-    }
-    if (value < 0) {
-      return 0;
-    }
-    if (value > 100) {
-      return 100;
-    }
-    return value;
-  };
-
-  const diagramBackground = (color: string, value: number) => {
-    const intensity = clampDiagramValue(value) / 100;
-    return applyAlphaToHex(color, 0.25 + intensity * 0.5);
-  };
-
-  const colorSchemeGroups = useMemo(() => {
-    const map = new Map<string, ChartColorScheme[]>();
-    COLOR_SCHEMES.forEach(scheme => {
-      const key = scheme.category ?? 'other';
-      const existing = map.get(key);
-      if (existing) {
-        existing.push(scheme);
-      } else {
-        map.set(key, [scheme]);
-      }
-    });
-    return Array.from(map.entries()).map(([category, schemes]) => ({ category, schemes }));
-  }, []);
-
-  const formatCategory = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
-
-  const normalizedType = useMemo(() => normalizeChartType(config.type), [config.type]);
-  const isDiagramType = normalizedType === 'blank' || normalizedType === 'calendar' || normalizedType === 'gantt';
-
-  const emitApply = (nextData: ChartDataRow[], nextConfig: ChartConfig) => {
-    onApply?.(nextData.map(item => ({ ...item })), nextConfig);
-  };
+    setLegendPosition(config.legendPosition ?? DEFAULT_CHART_CONFIG.legendPosition);
+  }, [config.legendPosition]);
 
   const addRow = () => {
-    setDraftRows(prev => {
-      const nextDrafts = [...prev, { label: 'New Item', value: '0' }];
-      const nextData = convertDraftsToChartData(nextDrafts);
-      setChartData(nextData);
-      emitApply(nextData, configRef.current);
-      return nextDrafts;
-    });
+    setChartData(prev => [...prev, { label: 'New Item', value: 0 }]);
   };
 
   const updateRow = (index: number, field: 'label' | 'value', value: string | number) => {
-    setDraftRows(prev => {
-      const nextDrafts = prev.map((row, rowIndex) => {
-        if (rowIndex !== index) {
-          return row;
-        }
-
-        if (field === 'label') {
-          return {
-            ...row,
-            label: typeof value === 'string' ? value : String(value ?? ''),
-          };
-        }
-
-        return {
-          ...row,
-          value: typeof value === 'string' ? value : String(value ?? ''),
-        };
-      });
-
-      const nextData = convertDraftsToChartData(nextDrafts);
-      setChartData(nextData);
-      emitApply(nextData, configRef.current);
-      return nextDrafts;
+    setChartData(prev => {
+      const next = [...prev];
+      const existing = next[index] ?? { label: '', value: 0 };
+      next[index] = { ...existing, [field]: value };
+      return next;
     });
   };
 
   const deleteRow = (index: number) => {
-    setDraftRows(prev => {
-      if (prev.length <= 1) {
-        return prev;
-      }
-
-      const nextDrafts = prev.filter((_, rowIndex) => rowIndex !== index);
-      const nextData = convertDraftsToChartData(nextDrafts);
-      setChartData(nextData);
-      emitApply(nextData, configRef.current);
-      return nextDrafts;
-    });
-  };
-
-  const handleConfigChange = (partial: Partial<ChartConfig>) => {
-    const nextConfig = { ...config, ...partial };
-    setConfig(nextConfig);
-    configRef.current = nextConfig;
-    emitApply(chartData, nextConfig);
+    setChartData(prev => prev.filter((_, idx) => idx !== index));
   };
 
   const handleSave = () => {
-    const normalisedConfig: ChartConfig = { ...config };
-    const outputData = chartData.map(item => ({ ...item }));
-    onApply?.(outputData, normalisedConfig);
-    onSave(outputData, normalisedConfig);
+    onSave(chartData.filter(row => row.label.trim().length > 0), config);
     onClose();
   };
 
-  const renderChartPreview = () => {
+  const colorSchemeGroups = useMemo(() => {
+    return COLOR_SCHEMES.reduce<Record<string, typeof COLOR_SCHEMES[number][]>>((acc, scheme) => {
+      const current = acc[scheme.category] ?? [];
+      acc[scheme.category] = [...current, scheme];
+      return acc;
+    }, {});
+  }, []);
+  const selectedScheme = useMemo(
+    () => COLOR_SCHEMES.find(scheme => scheme.id === config.colorScheme) ?? COLOR_SCHEMES[0],
+    [config.colorScheme],
+  );
+  const isDiagramTypeSelected = useMemo(
+    () => (diagramTypeOptions as readonly string[]).includes(config.type),
+    [config.type],
+  );
+  const showDataTable = isEditableChartType(config.type) || config.type === 'gantt';
+  const dataPanelTitle = showDataTable
+    ? isDiagramTypeSelected
+      ? 'Diagram data'
+      : 'Chart data'
+    : 'Diagram data';
+  const dataPanelDescription = showDataTable
+    ? isDiagramTypeSelected
+      ? 'Update the data used to render this diagram.'
+      : 'Enter your data values below'
+    : config.type === 'blank'
+      ? 'Blank diagrams do not require tabular data.'
+      : 'Calendar diagrams generate their layout automatically.';
+  const colors = useMemo(() => selectedScheme.colors, [selectedScheme]);
+
+  const renderChartLegend = () => {
+    if (!config.showLabels || !isEditableChartType(config.type) || chartData.length === 0) {
+      return null;
+    }
+
+    const orientation = config.legendPosition === 'left' || config.legendPosition === 'right' ? 'vertical' : 'horizontal';
+
+    return (
+      <div
+        className={cn(
+          orientation === 'vertical'
+            ? 'flex flex-col gap-3 items-start'
+            : 'flex flex-wrap gap-3 justify-center',
+        )}
+      >
+        {chartData.map((item, index) => (
+          <div
+            key={`${item.label}-${index}`}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card/50 border border-border/30 hover:border-primary/40 transition-all hover:scale-105 group"
+            style={{ animationDelay: `${index * 100}ms` }}
+          >
+            <span
+              className="w-3.5 h-3.5 rounded-full ring-2 ring-offset-1 ring-offset-card group-hover:scale-125 transition-transform"
+              style={{
+                backgroundColor: colors[index % colors.length],
+                boxShadow: `0 0 8px ${colors[index % colors.length]}40`,
+              }}
+            />
+            <span className="text-sm font-medium text-foreground">{item.label}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderEditableChartPreview = () => {
+    if (!isEditableChartType(config.type)) {
+      return null;
+    }
+
     if (chartData.length === 0) {
       return (
-        <div className="flex h-64 w-full items-center justify-center text-sm text-muted-foreground">
-          Add data to preview your chart or diagram.
+        <div className="w-full h-64 flex items-center justify-center text-sm text-muted-foreground">
+          Add chart data to see the preview
         </div>
       );
     }
 
-    const diagramData = chartData.map((item, index) => ({
-      label: item.label || `Item ${index + 1}`,
-      value: Number.isFinite(item.value) ? item.value : 0,
-    }));
-
-    if (normalizedType === 'blank') {
-      return (
-        <div className="flex h-64 w-full items-center justify-center">
-          <div className="rounded-2xl border border-dashed border-border/50 px-8 py-10 text-center">
-            <p className="text-base font-semibold text-foreground">Blank diagram</p>
-            <p className="mt-2 text-sm text-muted-foreground">Use the data table to plan or annotate your layout.</p>
-          </div>
-        </div>
-      );
-    }
-
-    if (normalizedType === 'calendar') {
-      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      const rowsPerDay = 4;
-      const eventsByDay = days.map(() => [] as typeof diagramData);
-      diagramData.forEach((entry, index) => {
-        eventsByDay[index % days.length].push(entry);
-      });
-
-      return (
-        <div className="flex h-64 w-full items-center justify-center">
-          <div className="grid h-full w-full max-w-[26rem] grid-cols-7 gap-1 p-4 text-[0.7rem]">
-            {days.map((day, dayIndex) => (
-              <div key={day} className="flex flex-col gap-1">
-                <span className="text-[0.6rem] font-semibold uppercase tracking-wide text-muted-foreground">{day}</span>
-                {Array.from({ length: rowsPerDay }).map((_, slotIndex) => {
-                  const event = eventsByDay[dayIndex][slotIndex];
-                  const color = colors[(dayIndex + slotIndex) % colors.length];
-                  const background = event ? diagramBackground(color, event.value) : `${color}1a`;
-
-                  return (
-                    <div
-                      key={`${day}-${slotIndex}`}
-                      className="flex h-10 flex-col items-center justify-center rounded border border-border/40 px-2 text-center"
-                      style={{ backgroundColor: background }}
-                    >
-                      {event && config.showLabels && (
-                        <span className="w-full truncate text-[0.6rem] font-semibold text-foreground">{event.label}</span>
-                      )}
-                      {event && config.showValues && (
-                        <span className="text-[0.55rem] text-muted-foreground">Value: {event.value}</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    if (normalizedType === 'gantt') {
-      const maxValue = Math.max(...diagramData.map(entry => entry.value), 1);
-
-      return (
-        <div className="flex h-64 w-full items-center justify-center">
-          <div className="flex w-full max-w-[28rem] flex-col gap-3 p-6">
-            {diagramData.map((item, index) => {
-              const ratio = maxValue === 0 ? 0 : item.value / maxValue;
-              const widthPercent = `${Math.max(ratio * 100, 6)}%`;
-              const offsetPercent = `${Math.min(index * 8, 80)}%`;
-              const color = colors[index % colors.length];
-
-              return (
-                <div key={`${item.label}-${index}`} className="flex items-center gap-3">
-                  {config.showLabels && (
-                    <span className="w-20 truncate text-xs font-medium text-muted-foreground">{item.label}</span>
-                  )}
-                  <div className="relative h-8 flex-1 rounded-full bg-muted/40">
-                    <div
-                      className="absolute top-1/2 h-5 -translate-y-1/2 rounded-full shadow-sm transition-all duration-300"
-                      style={{ left: offsetPercent, width: widthPercent, backgroundColor: color }}
-                    />
-                  </div>
-                  {config.showValues && (
-                    <span className="w-12 text-right text-xs font-semibold text-foreground">{item.value}</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      );
-    }
-
-    if (normalizedType === 'pie' || normalizedType === 'donut') {
+    if (config.type === 'pie' || config.type === 'donut') {
       const total = chartData.reduce((sum, item) => sum + item.value, 0);
-      if (total <= 0) {
-        return (
-          <div className="flex h-64 w-full items-center justify-center text-sm text-muted-foreground">
-            Add values above zero to preview this chart.
-          </div>
-        );
-      }
-      let currentAngle = 0;
+      let currentAngle = -90;
 
       return (
-        <div className="relative flex h-64 w-full items-center justify-center">
-          <svg width="200" height="200" viewBox="0 0 200 200" className="-rotate-90">
+        <div className="relative w-full h-64 flex items-center justify-center">
+          <svg width="220" height="220" viewBox="0 0 220 220" className="transform -rotate-90">
             {chartData.map((item, index) => {
-              const percentage = (item.value / total) * 100;
-              const angle = (percentage / 100) * 360;
+              const percentage = total === 0 ? 0 : (item.value / total) * 360;
               const startAngle = currentAngle;
-              currentAngle += angle;
+              const endAngle = currentAngle + percentage;
+              currentAngle = endAngle;
 
-              const startX = 100 + 80 * Math.cos((startAngle * Math.PI) / 180);
-              const startY = 100 + 80 * Math.sin((startAngle * Math.PI) / 180);
-              const endX = 100 + 80 * Math.cos((currentAngle * Math.PI) / 180);
-              const endY = 100 + 80 * Math.sin((currentAngle * Math.PI) / 180);
+              const radius = 90;
+              const innerRadius = config.type === 'donut' ? 50 : 0;
 
-              const largeArcFlag = angle > 180 ? 1 : 0;
+              const startX = 110 + radius * Math.cos((startAngle * Math.PI) / 180);
+              const startY = 110 + radius * Math.sin((startAngle * Math.PI) / 180);
+              const endX = 110 + radius * Math.cos((endAngle * Math.PI) / 180);
+              const endY = 110 + radius * Math.sin((endAngle * Math.PI) / 180);
 
-              const innerRadius = normalizedType === 'donut' ? 40 : 0;
-              const innerStartX = 100 + innerRadius * Math.cos((startAngle * Math.PI) / 180);
-              const innerStartY = 100 + innerRadius * Math.sin((startAngle * Math.PI) / 180);
-              const innerEndX = 100 + innerRadius * Math.cos((currentAngle * Math.PI) / 180);
-              const innerEndY = 100 + innerRadius * Math.sin((currentAngle * Math.PI) / 180);
+              const innerStartX = 110 + innerRadius * Math.cos((startAngle * Math.PI) / 180);
+              const innerStartY = 110 + innerRadius * Math.sin((startAngle * Math.PI) / 180);
+              const innerEndX = 110 + innerRadius * Math.cos((endAngle * Math.PI) / 180);
+              const innerEndY = 110 + innerRadius * Math.sin((endAngle * Math.PI) / 180);
 
-              const pathData =
-                normalizedType === 'donut'
-                  ? `M ${startX} ${startY} A 80 80 0 ${largeArcFlag} 1 ${endX} ${endY} L ${innerEndX} ${innerEndY} A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${innerStartX} ${innerStartY} Z`
-                  : `M 100 100 L ${startX} ${startY} A 80 80 0 ${largeArcFlag} 1 ${endX} ${endY} Z`;
+              const largeArcFlag = percentage > 180 ? 1 : 0;
+
+              const pathData = config.type === 'donut'
+                ? `M ${startX} ${startY} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endX} ${endY} L ${innerEndX} ${innerEndY} A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${innerStartX} ${innerStartY} Z`
+                : `M 110 110 L ${startX} ${startY} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endX} ${endY} Z`;
 
               return (
                 <path
-                  key={`${item.label || 'slice'}-${index}`}
+                  key={`${item.label}-${index}`}
                   d={pathData}
                   fill={colors[index % colors.length]}
                   className="transition-all duration-300 hover:opacity-80"
@@ -433,47 +241,38 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       );
     }
 
-    if (normalizedType === 'verticalBar' || normalizedType === 'horizontalBar') {
+    if (config.type === 'bar') {
       const maxValue = Math.max(...chartData.map(item => item.value), 0);
-      const isBar = normalizedType === 'horizontalBar';
+      const safeMax = maxValue === 0 ? 1 : maxValue;
 
       return (
-        <div
-          className={cn(
-            'flex h-64 w-full gap-4 p-4',
-            isBar ? 'flex-col justify-center' : 'items-end justify-center',
-          )}
-        >
+        <div className="w-full h-64 flex flex-col gap-3 justify-center p-6">
           {chartData.map((item, index) => {
-            const ratio = maxValue === 0 ? 0 : (item.value / maxValue) * 100;
+            const percentage = (item.value / safeMax) * 100;
+
             return (
               <div
-                key={`${item.label || 'bar'}-${index}`}
-                className={cn('flex gap-2', isBar ? 'flex-row items-center' : 'flex-col items-center justify-end')}
+                key={`${item.label}-${index}`}
+                className="flex w-full items-center gap-3 animate-fade-in"
+                style={{ animationDelay: `${index * 120}ms` }}
               >
-                <div
-                  className="rounded-lg transition-all duration-300 hover:opacity-80"
-                  style={{
-                    backgroundColor: colors[index % colors.length],
-                    [isBar ? 'width' : 'height']: `${ratio}%`,
-                    [isBar ? 'height' : 'width']: '40px',
-                    [isBar ? 'minWidth' : 'minHeight']: '20px',
-                    minHeight: isBar ? undefined : '6px',
-                    minWidth: isBar ? '6px' : undefined,
-                  }}
-                />
-                {(config.showLabels || config.showValues) && (
+                {config.showLabels && (
+                  <span className="text-xs text-muted-foreground font-medium min-w-[64px] text-right">
+                    {item.label}
+                  </span>
+                )}
+                <div className="flex-1 h-10 rounded-lg bg-muted/40">
                   <div
-                    className={cn(
-                      'flex flex-col items-center gap-1 text-xs text-muted-foreground',
-                      isBar && 'items-start',
-                    )}
-                  >
-                    {config.showValues && (
-                      <span className="text-foreground">{Number.isFinite(item.value) ? item.value : 0}</span>
-                    )}
-                    {config.showLabels && <span>{item.label || 'Label'}</span>}
-                  </div>
+                    className="h-full rounded-lg transition-all duration-300 hover:opacity-80"
+                    style={{
+                      backgroundColor: colors[index % colors.length],
+                      width: `${Math.max(0, percentage)}%`,
+                      minWidth: item.value > 0 ? '4px' : '0',
+                    }}
+                  />
+                </div>
+                {config.showValues && (
+                  <span className="text-xs font-semibold text-foreground min-w-[36px] text-right">{item.value}</span>
                 )}
               </div>
             );
@@ -482,86 +281,174 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
       );
     }
 
-    if (normalizedType === 'line' || normalizedType === 'area') {
-      const maxValue = Math.max(...chartData.map(item => item.value), 0);
-      const points = chartData
-        .map((item, index) => {
-          const x = chartData.length <= 1 ? 0 : (index / (chartData.length - 1)) * 300;
-          const y = 200 - (maxValue === 0 ? 0 : (item.value / maxValue) * 180);
-          return `${x},${y}`;
-        })
-        .join(' ');
+    if (config.type === 'column') {
+      const maxValue = Math.max(...chartData.map(item => Math.abs(item.value)), 0);
+      const safeMax = maxValue === 0 ? 1 : maxValue;
 
       return (
-        <div className="flex h-64 w-full flex-col items-center justify-center gap-4">
-          <svg width="320" height="220" viewBox="0 0 320 220">
-            {normalizedType === 'area' && (
-              <polygon points={`0,200 ${points} 300,200`} fill={`${colors[0]}33`} stroke="none" />
-            )}
-            <polyline points={points} fill="none" stroke={colors[0]} strokeWidth="3" className="transition-all duration-300" />
-            {chartData.map((item, index) => {
-              const x = chartData.length <= 1 ? 0 : (index / (chartData.length - 1)) * 300;
-              const y = 200 - (maxValue === 0 ? 0 : (item.value / maxValue) * 180);
-              return (
-                <g key={`${item.label || 'point'}-${index}`}>
-                  <circle
-                    cx={x}
-                    cy={y}
-                    r="5"
-                    fill={colors[index % colors.length]}
-                    className="transition-all duration-300 hover:r-7"
-                  />
-                  {config.showValues && (
-                    <text x={x} y={y - 12} textAnchor="middle" className="fill-foreground text-xs font-semibold">
-                      {Number.isFinite(item.value) ? item.value : 0}
-                    </text>
-                  )}
-                </g>
-              );
-            })}
-          </svg>
-          {config.showLabels && (
-            <div className="flex w-full justify-between px-8 text-xs text-muted-foreground">
-              {chartData.map((item, index) => (
-                <span key={`${item.label || 'axis'}-${index}`}>{item.label || `Item ${index + 1}`}</span>
-              ))}
-            </div>
-          )}
+        <div className="w-full h-64 flex items-end justify-center gap-4 p-6">
+          {chartData.map((item, index) => {
+            const ratio = Math.max(0, Math.abs(item.value)) / safeMax;
+            const percentage = ratio * 100;
+
+            return (
+              <div
+                key={`${item.label}-${index}`}
+                className="flex h-full flex-1 max-w-[60px] flex-col items-center justify-end gap-2 animate-fade-in"
+                style={{ animationDelay: `${index * 120}ms` }}
+              >
+                <div
+                  className="w-full rounded-t-lg transition-all duration-300 hover:scale-105 hover:opacity-90"
+                  style={{
+                    height: `${percentage}%`,
+                    minHeight: Math.abs(item.value) > 0 ? '4px' : '0',
+                    backgroundColor: colors[index % colors.length],
+                  }}
+                />
+                {config.showLabels && (
+                  <span className="text-xs text-muted-foreground text-center font-medium">{item.label}</span>
+                )}
+                {config.showValues && (
+                  <span className="text-xs font-semibold text-foreground">{item.value}</span>
+                )}
+              </div>
+            );
+          })}
         </div>
       );
     }
 
-    return null;
+    const maxValue = Math.max(...chartData.map(item => item.value), 0);
+    const safeMax = maxValue === 0 ? 1 : maxValue;
+    const points = chartData
+      .map((item, index) => {
+        const x = chartData.length <= 1 ? 160 : (index / (chartData.length - 1)) * 320;
+        const y = 200 - (item.value / safeMax) * 180;
+        return `${x},${y}`;
+      })
+      .join(' ');
+
+    return (
+      <div className="w-full h-64 flex items-center justify-center">
+        <svg width="340" height="220" viewBox="0 0 340 220">
+          <polyline
+            points={points}
+            fill="none"
+            stroke={colors[0]}
+            strokeWidth={3}
+            className="transition-all duration-300"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          {chartData.map((item, index) => {
+            const x = chartData.length <= 1 ? 160 : (index / (chartData.length - 1)) * 320;
+            const y = 200 - (item.value / safeMax) * 180;
+            return (
+              <g key={`${item.label}-${index}`}>
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={5}
+                  fill={colors[index % colors.length]}
+                  className="transition-all duration-300 hover:r-7"
+                />
+                {config.showValues && (
+                  <text x={x} y={y - 12} textAnchor="middle" fontSize={12} fontWeight="bold">
+                    {item.value}
+                  </text>
+                )}
+                {config.showLabels && (
+                  <text x={x} y={212} textAnchor="middle" fontSize={12}>
+                    {item.label}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    );
+  };
+
+  const renderPreviewCard = () => {
+    if (!isEditableChartType(config.type)) {
+      return (
+        <div className="rounded-xl border border-border/40 bg-card p-6 shadow-sm">
+          <div className="w-full h-64 rounded-lg bg-muted/20 border border-border/30 flex items-center justify-center overflow-hidden">
+            <SlideChart data={chartData} config={config} className="w-full h-full max-w-full" />
+          </div>
+        </div>
+      );
+    }
+
+    const chartContent = renderEditableChartPreview();
+    const legend = renderChartLegend();
+
+    if (!legend) {
+      return (
+        <div className="rounded-xl border border-border/40 bg-card p-8 shadow-sm">
+          {chartContent}
+        </div>
+      );
+    }
+
+    if (config.legendPosition === 'left') {
+      return (
+        <div className="rounded-xl border border-border/40 bg-card p-8 shadow-sm">
+          <div className="flex items-stretch gap-6">
+            <div className="pr-6 border-r border-border/20 flex flex-col justify-center">{legend}</div>
+            <div className="flex-1">{chartContent}</div>
+          </div>
+        </div>
+      );
+    }
+
+    if (config.legendPosition === 'right') {
+      return (
+        <div className="rounded-xl border border-border/40 bg-card p-8 shadow-sm">
+          <div className="flex items-stretch gap-6">
+            <div className="flex-1">{chartContent}</div>
+            <div className="pl-6 border-l border-border/20 flex flex-col justify-center">{legend}</div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="rounded-xl border border-border/40 bg-card p-8 shadow-sm">
+        {config.legendPosition === 'top' && (
+          <div className="pb-6 mb-6 border-b border-border/20">{legend}</div>
+        )}
+        {chartContent}
+        {config.legendPosition === 'bottom' && (
+          <div className="mt-8 pt-6 border-t border-border/20">{legend}</div>
+        )}
+      </div>
+    );
   };
 
   return (
-    <Dialog open={open} onOpenChange={isOpen => !isOpen && onClose()}>
-      <DialogContent
-        hideCloseButton
-        className="h-[85vh] max-w-6xl gap-0 overflow-hidden border-2 border-border/50 bg-gradient-to-br from-background via-background/98 to-primary/5 p-0 shadow-2xl"
-      >
-        <DialogHeader className="relative overflow-hidden border-b border-border/50 bg-gradient-to-br from-primary/5 via-transparent to-transparent px-8 pb-6 pt-8">
-          <div className="absolute inset-0 bg-grid-white/5 [mask-image:linear-gradient(0deg,transparent,black)]" />
-          <div className="relative flex items-start justify-between">
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <div className="absolute inset-0 animate-pulse rounded-2xl bg-gradient-to-br from-blue-500 to-purple-500 opacity-30 blur-xl" />
-                <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 ring-2 ring-blue-500/30 backdrop-blur-xl">
-                  <TableIcon className="h-7 w-7 text-blue-500" />
-                </div>
+    <Dialog open={open} onOpenChange={state => { if (!state) onClose(); }}>
+      <DialogContent className="max-w-7xl h-[90vh] p-0 gap-0 bg-background border border-border/60 shadow-[0_8px_30px_rgba(0,0,0,0.12)] overflow-hidden">
+        <DialogHeader className="px-8 pt-8 pb-6 border-b border-border/40 bg-muted/30">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-5">
+              <div className="h-14 w-14 rounded-xl bg-primary/10 flex items-center justify-center ring-1 ring-primary/20">
+                <BarChart3 className="h-7 w-7 text-primary" />
               </div>
               <div>
-                <DialogTitle className="mb-1 flex items-center gap-3 text-2xl font-bold">
-                  Edit Chart or Diagram Data
-                  <PaletteIcon className="h-5 w-5 text-blue-500 animate-pulse" />
+                <DialogTitle className="text-2xl font-bold text-foreground mb-1.5">
+                  Edit Chart Data
                 </DialogTitle>
-                <p className="text-sm text-muted-foreground">Customize your data and appearance</p>
+                <p className="text-sm text-muted-foreground">
+                  Customise your chart data and visual appearance
+                </p>
               </div>
             </div>
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 rounded-xl transition-all hover:bg-destructive/10 hover:text-destructive"
+              className="h-9 w-9 rounded-lg hover:bg-muted transition-colors"
               onClick={onClose}
             >
               <X className="h-5 w-5" />
@@ -570,240 +457,280 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
         </DialogHeader>
 
         <div className="flex flex-1 overflow-hidden">
-          <div className="flex w-1/2 flex-col border-r border-border/50">
-            <div className="border-b border-border/50 bg-gradient-to-br from-muted/20 to-transparent p-6">
-              <h3 className="mb-2 flex items-center gap-2 text-lg font-bold">
-                <TableIcon className="h-5 w-5 text-primary" />
-                Chart Data
+          <div className="w-1/2 border-r border-border/40 flex flex-col bg-muted/20">
+            <div className="p-6 border-b border-border/40 bg-card">
+              <h3 className="text-lg font-semibold mb-1.5 flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg bg-primary/10 ring-1 ring-primary/20">
+                  <TableIcon className="h-4 w-4 text-primary" />
+                </div>
+                {dataPanelTitle}
               </h3>
-              <p className="text-sm text-muted-foreground">Enter your data values below</p>
+              <p className="text-sm text-muted-foreground">{dataPanelDescription}</p>
             </div>
 
             <ScrollArea className="flex-1">
-              <div className="space-y-3 p-6">
-                <div className="grid grid-cols-[1fr,140px,48px] gap-3 border-b-2 border-border/50 pb-2">
-                  <Label className="text-sm font-bold text-foreground">Label</Label>
-                  <Label className="text-sm font-bold text-foreground">Value</Label>
-                  <div />
-                </div>
-
-                {draftRows.map((row, index) => (
-                  <div key={index} className="group grid animate-fade-in grid-cols-[1fr,140px,48px] gap-3">
-                    <Input
-                      value={row.label}
-                      onChange={event => updateRow(index, 'label', event.target.value)}
-                      className="h-11 rounded-xl border-2 border-border/50 bg-card/50 transition-all hover:border-primary/50 focus:border-primary"
-                      placeholder="Enter label"
-                    />
-                    <Input
-                      type="number"
-                      value={row.value}
-                      onChange={event => updateRow(index, 'value', event.target.value)}
-                      className="h-11 rounded-xl border-2 border-border/50 bg-card/50 transition-all hover:border-primary/50 focus:border-primary"
-                      placeholder="0"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => deleteRow(index)}
-                      className="h-11 w-11 rounded-xl opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-                      disabled={draftRows.length <= 1}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+              {showDataTable ? (
+                <div className="p-6 space-y-3">
+                  <div className="grid grid-cols-[1fr,140px,48px] gap-3 pb-3 mb-2 border-b border-border/40">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                      <Type className="h-3 w-3" />
+                      Label
+                    </Label>
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                      <TrendingUp className="h-3 w-3" />
+                      Value
+                    </Label>
+                    <div />
                   </div>
-                ))}
 
-                <Button
-                  variant="outline"
-                  onClick={addRow}
-                  className="mt-2 h-12 w-full rounded-xl border-2 border-dashed border-border/50 transition-all hover:border-primary/50 hover:bg-primary/5"
-                >
-                  <Plus className="mr-2 h-5 w-5" />
-                  Add Row
-                </Button>
-              </div>
+                  {chartData.map((row, index) => (
+                    <div key={index} className="grid grid-cols-[1fr,140px,48px] gap-3 group">
+                      <Input
+                        value={row.label}
+                        onChange={event => updateRow(index, 'label', event.target.value)}
+                        className="h-11 bg-card border border-border/60 hover:border-primary/40 focus:border-primary focus:ring-1 focus:ring-primary/20 rounded-lg transition-all"
+                        placeholder="Enter label"
+                      />
+                      <Input
+                        type="number"
+                        value={row.value}
+                        onChange={event => updateRow(index, 'value', Number(event.target.value) || 0)}
+                        className="h-11 bg-card border border-border/60 hover:border-accent/40 focus:border-accent focus:ring-1 focus:ring-accent/20 rounded-lg transition-all"
+                        placeholder="0"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => deleteRow(index)}
+                        className="h-11 w-11 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all"
+                        disabled={chartData.length <= 1}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+
+                  <Button
+                    variant="outline"
+                    onClick={addRow}
+                    className="w-full h-12 border border-dashed border-border/60 hover:border-primary/40 hover:bg-primary/5 rounded-lg transition-all mt-4"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    <span className="font-medium">Add Row</span>
+                  </Button>
+                </div>
+              ) : (
+                <div className="h-full flex items-center justify-center px-8 text-sm text-muted-foreground text-center">
+                  <p>{dataPanelDescription}</p>
+                </div>
+              )}
             </ScrollArea>
           </div>
 
-          <div className="flex w-1/2 flex-col">
-            <div className="border-b border-border/50 bg-gradient-to-br from-muted/20 to-transparent p-6">
-              <h3 className="mb-2 flex items-center gap-2 text-lg font-bold">
-                <TrendingUp className="h-5 w-5 text-primary" />
-                Preview
+          <div className="w-1/2 flex flex-col">
+            <div className="p-6 border-b border-border/40 bg-card">
+              <h3 className="text-lg font-semibold mb-1.5 flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg bg-accent/10 ring-1 ring-accent/20">
+                  <TrendingUp className="h-4 w-4 text-accent" />
+                </div>
+                Live Preview
               </h3>
-              <p className="text-sm text-muted-foreground">Live preview of your chart</p>
+              <p className="text-sm text-muted-foreground">Real-time visualisation of your chart</p>
             </div>
 
             <ScrollArea className="flex-1">
-              <div className="space-y-6 p-6">
-                <div className="rounded-2xl border-2 border-border/50 bg-gradient-to-br from-card/50 to-muted/20 p-6">
-                  {renderChartPreview()}
+              <div className="p-6 space-y-6">
+                {renderPreviewCard()}
 
-                  {!isDiagramType && (config.showLabels || config.showValues) && (
-                    <div
-                      className={cn('mt-6 flex flex-wrap gap-4 text-sm font-medium text-foreground', {
-                        'justify-center': config.legendPosition === 'top' || config.legendPosition === 'bottom',
-                        'flex-col items-start': config.legendPosition === 'left',
-                        'flex-col items-end': config.legendPosition === 'right',
-                      })}
-                    >
-                      {chartData.map((item, index) => (
-                        <div key={`${item.label || 'legend'}-${index}`} className="flex items-center gap-2">
-                          <div className="h-3 w-3 rounded-sm" style={{ backgroundColor: colors[index % colors.length] }} />
-                          <div className="flex flex-col text-xs">
-                            {config.showLabels && <span className="font-medium text-foreground">{item.label || `Item ${index + 1}`}</span>}
-                            {config.showValues && (
-                              <span className="text-muted-foreground">{Number.isFinite(item.value) ? item.value : 0}</span>
-                            )}
+                <div className="pt-2 pb-1 border-b-2 border-primary/20">
+                  <h4 className="text-base font-bold text-primary flex items-center gap-2">
+                    <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+                    Chart Configuration
+                  </h4>
+                  <p className="text-xs text-muted-foreground mt-0.5">Customise chart appearance and styling</p>
+                </div>
+
+                <div className="space-y-3">
+                  <Label className="text-sm font-semibold flex items-center gap-2">
+                    <div className="p-1 rounded-md bg-primary/10">
+                      <BarChart3 className="h-3.5 w-3.5 text-primary" />
+                    </div>
+                    Chart Type
+                  </Label>
+                  <div className="grid grid-cols-5 gap-2">
+                    {chartTypes.map(type => {
+                      const Icon = type.icon;
+                      return (
+                        <Button
+                          key={type.id}
+                          variant={config.type === type.id ? 'default' : 'outline'}
+                          onClick={() => setConfig(prev => ({ ...prev, type: type.id }))}
+                          className={cn(
+                            'h-20 flex flex-col items-center justify-center gap-2 rounded-lg transition-all',
+                            config.type === type.id
+                              ? 'bg-primary text-primary-foreground shadow-md border-primary'
+                              : 'hover:bg-muted border-border/60',
+                          )}
+                        >
+                          <Icon className="h-5 w-5" />
+                          <span className="text-xs font-medium">{type.name}</span>
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <Label className="text-sm font-semibold flex items-center gap-2">
+                    <div className="p-1 rounded-md bg-secondary/10">
+                      <LayoutGrid className="h-3.5 w-3.5 text-secondary" />
+                    </div>
+                    Freeform Diagrams
+                  </Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {diagramTypes.map(type => {
+                      const Icon = type.icon;
+                      const selected = config.type === type.id;
+                      return (
+                        <Button
+                          key={type.id}
+                          variant={selected ? 'default' : 'outline'}
+                          onClick={() => setConfig(prev => ({ ...prev, type: type.id }))}
+                          className={cn(
+                            'h-20 flex flex-col items-center justify-center gap-2 rounded-lg transition-all',
+                            selected
+                              ? 'bg-primary text-primary-foreground shadow-md border-primary'
+                              : 'hover:bg-muted border-border/60',
+                          )}
+                        >
+                          <Icon className="h-5 w-5" />
+                          <span className="text-xs font-medium">{type.name}</span>
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <Label className="text-sm font-semibold flex items-center gap-2">
+                    <div className="p-1 rounded-md bg-secondary/10">
+                      <PaletteIcon className="h-3.5 w-3.5 text-secondary" />
+                    </div>
+                    Colour scheme
+                  </Label>
+
+                  <ScrollArea className="h-80 w-full rounded-lg border border-border/60 bg-card">
+                    <div className="p-3 space-y-3">
+                      {Object.entries(colorSchemeGroups).map(([category, schemes]) => (
+                        <div key={category} className="mb-3">
+                          <div className="px-2 py-1 mb-2">
+                            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                              {category}
+                            </span>
+                          </div>
+                          <div className="space-y-1">
+                            {schemes.map(scheme => (
+                              <button
+                                key={scheme.id}
+                                type="button"
+                                onClick={() => setConfig(prev => ({ ...prev, colorScheme: scheme.id }))}
+                                className={cn(
+                                  'w-full flex items-center gap-3 p-2.5 rounded-lg transition-colors',
+                                  config.colorScheme === scheme.id
+                                    ? 'bg-primary/10 border border-primary/30'
+                                    : 'hover:bg-muted/50',
+                                )}
+                              >
+                                <div className="flex gap-1 shrink-0">
+                                  {scheme.colors.slice(0, 5).map(color => (
+                                    <div
+                                      key={`${scheme.id}-${color}`}
+                                      className="h-6 w-6 rounded-md border border-border/40"
+                                      style={{ backgroundColor: color }}
+                                    />
+                                  ))}
+                                </div>
+                                <span
+                                  className={cn(
+                                    'text-sm font-medium flex-1 text-left',
+                                    config.colorScheme === scheme.id ? 'text-primary' : 'text-foreground',
+                                  )}
+                                >
+                                  {scheme.name}
+                                </span>
+                              </button>
+                            ))}
                           </div>
                         </div>
                       ))}
                     </div>
-                  )}
-                </div>
-
-                <div className="space-y-3">
-                  <Label className="text-sm font-bold">Chart or Diagram Type</Label>
-                  <div className="flex flex-col gap-3">
-                    {chartTypeGroups.map(group => (
-                      <div key={group.label} className="flex flex-col gap-2">
-                        <span className="text-[0.65rem] uppercase tracking-[0.08em] text-muted-foreground">
-                          {group.label}
-                        </span>
-                        <div className="flex flex-wrap gap-2">
-                          {group.types.map(type => {
-                            const Icon = type.icon;
-                            const isSelected = config.type === type.id;
-                            return (
-                              <Button
-                                key={type.id}
-                                variant={isSelected ? 'default' : 'outline'}
-                                size="icon"
-                                className={cn(
-                                  'h-12 w-12 rounded-xl border-2 transition-all',
-                                  isSelected
-                                    ? 'scale-110 border-primary bg-primary text-primary-foreground shadow-lg'
-                                    : 'border-border/50 hover:border-primary/30 hover:bg-muted',
-                                )}
-                                onClick={() => handleConfigChange({ type: type.id })}
-                              >
-                                <Icon className="h-5 w-5" />
-                              </Button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <Label className="text-sm font-bold">Color Scheme</Label>
-                  <Select
-                    value={config.colorScheme}
-                    onValueChange={value => handleConfigChange({ colorScheme: value })}
-                  >
-                    <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/50 hover:border-primary/50">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="rounded-xl">
-                      {colorSchemeGroups.map((group, groupIndex) => (
-                        <React.Fragment key={group.category}>
-                          <SelectGroup>
-                            <SelectLabel className="px-2 py-1 text-[0.65rem] uppercase tracking-[0.08em] text-muted-foreground">
-                              {formatCategory(group.category)}
-                            </SelectLabel>
-                            {group.schemes.map(scheme => (
-                              <SelectItem key={scheme.id} value={scheme.id} className="rounded-lg">
-                                <div className="flex items-center gap-3">
-                                  <div className="flex gap-1.5">
-                                    {scheme.colors.map((color, index) => (
-                                      <div
-                                        key={`${scheme.id}-${color}-${index}`}
-                                        className="h-4 w-4 rounded-md border-2 border-border/50"
-                                        style={{ backgroundColor: color }}
-                                      />
-                                    ))}
-                                  </div>
-                                  <span className="font-medium">{scheme.name}</span>
-                                </div>
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                          {groupIndex < colorSchemeGroups.length - 1 && <SelectSeparator className="my-2" />}
-                        </React.Fragment>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  </ScrollArea>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="flex items-center justify-between rounded-xl border border-border/50 bg-gradient-to-br from-muted/40 to-muted/20 p-4">
-                    <Label htmlFor="show-labels-editor" className="cursor-pointer text-sm font-semibold">
+                  <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50 border border-border/50">
+                    <Label htmlFor="show-labels-editor" className="text-sm font-medium cursor-pointer">
                       Show Labels
                     </Label>
                     <Switch
                       id="show-labels-editor"
                       checked={config.showLabels}
-                      onCheckedChange={checked => handleConfigChange({ showLabels: checked })}
+                      onCheckedChange={checked => setConfig(prev => ({ ...prev, showLabels: checked }))}
                     />
                   </div>
 
-                  <div className="flex items-center justify-between rounded-xl border border-border/50 bg-gradient-to-br from-muted/40 to-muted/20 p-4">
-                    <Label htmlFor="show-values-editor" className="cursor-pointer text-sm font-semibold">
+                  <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50 border border-border/50">
+                    <Label htmlFor="show-values-editor" className="text-sm font-medium cursor-pointer">
                       Show Values
                     </Label>
                     <Switch
                       id="show-values-editor"
                       checked={config.showValues}
-                      onCheckedChange={checked => handleConfigChange({ showValues: checked })}
+                      onCheckedChange={checked => setConfig(prev => ({ ...prev, showValues: checked }))}
                     />
                   </div>
                 </div>
 
-                {!isDiagramType && (
-                  <div className="space-y-3">
-                    <Label className="text-sm font-bold">Legend Position</Label>
-                    <Select
-                      value={config.legendPosition}
-                      onValueChange={value => handleConfigChange({ legendPosition: value as ChartConfig['legendPosition'] })}
-                    >
-                      <SelectTrigger className="h-12 rounded-xl border-2 border-border/50 bg-card/50 hover:border-primary/50">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-xl">
-                        {legendPositions.map(position => (
-                          <SelectItem key={position.id} value={position.id} className="rounded-lg">
-                            {position.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
+                <div className="space-y-3">
+                  <Label className="text-sm font-semibold">Legend Position</Label>
+                  <Select
+                    value={legendPosition}
+                    onValueChange={value => {
+                      setLegendPosition(value as ChartConfig['legendPosition']);
+                      setConfig(prev => ({ ...prev, legendPosition: value as ChartConfig['legendPosition'] }));
+                    }}
+                  >
+                    <SelectTrigger className="h-11 bg-card border border-border/60 hover:border-primary/40 rounded-lg">
+                      <SelectValue placeholder="Select position" />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-lg">
+                      {legendPositions.map(pos => (
+                        <SelectItem key={pos.id} value={pos.id} className="rounded-md">
+                          {pos.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </ScrollArea>
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-4 border-t border-border/50 bg-gradient-to-r from-muted/5 via-transparent to-primary/5 px-8 py-5">
+        <div className="px-8 py-5 border-t border-border/40 bg-muted/30 flex items-center justify-between gap-4">
           <Button
             variant="outline"
             onClick={onClose}
-            className="h-12 flex-1 rounded-xl border-2 border-border/50 font-semibold transition-all hover:border-border hover:bg-muted"
+            className="flex-1 h-12 border border-border/60 hover:bg-muted rounded-lg font-medium transition-all"
           >
             Cancel
           </Button>
           <Button
             onClick={handleSave}
-            className="group relative h-12 flex-1 overflow-hidden rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 font-semibold shadow-lg transition-all hover:from-blue-600 hover:to-purple-600 hover:shadow-2xl hover:scale-105"
+            className="flex-1 h-12 rounded-lg font-medium shadow-sm hover:shadow-md transition-all bg-primary hover:bg-primary/90 text-primary-foreground"
           >
-            <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-white/0 via-white/20 to-white/0 transition-transform duration-700 group-hover:translate-x-full" />
-            <span className="relative z-10 flex items-center justify-center gap-2">
-              <TrendingUp className="h-5 w-5" />
-              Save Chart
-            </span>
+            <TrendingUp className="h-4 w-4 mr-2" />
+            Save Chart
           </Button>
         </div>
       </DialogContent>
@@ -811,6 +738,5 @@ export const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
   );
 };
 
-ChartDataEditor.displayName = 'ChartDataEditor';
-
 export default ChartDataEditor;
+export type { ChartDataEditorProps };
