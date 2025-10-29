@@ -280,19 +280,15 @@ class WorkflowCompositionAgent:
     
     def _create_fallback_response(self, session_id: str, error_msg: str = None, user_prompt: str = None) -> Dict:
         """
-        Create fallback response when LLM fails or cannot understand query
-        Provides smart, helpful responses instead of returning nothing
+        Create simple fallback response when LLM fails or cannot understand query
         """
         logger.warning(f"Creating fallback response due to: {error_msg}")
-        
-        # Analyze the user prompt to provide contextual help
-        smart_response = self._generate_smart_fallback(user_prompt)
         
         return {
             "success": False,
             "session_id": session_id,
-            "message": "Providing workflow guidance",
-            "smart_response": smart_response,
+            "message": "Unable to process workflow request",
+            "smart_response": "I couldn't process your request. Please try asking for a specific workflow like 'create MMM workflow' or 'build a churn prediction model'.",
             "suggestions": [
                 "Try asking for a specific workflow: 'create MMM workflow'",
                 "Or describe your goal: 'I want to forecast sales'",
@@ -302,202 +298,6 @@ class WorkflowCompositionAgent:
             "available_use_cases": ["mmm", "churn", "forecast", "pricing", "dashboard", "segmentation", "sentiment"],
             "error": error_msg if error_msg else "LLM processing error"
         }
-    
-    def _generate_smart_fallback(self, user_prompt: str = None) -> str:
-        """
-        Generate intelligent fallback response based on user query
-        Provides helpful information instead of generic error messages
-        """
-        if not user_prompt:
-            return self._get_default_help_message()
-        
-        prompt_lower = user_prompt.lower().strip()
-        
-        # Check for greeting or general help
-        if any(word in prompt_lower for word in ['hello', 'hi', 'hey', 'help', 'what can you do', 'capabilities']):
-            return """Hello! I'm your Workflow Composition Assistant. I help you design data workflows by suggesting how to group atoms into molecules.
-
-**What I Can Do:**
-- Create custom workflows for your business needs
-- Suggest pre-built workflows for common use cases
-- Help you understand which atoms to use
-- Design complete data pipelines from ingestion to insights
-
-**Popular Workflows I Can Create:**
-- **MMM (Marketing Mix Modeling)** - Measure marketing channel effectiveness
-- **Churn Prediction** - Identify customers likely to leave
-- **Demand Forecasting** - Predict future sales and inventory needs
-- **Price Optimization** - Find optimal pricing strategies
-- **Customer Segmentation** - Group customers by behavior
-- **Sales Dashboard** - Create KPI tracking dashboards
-- **Sentiment Analysis** - Analyze customer feedback
-
-**How to Get Started:**
-Just tell me what you want to achieve! For example:
-- "Create an MMM workflow"
-- "I want to predict customer churn"
-- "Build a sales forecasting model"
-- "Show me how to create a dashboard"
-
-What would you like to create today?"""
-        
-        # Check for "what" questions
-        if prompt_lower.startswith('what') or 'what is' in prompt_lower or 'what are' in prompt_lower:
-            return """I can help you understand workflows and create them! Here's what you need to know:
-
-**What is a Workflow?**
-A workflow is a sequence of molecules (grouped atoms) that process data from start to finish.
-
-**Available Workflow Types:**
-
-📊 **Analytics Workflows:**
-- **MMM (Marketing Mix Modeling)** - Measure ROI of marketing channels
-- **Customer Segmentation** - Group customers by behavior patterns
-- **Trend Analysis** - Identify patterns in your data
-
-🤖 **Predictive Workflows:**
-- **Churn Prediction** - Predict which customers will leave
-- **Demand Forecasting** - Forecast future sales and demand
-- **Price Optimization** - Find optimal pricing points
-
-📈 **Reporting Workflows:**
-- **Sales Dashboard** - Track KPIs and metrics
-- **Performance Reports** - Generate automated reports
-- **Sentiment Analysis** - Analyze customer feedback
-
-**Ready to Create?**
-Tell me which workflow you'd like to build, or describe your business goal and I'll design a custom workflow for you!"""
-        
-        # Check for list/show requests
-        if any(word in prompt_lower for word in ['list', 'show', 'available', 'options', 'types']):
-            return """Here are all the workflows I can help you create:
-
-**📊 Marketing & Sales:**
-- **MMM (Marketing Mix Modeling)** - Measure marketing effectiveness across channels
-- **Price Optimization** - Find optimal pricing strategies
-- **Sales Dashboard** - Track sales KPIs and performance
-- **Lead Scoring** - Prioritize sales leads
-
-**🤖 Predictive Analytics:**
-- **Churn Prediction** - Identify at-risk customers
-- **Demand Forecasting** - Predict future sales and inventory needs
-- **Customer LTV** - Predict customer lifetime value
-- **Propensity Modeling** - Predict customer behavior
-
-**👥 Customer Analytics:**
-- **Customer Segmentation** - Group customers by behavior
-- **Sentiment Analysis** - Analyze customer feedback
-- **RFM Analysis** - Recency, Frequency, Monetary analysis
-- **Customer Journey** - Map customer touchpoints
-
-**📈 Business Intelligence:**
-- **Executive Dashboard** - High-level KPI tracking
-- **Financial Reports** - Revenue and cost analysis
-- **Operational Metrics** - Track business operations
-- **Cohort Analysis** - Analyze user cohorts over time
-
-**Which workflow would you like to create?** Just tell me the name or describe your goal!"""
-        
-        # Check for unclear/vague requests
-        if len(prompt_lower) < 10 or prompt_lower in ['analyze', 'help me', 'do something', 'create', 'build']:
-            return """I'd love to help you create a workflow! To design the best solution, I need a bit more information.
-
-**Tell me about your goal:**
-- What business problem are you trying to solve?
-- What type of analysis do you need?
-- What insights are you looking for?
-
-**Or choose from these popular workflows:**
-
-🎯 **Marketing:**
-- "Create an MMM workflow" - Measure marketing effectiveness
-- "Build a price optimization model" - Find optimal pricing
-
-📊 **Customer Analytics:**
-- "Create a churn prediction model" - Identify at-risk customers
-- "Build a customer segmentation workflow" - Group customers
-
-📈 **Forecasting:**
-- "Create a demand forecasting workflow" - Predict future sales
-- "Build a sales dashboard" - Track KPIs
-
-**Example requests:**
-- "I want to measure my marketing ROI"
-- "Help me predict which customers will churn"
-- "Create a dashboard to track sales performance"
-
-What would you like to create?"""
-        
-        # Check for specific workflow keywords
-        workflow_keywords = {
-            'mmm': 'MMM (Marketing Mix Modeling)',
-            'marketing mix': 'MMM (Marketing Mix Modeling)',
-            'churn': 'Churn Prediction',
-            'forecast': 'Demand Forecasting',
-            'predict': 'Predictive Analytics',
-            'dashboard': 'Dashboard Creation',
-            'segment': 'Customer Segmentation',
-            'sentiment': 'Sentiment Analysis',
-            'price': 'Price Optimization',
-            'ltv': 'Customer Lifetime Value'
-        }
-        
-        for keyword, workflow_name in workflow_keywords.items():
-            if keyword in prompt_lower:
-                return f"""Great! I can help you create a **{workflow_name}** workflow.
-
-To design the best workflow for you, could you provide a bit more detail?
-
-**For example:**
-- What data sources will you use?
-- What specific insights are you looking for?
-- Do you have any specific requirements?
-
-**Or I can create a standard {workflow_name} workflow for you right now!**
-
-Just say:
-- "Create a standard {workflow_name} workflow"
-- "Show me the molecules for {workflow_name}"
-- "Build a {workflow_name} pipeline"
-
-What would you prefer?"""
-        
-        # Default fallback
-        return self._get_default_help_message()
-    
-    def _get_default_help_message(self) -> str:
-        """Get default help message when no specific context is available"""
-        return """I'm here to help you create data workflows! I can design custom workflows or suggest pre-built ones for common business use cases.
-
-**🎯 Popular Workflows:**
-
-**Marketing & Sales:**
-- **MMM (Marketing Mix Modeling)** - Measure marketing channel effectiveness
-- **Price Optimization** - Find optimal pricing strategies
-- **Sales Dashboard** - Track KPIs and performance
-
-**Customer Analytics:**
-- **Churn Prediction** - Identify at-risk customers
-- **Customer Segmentation** - Group customers by behavior
-- **Sentiment Analysis** - Analyze customer feedback
-
-**Forecasting:**
-- **Demand Forecasting** - Predict future sales and inventory
-- **Customer LTV** - Predict customer lifetime value
-
-**How to Get Started:**
-Just tell me what you want to achieve! For example:
-- "Create an MMM workflow"
-- "I want to predict customer churn"
-- "Build a sales forecasting model"
-- "Help me create a customer segmentation workflow"
-
-**Or ask me:**
-- "What workflows can you create?"
-- "Show me available options"
-- "Help me choose a workflow"
-
-What would you like to create today?"""
 
 
 # Global agent instance

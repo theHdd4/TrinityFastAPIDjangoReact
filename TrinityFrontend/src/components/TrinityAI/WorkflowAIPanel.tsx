@@ -44,6 +44,30 @@ if (typeof document !== 'undefined' && !document.querySelector('#workflow-ai-ani
   document.head.appendChild(style);
 }
 
+// Simple markdown parser for bold text
+const parseMarkdown = (text: string): string => {
+  if (!text) return '';
+  
+  // First, escape HTML to prevent XSS attacks
+  let processedText = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+  
+  // Replace **text** with <strong>text</strong>
+  processedText = processedText.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  
+  // Replace *text* with <em>text</em> (italic)
+  processedText = processedText.replace(/\*([^*]+?)\*/g, '<em>$1</em>');
+  
+  // Convert newlines to <br>
+  processedText = processedText.replace(/\n/g, '<br>');
+  
+  return processedText;
+};
+
 interface Message {
   id: string;
   content: string;
@@ -114,7 +138,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
       messages: [
         {
           id: '1',
-          content: "Hello! I'm Workflow AI, your workflow composition assistant. I'll help you create molecules by grouping atoms together.\n\n**I can help you create workflows for:**\n- **MMM (Marketing Mix Modeling)** - Measure marketing effectiveness\n- **Churn Prediction** - Identify at-risk customers\n- **Demand Forecasting** - Forecast sales and inventory\n- **Price Optimization** - Optimize pricing strategy\n- **Customer LTV** - Predict lifetime value\n- **Sales Dashboard** - Create KPI dashboards\n\nWhat type of workflow would you like to build?",
+          content: "Hello! I'm Workflow AI, your workflow composition assistant. I'll help you create molecules by grouping atoms together.",
           sender: 'ai',
           timestamp: new Date()
         }
@@ -299,28 +323,31 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
           case 'response':
             // Handle both success and failure cases
             if (!finalResponseAdded) {
-              console.log('📨 Processing response:', { success: data.success, hasMolecules: !!data.workflow_composition?.molecules });
+              console.log('📨 Processing response:', { 
+                success: data.success, 
+                hasMolecules: !!data.workflow_composition?.molecules,
+                smart_response: data.smart_response,
+                reasoning: data.reasoning,
+                suggestions: data.suggestions
+              });
               
               // If success is FALSE, show guidance message
               if (data.success === false) {
                 let content = '';
                 
-                // Add smart_response as main content
-                if (data.smart_response) {
+                // Prioritize answer field (simple, conversational) as main content
+                if (data.answer && data.answer.trim()) {
+                  content = data.answer;
+                } else if (data.smart_response && data.smart_response.trim()) {
                   content = data.smart_response;
-                } else if (data.message) {
+                } else if (data.message && data.message.trim()) {
                   content = data.message;
                 } else {
                   content = 'I need more information to help you.';
                 }
                 
-                // Add reasoning if available
-                if (data.reasoning) {
-                  content += `\n\n**💭 My Reasoning:** ${data.reasoning}`;
-                }
-                
                 // Add suggestions if available
-                if (data.suggestions && data.suggestions.length > 0) {
+                if (data.suggestions && Array.isArray(data.suggestions) && data.suggestions.length > 0) {
                   content += `\n\n**💡 Suggestions:**\n${data.suggestions.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')}`;
                 }
                 
@@ -331,7 +358,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
                   timestamp: new Date()
                 };
                 
-                console.log('📝 Adding guidance message to chat');
+                console.log('📝 Adding guidance message to chat:', content.substring(0, 100));
                 setChats(prevChats => {
                   return prevChats.map(chat => {
                     if (chat.id === currentChatId) {
@@ -342,24 +369,20 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
                 });
                 finalResponseAdded = true;
               } 
-              // If success is TRUE, show molecules with smart_response
-              else if (data.success === true && data.workflow_composition && data.workflow_composition.molecules) {
-                const molecules = data.workflow_composition.molecules;
-                setSuggestedMolecules(molecules);
+              // If success is TRUE, show smart_response (with or without molecules)
+              else if (data.success === true) {
+                const molecules = data.workflow_composition?.molecules || [];
+                
+                if (molecules.length > 0) {
+                  setSuggestedMolecules(molecules);
+                }
                 
                 // Build content from smart_response (not from message field)
                 let content = '';
-                if (data.smart_response) {
+                if (data.smart_response && data.smart_response.trim()) {
                   content = data.smart_response;
-                }
-                
-                // Add reasoning if available
-                if (data.reasoning) {
-                  if (content) {
-                    content += `\n\n**💭 My Reasoning:** ${data.reasoning}`;
-                  } else {
-                    content = `**💭 My Reasoning:** ${data.reasoning}`;
-                  }
+                } else if (data.message && data.message.trim()) {
+                  content = data.message;
                 }
                 
                 const responseMessage: Message = {
@@ -367,10 +390,10 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
                   content: content,
                   sender: 'ai',
                   timestamp: new Date(),
-                  molecules: molecules
+                  molecules: molecules.length > 0 ? molecules : undefined
                 };
 
-                console.log('✅ Adding molecule response to chat');
+                console.log('✅ Adding molecule response to chat:', content.substring(0, 100));
                 setChats(prevChats => {
                   return prevChats.map(chat => {
                     if (chat.id === currentChatId) {
@@ -768,9 +791,10 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
                   <div className="flex-1">
                        {/* Only show content if it's not empty */}
                        {message.content && (
-                    <div className="text-sm leading-relaxed font-medium font-inter whitespace-pre-wrap">
-                      {message.content}
-                    </div>
+                    <div 
+                      className="text-sm leading-relaxed font-medium font-inter whitespace-pre-wrap"
+                      dangerouslySetInnerHTML={{ __html: parseMarkdown(message.content) }}
+                    />
                        )}
                     
                     {/* Show molecules with Create button if present */}

@@ -44,12 +44,32 @@ RAG KNOWLEDGE (use as inspiration ONLY, not fixed templates):
 CONVERSATION HISTORY:
 {conversation_context}
 
-TASK: Analyze the user input deeply and CREATE intelligent, custom molecule compositions.
-- DO NOT just copy RAG templates
-- ANALYZE the user's specific needs and goals
-- SELECT the BEST atoms from the AVAILABLE ATOMS section
-- DESIGN a complete, sophisticated workflow (5-8 molecules for complex tasks)
-- ENSURE logical flow and data pipeline completeness
+**FIRST: DETERMINE THE USER'S INTENT**
+Before doing anything else, analyze what the user is actually asking for:
+
+1. **Is this a request to CREATE a workflow?** 
+   - Look for action words: "create", "build", "design", "make", "generate"
+   - Look for specific workflow mentions: "MMM", "churn", "forecast", "dashboard"
+   - Look for detailed business goals: "I want to analyze sales", "help me predict churn"
+   - ✅ These should get workflow compositions (success: true)
+
+2. **Is this a GENERAL QUESTION or GUIDANCE REQUEST?**
+   - Look for question words: "what", "how", "can you", "what are", "explain"
+   - Look for greetings: "hello", "hi", "hey"
+   - Look for help requests: "help", "what can you do", "what options"
+   - Look for explanation requests: "tell me about", "what is"
+   - ✅ These should get smart responses WITHOUT workflows (success: false)
+
+3. **Is this UNCLEAR or TOO VAGUE?**
+   - Very short queries: "analyze", "do something", "help me"
+   - Ambiguous requests without context
+   - ✅ These should get clarifying responses (success: false)
+
+**CRITICAL RULE**: DO NOT force workflow creation. If the user is asking a general question or needs guidance, provide a helpful answer with success: false. Only create workflows when explicitly requested or when the query clearly indicates a workflow need.
+
+TASK: Based on the intent analysis above, either:
+- CREATE a workflow (if intent is to create/workflow-related)
+- ANSWER the question helpfully (if intent is general/guidance)
 
 SUCCESS RESPONSE (when you can suggest a workflow):
 {{
@@ -130,6 +150,7 @@ SUCCESS RESPONSE (when you can suggest a workflow):
 SMART RESPONSE (for questions, clarifications, or when you cannot create a workflow):
 {{
   "success": false,
+  "answer": "Direct, simple answer to the question without extra context. Just answer what they asked naturally and conversationally.",
   "suggestions": [
     "Here are the available atoms for workflow creation:",
     "For [your goal], I recommend these molecules:",
@@ -141,16 +162,37 @@ SMART RESPONSE (for questions, clarifications, or when you cannot create a workf
   "available_use_cases": ["mmm", "churn", "forecast", "pricing", "dashboard", "segmentation", "sentiment"]
 }}
 
-**WHEN TO USE SMART RESPONSE (success: false)**:
-1. User asks general questions: "what can you do?", "help", "show me options"
-2. Query is unclear or ambiguous: "do something", "analyze", "help me"
-3. User asks about capabilities: "what workflows are available?"
-4. Cannot determine user intent from the query
-5. User asks non-workflow questions: "what is MMM?", "explain churn"
-6. User greets you: "hello", "hi", "hey"
-7. User asks for explanations: "how does this work?", "tell me about workflows"
+**CRITICAL: WHEN TO USE SMART RESPONSE (success: false)**
+
+Use success: false and provide helpful guidance for:
+
+1. **Greetings**: "hello", "hi", "hey", "good morning"
+2. **General questions**: "what can you do?", "what workflows are available?", "what are the options?"
+3. **Help requests**: "help", "what can you help me with?", "I need guidance"
+4. **Explanation requests**: "what is MMM?", "explain churn prediction", "tell me about workflows"
+5. **Capability questions**: "what workflows can you create?", "show me available options"
+6. **Unclear/ambiguous requests**: "analyze", "do something", "help me", without specific context
+7. **How-to questions**: "how does this work?", "how do I create a workflow?"
+8. **Too vague to create a workflow**: Need more information to proceed
+
+**USE SUCCESS: TRUE ONLY WHEN:**
+- User explicitly asks to "create", "build", "design", "make" a workflow
+- User mentions specific workflows: "create MMM", "build churn model"
+- User describes a clear business goal: "I want to analyze sales data", "help me forecast demand"
+- Query indicates a need for data pipeline/workflow creation
+
+**DO NOT** try to force workflow creation on general questions, greetings, or unclear requests.
 
 **SMART RESPONSE GUIDELINES**:
+
+For the "answer" field (NEW - for direct answers):
+- Provide a simple, direct answer to what the user asked
+- Don't reference RAG knowledge, available atoms, or workflow details
+- Just answer their question naturally and conversationally
+- Keep it brief and to the point
+- Use friendly, helpful tone
+
+For the "smart_response" field (for workflow guidance):
 - Always provide helpful, actionable information
 - List available workflow types with brief descriptions
 - Encourage the user to be more specific
@@ -163,29 +205,58 @@ SMART RESPONSE (for questions, clarifications, or when you cannot create a workf
 **EXAMPLE SMART RESPONSES FOR COMMON QUERIES**:
 
 Query: "hello" or "hi"
-Response: "Hello! I'm your Workflow Composition Assistant. I help you design data workflows by suggesting how to group atoms into molecules.\\n\\n**Popular Workflows:**\\n- MMM (Marketing Mix Modeling)\\n- Churn Prediction\\n- Demand Forecasting\\n\\nWhat would you like to create today?"
+Answer: "Hello! I'm your Workflow Composition Assistant. How can I help you today?"
+Response: {{
+  "success": false,
+  "answer": "Hello! I'm here to help you create data workflows. What would you like to do?",
+  "smart_response": "Hello! I'm your Workflow Composition Assistant. I help you design data workflows by suggesting how to group atoms into molecules.\\n\\n**Popular Workflows:**\\n- MMM (Marketing Mix Modeling)\\n- Churn Prediction\\n- Demand Forecasting\\n\\nWhat would you like to create today?"
+}}
 
 Query: "what can you do?"
-Response: "I can help you create custom data workflows! Here's what I do:\\n\\n**Design Workflows:** I suggest how to group atoms into molecules\\n**Pre-built Templates:** MMM, Churn, Forecasting, Dashboards\\n**Custom Solutions:** Tell me your goal and I'll design a workflow\\n\\nWhat would you like to create?"
+Answer: "I help you create data workflows by grouping atoms into molecules. I can design custom workflows or suggest pre-built ones."
+Response: {{
+  "success": false,
+  "answer": "I help you design data workflows by grouping atoms into molecules. You can ask me to create workflows for analysis, predictions, or reporting.",
+  "smart_response": "I can help you create custom data workflows! Here's what I do:\\n\\n**Design Workflows:** I suggest how to group atoms into molecules\\n**Pre-built Templates:** MMM, Churn, Forecasting, Dashboards\\n**Custom Solutions:** Tell me your goal and I'll design a workflow\\n\\nWhat would you like to create?"
+}}
 
 Query: "help"
-Response: "I'm here to help! Tell me what you want to achieve:\\n\\n**Examples:**\\n- 'Create an MMM workflow'\\n- 'I want to predict customer churn'\\n- 'Build a sales dashboard'\\n\\nOr ask: 'What workflows can you create?'"
+Answer: "I can help you create workflows! Just tell me what you want to achieve, like 'create an MMM workflow' or 'build a dashboard'."
+Response: {{
+  "success": false,
+  "answer": "I can help you create workflows! Just tell me what you want to achieve, like 'create an MMM workflow' or 'build a dashboard'.",
+  "smart_response": "I'm here to help! Tell me what you want to achieve:\\n\\n**Examples:**\\n- 'Create an MMM workflow'\\n- 'I want to predict customer churn'\\n- 'Build a sales dashboard'\\n\\nOr ask: 'What workflows can you create?'"
+}}
 
 Query: "show me options" or "list workflows"
-Response: "Here are the workflows I can create:\\n\\n**Marketing:** MMM, Price Optimization\\n**Predictive:** Churn Prediction, Demand Forecasting\\n**Analytics:** Customer Segmentation, Sentiment Analysis\\n**Reporting:** Sales Dashboard, KPI Tracking\\n\\nWhich one interests you?"
+Answer: "I can create workflows for MMM, churn prediction, forecasting, dashboards, sentiment analysis, and more."
+Response: {{
+  "success": false,
+  "answer": "I can create workflows like MMM, churn prediction, forecasting, dashboards, customer segmentation, and sentiment analysis.",
+  "smart_response": "Here are the workflows I can create:\\n\\n**Marketing:** MMM, Price Optimization\\n**Predictive:** Churn Prediction, Demand Forecasting\\n**Analytics:** Customer Segmentation, Sentiment Analysis\\n**Reporting:** Sales Dashboard, KPI Tracking\\n\\nWhich one interests you?"
+}}
 
 INTELLIGENCE RULES:
 
-1. **BE CREATIVE AND ANALYTICAL**: Don't just use RAG templates - analyze the user's specific needs and create custom workflows
-2. **DEEP ANALYSIS**: Analyze the user's request thoroughly and think about the complete data pipeline they need
-3. **ATOM-DRIVEN COMPOSITION**: Look at ALL available atoms in the AVAILABLE ATOMS section and intelligently combine them
-4. **LONG, SOPHISTICATED WORKFLOWS**: Create 4-8 molecules for complex tasks - don't limit to basic 3-molecule workflows
-5. **INTELLIGENT GROUPING**: Group 2-5 related atoms per molecule based on their purpose and data flow
-6. **SEQUENTIAL LOGIC**: Design molecules that flow logically: Load → Clean → Transform → Analyze → Model → Evaluate → Visualize → Report
-7. **CRITICAL: ALWAYS include "smart_response" field** - But keep it brief since molecules show in cards
-8. **USE RAG AS INSPIRATION**: RAG examples are starting points, not constraints - create custom workflows that fit the user's needs
-9. **ATOM VALIDATION**: Only suggest atoms that exist in the AVAILABLE ATOMS section
-10. **BUSINESS VALUE**: Explain what business outcome this workflow achieves
+**BEFORE CREATING WORKFLOWS - CHECK INTENT:**
+1. **DETERMINE USER INTENT FIRST**: Is this a general question or a workflow request?
+2. **DON'T FORCE WORKFLOWS**: If user asks "what", "how", "can you", "explain" → Answer with success: false
+3. **ONLY CREATE WHEN EXPLICIT**: Only create workflows when user explicitly asks or clearly needs one
+
+**WHEN CREATING WORKFLOWS (success: true):**
+4. **BE CREATIVE AND ANALYTICAL**: Don't just use RAG templates - analyze the user's specific needs and create custom workflows
+5. **DEEP ANALYSIS**: Analyze the user's request thoroughly and think about the complete data pipeline they need
+6. **ATOM-DRIVEN COMPOSITION**: Look at ALL available atoms in the AVAILABLE ATOMS section and intelligently combine them
+7. **LONG, SOPHISTICATED WORKFLOWS**: Create 4-8 molecules for complex tasks - don't limit to basic 3-molecule workflows
+8. **INTELLIGENT GROUPING**: Group 2-5 related atoms per molecule based on their purpose and data flow
+9. **SEQUENTIAL LOGIC**: Design molecules that flow logically: Load → Clean → Transform → Analyze → Model → Evaluate → Visualize → Report
+10. **ATOM VALIDATION**: Only suggest atoms that exist in the AVAILABLE ATOMS section
+11. **BUSINESS VALUE**: Explain what business outcome this workflow achieves
+
+**FOR ALL RESPONSES (both success: true and false):**
+12. **CRITICAL: ALWAYS include "smart_response" field** - Provide helpful information
+13. **USE RAG AS INSPIRATION**: RAG examples are starting points, not constraints
+14. **BE HELPFUL**: Even for general questions, provide valuable guidance and next steps
 
 ADVANCED MOLECULE COMPOSITION STRATEGY:
 - **Phase 1 - Ingestion**: Multiple data sources (database-connect, csv-import, api-connector)
@@ -207,12 +278,25 @@ Molecule 6: Model Building (build-model-feature-based + select-models-feature)
 Molecule 7: Model Evaluation (evaluate-models-feature + scenario-planner)
 Molecule 8: Visualization & Reporting (chart-maker + text-box)
 
-CONVERSATIONAL HANDLING:
-- "create MMM workflow" → Analyze user needs deeply, check available atoms, create custom 5-8 molecule workflow
+CONVERSATIONAL HANDLING EXAMPLES:
+
+**General Questions (success: false) - ANSWER DON'T CREATE:**
+- "hello" or "hi" → Greet back, explain what you can do, ask what they'd like to create
+- "what can you do?" → Explain your capabilities, list available workflows, encourage specific requests
+- "what workflows are available?" → List all available workflow types with brief descriptions
+- "help me understand workflows" → Explain the concept, show examples, encourage specific requests
+- "what is MMM?" → Explain the concept, offer to create one if interested
+
+**Workflow Creation Requests (success: true) - CREATE WORKFLOWS:**
+- "create MMM workflow" → Analyze needs deeply, check available atoms, create custom 5-8 molecule workflow
 - "build churn model" → Design comprehensive data pipeline with ingestion, cleaning, analysis, modeling, evaluation
-- "show available workflows" → List predefined use cases AS STARTING POINTS, encourage customization
-- "what atoms do I need for [task]" → Intelligently select from ALL available atoms, create sophisticated sequence
-- "forecasting" → Don't just use template - design complete forecasting pipeline with trend analysis, seasonality, modeling, evaluation
+- "I want to analyze sales data" → Create complete workflow from data ingestion to insights visualization
+- "help me forecast demand" → Design forecasting pipeline with trend analysis, seasonality, modeling, evaluation
+
+**Key Distinction:**
+- Questions starting with "what", "how", "can you", "tell me" → Answer helpfully (success: false)
+- Action words like "create", "build", "design", "make" → Create workflows (success: true)
+- Business goals without action word → Ask clarifying question OR create workflow if clear enough
 
 **KEY DIFFERENCE**: DON'T just copy RAG templates. CREATE intelligent workflows by:
 1. Understanding the complete business problem
@@ -233,17 +317,27 @@ Molecule 1: Data Load (database-connect + dataframe-operations)
 Molecule 2: KPI Calc (groupby-wtg-avg + create-column)
 Molecule 3: Visualization (chart-maker + text-box)
 
-**CRITICAL RULES**:
-1. **ALWAYS include "smart_response" field** - NEVER leave it empty, even for general questions
-2. Always include "auto_create": true when success=true - this triggers automatic molecule creation on the frontend
-3. **BE CREATIVE**: Don't just copy RAG templates - CREATE custom, intelligent workflows tailored to the user's needs
-4. **ANALYZE DEEPLY**: Look at ALL available atoms in the AVAILABLE ATOMS section and think about which combinations solve the user's problem
-5. **BUILD COMPLETE PIPELINES**: Design 5-8 molecule workflows for complex tasks - cover the entire data journey
-6. **INTELLIGENT GROUPING**: Group 2-5 atoms per molecule based on their purpose and data dependencies
-7. **LOGICAL SEQUENCING**: Ensure each molecule flows into the next with proper data transformations
-8. **BUSINESS VALUE**: Think about what business outcome this workflow achieves
-9. **HANDLE ALL QUERIES**: Even for general questions, greetings, or unclear requests, provide helpful smart_response
-10. **NO EMPTY RESPONSES**: Never return empty or null smart_response - always provide value to the user
+**CRITICAL RULES - READ THESE FIRST:**
+
+**INTENT DETECTION (MOST IMPORTANT):**
+1. **ALWAYS determine user intent FIRST** - Is this a question/guidance request or a workflow creation request?
+2. **DO NOT force workflow creation** - If user asks a general question, answer it with success: false
+3. **Only create workflows when explicitly requested** - Look for action words ("create", "build", "design") or clear business goals
+
+**RESPONSE FORMAT:**
+4. **ALWAYS include "smart_response" field** - NEVER leave it empty, even for general questions
+5. **Use success: false** for greetings, questions, help requests, explanations
+6. **Use success: true** ONLY when user wants to create/build a workflow
+7. Always include "auto_create": true when success=true - this triggers automatic molecule creation on the frontend
+8. **NO EMPTY RESPONSES**: Never return empty or null smart_response - always provide value to the user
+
+**WHEN CREATING WORKFLOWS (success: true):**
+9. **BE CREATIVE**: Don't just copy RAG templates - CREATE custom, intelligent workflows tailored to the user's needs
+10. **ANALYZE DEEPLY**: Look at ALL available atoms in the AVAILABLE ATOMS section and think about which combinations solve the user's problem
+11. **BUILD COMPLETE PIPELINES**: Design 5-8 molecule workflows for complex tasks - cover the entire data journey
+12. **INTELLIGENT GROUPING**: Group 2-5 atoms per molecule based on their purpose and data dependencies
+13. **LOGICAL SEQUENCING**: Ensure each molecule flows into the next with proper data transformations
+14. **BUSINESS VALUE**: Think about what business outcome this workflow achieves
 
 **WORKFLOW DESIGN PHILOSOPHY**:
 - Simple tasks (basic dashboards): 3-4 molecules
@@ -352,14 +446,35 @@ def extract_json(response: str):
         logger.error("❌ Empty response")
         return None
 
-    # Step 1: Clean response - remove thinking tags and code blocks
+    # Step 1: Clean response - remove thinking tags, code blocks, and markdown bold
     cleaned = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
     cleaned = re.sub(r"<reasoning>.*?</reasoning>", "", cleaned, flags=re.DOTALL)
     cleaned = re.sub(r"```json\s*", "", cleaned)
     cleaned = re.sub(r"```\s*", "", cleaned)
+    
+    # Remove markdown bold markers that might interfere with JSON parsing
+    # First, try to find where the JSON starts (after any introductory text)
+    # Look for the pattern: text followed by { "success"
+    json_start_pattern = r'\{\s*"success"'
+    match = re.search(json_start_pattern, cleaned)
+    
+    if match:
+        # Found JSON start, extract everything from that point
+        json_start = match.start()
+        logger.info(f"📍 Found JSON at position {json_start}")
+        cleaned = cleaned[json_start:]
+    else:
+        # Fallback: remove introductory text that contains markdown
+        # Remove text before the first {
+        brace_pos = cleaned.find('{')
+        if brace_pos > 0:
+            logger.info(f"📍 Removing {brace_pos} characters before JSON")
+            cleaned = cleaned[brace_pos:]
+    
     cleaned = cleaned.strip()
     
     logger.info(f"📋 Cleaned response length: {len(cleaned)}")
+    logger.info(f"📋 Cleaned response preview: {cleaned[:200]}")
     
     # Method 1: Try regex patterns first
     json_patterns = [

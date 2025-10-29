@@ -48,6 +48,30 @@ if (typeof document !== 'undefined' && !document.querySelector('#trinity-ai-anim
   document.head.appendChild(style);
 }
 
+// Simple markdown parser for bold text
+const parseMarkdown = (text: string): string => {
+  if (!text) return '';
+  
+  // First, escape HTML to prevent XSS attacks
+  let processedText = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+  
+  // Replace **text** with <strong>text</strong>
+  processedText = processedText.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  
+  // Replace *text* with <em>text</em> (italic)
+  processedText = processedText.replace(/\*([^*]+?)\*/g, '<em>$1</em>');
+  
+  // Convert newlines to <br>
+  processedText = processedText.replace(/\n/g, '<br>');
+  
+  return processedText;
+};
+
 interface Message {
   id: string;
   content: string;
@@ -979,7 +1003,7 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
                   <div
                     className="text-sm leading-relaxed font-medium font-inter"
                     dangerouslySetInnerHTML={{
-                      __html: message.content.replace(/\n/g, '<br>')
+                      __html: parseMarkdown(message.content)
                     }}
                   />
                 </div>

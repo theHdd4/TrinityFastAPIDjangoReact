@@ -3,8 +3,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { safeStringify } from '@/utils/safeStringify';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Play, Save, Share2, Upload, ChevronLeft, ChevronRight, Grid3X3, Edit2 } from 'lucide-react';
+import { Play, Save, Share2, Upload, ChevronLeft, ChevronRight, Grid3X3 } from 'lucide-react';
 import Header from '@/components/Header';
 import WorkflowCanvas from './components/WorkflowCanvas';
 import MoleculeList from '@/components/MoleculeList/MoleculeList';
@@ -812,15 +811,6 @@ const WorkflowMode = () => {
           <div className="flex-1 max-w-2xl">
             <div className="flex items-center gap-3 mb-2">
               <h1 className="text-3xl font-semibold text-foreground">Workflow Mode</h1>
-              <div className="flex items-center gap-2 px-4 py-1.5 bg-muted/50 rounded-lg border border-border">
-                <Edit2 className="w-4 h-4 text-muted-foreground" />
-                <Input
-                  value={workflowName}
-                  onChange={(e) => setWorkflowName(e.target.value)}
-                  className="h-8 text-sm font-medium bg-transparent border-none focus-visible:ring-0 focus-visible:ring-offset-0 px-0"
-                  placeholder="Enter workflow name..."
-                />
-              </div>
             </div>
             <p className="text-muted-foreground">
               Drag molecules from the list onto the workflow canvas. Connect molecules by drawing arrows between them.

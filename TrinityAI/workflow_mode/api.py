@@ -213,6 +213,10 @@ async def compose_workflow_websocket(websocket: WebSocket):
             "success": result.get('success', False),
             "session_id": result.get('session_id'),
             "workflow_composition": result.get('workflow_composition'),
+            "smart_response": result.get('smart_response', ''),
+            "reasoning": result.get('reasoning', ''),
+            "suggestions": result.get('suggestions', []),
+            "message": result.get('message', ''),
             "auto_create": result.get('auto_create', False),  # Flag to automatically create molecules
             "execution_plan": result.get('execution_plan', []),  # Step-by-step execution plan
             "mode": "workflow_composition"
