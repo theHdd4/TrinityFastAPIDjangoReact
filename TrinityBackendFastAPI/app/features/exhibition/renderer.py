@@ -4,6 +4,9 @@ import base64
 import contextlib
 import logging
 import math
+import subprocess
+import sys
+import threading
 from dataclasses import dataclass
 from typing import Iterable, List, Optional
 from urllib.parse import urljoin
@@ -19,6 +22,10 @@ except ImportError:  # pragma: no cover - executed when playwright is missing
     PlaywrightTimeoutError = None  # type: ignore[assignment]
     Browser = None  # type: ignore[assignment]
     sync_playwright = None  # type: ignore[assignment]
+
+
+_browser_install_lock = threading.Lock()
+_browser_install_ready = False
 
 
 class ExhibitionRendererError(RuntimeError):
@@ -84,6 +91,50 @@ def _ensure_playwright_available() -> None:
         )
 
 
+def _should_attempt_browser_install(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "playwright install" in message
+        or "executable doesn't exist" in message
+        or "looks like playwright" in message
+    )
+
+
+def _install_playwright_chromium() -> None:
+    global _browser_install_ready
+
+    with _browser_install_lock:
+        if _browser_install_ready:
+            return
+
+        logger.info("Attempting to install Playwright chromium browser automatically.")
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except FileNotFoundError as exc:  # pragma: no cover - python missing?
+            raise ExhibitionRendererError(
+                "Unable to install chromium for Playwright: Python executable not found."
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or exc.stdout or "").strip()
+            if stderr:
+                logger.error("Playwright chromium installation failed: %s", stderr)
+            raise ExhibitionRendererError(
+                "Unable to install chromium for Playwright automatically."
+            ) from exc
+
+        stdout = (completed.stdout or "").strip()
+        if stdout:
+            logger.debug("Playwright install output: %s", stdout)
+
+        _browser_install_ready = True
+
+
 def _compose_document(slide: SlideRenderInput, styles: DocumentStylesPayload) -> str:
     head_parts: List[str] = [
         "<meta charset=\"utf-8\">",
@@ -127,13 +178,20 @@ class ExhibitionRenderer:
     def __enter__(self) -> "ExhibitionRenderer":
         _ensure_playwright_available()
         self._play = sync_playwright().start()
-        try:
-            self._browser = self._play.chromium.launch(
-                headless=self._headless,
-                args=["--font-render-hinting=medium", "--disable-dev-shm-usage"],
-            )
-        except Exception as exc:  # pragma: no cover - playwright startup edge cases
-            raise ExhibitionRendererError(f"Unable to start chromium renderer: {exc}") from exc
+        install_attempted = False
+        while True:
+            try:
+                self._browser = self._play.chromium.launch(
+                    headless=self._headless,
+                    args=["--font-render-hinting=medium", "--disable-dev-shm-usage"],
+                )
+                break
+            except Exception as exc:  # pragma: no cover - playwright startup edge cases
+                if not install_attempted and _should_attempt_browser_install(exc):
+                    _install_playwright_chromium()
+                    install_attempted = True
+                    continue
+                raise ExhibitionRendererError(f"Unable to start chromium renderer: {exc}") from exc
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:  # pragma: no cover - cleanup robustness
