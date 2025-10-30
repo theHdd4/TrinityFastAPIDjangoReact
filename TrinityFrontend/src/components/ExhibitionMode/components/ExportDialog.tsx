@@ -11,10 +11,13 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useExhibitionStore } from '../store/exhibitionStore';
 import {
+  captureSlidesAsImages,
   exportAsImages,
   exportToPDF,
   exportToPowerPoint,
+  hydrateSlidesWithAssets,
   prepareSlidesForExport,
+  type SlideScreenshot,
 } from '../utils/exportUtils';
 
 interface ExportDialogProps {
@@ -47,23 +50,45 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
 
     try {
       const slides = prepareSlidesForExport(exhibitedCards, slideObjectsByCardId, activeTheme);
+      const hydratedSlides = await hydrateSlidesWithAssets(slides);
+      const captures = await captureSlidesAsImages(
+        hydratedSlides.map(slide => slide.id),
+        { backgroundColor: '#ffffff' },
+      );
+
+      const captureMap = new Map<string, SlideScreenshot>(
+        captures.map(capture => [capture.id, capture]),
+      );
+
+      const orderedScreenshots: SlideScreenshot[] = hydratedSlides.map(slide =>
+        captureMap.get(slide.id) ?? {
+          id: slide.id,
+          dataUrl: '',
+          base64: '',
+          mimeType: 'image/png',
+          width: 0,
+          height: 0,
+          scale: 1,
+        },
+      );
 
       switch (format) {
         case 'PowerPoint':
-          await exportToPowerPoint(slides, exportTitle);
+          await exportToPowerPoint(hydratedSlides, exportTitle, orderedScreenshots);
           toast.dismiss();
           toast.success('PowerPoint exported successfully!');
           break;
         case 'PDF':
-          await exportToPDF(slides, exportTitle);
+          await exportToPDF(hydratedSlides, exportTitle, orderedScreenshots);
           toast.dismiss();
           toast.success('PDF exported successfully!');
           break;
-        case 'Images':
-          await exportAsImages(slides, exportTitle);
+        case 'Images': {
+          await exportAsImages(orderedScreenshots, exportTitle);
           toast.dismiss();
-          toast.success(`${slides.length} images exported successfully!`);
+          toast.success(`${captures.length} images exported successfully!`);
           break;
+        }
         default:
           toast.dismiss();
           toast.error('Unsupported export format.');
