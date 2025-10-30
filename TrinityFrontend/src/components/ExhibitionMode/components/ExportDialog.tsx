@@ -159,29 +159,29 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl border-0 bg-gradient-to-br from-background via-background to-muted/20 shadow-2xl">
-        <DialogHeader className="space-y-4 pb-6 border-b border-border/50">
+      <DialogContent className="sm:max-w-2xl border border-border/60 bg-background shadow-xl">
+        <DialogHeader className="space-y-4 pb-5 border-b border-border/60">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-4">
-              <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-br from-primary via-accent to-secondary rounded-2xl blur-xl opacity-30 animate-pulse"></div>
-                <div className="relative p-4 rounded-2xl bg-gradient-to-br from-primary/10 via-accent/10 to-secondary/10 border border-primary/20 shadow-lg">
-                  <Download className="h-7 w-7 text-primary" strokeWidth={2.5} />
-                </div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Download className="h-6 w-6" strokeWidth={2.25} />
               </div>
               <div>
-                <DialogTitle className="text-3xl font-bold bg-gradient-to-r from-foreground via-foreground to-muted-foreground bg-clip-text">
-                  Export Presentation
+                <DialogTitle className="text-2xl font-semibold text-foreground">
+                  Export presentation
                 </DialogTitle>
-                <DialogDescription className="text-sm mt-2 flex items-center gap-2">
+                <DialogDescription className="mt-1 text-sm text-muted-foreground flex items-center gap-2">
                   <Sparkles className="h-3.5 w-3.5 text-primary" />
-                  <span className="font-medium">
-                    {totalSlides} professional {totalSlides === 1 ? 'slide' : 'slides'} ready
+                  <span className="font-medium text-foreground">
+                    {totalSlides} {totalSlides === 1 ? 'slide' : 'slides'} ready
                   </span>
                 </DialogDescription>
               </div>
             </div>
-            <Badge variant="secondary" className="text-xs px-3 py-1 bg-primary/10 text-primary border-primary/20">
+            <Badge
+              variant="outline"
+              className="uppercase tracking-wide text-xs px-3 py-1 border-border/70 text-muted-foreground"
+            >
               Premium
             </Badge>
           </div>
@@ -190,40 +190,36 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
         <div className="grid gap-4 py-6">
           <Button
             variant="outline"
-            className="group relative justify-start h-auto py-6 px-6 border-2 border-border hover:border-destructive/40 hover:shadow-xl transition-all duration-500 overflow-hidden bg-card/50 backdrop-blur"
+            className="justify-start h-auto py-5 px-5 border border-border/70 bg-card hover:bg-muted transition-colors"
             onClick={() => handleExport('PDF')}
             disabled={isExporting}
           >
-            <div className="absolute inset-0 bg-gradient-to-r from-destructive/0 via-destructive/10 to-destructive/0 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000"></div>
-            <div className="absolute inset-0 bg-gradient-to-br from-destructive/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-
-            <div className="flex items-center gap-5 w-full relative z-10">
-              <div className="relative">
-                <div className="absolute inset-0 bg-destructive/20 rounded-2xl blur-md group-hover:blur-xl transition-all duration-500"></div>
-                <div className="relative p-4 bg-gradient-to-br from-destructive/20 to-destructive/10 rounded-2xl border border-destructive/30 group-hover:scale-110 group-hover:rotate-3 transition-all duration-500 shadow-lg">
-                  <FileText className="h-7 w-7 text-destructive" strokeWidth={2.5} />
-                </div>
+            <div className="flex items-center gap-4 w-full">
+              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
+                <FileText className="h-5 w-5" strokeWidth={2.25} />
               </div>
-
-              <div className="text-left flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="font-bold text-lg">PDF Document</span>
-                  <Badge variant="outline" className="text-[10px] px-2 py-0 border-destructive/30 text-destructive">
+              <div className="flex-1 text-left">
+                <div className="flex items-center gap-2">
+                  <span className="text-base font-semibold text-foreground">PDF document</span>
+                  <Badge
+                    variant="secondary"
+                    className="text-[10px] font-medium px-2 py-0.5 bg-transparent text-destructive border-destructive/40"
+                  >
                     Universal
                   </Badge>
                 </div>
-                <p className="text-xs text-muted-foreground leading-relaxed mb-2">
-                  Perfect for sharing and printing with universal compatibility
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Perfect for sharing and printing with universal compatibility.
                 </p>
-                <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
                   <span className="flex items-center gap-1">
-                    <Check className="h-3 w-3" /> High Quality
+                    <Check className="h-3 w-3" /> High quality
                   </span>
                   <span className="flex items-center gap-1">
-                    <Check className="h-3 w-3" /> Print Ready
+                    <Check className="h-3 w-3" /> Print ready
                   </span>
                   <span className="flex items-center gap-1">
-                    <Check className="h-3 w-3" /> Secure
+                    <Check className="h-3 w-3" /> Secure output
                   </span>
                 </div>
               </div>
@@ -232,40 +228,36 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
 
           <Button
             variant="outline"
-            className="group relative justify-start h-auto py-6 px-6 border-2 border-border hover:border-primary/40 hover:shadow-xl transition-all duration-500 overflow-hidden bg-card/50 backdrop-blur"
+            className="justify-start h-auto py-5 px-5 border border-border/70 bg-card hover:bg-muted transition-colors"
             onClick={() => handleExport('PowerPoint')}
             disabled={isExporting}
           >
-            <div className="absolute inset-0 bg-gradient-to-r from-primary/0 via-primary/10 to-primary/0 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000"></div>
-            <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-
-            <div className="flex items-center gap-5 w-full relative z-10">
-              <div className="relative">
-                <div className="absolute inset-0 bg-primary/20 rounded-2xl blur-md group-hover:blur-xl transition-all duration-500"></div>
-                <div className="relative p-4 bg-gradient-to-br from-primary/20 to-primary/10 rounded-2xl border border-primary/30 group-hover:scale-110 group-hover:rotate-3 transition-all duration-500 shadow-lg">
-                  <Presentation className="h-7 w-7 text-primary" strokeWidth={2.5} />
-                </div>
+            <div className="flex items-center gap-4 w-full">
+              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Presentation className="h-5 w-5" strokeWidth={2.25} />
               </div>
-
-              <div className="text-left flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="font-bold text-lg">PowerPoint Presentation</span>
-                  <Badge variant="outline" className="text-[10px] px-2 py-0 border-primary/30 text-primary">
+              <div className="flex-1 text-left">
+                <div className="flex items-center gap-2">
+                  <span className="text-base font-semibold text-foreground">PowerPoint presentation</span>
+                  <Badge
+                    variant="secondary"
+                    className="text-[10px] font-medium px-2 py-0.5 bg-transparent text-primary border-primary/40"
+                  >
                     Editable
                   </Badge>
                 </div>
-                <p className="text-xs text-muted-foreground leading-relaxed mb-2">
-                  Export as .pptx with full Microsoft Office and Google Slides support
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Export an editable .pptx deck ready for Microsoft Office or Google Slides.
                 </p>
-                <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
                   <span className="flex items-center gap-1">
-                    <Check className="h-3 w-3" /> Fully Editable
+                    <Check className="h-3 w-3" /> Fully editable
                   </span>
                   <span className="flex items-center gap-1">
-                    <Check className="h-3 w-3" /> Professional
+                    <Check className="h-3 w-3" /> Chart &amp; table support
                   </span>
                   <span className="flex items-center gap-1">
-                    <Check className="h-3 w-3" /> Compatible
+                    <Check className="h-3 w-3" /> Layout overlays
                   </span>
                 </div>
               </div>
@@ -274,40 +266,36 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
 
           <Button
             variant="outline"
-            className="group relative justify-start h-auto py-6 px-6 border-2 border-border hover:border-accent/40 hover:shadow-xl transition-all duration-500 overflow-hidden bg-card/50 backdrop-blur"
+            className="justify-start h-auto py-5 px-5 border border-border/70 bg-card hover:bg-muted transition-colors"
             onClick={() => handleExport('Images')}
             disabled={isExporting}
           >
-            <div className="absolute inset-0 bg-gradient-to-r from-accent/0 via-accent/10 to-accent/0 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000"></div>
-            <div className="absolute inset-0 bg-gradient-to-br from-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-
-            <div className="flex items-center gap-5 w-full relative z-10">
-              <div className="relative">
-                <div className="absolute inset-0 bg-accent/20 rounded-2xl blur-md group-hover:blur-xl transition-all duration-500"></div>
-                <div className="relative p-4 bg-gradient-to-br from-accent/20 to-accent/10 rounded-2xl border border-accent/30 group-hover:scale-110 group-hover:rotate-3 transition-all duration-500 shadow-lg">
-                  <Image className="h-7 w-7 text-accent" strokeWidth={2.5} />
-                </div>
+            <div className="flex items-center gap-4 w-full">
+              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-blue-100 text-blue-600">
+                <Image className="h-5 w-5" strokeWidth={2.25} />
               </div>
-
-              <div className="text-left flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="font-bold text-lg">Image Files</span>
-                  <Badge variant="outline" className="text-[10px] px-2 py-0 border-accent/30 text-accent">
-                    HD Quality
+              <div className="flex-1 text-left">
+                <div className="flex items-center gap-2">
+                  <span className="text-base font-semibold text-foreground">Image files</span>
+                  <Badge
+                    variant="secondary"
+                    className="text-[10px] font-medium px-2 py-0.5 bg-transparent text-blue-600 border-blue-200"
+                  >
+                    PNG set
                   </Badge>
                 </div>
-                <p className="text-xs text-muted-foreground leading-relaxed mb-2">
-                  High-resolution PNG images • One file per slide for maximum flexibility
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Download each slide as a high-resolution PNG for flexible reuse.
                 </p>
-                <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
                   <span className="flex items-center gap-1">
-                    <Check className="h-3 w-3" /> High Resolution
+                    <Check className="h-3 w-3" /> Retina ready
                   </span>
                   <span className="flex items-center gap-1">
-                    <Check className="h-3 w-3" /> Transparent BG
+                    <Check className="h-3 w-3" /> Consistent sizing
                   </span>
                   <span className="flex items-center gap-1">
-                    <Check className="h-3 w-3" /> Web Ready
+                    <Check className="h-3 w-3" /> Slide-by-slide
                   </span>
                 </div>
               </div>
@@ -315,10 +303,10 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
           </Button>
         </div>
 
-        <div className="pt-4 border-t border-border/50">
+        <div className="pt-4 border-t border-border/60">
           <p className="text-xs text-center text-muted-foreground flex items-center justify-center gap-2">
-            <Sparkles className="h-3 w-3" />
-            All exports maintain your original design and quality
+            <Sparkles className="h-3 w-3 text-primary" />
+            <span>All exports preserve your slide proportions and styling.</span>
           </p>
         </div>
       </DialogContent>

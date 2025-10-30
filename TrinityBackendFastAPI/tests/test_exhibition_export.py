@@ -45,6 +45,7 @@ SlideDomSnapshotPayload = schemas_module.SlideDomSnapshotPayload
 build_export_filename = export_module.build_export_filename
 build_pdf_bytes = export_module.build_pdf_bytes
 build_pptx_bytes = export_module.build_pptx_bytes
+_px_to_emu = export_module._px_to_emu
 
 
 # 1x1 transparent PNG
@@ -132,6 +133,24 @@ def test_build_pptx_bytes_renders_slides(tmp_path: Path) -> None:
         if hasattr(shape, "text") and "Hello" in shape.text
     ]
     assert text_shapes, "Expected text box to contain exported content"
+
+
+def test_build_pptx_bytes_uses_max_dimensions() -> None:
+    payload = _build_payload()
+
+    payload.slides[0].base_width = 840
+    payload.slides[0].base_height = 520
+    payload.slides[1].base_width = 1088
+    payload.slides[1].base_height = 520
+
+    pptx_bytes = build_pptx_bytes(payload)
+    assert pptx_bytes.startswith(b"PK")
+
+    from pptx import Presentation
+
+    presentation = Presentation(io.BytesIO(pptx_bytes))
+    assert presentation.slide_width == _px_to_emu(1088)
+    assert presentation.slide_height == _px_to_emu(520)
 
 
 def test_build_pdf_bytes_requires_screenshots() -> None:

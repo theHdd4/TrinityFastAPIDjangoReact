@@ -14,6 +14,7 @@ from pptx import Presentation
 from pptx.chart.data import ChartData
 from pptx.dml.color import RGBColor
 from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
+from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Pt
 from reportlab.lib.utils import ImageReader
@@ -34,6 +35,29 @@ PX_PER_INCH = 96.0
 EMU_PER_INCH = 914400
 PT_PER_INCH = 72.0
 DEFAULT_RENDER_SERVICE_URL = "http://localhost:4100"
+
+CANVAS_STAGE_HEIGHT = 520.0
+TOP_LAYOUT_MIN_HEIGHT = 210.0
+BOTTOM_LAYOUT_MIN_HEIGHT = 220.0
+SIDE_LAYOUT_MIN_WIDTH = 280.0
+SIDE_LAYOUT_RATIO = 0.34
+
+GRADIENT_PRESETS: dict[str, dict[str, object]] = {
+    "default": {"stops": ["#7c3aed", "#ec4899", "#f97316"], "angle": 135},
+    "blue": {"stops": ["#1d4ed8", "#2563eb", "#0ea5e9", "#14b8a6"], "angle": 135},
+    "purple": {"stops": ["#5b21b6", "#7c3aed", "#a855f7", "#ec4899"], "angle": 135},
+    "green": {"stops": ["#047857", "#10b981", "#22c55e", "#bef264"], "angle": 135},
+    "orange": {"stops": ["#c2410c", "#ea580c", "#f97316", "#facc15"], "angle": 135},
+    "gradient-aurora": {"stops": ["#312e81", "#7c3aed", "#ec4899", "#f97316"], "angle": 135},
+    "gradient-dusk": {"stops": ["#1e3a8a", "#6366f1", "#a855f7", "#f472b6"], "angle": 135},
+    "gradient-oceanic": {"stops": ["#0f172a", "#1d4ed8", "#38bdf8", "#2dd4bf"], "angle": 135},
+    "gradient-forest": {"stops": ["#064e3b", "#047857", "#22c55e", "#a3e635"], "angle": 135},
+    "gradient-tropical": {"stops": ["#0ea5e9", "#22d3ee", "#34d399", "#fde68a"], "angle": 135},
+    "gradient-blush": {"stops": ["#f472b6", "#fb7185", "#f97316", "#fde68a"], "angle": 135},
+    "gradient-midnight": {"stops": ["#0f172a", "#312e81", "#6d28d9", "#a855f7"], "angle": 135},
+}
+
+DEFAULT_OVERLAY_COLOR = "#7c3aed"
 
 
 class ExportGenerationError(Exception):
@@ -141,15 +165,160 @@ def _apply_font_formatting(font, formatting: dict) -> None:
         font.color.rgb = color
 
 
-def _render_text_box(slide, obj: SlideExportObjectPayload) -> None:
+def _normalise_card_layout(value: Optional[str]) -> str:
+    if not value:
+        return 'none'
+    lowered = value.lower()
+    if lowered in {'none', 'top', 'bottom', 'left', 'right', 'full'}:
+        return lowered
+    return 'none'
+
+
+def _resolve_overlay_fill(settings: dict) -> tuple[str, object]:
+    accent_image = settings.get('accentImage') or settings.get('accent_image')
+    if isinstance(accent_image, str) and accent_image.strip():
+        return 'image', accent_image.strip()
+
+    card_color = settings.get('cardColor') or settings.get('card_color')
+    if isinstance(card_color, str) and card_color.strip():
+        token = card_color.strip()
+        if token.startswith('solid-') and len(token) >= 12:
+            return 'solid', f"#{token[6:12]}"
+
+        lookup = token.lower()
+        preset = GRADIENT_PRESETS.get(lookup)
+        if preset:
+            return 'gradient', preset
+
+    return 'solid', DEFAULT_OVERLAY_COLOR
+
+
+def _compute_overlay_rect(layout: str, width: float, height: float) -> Optional[tuple[float, float, float, float]]:
+    if width <= 0 or height <= 0:
+        return None
+
+    if layout == 'full':
+        return 0.0, 0.0, width, height
+
+    if layout == 'top':
+        ratio = TOP_LAYOUT_MIN_HEIGHT / CANVAS_STAGE_HEIGHT if CANVAS_STAGE_HEIGHT else 0
+        overlay_height = max(TOP_LAYOUT_MIN_HEIGHT, height * ratio)
+        overlay_height = min(overlay_height, height)
+        return 0.0, 0.0, width, overlay_height
+
+    if layout == 'bottom':
+        ratio = BOTTOM_LAYOUT_MIN_HEIGHT / CANVAS_STAGE_HEIGHT if CANVAS_STAGE_HEIGHT else 0
+        overlay_height = max(BOTTOM_LAYOUT_MIN_HEIGHT, height * ratio)
+        overlay_height = min(overlay_height, height)
+        return 0.0, height - overlay_height, width, overlay_height
+
+    if layout == 'left':
+        overlay_width = max(SIDE_LAYOUT_MIN_WIDTH, width * SIDE_LAYOUT_RATIO)
+        overlay_width = min(overlay_width, width)
+        return 0.0, 0.0, overlay_width, height
+
+    if layout == 'right':
+        overlay_width = max(SIDE_LAYOUT_MIN_WIDTH, width * SIDE_LAYOUT_RATIO)
+        overlay_width = min(overlay_width, width)
+        return width - overlay_width, 0.0, overlay_width, height
+
+    return None
+
+
+def _render_layout_overlay(
+    slide,
+    slide_payload: SlideExportPayload,
+    base_width: float,
+    base_height: float,
+    offset_x: float = 0.0,
+    offset_y: float = 0.0,
+) -> None:
+    settings = slide_payload.presentation_settings or {}
+    if not isinstance(settings, dict):
+        return
+
+    layout_value = settings.get('cardLayout') or settings.get('card_layout')
+    layout = _normalise_card_layout(layout_value)
+    if layout == 'none':
+        return
+
+    rect = _compute_overlay_rect(layout, base_width, base_height)
+    if not rect:
+        return
+
+    x, y, width, height = rect
+    fill_type, fill_value = _resolve_overlay_fill(settings)
+
+    if fill_type == 'image' and isinstance(fill_value, str):
+        try:
+            image_bytes = _decode_data_url(fill_value)
+            image_stream = io.BytesIO(image_bytes)
+            slide.shapes.add_picture(
+                image_stream,
+                _px_to_emu(x + offset_x),
+                _px_to_emu(y + offset_y),
+                width=_px_to_emu(width),
+                height=_px_to_emu(height),
+            )
+            return
+        except ExportGenerationError:
+            fill_type = 'solid'
+            fill_value = DEFAULT_OVERLAY_COLOR
+        except Exception as exc:  # pragma: no cover - best effort logging
+            logger.warning('Unable to render accent image for slide %s: %s', slide_payload.id, exc)
+            fill_type = 'solid'
+            fill_value = DEFAULT_OVERLAY_COLOR
+
+    shape = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE,
+        _px_to_emu(x + offset_x),
+        _px_to_emu(y + offset_y),
+        _px_to_emu(width),
+        _px_to_emu(height),
+    )
+    shape.line.fill.background()
+
+    if fill_type == 'gradient' and isinstance(fill_value, dict):
+        stops = fill_value.get('stops') if isinstance(fill_value.get('stops'), list) else []
+        colors = [color for color in stops if isinstance(color, str)]
+        if len(colors) >= 2:
+            gradient = shape.fill
+            gradient.gradient()
+            try:
+                gradient.gradient_angle = int(fill_value.get('angle')) if fill_value.get('angle') is not None else 135
+            except (TypeError, ValueError):
+                gradient.gradient_angle = 135
+
+            start_color = _parse_hex_color(colors[0]) or _parse_hex_color(DEFAULT_OVERLAY_COLOR)
+            end_color = _parse_hex_color(colors[-1]) or start_color
+            if start_color is not None and end_color is not None:
+                gradient_stops = gradient.gradient_stops
+                gradient_stops[0].position = 0.0
+                gradient_stops[0].color.rgb = start_color
+                gradient_stops[1].position = 1.0
+                gradient_stops[1].color.rgb = end_color
+                return
+
+        fill_type = 'solid'
+        fill_value = colors[0] if colors else DEFAULT_OVERLAY_COLOR
+
+    if fill_type == 'solid':
+        rgb = _parse_hex_color(str(fill_value)) or _parse_hex_color(DEFAULT_OVERLAY_COLOR)
+        if rgb is not None:
+            fill = shape.fill
+            fill.solid()
+            fill.fore_color.rgb = rgb
+
+
+def _render_text_box(slide, obj: SlideExportObjectPayload, offset_x: float = 0.0, offset_y: float = 0.0) -> None:
     width = _safe_float(obj.width, 0)
     height = _safe_float(obj.height, 0)
     if width <= 0 or height <= 0:
         return
 
     shape = slide.shapes.add_textbox(
-        _px_to_emu(obj.x),
-        _px_to_emu(obj.y),
+        _px_to_emu(obj.x + offset_x),
+        _px_to_emu(obj.y + offset_y),
         _px_to_emu(width),
         _px_to_emu(height),
     )
@@ -173,7 +342,7 @@ def _render_text_box(slide, obj: SlideExportObjectPayload) -> None:
         shape.rotation = rotation
 
 
-def _render_image(slide, obj: SlideExportObjectPayload) -> None:
+def _render_image(slide, obj: SlideExportObjectPayload, offset_x: float = 0.0, offset_y: float = 0.0) -> None:
     width = _safe_float(obj.width, 0)
     height = _safe_float(obj.height, 0)
     if width <= 0 or height <= 0:
@@ -189,8 +358,8 @@ def _render_image(slide, obj: SlideExportObjectPayload) -> None:
 
     shape = slide.shapes.add_picture(
         image_stream,
-        _px_to_emu(obj.x),
-        _px_to_emu(obj.y),
+        _px_to_emu(obj.x + offset_x),
+        _px_to_emu(obj.y + offset_y),
         width=_px_to_emu(width),
         height=_px_to_emu(height),
     )
@@ -220,7 +389,7 @@ def _apply_table_cell(cell, payload: dict) -> None:
     _apply_font_formatting(paragraph.font, formatting)
 
 
-def _render_table(slide, obj: SlideExportObjectPayload) -> None:
+def _render_table(slide, obj: SlideExportObjectPayload, offset_x: float = 0.0, offset_y: float = 0.0) -> None:
     table_data = _extract_table_data(obj)
     if not table_data:
         return
@@ -238,8 +407,8 @@ def _render_table(slide, obj: SlideExportObjectPayload) -> None:
     table_shape = slide.shapes.add_table(
         rows,
         cols,
-        _px_to_emu(obj.x),
-        _px_to_emu(obj.y),
+        _px_to_emu(obj.x + offset_x),
+        _px_to_emu(obj.y + offset_y),
         _px_to_emu(width),
         _px_to_emu(height),
     )
@@ -298,7 +467,7 @@ def _map_legend_position(position: Optional[str]) -> Optional[XL_LEGEND_POSITION
     return lookup.get(position.lower())
 
 
-def _render_chart(slide, obj: SlideExportObjectPayload) -> None:
+def _render_chart(slide, obj: SlideExportObjectPayload, offset_x: float = 0.0, offset_y: float = 0.0) -> None:
     props = obj.props or {}
     data = props.get('chartData')
     config = props.get('chartConfig') or {}
@@ -329,8 +498,8 @@ def _render_chart(slide, obj: SlideExportObjectPayload) -> None:
     chart_type = _map_chart_type(config.get('type'))
     chart_shape = slide.shapes.add_chart(
         chart_type,
-        _px_to_emu(obj.x),
-        _px_to_emu(obj.y),
+        _px_to_emu(obj.x + offset_x),
+        _px_to_emu(obj.y + offset_y),
         _px_to_emu(width),
         _px_to_emu(height),
         chart_data,
@@ -370,17 +539,22 @@ def _sort_objects(objects: Iterable[SlideExportObjectPayload]) -> list[SlideExpo
     return sorted(objects, key=lambda item: (item.z_index if item.z_index is not None else 0))
 
 
-def _render_slide_objects(slide, slide_payload: SlideExportPayload) -> None:
+def _render_slide_objects(
+    slide,
+    slide_payload: SlideExportPayload,
+    offset_x: float = 0.0,
+    offset_y: float = 0.0,
+) -> None:
     for obj in _sort_objects(slide_payload.objects):
         try:
             if obj.type == 'text-box':
-                _render_text_box(slide, obj)
+                _render_text_box(slide, obj, offset_x, offset_y)
             elif obj.type == 'image':
-                _render_image(slide, obj)
+                _render_image(slide, obj, offset_x, offset_y)
             elif obj.type == 'table':
-                _render_table(slide, obj)
+                _render_table(slide, obj, offset_x, offset_y)
             elif obj.type == 'chart':
-                _render_chart(slide, obj)
+                _render_chart(slide, obj, offset_x, offset_y)
             else:
                 logger.debug('Skipping unsupported object type %s on slide %s', obj.type, slide_payload.id)
         except ExportGenerationError:
@@ -563,20 +737,25 @@ def build_pptx_bytes(payload: ExhibitionExportRequest) -> bytes:
         raise ExportGenerationError('No slides provided for export.')
 
     ordered_slides = sorted(payload.slides, key=lambda slide: slide.index)
-    width, height = _resolve_slide_dimensions(ordered_slides[0])
+    dimensions = [_resolve_slide_dimensions(slide) for slide in ordered_slides]
+    max_width = max(width for width, _ in dimensions)
+    max_height = max(height for _, height in dimensions)
 
     presentation = Presentation()
-    presentation.slide_width = _px_to_emu(width)
-    presentation.slide_height = _px_to_emu(height)
+    presentation.slide_width = _px_to_emu(max_width)
+    presentation.slide_height = _px_to_emu(max_height)
 
     title = (payload.title or 'Exhibition Presentation').strip() or 'Exhibition Presentation'
     presentation.core_properties.title = title
     presentation.core_properties.subject = 'Exhibition export'
     presentation.core_properties.author = 'Trinity Exhibition'
 
-    for slide_payload in ordered_slides:
+    for slide_payload, (base_width, base_height) in zip(ordered_slides, dimensions):
         slide = presentation.slides.add_slide(presentation.slide_layouts[6])
-        _render_slide_objects(slide, slide_payload)
+        offset_x = max((max_width - base_width) / 2, 0.0)
+        offset_y = max((max_height - base_height) / 2, 0.0)
+        _render_layout_overlay(slide, slide_payload, base_width, base_height, offset_x, offset_y)
+        _render_slide_objects(slide, slide_payload, offset_x, offset_y)
 
     output = io.BytesIO()
     presentation.save(output)

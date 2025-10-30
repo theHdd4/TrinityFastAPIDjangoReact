@@ -4,6 +4,8 @@ import { toPng } from 'html-to-image';
 
 import { EXHIBITION_API } from '@/lib/api';
 import {
+  type CardWidth,
+  DEFAULT_PRESENTATION_SETTINGS,
   type LayoutCard,
   type PresentationSettings,
   type SlideObject,
@@ -24,8 +26,15 @@ type JsonCompatible =
 const EXPORT_CONTAINER_ID = 'exhibition-export-container';
 const WAIT_FOR_RENDER_MS = 120;
 const DOWNLOAD_DELAY_MS = 80;
-const FALLBACK_BASE_WIDTH = 960;
-const FALLBACK_BASE_HEIGHT = 540;
+const PRESENTATION_STAGE_HEIGHT = 520;
+
+const CARD_WIDTH_DIMENSIONS: Record<CardWidth, { width: number; height: number }> = {
+  M: { width: 832, height: PRESENTATION_STAGE_HEIGHT },
+  L: { width: 1088, height: PRESENTATION_STAGE_HEIGHT },
+};
+
+const FALLBACK_BASE_WIDTH = CARD_WIDTH_DIMENSIONS[DEFAULT_PRESENTATION_SETTINGS.cardWidth].width;
+const FALLBACK_BASE_HEIGHT = CARD_WIDTH_DIMENSIONS[DEFAULT_PRESENTATION_SETTINGS.cardWidth].height;
 const MAX_CAPTURE_ATTEMPTS = 2;
 
 const isSecurityError = (error: unknown): boolean => {
@@ -322,6 +331,38 @@ const createDomSnapshot = (
   };
 };
 
+const resolveDesignDimensions = (
+  card: LayoutCard,
+  measuredWidth: number,
+  measuredHeight: number,
+): { width: number; height: number } => {
+  const cardWidthSetting = card.presentationSettings?.cardWidth as CardWidth | undefined;
+  const fallbackDimensions = CARD_WIDTH_DIMENSIONS[DEFAULT_PRESENTATION_SETTINGS.cardWidth];
+  const targetDimensions = (cardWidthSetting && CARD_WIDTH_DIMENSIONS[cardWidthSetting]) || fallbackDimensions;
+
+  const width = (() => {
+    if (targetDimensions?.width && targetDimensions.width > 0) {
+      return targetDimensions.width;
+    }
+    if (Number.isFinite(measuredWidth) && measuredWidth > 0) {
+      return measuredWidth;
+    }
+    return FALLBACK_BASE_WIDTH;
+  })();
+
+  const height = (() => {
+    if (targetDimensions?.height && targetDimensions.height > 0) {
+      return targetDimensions.height;
+    }
+    if (Number.isFinite(measuredHeight) && measuredHeight > 0) {
+      return measuredHeight;
+    }
+    return FALLBACK_BASE_HEIGHT;
+  })();
+
+  return { width, height };
+};
+
 export interface PrepareSlidesForExportOptions {
   pixelRatio?: number;
   captureImages?: boolean;
@@ -458,9 +499,14 @@ export const prepareSlidesForExport = async (
         continue;
       }
 
-      const { width: baseWidth, height: baseHeight } = resolveSlideDimensions(slideElement);
+      const { width: measuredWidth, height: measuredHeight } = resolveSlideDimensions(slideElement);
+      const { width: designWidth, height: designHeight } = resolveDesignDimensions(
+        card,
+        measuredWidth,
+        measuredHeight,
+      );
 
-      if ((captureImages || includeDomSnapshot) && (baseWidth === 0 || baseHeight === 0)) {
+      if ((captureImages || includeDomSnapshot) && (designWidth === 0 || designHeight === 0)) {
         failures.push(card.id);
         continue;
       }
@@ -468,7 +514,7 @@ export const prepareSlidesForExport = async (
       if (includeDomSnapshot) {
         domSnapshots.set(
           card.id,
-          createDomSnapshot(slideElement, card.id, pixelRatio, baseWidth, baseHeight),
+          createDomSnapshot(slideElement, card.id, pixelRatio, designWidth, designHeight),
         );
         if (!collectedStyles) {
           collectedStyles = collectDocumentStyles();
@@ -487,8 +533,8 @@ export const prepareSlidesForExport = async (
           attempt += 1;
 
           try {
-            const targetWidth = Math.round(baseWidth);
-            const targetHeight = Math.round(baseHeight);
+            const targetWidth = Math.round(designWidth);
+            const targetHeight = Math.round(designHeight);
 
             const pngOptions = {
               pixelRatio,
@@ -528,8 +574,8 @@ export const prepareSlidesForExport = async (
         captures.push({
           cardId: card.id,
           dataUrl,
-          cssWidth: baseWidth,
-          cssHeight: baseHeight,
+          cssWidth: designWidth,
+          cssHeight: designHeight,
           imageWidth,
           imageHeight,
           pixelRatio,
@@ -640,13 +686,30 @@ const normaliseObjects = async (
   );
 };
 
-const normalisePresentationSettings = (
+const normalisePresentationSettings = async (
   settings?: PresentationSettings,
-): PresentationSettings | null => {
+): Promise<PresentationSettings | null> => {
   if (!settings) {
     return null;
   }
-  return clonePlainObject(settings);
+
+  const cloned = clonePlainObject(settings);
+  const accentImage = cloned.accentImage;
+
+  if (typeof accentImage === 'string' && accentImage.length > 0) {
+    if (DATA_URL_PATTERN.test(accentImage)) {
+      cloned.accentImage = accentImage;
+    } else {
+      try {
+        cloned.accentImage = await fetchImageAsDataUrl(accentImage);
+      } catch (error) {
+        console.warn('[Exhibition Export] Unable to inline accent image for export', error);
+        cloned.accentImage = null;
+      }
+    }
+  }
+
+  return cloned;
 };
 
 const resolveExportTitle = (cards: LayoutCard[], provided?: string): string => {
@@ -683,6 +746,9 @@ export const buildPresentationExportPayload = async (
     const capture = captureLookup.get(card.id);
     const domSnapshot = domSnapshots.get(card.id);
     const objects = await normaliseObjects(slideObjectsByCardId[card.id]);
+    const presentationSettings = await normalisePresentationSettings(
+      card.presentationSettings ?? undefined,
+    );
     const baseWidth = capture?.cssWidth ?? domSnapshot?.width ?? fallbackWidth;
     const baseHeight = capture?.cssHeight ?? domSnapshot?.height ?? fallbackHeight;
 
@@ -692,7 +758,7 @@ export const buildPresentationExportPayload = async (
       title: resolveCardTitle(card, card.atoms ?? []),
       baseWidth,
       baseHeight,
-      presentationSettings: normalisePresentationSettings(card.presentationSettings ?? undefined),
+      presentationSettings,
       objects,
       screenshot: capture
         ? {
