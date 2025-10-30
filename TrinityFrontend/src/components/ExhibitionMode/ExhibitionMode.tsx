@@ -2108,7 +2108,7 @@ const ExhibitionMode = () => {
       <ShareDialog
         open={isShareOpen}
         onOpenChange={setIsShareOpen}
-        projectName={context?.project_name ?? 'Exhibition Project'}
+        projectName={projectContext?.project_name ?? 'Exhibition Project'}
       />
     </div>
   );
