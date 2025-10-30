@@ -25,72 +25,35 @@ async def save_build_config(
     user_id: str = "",
     project_id: int | None = None,
 ):
-    """Save build model configuration data to MongoDB build-model_featurebased_configs collection"""
+    """Save build model configuration data to MongoDB build-model_featurebased_configs collection.
+    Always overwrites the entire document for the given document_id (no merging)."""
     try:
         document_id = f"{client_name}/{app_name}/{project_name}"
         
-        # Check if document already exists
-        existing_doc = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
+        # Create document - always overwrites existing document completely
+        document = {
+            "_id": document_id,
+            "client_name": client_name,
+            "app_name": app_name,
+            "project_name": project_name,
+            "operation_type": "build_model_feature_based",
+            "updated_at": datetime.utcnow(),
+            "user_id": user_id,
+            "project_id": project_id,
+            **build_data,
+        }
         
-        if existing_doc:
-            # Merge new data with existing data instead of replacing
-            # Create base document with existing data
-            merged_document = existing_doc.copy()
-            
-            # Update timestamp and user info
-            merged_document["updated_at"] = datetime.utcnow()
-            if user_id:
-                merged_document["user_id"] = user_id
-            if project_id is not None:
-                merged_document["project_id"] = project_id
-            
-            # Merge build_data with existing data
-            for key, value in build_data.items():
-                if key in merged_document:
-                    # Special handling for combination_file_keys - replace instead of extend
-                    if key == "combination_file_keys" and isinstance(merged_document[key], list) and isinstance(value, list):
-                        merged_document[key] = value  # Replace the entire list
-                        logger.info(f"🔄 Replaced combination_file_keys with {len(value)} entries")
-                    # If key exists and both are lists, extend the list (for other list fields)
-                    elif isinstance(merged_document[key], list) and isinstance(value, list):
-                        merged_document[key].extend(value)
-                    # If key exists and both are dicts, merge the dicts
-                    elif isinstance(merged_document[key], dict) and isinstance(value, dict):
-                        merged_document[key].update(value)
-                    # Otherwise, replace the value
-                    else:
-                        merged_document[key] = value
-                else:
-                    # If key doesn't exist, add it
-                    merged_document[key] = value
-            
-            # Update the existing document
-            result = await db["build-model_featurebased_configs"].replace_one(
-                {"_id": document_id},
-                merged_document
-            )
-            
-            operation = "updated"
-        else:
-            # Create new document
-            document = {
-                "_id": document_id,
-                "client_name": client_name,
-                "app_name": app_name,
-                "project_name": project_name,
-                "operation_type": "build_model_feature_based",
-                "updated_at": datetime.utcnow(),
-                "user_id": user_id,
-                "project_id": project_id,
-                **build_data,
-            }
-            
-            # Insert new document
-            result = await db["build-model_featurebased_configs"].insert_one(document)
-            
-            operation = "inserted"
+        # Use replace_one with upsert=True to overwrite if exists, insert if not exists
+        result = await db["build-model_featurebased_configs"].replace_one(
+            {"_id": document_id},
+            document,
+            upsert=True
+        )
         
-        logger.info(f"📦 Stored in build-model_featurebased_configs: {document_id}")
+        # Determine operation type based on result
+        operation = "updated" if result.matched_count > 0 else "inserted"
+        
+        logger.info(f"📦 {'Overwritten' if operation == 'updated' else 'Inserted'} document in build-model_featurebased_configs: {document_id}")
         
         return {
             "status": "success", 

@@ -80,7 +80,7 @@ interface CanvasAreaProps {
   onToggleSettingsPanel?: () => void;
   onToggleHelpPanel?: () => void;
   canEdit: boolean;
-  onPendingChangesUpdate?: (changes: { deletedMolecules: string[]; deletedAtoms: { moleculeId: string; atomId: string }[] }) => void;
+  onPendingChangesUpdate?: (changes: { deletedMolecules: string[]; deletedAtoms: { moleculeId: string; atomId: string }[]; addedAtoms: { moleculeId: string; atomId: string; position: number }[] }) => void;
 }
 
 interface CanvasAreaRef {
@@ -175,6 +175,21 @@ const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
         };
       });
 
+      // Log standalone cards for debugging
+      const standaloneCards = cards.filter(card => !card.moleculeId);
+      const workflowCards = cards.filter(card => card.moleculeId);
+      if (standaloneCards.length > 0) {
+        console.info('[Laboratory API] MongoDB returned standalone cards:', {
+          count: standaloneCards.length,
+          standaloneCardIds: standaloneCards.map(c => ({ id: c.id, atomId: c.atoms[0]?.atomId }))
+        });
+      }
+      console.info('[Laboratory API] MongoDB cards breakdown:', {
+        total: cards.length,
+        workflow: workflowCards.length,
+        standalone: standaloneCards.length
+      });
+
       // Use workflow molecules from backend directly - no assignments needed
       const workflowMolecules = data.workflow_molecules || [];
       
@@ -218,9 +233,11 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   const [pendingChanges, setPendingChanges] = useState<{
     deletedMolecules: string[];
     deletedAtoms: { moleculeId: string; atomId: string }[];
+    addedAtoms: { moleculeId: string; atomId: string; position: number }[];
   }>({
     deletedMolecules: [],
-    deletedAtoms: []
+    deletedAtoms: [],
+    addedAtoms: []
   });
   const loadingMessages = useMemo(
     () => [
@@ -865,37 +882,46 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       const cardsWithMoleculeInfo = normalizedCards.filter(card => card.moleculeId);
       const cardsWithoutMoleculeInfo = normalizedCards.filter(card => !card.moleculeId);
       console.log('[Laboratory API] Cards with molecule info:', cardsWithMoleculeInfo.length);
-      console.log('[Laboratory API] Cards without molecule info:', cardsWithoutMoleculeInfo.length);
+      console.log('[Laboratory API] Cards without molecule info (standalone):', cardsWithoutMoleculeInfo.length);
       
       if (cardsWithoutMoleculeInfo.length > 0) {
-        console.log('[Laboratory API] Cards without molecule info:', cardsWithoutMoleculeInfo);
+        console.log('[Laboratory API] Standalone cards (no moleculeId):', cardsWithoutMoleculeInfo.map(c => ({ 
+          id: c.id, 
+          atomId: c.atoms[0]?.atomId 
+        })));
       }
       
-      // If we have cards without molecule info, try to fetch molecule information from MongoDB
-      if (cardsWithoutMoleculeInfo.length > 0) {
-        console.log('[Laboratory API] Attempting to fetch molecule information from MongoDB for cards without molecule info');
+      // Only try to fetch molecule info from MongoDB if:
+      // 1. We have cards without moleculeId (potential standalone or legacy cards)
+      // 2. AND we also have cards with moleculeId (mixed state - might need to merge)
+      // 3. BUT if ALL cards are standalone (no moleculeId), preserve them as-is
+      if (cardsWithoutMoleculeInfo.length > 0 && cardsWithMoleculeInfo.length > 0) {
+        console.log('[Laboratory API] Mixed cards detected - attempting to fetch molecule information from MongoDB for cards without molecule info');
         
-        // Try to fetch molecule information from MongoDB
+        // Try to fetch molecule information from MongoDB to see if standalone cards should get moleculeId
         fetchAtomConfigurationsFromMongoDB()
           .then((mongoData) => {
             if (mongoData && mongoData.cards.length > 0) {
               console.log('[Laboratory API] Found MongoDB data with molecule info, updating cards');
               
               // Create a map of MongoDB cards by their atom IDs for quick lookup
+              // Only include MongoDB cards that HAVE moleculeId (workflow cards)
               const mongoCardMap = new Map();
               mongoData.cards.forEach(mongoCard => {
                 const atomId = mongoCard.atoms[0]?.atomId;
-                if (atomId) {
+                // Only map cards that have moleculeId (not standalone cards from MongoDB)
+                if (atomId && mongoCard.moleculeId) {
                   mongoCardMap.set(atomId, mongoCard);
                 }
               });
               
-              // Update cards with molecule information from MongoDB
+
               const updatedCards = normalizedCards.map(card => {
                 const atomId = card.atoms[0]?.atomId;
-                if (atomId && mongoCardMap.has(atomId)) {
+
+                if (!card.moleculeId && atomId && mongoCardMap.has(atomId)) {
                   const mongoCard = mongoCardMap.get(atomId);
-                  console.log(`[Laboratory API] Updating card ${atomId} with molecule info from MongoDB:`, {
+                  console.log(`[Laboratory API] Updating standalone card ${atomId} with molecule info from MongoDB:`, {
                     moleculeId: mongoCard.moleculeId,
                     moleculeTitle: mongoCard.moleculeTitle
                   });
@@ -905,6 +931,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     moleculeTitle: mongoCard.moleculeTitle
                   };
                 }
+                // Preserve card as-is (either already has moleculeId, or is truly standalone)
                 return card;
               });
               
@@ -921,16 +948,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                 setLayoutCards(updatedCards);
               }
             } else {
-              console.log('[Laboratory API] No MongoDB data found, using cards as-is');
+              console.log('[Laboratory API] No MongoDB data found, preserving all cards as-is (including standalone)');
               setLayoutCards(normalizedCards);
             }
           })
           .catch((error) => {
             console.error('[Laboratory API] Failed to fetch molecule info from MongoDB:', error);
-            console.log('[Laboratory API] Using cards as-is without molecule info');
+            console.log('[Laboratory API] Preserving all cards as-is (including standalone)');
             setLayoutCards(normalizedCards);
           });
       } else {
+        // Either all cards are with moleculeId, or all are standalone - use them as-is
+        console.log('[Laboratory API] All cards are consistent (all workflow or all standalone), using as-is');
         setLayoutCards(normalizedCards);
       }
       
@@ -1279,13 +1308,28 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       const storedLayout = localStorage.getItem(STORAGE_KEY);
       const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
       
-      if (storedLayout && storedLayout !== 'undefined' && storedWorkflowMolecules) {
+      if (storedLayout && storedLayout !== 'undefined') {
         try {
           const raw = JSON.parse(storedLayout);
           const layoutCards = hydrateLayoutCards(raw);
-          const workflowMolecules = JSON.parse(storedWorkflowMolecules);
+          let workflowMolecules: WorkflowMolecule[] | undefined;
           
-          if (layoutCards && layoutCards.length > 0 && workflowMolecules && workflowMolecules.length > 0) {
+          if (storedWorkflowMolecules) {
+            try {
+              workflowMolecules = JSON.parse(storedWorkflowMolecules);
+            } catch (e) {
+              console.warn('Failed to parse stored workflow molecules', e);
+            }
+          }
+          
+          // Load cards even if there are no workflow molecules (for standalone atoms)
+          if (layoutCards && layoutCards.length > 0) {
+            console.log('[Laboratory API] Loading cards from localStorage:', {
+              cardsCount: layoutCards.length,
+              standaloneCards: layoutCards.filter(c => !c.moleculeId).length,
+              workflowCards: layoutCards.filter(c => c.moleculeId).length,
+              hasWorkflowMolecules: !!workflowMolecules
+            });
             applyInitialCards(layoutCards, workflowMolecules);
           } else {
             markLoadingComplete();
@@ -1478,6 +1522,54 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             : undefined,
       };
       
+      // Find the card to get its moleculeId and current atom count
+      const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
+      
+      // Calculate position accounting for existing workflow molecule atoms
+      let atomPosition = card?.atoms ? card.atoms.length : 0;
+      
+      // If card belongs to a molecule, map position to workflow molecule's atom array
+      if (card?.moleculeId) {
+        const workflowMolecule = workflowMolecules.find(m => m.moleculeId === card.moleculeId);
+        if (workflowMolecule) {
+          // Get ALL cards belonging to this molecule (a molecule can have multiple cards)
+          const moleculeCards = (Array.isArray(layoutCards) ? layoutCards : [])
+            .filter(c => c.moleculeId === card.moleculeId);
+          
+          // Collect ALL atoms from ALL cards in this molecule, maintaining card order
+          const allMoleculeAtomIds: string[] = [];
+          moleculeCards.forEach(moleculeCard => {
+            moleculeCard.atoms.forEach(atom => {
+              allMoleculeAtomIds.push(atom.atomId);
+            });
+          });
+          
+          // Get workflow molecule atom IDs
+          const workflowAtomIds = workflowMolecule.atoms.map(a => typeof a === 'string' ? a : a.atomName);
+          
+          // Find where this card's atoms start in the full molecule atom array
+          let cardStartIndex = 0;
+          for (let i = 0; i < moleculeCards.length; i++) {
+            if (moleculeCards[i].id === card.id) {
+              break;
+            }
+            cardStartIndex += moleculeCards[i].atoms.length;
+          }
+          
+          // Position in full molecule atom array = card start index + atom position in card
+          const fullMoleculePosition = cardStartIndex + atomPosition;
+          
+          // Calculate how many atoms before the insertion point exist in the workflow molecule
+          const atomsBeforeInsert = allMoleculeAtomIds.slice(0, fullMoleculePosition);
+          const existingAtomsCount = atomsBeforeInsert.filter(atomId => workflowAtomIds.includes(atomId)).length;
+          
+          // Position in workflow molecule = existing atoms count
+          atomPosition = existingAtomsCount;
+          
+          console.log(`📝 Position calculation for ${newAtom.atomId}: card index=${atomPosition}, card start in molecule=${cardStartIndex}, full molecule position=${fullMoleculePosition}, workflow position=${atomPosition}, existing workflow atoms=${workflowAtomIds.length}`);
+        }
+      }
+      
       setLayoutCards(
         (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
           card.id === cardId
@@ -1485,6 +1577,19 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             : card
         )
       );
+
+      // Track atom addition for cross-collection sync if card belongs to a molecule
+      if (card?.moleculeId) {
+        setPendingChanges(prev => ({
+          ...prev,
+          addedAtoms: [...prev.addedAtoms, { 
+            moleculeId: card.moleculeId, 
+            atomId: newAtom.atomId,
+            position: atomPosition
+          }]
+        }));
+        console.log(`📝 Tracked atom addition: ${newAtom.atomId} to molecule ${card.moleculeId} at position ${atomPosition} (will sync on save)`);
+      }
 
       if (atom.id === 'feature-overview') {
         prefillFeatureOverview(cardId, newAtom.id);
@@ -1506,16 +1611,45 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     moleculeTitle: info?.title,
     position: moleculeId ? undefined : position, // Set position for standalone cards
   };
-  if (position === undefined || position >= (Array.isArray(layoutCards) ? layoutCards.length : 0)) {
-    setLayoutCards([...(Array.isArray(layoutCards) ? layoutCards : []), newCard]);
-  } else {
+  
     const arr = Array.isArray(layoutCards) ? layoutCards : [];
+  
+  // For standalone cards with a position value, find the correct insertion index
+  if (!moleculeId && position !== undefined) {
+    // Find the insertion index by counting cards that should come before this position
+    let insertIndex = arr.length; // Default to end
+    
+    for (let i = 0; i < arr.length; i++) {
+      const card = arr[i];
+      // If this card is a standalone with a position greater than new card's position
+      if (!card.moleculeId && typeof card.position === 'number' && card.position > position) {
+        insertIndex = i;
+        break;
+      }
+      // If this card is in a molecule and new card should come before molecules
+      if (card.moleculeId && position < 0) {
+        insertIndex = i;
+        break;
+      }
+    }
+    
     setLayoutCards([
-      ...arr.slice(0, position),
+      ...arr.slice(0, insertIndex),
       newCard,
-      ...arr.slice(position),
+      ...arr.slice(insertIndex),
+    ]);
+  } else if (position === undefined || position >= arr.length) {
+    setLayoutCards([...arr, newCard]);
+  } else {
+    // For cards in molecules or integer positions, use position as array index
+    const insertIndex = Math.floor(position);
+    setLayoutCards([
+      ...arr.slice(0, insertIndex),
+      newCard,
+      ...arr.slice(insertIndex),
     ]);
   }
+  
   setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
 
   // Scroll to the newly created card after a short delay to ensure it's rendered
@@ -1876,11 +2010,73 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
       atomId: info.id,
       source: 'ai',
     });
+    
+    // Find the card to get its moleculeId and current atom count
+    const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
+    
+    // Calculate position accounting for existing workflow molecule atoms
+    let atomPosition = card?.atoms ? card.atoms.length : 0;
+    
+    // If card belongs to a molecule, map position to workflow molecule's atom array
+    if (card?.moleculeId) {
+      const workflowMolecule = workflowMolecules.find(m => m.moleculeId === card.moleculeId);
+      if (workflowMolecule) {
+        // Get ALL cards belonging to this molecule (a molecule can have multiple cards)
+        const moleculeCards = (Array.isArray(layoutCards) ? layoutCards : [])
+          .filter(c => c.moleculeId === card.moleculeId);
+        
+        // Collect ALL atoms from ALL cards in this molecule, maintaining card order
+        const allMoleculeAtomIds: string[] = [];
+        moleculeCards.forEach(moleculeCard => {
+          moleculeCard.atoms.forEach(atom => {
+            allMoleculeAtomIds.push(atom.atomId);
+          });
+        });
+        
+        // Get workflow molecule atom IDs
+        const workflowAtomIds = workflowMolecule.atoms.map(a => typeof a === 'string' ? a : a.atomName);
+        
+        // Find where this card's atoms start in the full molecule atom array
+        let cardStartIndex = 0;
+        for (let i = 0; i < moleculeCards.length; i++) {
+          if (moleculeCards[i].id === card.id) {
+            break;
+          }
+          cardStartIndex += moleculeCards[i].atoms.length;
+        }
+        
+        // Position in full molecule atom array = card start index + atom position in card
+        const fullMoleculePosition = cardStartIndex + atomPosition;
+        
+        // Calculate how many atoms before the insertion point exist in the workflow molecule
+        const atomsBeforeInsert = allMoleculeAtomIds.slice(0, fullMoleculePosition);
+        const existingAtomsCount = atomsBeforeInsert.filter(atomId => workflowAtomIds.includes(atomId)).length;
+        
+        // Position in workflow molecule = existing atoms count
+        atomPosition = existingAtomsCount;
+        
+        console.log(`📝 Position calculation for ${newAtom.atomId}: card index=${atomPosition}, card start in molecule=${cardStartIndex}, full molecule position=${fullMoleculePosition}, workflow position=${atomPosition}, existing workflow atoms=${workflowAtomIds.length}`);
+      }
+    }
+    
     setLayoutCards(
       (Array.isArray(layoutCards) ? layoutCards : []).map(card =>
         card.id === cardId ? { ...card, atoms: [...card.atoms, newAtom] } : card
       )
     );
+
+    // Track atom addition for cross-collection sync if card belongs to a molecule
+    if (card?.moleculeId) {
+      setPendingChanges(prev => ({
+        ...prev,
+        addedAtoms: [...prev.addedAtoms, { 
+          moleculeId: card.moleculeId, 
+          atomId: newAtom.atomId,
+          position: atomPosition
+        }]
+      }));
+      console.log(`📝 Tracked atom addition: ${newAtom.atomId} to molecule ${card.moleculeId} at position ${atomPosition} (will sync on save)`);
+    }
 
     prefillAtomIfRequired(cardId, newAtom);
   };
@@ -2131,7 +2327,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
 
   // Sync Laboratory changes to Workflow collection
   const syncWorkflowCollectionOnLaboratorySave = async () => {
-    if (pendingChanges.deletedMolecules.length === 0 && pendingChanges.deletedAtoms.length === 0) {
+    if (pendingChanges.deletedMolecules.length === 0 && pendingChanges.deletedAtoms.length === 0 && pendingChanges.addedAtoms.length === 0) {
       console.log('📝 No pending changes to sync');
       return;
     }
@@ -2216,6 +2412,97 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
             console.log(`🗑️ Removed ${pendingChanges.deletedAtoms.length} atoms from workflow config`);
           }
           
+          // Handle atom additions
+          if (pendingChanges.addedAtoms.length > 0) {
+            console.log('➕ Processing atom additions:', pendingChanges.addedAtoms);
+            
+            // Get current Laboratory cards to map atoms to their actual positions
+            const currentCards = Array.isArray(layoutCards) ? layoutCards : [];
+            
+            // Group additions by molecule and sort by position
+            const additionsByMolecule = pendingChanges.addedAtoms.reduce((acc, addition) => {
+              if (!acc[addition.moleculeId]) {
+                acc[addition.moleculeId] = [];
+              }
+              acc[addition.moleculeId].push(addition);
+              return acc;
+            }, {} as Record<string, Array<{ atomId: string; position: number }>>);
+            
+            // Add atoms to existing molecules at specific positions
+            updatedCanvasMolecules = updatedCanvasMolecules.map(molecule => {
+              const atomsToAdd = additionsByMolecule[molecule.id] || [];
+              
+              if (atomsToAdd.length > 0) {
+                console.log(`➕ Molecule ${molecule.id}: adding atoms =`, atomsToAdd.map(a => ({ atomId: a.atomId, pos: a.position })));
+                console.log(`➕ Molecule ${molecule.id}: current atoms =`, molecule.atoms);
+                
+                // Find ALL cards for this molecule (a molecule can have multiple cards)
+                const moleculeCards = currentCards.filter(c => c.moleculeId === molecule.id);
+                
+                // Collect ALL atoms from ALL cards in this molecule, maintaining card order
+                const allCardAtomIds: string[] = [];
+                moleculeCards.forEach(card => {
+                  card.atoms.forEach(atom => {
+                    allCardAtomIds.push(atom.atomId);
+                  });
+                });
+                
+                console.log(`➕ Molecule ${molecule.id}: ${moleculeCards.length} cards, ${allCardAtomIds.length} total atoms across cards`);
+                
+                // Create a working copy of the atoms array
+                let updatedAtoms = [...(molecule.atoms || [])];
+                
+                // Build the final atom order based on ALL cards' atom order
+                // This ensures atoms are inserted in the same order as they appear across all cards
+                const finalAtomOrder: string[] = [];
+                
+                // First, add atoms that exist in both cards and workflow, maintaining card order
+                allCardAtomIds.forEach(atomId => {
+                  if (updatedAtoms.includes(atomId) && !finalAtomOrder.includes(atomId)) {
+                    finalAtomOrder.push(atomId);
+                  } else if (!updatedAtoms.includes(atomId) && atomsToAdd.some(a => a.atomId === atomId)) {
+                    // New atom being added - insert at its position
+                    finalAtomOrder.push(atomId);
+                  }
+                });
+                
+                // Add any workflow atoms that aren't in the cards (shouldn't happen, but safety check)
+                updatedAtoms.forEach(atomId => {
+                  if (!finalAtomOrder.includes(atomId)) {
+                    finalAtomOrder.push(atomId);
+                  }
+                });
+                
+                // If we built a final order from the cards, use it; otherwise use position-based insertion
+                if (finalAtomOrder.length > 0 && allCardAtomIds.length > 0) {
+                  updatedAtoms = finalAtomOrder;
+                } else {
+                  // Fallback: Insert atoms at their tracked positions
+                  const sortedAdditions = [...atomsToAdd].sort((a, b) => a.position - b.position);
+                  sortedAdditions.forEach(addition => {
+                    const atomExists = updatedAtoms.includes(addition.atomId);
+                    if (!atomExists) {
+                      const insertPosition = Math.min(addition.position, updatedAtoms.length);
+                      updatedAtoms.splice(insertPosition, 0, addition.atomId);
+                    }
+                  });
+                }
+                
+                const updatedMolecule = {
+                  ...molecule,
+                  atoms: updatedAtoms,
+                  atomOrder: updatedAtoms // Keep atomOrder in sync with atoms
+                };
+                
+                console.log(`➕ Molecule ${molecule.id}: updated atoms =`, updatedMolecule.atoms);
+                return updatedMolecule;
+              }
+              return molecule;
+            });
+            
+            console.log(`➕ Added ${pendingChanges.addedAtoms.length} atoms to workflow config`);
+          }
+          
           // Save updated workflow configuration
           await fetch(`${MOLECULES_API}/workflow/save`, {
             method: 'POST',
@@ -2234,7 +2521,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
           // Clear pending changes after successful sync
           setPendingChanges({
             deletedMolecules: [],
-            deletedAtoms: []
+            deletedAtoms: [],
+            addedAtoms: []
           });
           
           console.log('✅ Laboratory changes synced to Workflow collection');
@@ -2304,10 +2592,24 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
               const unifiedItems = [];
               let itemIndex = 0;
               
-              // Add standalone cards that should appear before the first molecule
-              const standaloneCardsBefore = Array.isArray(layoutCards) 
-                ? layoutCards.filter(card => !card.moleculeId && card.position < 0)
+              // Collect ALL standalone cards first
+              const allStandaloneCards = Array.isArray(layoutCards) 
+                ? layoutCards.filter(card => !card.moleculeId)
                 : [];
+              
+              console.log('[Laboratory API] Rendering standalone cards:', {
+                total: allStandaloneCards.length,
+                cards: allStandaloneCards.map(c => ({ 
+                  id: c.id, 
+                  atomId: c.atoms[0]?.atomId,
+                  position: c.position 
+                }))
+              });
+              
+              // Add standalone cards that should appear before the first molecule
+              const standaloneCardsBefore = allStandaloneCards.filter(card => 
+                typeof card.position === 'number' && card.position < 0
+              );
               
               standaloneCardsBefore.forEach(card => {
                 unifiedItems.push({
@@ -2320,13 +2622,11 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
               // Process molecules and their associated standalone cards
               workflowMolecules.forEach((molecule, moleculeIndex) => {
                 // Add standalone cards that should appear before this molecule
-                const standaloneCardsBeforeMolecule = Array.isArray(layoutCards) 
-                  ? layoutCards.filter(card => 
-                      !card.moleculeId && 
-                      card.position >= moleculeIndex && 
-                      card.position < moleculeIndex + 1
-                    )
-                  : [];
+                const standaloneCardsBeforeMolecule = allStandaloneCards.filter(card => 
+                  typeof card.position === 'number' &&
+                  card.position >= moleculeIndex && 
+                  card.position < moleculeIndex + 1
+                );
                 
                 standaloneCardsBeforeMolecule.forEach(card => {
                   unifiedItems.push({
@@ -2346,9 +2646,21 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
               });
               
               // Add standalone cards that should appear after the last molecule
-              const standaloneCardsAfter = Array.isArray(layoutCards) 
-                ? layoutCards.filter(card => !card.moleculeId && card.position >= workflowMolecules.length)
-                : [];
+              // Include cards with position >= workflowMolecules.length OR undefined/null position
+              const standaloneCardsAfter = allStandaloneCards.filter(card => 
+                card.position === undefined || 
+                card.position === null || 
+                (typeof card.position === 'number' && card.position >= workflowMolecules.length)
+              );
+              
+              console.log('[Laboratory API] Standalone cards after molecules:', {
+                count: standaloneCardsAfter.length,
+                cards: standaloneCardsAfter.map(c => ({ 
+                  id: c.id, 
+                  atomId: c.atoms[0]?.atomId,
+                  position: c.position 
+                }))
+              });
               
               standaloneCardsAfter.forEach(card => {
                 unifiedItems.push({
@@ -2574,12 +2886,78 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                       {/* Add New Card Button after standalone card */}
                       <div className="flex justify-center my-4">
                         <button
-                          onClick={() => addNewCard(undefined, unifiedIndex + 1)}
+                          onClick={() => {
+                            // Calculate position as midpoint between current card and next card
+                            const currentCardPosition = card.position;
+                            
+                            // Find the next standalone card in the same zone
+                            let nextCardPosition: number | undefined;
+                            for (let i = unifiedIndex + 1; i < unifiedItems.length; i++) {
+                              const nextItem = unifiedItems[i];
+                              if (nextItem.type === 'standalone-card') {
+                                const nextCard = nextItem.data;
+                                if (typeof nextCard.position === 'number') {
+                                  nextCardPosition = nextCard.position;
+                                  break;
+                                }
+                              } else if (nextItem.type === 'molecule') {
+                                // Stop at next molecule - we're at the end of the zone
+                                break;
+                              }
+                            }
+                            
+                            // Calculate new position
+                            let newPosition: number;
+                            if (typeof currentCardPosition === 'number' && typeof nextCardPosition === 'number') {
+                              // Midpoint between current and next card
+                              newPosition = (currentCardPosition + nextCardPosition) / 2;
+                            } else if (typeof currentCardPosition === 'number') {
+                              // No next card in zone, add small increment
+                              newPosition = currentCardPosition + 0.1;
+                            } else {
+                              // Fallback to unified index
+                              newPosition = unifiedIndex + 1;
+                            }
+                            
+                            addNewCard(undefined, newPosition);
+                          }}
                           onDragEnter={e => handleAddDragEnter(e, `standalone-${unifiedIndex}`)}
                           onDragLeave={handleAddDragLeave}
                           onDragOver={e => e.preventDefault()}
                           onDrop={e => {
-                            void handleDropNewCard(e, undefined, unifiedIndex + 1);
+                            // Calculate position as midpoint between current card and next card
+                            const currentCardPosition = card.position;
+                            
+                            // Find the next standalone card in the same zone
+                            let nextCardPosition: number | undefined;
+                            for (let i = unifiedIndex + 1; i < unifiedItems.length; i++) {
+                              const nextItem = unifiedItems[i];
+                              if (nextItem.type === 'standalone-card') {
+                                const nextCard = nextItem.data;
+                                if (typeof nextCard.position === 'number') {
+                                  nextCardPosition = nextCard.position;
+                                  break;
+                                }
+                              } else if (nextItem.type === 'molecule') {
+                                // Stop at next molecule - we're at the end of the zone
+                                break;
+                              }
+                            }
+                            
+                            // Calculate new position
+                            let newPosition: number;
+                            if (typeof currentCardPosition === 'number' && typeof nextCardPosition === 'number') {
+                              // Midpoint between current and next card
+                              newPosition = (currentCardPosition + nextCardPosition) / 2;
+                            } else if (typeof currentCardPosition === 'number') {
+                              // No next card in zone, add small increment
+                              newPosition = currentCardPosition + 0.1;
+                            } else {
+                              // Fallback to unified index
+                              newPosition = unifiedIndex + 1;
+                            }
+                            
+                            void handleDropNewCard(e, undefined, newPosition);
                           }}
                           className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `standalone-${unifiedIndex}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
                           title="Add new card"
@@ -2884,12 +3262,24 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 {/* Add New Card Button after each card */}
                           <div className="flex justify-center my-4">
                             <button
-                                    onClick={() => addNewCard(molecule.moleculeId, cardIndex + 1)}
+                                    onClick={() => {
+                                      // Find the actual array index of the current card in the full layoutCards array
+                                      const arr = Array.isArray(layoutCards) ? layoutCards : [];
+                                      const actualIndex = arr.findIndex(c => c.id === card.id);
+                                      // Insert after the current card, or at end if not found
+                                      const insertIndex = actualIndex >= 0 ? actualIndex + 1 : arr.length;
+                                      addNewCard(molecule.moleculeId, insertIndex);
+                                    }}
                                     onDragEnter={e => handleAddDragEnter(e, `molecule-${molecule.moleculeId}-${cardIndex}`)}
                               onDragLeave={handleAddDragLeave}
                               onDragOver={e => e.preventDefault()}
                               onDrop={e => {
-                                      void handleDropNewCard(e, molecule.moleculeId, cardIndex + 1);
+                                      // Find the actual array index of the current card in the full layoutCards array
+                                      const arr = Array.isArray(layoutCards) ? layoutCards : [];
+                                      const actualIndex = arr.findIndex(c => c.id === card.id);
+                                      // Insert after the current card, or at end if not found
+                                      const insertIndex = actualIndex >= 0 ? actualIndex + 1 : arr.length;
+                                      void handleDropNewCard(e, molecule.moleculeId, insertIndex);
                               }}
                                     className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `molecule-${molecule.moleculeId}-${cardIndex}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
                               title="Add new card"
@@ -2913,12 +3303,70 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                       {/* Add New Card Button after each molecule */}
                       <div className="flex justify-center my-6">
                         <button
-                          onClick={() => addNewCard(undefined, moleculeIndex + 1)}
+                          onClick={() => {
+                            // Find the first standalone card after this molecule
+                            let firstCardPosition: number | undefined;
+                            for (let i = unifiedIndex + 1; i < unifiedItems.length; i++) {
+                              const nextItem = unifiedItems[i];
+                              if (nextItem.type === 'standalone-card') {
+                                const nextCard = nextItem.data;
+                                if (typeof nextCard.position === 'number') {
+                                  firstCardPosition = nextCard.position;
+                                  break;
+                                }
+                              } else if (nextItem.type === 'molecule') {
+                                // Stop at next molecule
+                                break;
+                              }
+                            }
+                            
+                            // Calculate new position
+                            let newPosition: number;
+                            if (typeof firstCardPosition === 'number') {
+                              // Midpoint between next molecule zone start and first card
+                              newPosition = ((moleculeIndex + 1) + firstCardPosition) / 2;
+                            } else {
+                              // No cards before next molecule, place in middle of next molecule's zone
+                              // Cards render BEFORE a molecule if position >= moleculeIndex && < moleculeIndex + 1
+                              // So to appear AFTER Molecule N, card needs position in range [N+1, N+2)
+                              newPosition = (moleculeIndex + 1) + 0.5;
+                            }
+                            
+                            addNewCard(undefined, newPosition);
+                          }}
                           onDragEnter={e => handleAddDragEnter(e, `after-molecule-${moleculeIndex}`)}
                           onDragLeave={handleAddDragLeave}
                           onDragOver={e => e.preventDefault()}
                           onDrop={e => {
-                            void handleDropNewCard(e, undefined, moleculeIndex + 1);
+                            // Find the first standalone card after this molecule
+                            let firstCardPosition: number | undefined;
+                            for (let i = unifiedIndex + 1; i < unifiedItems.length; i++) {
+                              const nextItem = unifiedItems[i];
+                              if (nextItem.type === 'standalone-card') {
+                                const nextCard = nextItem.data;
+                                if (typeof nextCard.position === 'number') {
+                                  firstCardPosition = nextCard.position;
+                                  break;
+                                }
+                              } else if (nextItem.type === 'molecule') {
+                                // Stop at next molecule
+                                break;
+                              }
+                            }
+                            
+                            // Calculate new position
+                            let newPosition: number;
+                            if (typeof firstCardPosition === 'number') {
+                              // Midpoint between next molecule zone start and first card
+                              newPosition = ((moleculeIndex + 1) + firstCardPosition) / 2;
+                            } else {
+                              // No cards before next molecule, place in middle of next molecule's zone
+                              // Cards render BEFORE a molecule if position >= moleculeIndex && < moleculeIndex + 1
+                              // So to appear AFTER Molecule N, card needs position in range [N+1, N+2)
+                              newPosition = (moleculeIndex + 1) + 0.5;
+                            }
+                            
+                            void handleDropNewCard(e, undefined, newPosition);
                           }}
                           className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `after-molecule-${moleculeIndex}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
                           title="Add new card outside molecules"

@@ -1219,11 +1219,11 @@ async def train_models_direct(request: dict):
             # Get the standard prefix using get_object_prefix
             prefix = await get_object_prefix()
             
-            # Create timestamp for file naming
+            # Create timestamp for data (not for filename - filename stays consistent to enable overwriting)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            # Generate filename for model results
-            model_results_filename = f"model_results_scope_{scope_number}_{timestamp}.arrow"
+            # Generate filename for model results (without timestamp to enable overwriting)
+            model_results_filename = f"model_results_scope_{scope_number}.arrow"
             
             # Construct the full path with the standard structure
             model_results_file_key = f"{prefix}model-results/{model_results_filename}"
@@ -1449,31 +1449,48 @@ async def train_models_direct(request: dict):
             combination_file_keys = []
             model_coefficients = {}
             
+            # Build combination_file_keys from current cleaned_combination_results
+            # Use combination_id directly from result (which matches the original combination from request)
             for i, combo_result in enumerate(cleaned_combination_results):
-                if 'file_key' in combo_result:
-                    # Use the original combination from the combinations list
+                # Use combination_id from the result if available, otherwise fall back to index
+                if 'combination_id' in combo_result:
+                    combination_name = combo_result['combination_id']
+                elif 'combination' in combo_result:
+                    combination_name = combo_result['combination']
+                else:
+                    # Fallback: use index if no combination_id found
                     combination_name = combinations[i] if i < len(combinations) else f"combination_{i}"
+                    logger.warning(f"⚠️ No combination_id found in combo_result {i}, using fallback: {combination_name}")
+                
+                # Verify this combination matches one from the request
+                if combination_name not in combinations:
+                    logger.warning(f"⚠️ combination_name '{combination_name}' not found in request combinations list")
+                
+                if 'file_key' in combo_result:
+                    logger.info(f"📝 Adding combination_file_key: {combination_name} -> {combo_result['file_key']}")
                     combination_file_keys.append({
                         "combination": combination_name,
                         "file_key": combo_result['file_key']
                     })
+                else:
+                    logger.warning(f"⚠️ No file_key found for combination {combination_name}")
                     
-                    # Extract model coefficients for this combination
-                    if 'model_results' in combo_result:
-                        combination_coefficients = {}
-                        for model_result in combo_result['model_results']:
-                            model_name = model_result.get('model_name', 'unknown')
-                            coefficients = model_result.get('coefficients', {})
-                            intercept = model_result.get('intercept', 0)
-                            
-                            combination_coefficients[model_name] = {
-                                "intercept": intercept,
-                                "coefficients": coefficients,
-                                "x_variables": x_variables,
-                                "y_variable": y_variable
-                            }
+                # Extract model coefficients for this combination
+                if 'model_results' in combo_result:
+                    combination_coefficients = {}
+                    for model_result in combo_result['model_results']:
+                        model_name = model_result.get('model_name', 'unknown')
+                        coefficients = model_result.get('coefficients', {})
+                        intercept = model_result.get('intercept', 0)
                         
-                        model_coefficients[combination_name] = combination_coefficients
+                        combination_coefficients[model_name] = {
+                            "intercept": intercept,
+                            "coefficients": coefficients,
+                            "x_variables": x_variables,
+                            "y_variable": y_variable
+                        }
+                    
+                    model_coefficients[combination_name] = combination_coefficients
             
             # Prepare comprehensive build configuration data
             build_config_data = {
@@ -3592,12 +3609,12 @@ async def train_mmm_models(request: dict):
             # Get the standard prefix using get_object_prefix
             prefix = await get_object_prefix()
             
-            # Create timestamp for file naming
+            # Create timestamp for data (not for filename - filename stays consistent to enable overwriting)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            # Generate filenames for both ensemble and individual results
-            ensemble_results_filename = f"mmm_ensemble_results_scope_{scope_number}_{timestamp}.arrow"
-            individual_results_filename = f"mmm_individual_results_scope_{scope_number}_{timestamp}.arrow"
+            # Generate filenames for both ensemble and individual results (without timestamp to enable overwriting)
+            ensemble_results_filename = f"mmm_ensemble_results_scope_{scope_number}.arrow"
+            individual_results_filename = f"mmm_individual_results_scope_{scope_number}.arrow"
             
             # Construct the full paths with the standard structure
             ensemble_results_file_key = f"{prefix}model-results/{ensemble_results_filename}"
@@ -3923,10 +3940,16 @@ async def train_mmm_models(request: dict):
                     "result_type": "individual_parameters"
                 })
             
+            # Build combination_file_keys from current combination_results
+            # Use the exact combination_id from results (which matches the request combinations)
             for i, combo_result in enumerate(combination_results):
-                # Use combination_id (same as train-models-direct)
+                # Use combination_id from the result (which should match the original combination from request)
                 if 'combination_id' in combo_result:
                     combination_name = combo_result['combination_id']
+                    
+                    # Verify this combination matches one from the request
+                    if combination_name not in combinations:
+                        logger.warning(f"⚠️ combination_id '{combination_name}' not found in request combinations list")
                     
                     # Add original file key if available (skip for stack models)
                     if 'file_key' in combo_result:
@@ -3942,11 +3965,16 @@ async def train_mmm_models(request: dict):
                             # Don't set file_key = None, keep the original source file key
                         
                         if file_key:  # Only add if file_key is not None
+                            logger.info(f"📝 Adding combination_file_key: {combination_name} -> {file_key}")
                             combination_file_keys.append({
                                 "combination": combination_name,
                                 "file_key": file_key,
                                 "result_type": "source_data"
                             })
+                        else:
+                            logger.warning(f"⚠️ No file_key found for combination {combination_name}")
+                    else:
+                        logger.warning(f"⚠️ No file_key in combo_result for combination {combination_name}")
                     
                     # Extract model coefficients for this combination
                     if 'model_results' in combo_result:
@@ -4053,95 +4081,9 @@ async def train_mmm_models(request: dict):
             else:
                 logger.info("✅ No None values found in build_config_data")
             
-            # Check for existing build configuration and override ensemble/individual results file keys
-            try:
-                from .database import mongo_client
-                if mongo_client is None:
-                    raise Exception("MongoDB client not available")
-                db = mongo_client["trinity_db"]
-                document_id = f"{client_name}/{app_name}/{project_name}"
-                
-                existing_config = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
-                
-                if existing_config:
-                    logger.info(f"🔄 Found existing build configuration for {document_id}, updating ensemble/individual results file keys")
-                    
-                    # Update existing combination_file_keys to override ONLY ensemble and individual results
-                    existing_combination_file_keys = existing_config.get("combination_file_keys", [])
-                    
-                    # Create updated list by replacing specific result types
-                    updated_combination_file_keys = []
-                    
-                    # Process existing entries and replace only the specific result types
-                    ensemble_updated = False
-                    individual_updated = False
-                    
-                    for entry in existing_combination_file_keys:
-                        result_type = entry.get("result_type")
-                        
-                        if result_type == "ensemble":
-                            # Skip old ensemble entry - will be replaced with new one
-                            if 'ensemble_results_file_key' in locals():
-                                ensemble_updated = True
-                                logger.info(f"🔄 Replacing old ensemble file key: {entry.get('file_key')}")
-                                logger.info(f"✅ With new ensemble_results_file_key: {ensemble_results_file_key}")
-                            else:
-                                # Keep existing if no new one available
-                                updated_combination_file_keys.append(entry)
-                                
-                        elif result_type == "individual_parameters":
-                            # Skip old individual parameters entry - will be replaced with new one
-                            if 'individual_results_file_key' in locals():
-                                individual_updated = True
-                                logger.info(f"🔄 Replacing old individual parameters file key: {entry.get('file_key')}")
-                                logger.info(f"✅ With new individual_results_file_key: {individual_results_file_key}")
-                            else:
-                                # Keep existing if no new one available
-                                updated_combination_file_keys.append(entry)
-                        else:
-                            # Keep all other entries unchanged (source_data, etc.)
-                            updated_combination_file_keys.append(entry)
-                    
-                    # Always add new ensemble and individual results entries (replacing old ones)
-                    if 'ensemble_results_file_key' in locals():
-                        updated_combination_file_keys.append({
-                            "combination": "ensemble_results",
-                            "file_key": ensemble_results_file_key,
-                            "result_type": "ensemble"
-                        })
-                        if ensemble_updated:
-                            logger.info(f"✅ Replaced with new ensemble_results_file_key: {ensemble_results_file_key}")
-                        else:
-                            logger.info(f"✅ Added new ensemble_results_file_key: {ensemble_results_file_key}")
-                    
-                    if 'individual_results_file_key' in locals():
-                        updated_combination_file_keys.append({
-                            "combination": "individual_parameter_results", 
-                            "file_key": individual_results_file_key,
-                            "result_type": "individual_parameters"
-                        })
-                        if individual_updated:
-                            logger.info(f"✅ Replaced with new individual_results_file_key: {individual_results_file_key}")
-                        else:
-                            logger.info(f"✅ Added new individual_results_file_key: {individual_results_file_key}")
-                    
-                    # Update the build_config_data with the updated combination_file_keys
-                    build_config_data["combination_file_keys"] = updated_combination_file_keys
-                    
-                    # Also update the model_coefficients if they exist in the existing config
-                    existing_model_coefficients = existing_config.get("model_coefficients", {})
-                    # Merge new model_coefficients with existing ones (new ones take precedence)
-                    merged_model_coefficients = {**existing_model_coefficients, **build_config_data.get("model_coefficients", {})}
-                    build_config_data["model_coefficients"] = merged_model_coefficients
-                    
-                    logger.info(f"🔄 Updated existing configuration with new file keys and merged model coefficients")
-                else:
-                    logger.info(f"📝 No existing build configuration found for {document_id}, creating new one")
-                    
-            except Exception as override_error:
-                logger.warning(f"⚠️ Error during override logic: {str(override_error)}, proceeding with normal save")
-                import traceback
-                logger.warning(f"   Override error traceback: {traceback.format_exc()}")
+            # Note: Since save_build_config now always overwrites the entire document,
+            # we don't need to merge with existing data - just use the new combination_file_keys directly
+            logger.info(f"📝 Using new combination_file_keys directly (MongoDB will overwrite entire document)")
 
             # Save to MongoDB with detailed error handling
             try:

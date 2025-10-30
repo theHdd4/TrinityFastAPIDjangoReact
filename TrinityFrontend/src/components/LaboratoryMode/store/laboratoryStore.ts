@@ -1533,6 +1533,7 @@ export interface LayoutCard {
   isExhibited: boolean;
   moleculeId?: string;
   moleculeTitle?: string;
+  position?: number; // Position for standalone cards (used for rendering order)
 }
 
 // GroupBy Atom Settings
@@ -1657,7 +1658,8 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
 
   getAtom: (atomId: string) => {
     const state = get();
-    return state.cards.flatMap(card => card.atoms).find(atom => atom.id === atomId);
+    const cards = Array.isArray(state.cards) ? state.cards : [];
+    return cards.flatMap(card => card.atoms).find(atom => atom.id === atomId);
   },
 
   reset: () => {

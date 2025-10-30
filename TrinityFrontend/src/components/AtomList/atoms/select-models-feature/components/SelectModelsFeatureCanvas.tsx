@@ -15,6 +15,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, Conte
 import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import Table from '@/templates/tables/table';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
+import SCurveChartRenderer from '@/templates/charts/SCurveChartRenderer';
 
 interface SelectModelsFeatureCanvasProps {
   atomId: string;
@@ -3837,15 +3838,13 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                 {Object.entries(data.sCurveData.s_curves).slice(0, 2).map(([variable, curveData]: [string, any]) => (
                   <div key={variable} className="border border-gray-200 rounded-lg p-4">
                     <div className="w-full h-[350px]">
-                      <RechartsChartRenderer
-                        type="line_chart"
-                        data={curveData.percent_changes.map((percent: number, index: number) => ({
-                          name: `${percent > 0 ? '+' : ''}${percent.toFixed(0)}%`,
-                          value: curveData.total_volumes[index] || 0,
-                          percentage: percent
+                      <SCurveChartRenderer
+                        data={(curveData.media_values || []).map((reach: number, index: number) => ({
+                          x: reach || 0,
+                          y: curveData.total_volumes[index] || 0,
+                          percent_change: (curveData.percent_changes || [])[index] || 0
                         }))}
-                        xField="name"
-                        yField="value"
+                        curveAnalysis={curveData.curve_analysis}
                         xAxisLabel={variable.replace(/_/g, ' ')}
                         yAxisLabel="Total Volume"
                         theme="default"
@@ -3853,8 +3852,11 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                         height={350}
                         showDataLabels={false}
                         showLegend={false}
+                        showMinMaxLines={true}
                       />
                     </div>
+                    
+                    
                   </div>
                 ))}
               </div>

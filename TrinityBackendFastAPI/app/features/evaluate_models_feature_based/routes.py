@@ -611,6 +611,20 @@ async def selected_actual_vs_predicted(
             raise HTTPException(status_code=404, detail=f"y_variable '{y_var}' not in source for {combination_id}")
         actual = pd.to_numeric(src_df[y_var], errors="coerce").fillna(0.0).to_numpy(dtype=float)
         
+        # Try to capture dates if a date-like column exists
+        date_column = None
+        for col in ["date", "invoice_date", "bill_date", "order_date", "month", "period", "year"]:
+            if col in src_df.columns:
+                date_column = col
+                break
+        dates_list = None
+        if date_column is not None:
+            try:
+                parsed = pd.to_datetime(src_df[date_column], errors='coerce')
+                dates_list = [d.isoformat() if pd.notna(d) else None for d in parsed]
+            except Exception:
+                dates_list = None
+        
         # Check if transformations are available
         has_transformations = transformation_metadata and len(transformation_metadata) > 0
         if has_transformations:
@@ -676,11 +690,13 @@ async def selected_actual_vs_predicted(
             for i, (actual_val, predicted_val) in enumerate(zip(actual, predicted_values)):
                 if (predicted_val <= pred_99th and predicted_val >= pred_1st and 
                     actual_val <= actual_99th and actual_val >= actual_1st):
-                    filtered_data.append((actual_val, predicted_val))
+                    filtered_data.append((actual_val, predicted_val, (dates_list[i] if dates_list else None)))
             
             if len(filtered_data) < len(actual):
                 actual = np.array([item[0] for item in filtered_data])
                 pred = np.array([item[1] for item in filtered_data])
+                if dates_list is not None:
+                    dates_list = [item[2] for item in filtered_data]
 
         # optional outlier guard
         if len(pred) and len(actual):
@@ -689,6 +705,9 @@ async def selected_actual_vs_predicted(
             mask = (pred <= p99) & (pred >= p01) & (actual <= a99) & (actual >= a01)
             actual = actual[mask]
             pred = pred[mask]
+            if dates_list is not None:
+                dates_array = np.array(dates_list, dtype=object)
+                dates_list = dates_array[mask].tolist()
 
         items.append(
             ActualPredictedItem(
@@ -697,6 +716,7 @@ async def selected_actual_vs_predicted(
                 file_key=file_key,
                 actual_values=actual.tolist(),
                 predicted_values=pred.tolist(),
+                dates=dates_list,
                 performance_metrics=PerformanceMetrics(**_metrics(actual, pred)),
                 data_points=int(len(actual)),
             ).dict()

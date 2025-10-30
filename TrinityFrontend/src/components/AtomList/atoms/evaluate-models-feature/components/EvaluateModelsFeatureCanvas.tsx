@@ -60,6 +60,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell, Legend, Tooltip as RechartsTooltip, ScatterChart, Scatter } from 'recharts';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
+import SCurveChartRenderer from '@/templates/charts/SCurveChartRenderer';
 import { Maximize2, X, MessageSquare, Send, Edit3, Trash2, Filter, ChevronDown, ChevronRight, ChevronUp, ArrowUp, ArrowDown, Filter as FilterIcon, Plus, BarChart3 } from 'lucide-react';
 import { EvaluateModelsFeatureData } from '../EvaluateModelsFeatureAtom';
 import { EvaluateModelsFeatureSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -2218,16 +2219,24 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       );
     }
     
-    // Transform data for chart and sort by actual values (low to high)
-    const chartData = combinationData.actual_values.map((actual: number, index: number) => ({
+    // Prefer dates from backend for X-axis; fallback to index
+    const dateArray: string[] | undefined = combinationData.dates || combinationData.date_values || combinationData.timestamps;
+    let chartData = combinationData.actual_values.map((actual: number, index: number) => ({
+      date: dateArray && dateArray[index] !== undefined ? normalizeToDateString(dateArray[index]) : index,
+      index,
       actual: actual,
       predicted: combinationData.predicted_values[index] || 0
-    })).sort((a, b) => a.actual - b.actual);
+    }));
+    // If dates provided for every point, sort by date ascending to draw a proper time series
+    const useDates = !!(dateArray && dateArray.length === chartData.length);
+    if (useDates) {
+      chartData = chartData.sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    }
     
     console.log('🔍 DEBUG: Actual vs Predicted chart data:', chartData);
     
-    // Get chart type and theme for this combination (default to scatter_chart)
-    const chartType = actualVsPredictedChartTypes[combinationName] || 'scatter_chart';
+    // Get chart type and theme for this combination (default to line_chart)
+    const chartType = actualVsPredictedChartTypes[combinationName] || 'line_chart';
     const chartTheme = actualVsPredictedChartThemes[combinationName] || 'default';
     const showDataLabels = actualVsPredictedChartDataLabels[combinationName] !== undefined ? actualVsPredictedChartDataLabels[combinationName] : false;
     const sortOrder = actualVsPredictedChartSortOrder[combinationName] || null;
@@ -2241,12 +2250,13 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       key: `actual-vs-predicted-chart-${combinationName}-${chartType}-${chartTheme}`,
       type: chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
       data: chartData,
-      xField: 'actual',
-      yField: 'predicted',
-      xKey: 'actual',
-      yKey: 'predicted',
-      xAxisLabel: 'Actual',
-      yAxisLabel: 'Predicted',
+      xField: useDates ? 'date' : 'index',
+      yField: 'actual',
+      yFields: ['actual','predicted'],
+      xKey: useDates ? 'date' : 'index',
+      yKey: 'actual',
+      xAxisLabel: useDates ? 'Date' : 'Index',
+      yAxisLabel: 'Value',
       theme: chartTheme,
       enableScroll: false,
       width: isExpanded ? 400 : 500,
@@ -2648,35 +2658,32 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
             return (
               <div key={`${variable}-${index}`} className="border border-gray-200 rounded-lg p-4 min-w-[350px]">
                 <div className="w-full h-[400px]">
-                  <RechartsChartRenderer
-                    type={chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart'}
-                    data={chartData}
-                    xField="percentage"
-                    yField="volume"
-                    xAxisLabel="Percentage Change (%)"
+                  <SCurveChartRenderer
+                    data={(curveData.media_values || []).map((reach: number, idx: number) => ({
+                      x: reach || 0,
+                      y: curveData.total_volumes[idx] || 0,
+                      percent_change: (curveData.percent_changes || [])[idx] || 0
+                    }))}
+                    curveAnalysis={curveData.curve_analysis}
+                    xAxisLabel="Reach"
                     yAxisLabel="Volume"
                     theme={chartTheme}
                     enableScroll={false}
-                    width="100%"
-                    height="100%"
+                    height={400}
                     showDataLabels={false}
                     showLegend={showLegend}
                     showGrid={showGrid}
                     showAxisLabels={showAxisLabels}
+                    showMinMaxLines={true}
                     onThemeChange={(newTheme: string) => {
                       setSCurveChartThemes(prev => ({ ...prev, [chartKey]: newTheme }));
-                    }}
-                    onChartTypeChange={(newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
-                      setSCurveChartTypes(prev => ({ ...prev, [chartKey]: newType }));
                     }}
                     onGridToggle={(enabled: boolean) => handleSCurveChartGridToggle(chartKey, enabled)}
                     onLegendToggle={(enabled: boolean) => handleSCurveChartLegendToggle(chartKey, enabled)}
                     onAxisLabelsToggle={(enabled: boolean) => handleSCurveChartAxisLabelsToggle(chartKey, enabled)}
                   />
                 </div>
-                <div className="mt-2 text-center">
-                  <p className="text-xs text-gray-600 font-medium">{variable}</p>
-                </div>
+                
               </div>
             );
           })}

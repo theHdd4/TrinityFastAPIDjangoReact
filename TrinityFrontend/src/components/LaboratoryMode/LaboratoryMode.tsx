@@ -56,9 +56,11 @@ const LaboratoryMode = () => {
   const [pendingChanges, setPendingChanges] = useState<{
     deletedMolecules: string[];
     deletedAtoms: { moleculeId: string; atomId: string }[];
+    addedAtoms: { moleculeId: string; atomId: string; position: number }[];
   }>({
     deletedMolecules: [],
-    deletedAtoms: []
+    deletedAtoms: [],
+    addedAtoms: []
   });
   const reduceMotionRef = useRef(initialReduceMotion);
   const [isPreparingAnimation, setIsPreparingAnimation] = useState(!initialReduceMotion);
@@ -431,7 +433,7 @@ const LaboratoryMode = () => {
 
       {/* Pending Changes Indicator */}
       {(() => {
-        const totalChanges = pendingChanges.deletedMolecules.length + pendingChanges.deletedAtoms.length;
+        const totalChanges = pendingChanges.deletedMolecules.length + pendingChanges.deletedAtoms.length + pendingChanges.addedAtoms.length;
         if (totalChanges === 0) return null;
         
         return (
@@ -441,7 +443,8 @@ const LaboratoryMode = () => {
                 <span className="text-sm font-medium">
                   📝 {totalChanges} pending change{totalChanges > 1 ? 's' : ''} 
                   {pendingChanges.deletedMolecules.length > 0 && ` (${pendingChanges.deletedMolecules.length} molecules)`}
-                  {pendingChanges.deletedAtoms.length > 0 && ` (${pendingChanges.deletedAtoms.length} atoms)`}
+                  {pendingChanges.deletedAtoms.length > 0 && ` (${pendingChanges.deletedAtoms.length} atoms deleted)`}
+                  {pendingChanges.addedAtoms.length > 0 && ` (${pendingChanges.addedAtoms.length} atoms added)`}
                 </span>
                 <span className="text-xs ml-2 text-yellow-600">Will sync when you save</span>
               </div>
