@@ -1,0 +1,14 @@
+{
+  "name": "exhibition-renderer-service",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "puppeteer": "^23.6.1",
+    "zod": "^3.23.8"
+  }
+}

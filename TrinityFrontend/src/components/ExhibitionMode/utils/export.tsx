@@ -166,8 +166,58 @@ const ensureBrowserEnvironment = (action: string) => {
   }
 };
 
-export interface SlideCaptureOptions {
+const collectDocumentStyles = (): ExportDocumentStyles => {
+  ensureBrowserEnvironment('Style collection');
+
+  const inline = Array.from(document.querySelectorAll('style'))
+    .map(node => node.textContent?.trim() ?? '')
+    .filter(content => content.length > 0);
+
+  const external = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+    .map(link => {
+      const href = (link as HTMLLinkElement).href;
+      if (!href) {
+        return null;
+      }
+      try {
+        return new URL(href, window.location.href).href;
+      } catch {
+        return href;
+      }
+    })
+    .filter((value): value is string => Boolean(value));
+
+  const uniqueInline = Array.from(new Set(inline));
+  const uniqueExternal = Array.from(new Set(external));
+
+  const baseUrl = window.location?.origin;
+
+  return {
+    inline: uniqueInline,
+    external: uniqueExternal,
+    baseUrl,
+  };
+};
+
+const createDomSnapshot = (
+  element: HTMLElement,
+  cardId: string,
+  pixelRatio: number,
+): SlideDomSnapshot => {
+  const rect = element.getBoundingClientRect();
+  return {
+    cardId,
+    html: element.outerHTML,
+    width: rect.width || FALLBACK_BASE_WIDTH,
+    height: rect.height || FALLBACK_BASE_HEIGHT,
+    pixelRatio,
+  };
+};
+
+export interface PrepareSlidesForExportOptions {
   pixelRatio?: number;
+  captureImages?: boolean;
+  includeDomSnapshot?: boolean;
 }
 
 export interface SlideCaptureResult {
@@ -178,6 +228,26 @@ export interface SlideCaptureResult {
   imageWidth: number;
   imageHeight: number;
   pixelRatio: number;
+}
+
+export interface SlideDomSnapshot {
+  cardId: string;
+  html: string;
+  width: number;
+  height: number;
+  pixelRatio: number;
+}
+
+export interface ExportDocumentStyles {
+  inline: string[];
+  external: string[];
+  baseUrl?: string;
+}
+
+export interface PreparedSlidesForExport {
+  captures: SlideCaptureResult[];
+  domSnapshots: Map<string, SlideDomSnapshot>;
+  documentStyles: ExportDocumentStyles | null;
 }
 
 const renderSlideForCapture = (
@@ -210,14 +280,29 @@ const renderSlideForCapture = (
   });
 };
 
-export const captureSlidesForExport = async (
+export const prepareSlidesForExport = async (
   cards: LayoutCard[],
-  options?: SlideCaptureOptions,
-): Promise<SlideCaptureResult[]> => {
-  ensureBrowserEnvironment('Slide capture');
+  options?: PrepareSlidesForExportOptions,
+): Promise<PreparedSlidesForExport> => {
+  ensureBrowserEnvironment('Slide preparation');
+
+  const captureImages = options?.captureImages ?? true;
+  const includeDomSnapshot = options?.includeDomSnapshot ?? false;
+
+  if (!captureImages && !includeDomSnapshot) {
+    return {
+      captures: [],
+      domSnapshots: new Map(),
+      documentStyles: null,
+    };
+  }
 
   if (cards.length === 0) {
-    return [];
+    return {
+      captures: [],
+      domSnapshots: new Map(),
+      documentStyles: includeDomSnapshot ? collectDocumentStyles() : null,
+    };
   }
 
   const container = document.createElement('div');
@@ -237,8 +322,10 @@ export const captureSlidesForExport = async (
   const root = createRoot(container);
 
   const captures: SlideCaptureResult[] = [];
+  const domSnapshots = new Map<string, SlideDomSnapshot>();
   const failures: string[] = [];
   const pixelRatio = getPixelRatio(options?.pixelRatio);
+  let collectedStyles: ExportDocumentStyles | null = null;
 
   try {
     const fontReady = (document as { fonts?: { ready?: Promise<unknown> } }).fonts?.ready;
@@ -264,8 +351,19 @@ export const captureSlidesForExport = async (
       }
 
       const rect = slideElement.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) {
+      if ((captureImages || includeDomSnapshot) && (rect.width === 0 || rect.height === 0)) {
         failures.push(card.id);
+        continue;
+      }
+
+      if (includeDomSnapshot) {
+        domSnapshots.set(card.id, createDomSnapshot(slideElement, card.id, pixelRatio));
+        if (!collectedStyles) {
+          collectedStyles = collectDocumentStyles();
+        }
+      }
+
+      if (!captureImages) {
         continue;
       }
 
@@ -277,13 +375,13 @@ export const captureSlidesForExport = async (
           attempt += 1;
 
           try {
-            const options = {
+            const pngOptions = {
               pixelRatio,
               cacheBust: true,
               ...(attempt > 1 ? { skipFonts: true } : {}),
             } as Parameters<typeof toPng>[1];
 
-            dataUrl = await toPng(slideElement, options);
+            dataUrl = await toPng(slideElement, pngOptions);
           } catch (error) {
             if (attempt >= MAX_CAPTURE_ATTEMPTS || !isSecurityError(error)) {
               throw error;
@@ -328,11 +426,15 @@ export const captureSlidesForExport = async (
 
   if (failures.length > 0) {
     throw new Error(
-      `Unable to capture ${failures.length} slide${failures.length === 1 ? '' : 's'} for export.`,
+      `Unable to prepare ${failures.length} slide${failures.length === 1 ? '' : 's'} for export.`,
     );
   }
 
-  return captures;
+  return {
+    captures,
+    domSnapshots,
+    documentStyles: includeDomSnapshot ? collectedStyles ?? collectDocumentStyles() : null,
+  };
 };
 
 export interface SlideExportObjectPayload {
@@ -356,6 +458,13 @@ export interface SlideScreenshotPayload {
   pixelRatio: number;
 }
 
+export interface SlideDomSnapshotPayload {
+  html: string;
+  width: number;
+  height: number;
+  pixelRatio?: number;
+}
+
 export interface SlideExportPayload {
   id: string;
   index: number;
@@ -365,11 +474,13 @@ export interface SlideExportPayload {
   presentationSettings?: PresentationSettings | null;
   objects: SlideExportObjectPayload[];
   screenshot?: SlideScreenshotPayload;
+  domSnapshot?: SlideDomSnapshotPayload;
 }
 
 export interface ExhibitionExportPayload {
   title: string;
   slides: SlideExportPayload[];
+  documentStyles?: ExportDocumentStyles | null;
 }
 
 export interface BuildPresentationExportOptions {
@@ -428,22 +539,27 @@ const resolveExportTitle = (cards: LayoutCard[], provided?: string): string => {
 export const buildPresentationExportPayload = async (
   cards: LayoutCard[],
   slideObjectsByCardId: SlideObjectMap,
-  captures: SlideCaptureResult[],
+  prepared: PreparedSlidesForExport | null,
   options?: BuildPresentationExportOptions,
 ): Promise<ExhibitionExportPayload> => {
+  const captures = prepared?.captures ?? [];
   const captureLookup = new Map<string, SlideCaptureResult>();
   captures.forEach(capture => {
     captureLookup.set(capture.cardId, capture);
   });
 
-  const fallbackWidth = captures[0]?.cssWidth ?? FALLBACK_BASE_WIDTH;
-  const fallbackHeight = captures[0]?.cssHeight ?? FALLBACK_BASE_HEIGHT;
+  const domSnapshots = prepared?.domSnapshots ?? new Map<string, SlideDomSnapshot>();
+  const firstSnapshot = domSnapshots.size > 0 ? domSnapshots.values().next().value : undefined;
+
+  const fallbackWidth = captures[0]?.cssWidth ?? firstSnapshot?.width ?? FALLBACK_BASE_WIDTH;
+  const fallbackHeight = captures[0]?.cssHeight ?? firstSnapshot?.height ?? FALLBACK_BASE_HEIGHT;
 
   const slides: SlideExportPayload[] = await Promise.all(cards.map(async (card, index) => {
     const capture = captureLookup.get(card.id);
+    const domSnapshot = domSnapshots.get(card.id);
     const objects = await normaliseObjects(slideObjectsByCardId[card.id]);
-    const baseWidth = capture?.cssWidth ?? fallbackWidth;
-    const baseHeight = capture?.cssHeight ?? fallbackHeight;
+    const baseWidth = capture?.cssWidth ?? domSnapshot?.width ?? fallbackWidth;
+    const baseHeight = capture?.cssHeight ?? domSnapshot?.height ?? fallbackHeight;
 
     return {
       id: card.id,
@@ -463,12 +579,21 @@ export const buildPresentationExportPayload = async (
             pixelRatio: capture.pixelRatio,
           }
         : undefined,
+      domSnapshot: domSnapshot
+        ? {
+            html: domSnapshot.html,
+            width: domSnapshot.width,
+            height: domSnapshot.height,
+            pixelRatio: domSnapshot.pixelRatio,
+          }
+        : undefined,
     };
   }));
 
   return {
     title: resolveExportTitle(cards, options?.title),
     slides,
+    documentStyles: prepared?.documentStyles ?? null,
   };
 };
 

@@ -140,6 +140,14 @@ class ExhibitionLayoutConfigurationOut(ExhibitionLayoutConfigurationBase):
     updated_at: Optional[datetime] = Field(default=None)
 
 
+class DocumentStylesPayload(BaseModel):
+    inline: List[str] = Field(default_factory=list)
+    external: List[str] = Field(default_factory=list)
+    base_url: Optional[str] = Field(default=None, alias="baseUrl")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class SlideScreenshotPayload(BaseModel):
     """Screenshot metadata accompanying an exported slide."""
 
@@ -148,6 +156,17 @@ class SlideScreenshotPayload(BaseModel):
     height: int
     css_width: Optional[float] = Field(default=None, alias="cssWidth")
     css_height: Optional[float] = Field(default=None, alias="cssHeight")
+    pixel_ratio: Optional[float] = Field(default=None, alias="pixelRatio")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SlideDomSnapshotPayload(BaseModel):
+    """Serialised DOM snapshot used for server-side rendering."""
+
+    html: str
+    width: float
+    height: float
     pixel_ratio: Optional[float] = Field(default=None, alias="pixelRatio")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -182,6 +201,7 @@ class SlideExportPayload(BaseModel):
     )
     objects: List[SlideExportObjectPayload] = Field(default_factory=list)
     screenshot: Optional[SlideScreenshotPayload] = None
+    dom_snapshot: Optional[SlideDomSnapshotPayload] = Field(default=None, alias="domSnapshot")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -191,3 +211,6 @@ class ExhibitionExportRequest(BaseModel):
 
     title: Optional[str] = None
     slides: List[SlideExportPayload] = Field(default_factory=list)
+    document_styles: Optional[DocumentStylesPayload] = Field(
+        default=None, alias="documentStyles"
+    )

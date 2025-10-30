@@ -38,8 +38,10 @@ sys.modules.setdefault("app.features.exhibition", exhibition_pkg)
 schemas_module = _load_module("app.features.exhibition.schemas", EXHIBITION_PATH / "schemas.py")
 export_module = _load_module("app.features.exhibition.export", EXHIBITION_PATH / "export.py")
 
+DocumentStylesPayload = schemas_module.DocumentStylesPayload
 ExhibitionExportRequest = schemas_module.ExhibitionExportRequest
 ExportGenerationError = export_module.ExportGenerationError
+SlideDomSnapshotPayload = schemas_module.SlideDomSnapshotPayload
 build_export_filename = export_module.build_export_filename
 build_pdf_bytes = export_module.build_pdf_bytes
 build_pptx_bytes = export_module.build_pptx_bytes
@@ -140,6 +142,53 @@ def test_build_pdf_bytes_requires_screenshots() -> None:
     payload_missing = _build_payload(include_screenshot=False)
     with pytest.raises(ExportGenerationError):
         build_pdf_bytes(payload_missing)
+
+
+def test_build_pdf_bytes_renders_missing_screenshots(monkeypatch) -> None:
+    payload = _build_payload(include_screenshot=False)
+
+    for slide in payload.slides:
+        slide.dom_snapshot = SlideDomSnapshotPayload.model_validate(
+            {
+                "html": "<div class=\"slide\">Slide</div>",
+                "width": 960,
+                "height": 540,
+                "pixelRatio": 2,
+            }
+        )
+
+    payload.document_styles = DocumentStylesPayload.model_validate(
+        {
+            "inline": [".slide { width: 100%; height: 100%; }"],
+            "external": [],
+            "baseUrl": "http://localhost:3000",
+        }
+    )
+
+    captured_ids: list[str] = []
+
+    def fake_request(slides, styles):
+        assert isinstance(styles.inline, list)
+        for slide in slides:
+            captured_ids.append(slide.id)
+        return {
+            slide.id: {
+                "id": slide.id,
+                "dataUrl": _png_data_url(),
+                "width": 960,
+                "height": 540,
+                "cssWidth": 960,
+                "cssHeight": 540,
+                "pixelRatio": 2,
+            }
+            for slide in slides
+        }
+
+    monkeypatch.setattr(export_module, "_request_slide_screenshots", fake_request)
+
+    pdf_bytes = build_pdf_bytes(payload)
+    assert pdf_bytes.startswith(b"%PDF")
+    assert captured_ids == [slide.id for slide in payload.slides]
 
 
 def test_build_export_filename_normalises_title() -> None:

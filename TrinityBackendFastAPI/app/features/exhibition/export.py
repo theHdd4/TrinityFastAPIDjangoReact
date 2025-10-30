@@ -5,9 +5,11 @@ import html
 import io
 import logging
 import math
+import os
 import re
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
+import httpx
 from pptx import Presentation
 from pptx.chart.data import ChartData
 from pptx.dml.color import RGBColor
@@ -17,17 +19,32 @@ from pptx.util import Emu, Pt
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
-from .schemas import ExhibitionExportRequest, SlideExportObjectPayload, SlideExportPayload
+from .schemas import (
+    DocumentStylesPayload,
+    ExhibitionExportRequest,
+    SlideDomSnapshotPayload,
+    SlideExportObjectPayload,
+    SlideExportPayload,
+    SlideScreenshotPayload,
+)
 
 logger = logging.getLogger(__name__)
 
 PX_PER_INCH = 96.0
 EMU_PER_INCH = 914400
 PT_PER_INCH = 72.0
+DEFAULT_RENDER_SERVICE_URL = "http://localhost:4100"
 
 
 class ExportGenerationError(Exception):
     """Raised when an export file cannot be generated."""
+
+
+def _get_render_service_url() -> str:
+    configured = (os.environ.get("EXHIBITION_RENDER_SERVICE_URL") or "").strip()
+    if configured:
+        return configured.rstrip("/")
+    return DEFAULT_RENDER_SERVICE_URL
 
 
 def _px_to_inches(value: float) -> float:
@@ -376,7 +393,13 @@ def _resolve_slide_dimensions(slide: SlideExportPayload) -> tuple[float, float]:
     width = _safe_float(slide.base_width, 0)
     height = _safe_float(slide.base_height, 0)
 
-    if width <= 0 or height <= 0 and slide.screenshot:
+    if (width <= 0 or height <= 0) and getattr(slide, "dom_snapshot", None):
+        snapshot = slide.dom_snapshot
+        if isinstance(snapshot, SlideDomSnapshotPayload):
+            width = max(width, _safe_float(getattr(snapshot, "width", None), 0))
+            height = max(height, _safe_float(getattr(snapshot, "height", None), 0))
+
+    if (width <= 0 or height <= 0) and slide.screenshot:
         screenshot = slide.screenshot
         width = max(width, _safe_float(getattr(screenshot, 'css_width', None), 0))
         height = max(height, _safe_float(getattr(screenshot, 'css_height', None), 0))
@@ -387,6 +410,113 @@ def _resolve_slide_dimensions(slide: SlideExportPayload) -> tuple[float, float]:
         raise ExportGenerationError('Slide dimensions are missing or invalid.')
 
     return width, height
+
+
+def _prepare_render_slide(slide: SlideExportPayload) -> dict:
+    snapshot = slide.dom_snapshot
+    if not isinstance(snapshot, SlideDomSnapshotPayload):
+        raise ExportGenerationError(
+            f'Slide {slide.id} is missing a DOM snapshot required for server-side rendering.'
+        )
+
+    width = _safe_float(getattr(snapshot, "width", None), 0) or _safe_float(slide.base_width, 0)
+    height = _safe_float(getattr(snapshot, "height", None), 0) or _safe_float(slide.base_height, 0)
+
+    if width <= 0 or height <= 0:
+        raise ExportGenerationError(
+            f'Slide {slide.id} does not include valid dimensions for rendering.'
+        )
+
+    payload: dict[str, object] = {
+        "id": slide.id,
+        "html": snapshot.html,
+        "width": width,
+        "height": height,
+    }
+
+    pixel_ratio = _safe_float(getattr(snapshot, "pixel_ratio", None), 0)
+    if pixel_ratio > 0:
+        payload["pixelRatio"] = pixel_ratio
+
+    return payload
+
+
+def _request_slide_screenshots(
+    slides: Sequence[SlideExportPayload], styles: DocumentStylesPayload
+) -> dict[str, dict]:
+    if not slides:
+        return {}
+
+    render_slides = []
+    pixel_ratios: list[float] = []
+    for slide in slides:
+        render_payload = _prepare_render_slide(slide)
+        ratio = _safe_float(render_payload.get("pixelRatio"), 0)
+        if ratio > 0:
+            pixel_ratios.append(ratio)
+        render_slides.append(render_payload)
+
+    request_payload: dict[str, object] = {
+        "slides": render_slides,
+        "styles": styles.model_dump(by_alias=True),
+    }
+
+    if pixel_ratios:
+        request_payload["pixelRatio"] = max(pixel_ratios)
+
+    base_url = _get_render_service_url()
+
+    try:
+        with httpx.Client(base_url=base_url, timeout=60.0) as client:
+            response = client.post("/render/batch", json=request_payload)
+        response.raise_for_status()
+    except httpx.HTTPError as exc:  # pragma: no cover - network failure
+        raise ExportGenerationError('Unable to render slides using the rendering service.') from exc
+
+    try:
+        payload = response.json()
+    except ValueError as exc:  # pragma: no cover - unexpected payload
+        raise ExportGenerationError('Rendering service returned an invalid response.') from exc
+
+    screenshots = payload.get("screenshots")
+    if not isinstance(screenshots, list):
+        raise ExportGenerationError('Rendering service response did not include screenshots.')
+
+    results: dict[str, dict] = {}
+    for entry in screenshots:
+        if not isinstance(entry, dict):
+            continue
+        slide_id = entry.get("id")
+        if entry.get("error"):
+            raise ExportGenerationError(
+                f"Rendering service failed to capture slide {slide_id or '?'}"
+            )
+        if isinstance(slide_id, str):
+            results[slide_id] = entry
+
+    return results
+
+
+def _ensure_slide_screenshots(
+    payload: ExhibitionExportRequest, slides: Sequence[SlideExportPayload]
+) -> None:
+    missing = [slide for slide in slides if not slide.screenshot or not slide.screenshot.data_url]
+    if not missing:
+        return
+
+    styles = payload.document_styles
+    if not isinstance(styles, DocumentStylesPayload):
+        raise ExportGenerationError(
+            'Document styles are required to render slide screenshots on the server.'
+        )
+
+    screenshots = _request_slide_screenshots(missing, styles)
+
+    for slide in missing:
+        data = screenshots.get(slide.id)
+        if not isinstance(data, dict):
+            raise ExportGenerationError(f'Unable to render screenshot for slide {slide.id}.')
+        slide.screenshot = SlideScreenshotPayload.model_validate(data)
 
 
 def build_pptx_bytes(payload: ExhibitionExportRequest) -> bytes:
@@ -420,6 +550,8 @@ def build_pdf_bytes(payload: ExhibitionExportRequest) -> bytes:
         raise ExportGenerationError('No slides provided for export.')
 
     ordered_slides = sorted(payload.slides, key=lambda slide: slide.index)
+
+    _ensure_slide_screenshots(payload, ordered_slides)
 
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer)
