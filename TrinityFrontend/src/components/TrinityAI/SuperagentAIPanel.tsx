@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, X, Bot, User, Sparkles, RotateCcw, Clock, Settings, Paperclip, Mic, Plus, Trash2, MessageCircle, Minimize2, Maximize2 } from 'lucide-react';
+import { Send, X, Bot, User, Sparkles, RotateCcw, Clock, Settings, Paperclip, Mic, Plus, Trash2, MessageCircle, Minimize2, Maximize2, Minus } from 'lucide-react';
 import { TRINITY_AI_API } from '@/lib/api';
 import { useLaboratoryStore } from '../LaboratoryMode/store/laboratoryStore';
 import WorkflowProgress from './WorkflowProgress';
@@ -335,6 +335,31 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Keep reference to WebSocket for cleanup
+  const wsRef = useRef<WebSocket | null>(null);
+  
+  // Update ref whenever wsConnection changes
+  useEffect(() => {
+    wsRef.current = wsConnection;
+  }, [wsConnection]);
+
+  // Debug: Log when isCollapsed changes
+  useEffect(() => {
+    console.log('🔄 SuperAgent isCollapsed changed:', isCollapsed, 'WebSocket state:', wsConnection ? 'exists' : 'null', wsConnected ? 'connected' : 'disconnected');
+    console.log('📊 Active WebSocket:', wsConnection?.readyState === WebSocket.OPEN ? 'OPEN' : wsConnection ? 'CLOSED/CLOSING' : 'none');
+  }, [isCollapsed]);
+
+  // Cleanup WebSocket ONLY when component unmounts (NOT when collapsed/minimized)
+  useEffect(() => {
+    return () => {
+      // Only cleanup on actual unmount, not on re-render or collapse
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        console.log('🧹 SuperAgent unmounting, closing WebSocket');
+        wsRef.current.close();
+      }
+    };
+  }, []); // Empty deps array means this only runs on mount/unmount
 
   const updateCurrentChat = (updatedMessages: Message[]) => {
     setChats(prev => prev.map(chat => 
@@ -875,13 +900,17 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
     }
   };
 
+  // Calculate responsive font sizes based on panel width
+  const baseFontSize = Math.max(12, Math.min(14, panelWidth * 0.035)); // Scales between 12px and 14px
+  const smallFontSize = Math.max(10, Math.min(12, panelWidth * 0.03)); // Scales between 10px and 12px
+  const headerFontSize = Math.max(16, Math.min(18, panelWidth * 0.045)); // Scales between 16px and 18px
+  
+  // Calculate responsive message bubble max width for SuperAgent (can expand more - 75% of panel width, min 250px, max 650px)
+  const messageBubbleMaxWidth = Math.max(250, Math.min(650, panelWidth * 0.75));
 
-  // Don't return null when collapsed - preserve state
-  if (isCollapsed) {
-    return null;
-  }
-
+  // Don't unmount when collapsed - keep WebSocket connections and requests alive
   return (
+    <div className={isCollapsed ? 'hidden' : ''} style={{ height: '100%' }}>
     <Card className="h-full bg-white backdrop-blur-xl shadow-[0_20px_70px_rgba(0,0,0,0.3)] border-2 border-gray-200 overflow-hidden flex flex-col relative ring-1 ring-gray-100" style={{ width: `${panelWidth}px` }}>
       {/* Resize Handle */}
       <div
@@ -895,7 +924,7 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
         <div className="absolute left-0 top-0 w-64 h-full bg-white backdrop-blur-xl border-r-2 border-gray-200 z-50 flex flex-col shadow-xl">
           <div className="p-4 border-b-2 border-gray-200 bg-gradient-to-r from-gray-50 to-white">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-800 font-inter">Chat History</h3>
+              <h3 className="font-semibold text-gray-800 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Chat History</h3>
               <Button
                 variant="ghost"
                 size="sm"
@@ -918,10 +947,10 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
                       : 'bg-white hover:bg-gray-50 hover:text-gray-800 hover:border-2 hover:border-gray-200'
                   }`}
                 >
-                  <div className="text-sm font-medium truncate font-inter">{chat.title}</div>
-                  <div className={`text-xs mt-1 font-inter ${
+                  <div className="font-medium truncate font-inter" style={{ fontSize: `${baseFontSize}px` }}>{chat.title}</div>
+                  <div className={`mt-1 font-inter ${
                     chat.id === currentChatId ? 'text-[#41C185]/70' : 'text-gray-600'
-                  }`}>
+                  }`} style={{ fontSize: `${smallFontSize}px` }}>
                     {chat.messages.length - 1} messages
                   </div>
                 </div>
@@ -946,10 +975,10 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
             </div>
           </div>
           <div>
-            <h3 className="text-lg font-bold text-gray-800 tracking-tight font-inter">Trinity AI</h3>
+            <h3 className="font-bold text-gray-800 tracking-tight font-inter" style={{ fontSize: `${headerFontSize}px` }}>Trinity AI</h3>
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 bg-[#50C878] rounded-full animate-pulse" />
-              <p className="text-xs text-gray-600 font-medium font-inter">Active • Ready to help</p>
+              <p className="text-gray-600 font-medium font-inter" style={{ fontSize: `${smallFontSize}px` }}>Active • Ready to help</p>
             </div>
           </div>
         </div>
@@ -975,9 +1004,26 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
           <Button
             variant="ghost"
             size="sm"
-            className="h-9 w-9 p-0 hover:bg-red-100 hover:text-red-500 transition-all duration-200 rounded-xl"
+            className="h-9 w-9 p-0 hover:bg-blue-100 hover:text-blue-500 transition-all duration-200 rounded-xl"
             onClick={onToggle}
-            title="Close Panel"
+            title="Minimize Panel"
+          >
+            <Minus className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 w-9 p-0 hover:bg-red-100 hover:text-red-500 transition-all duration-200 rounded-xl"
+            onClick={() => {
+              // Cancel any ongoing requests
+              if (wsConnection && wsConnected) {
+                wsConnection.close();
+                setWsConnected(false);
+              }
+              setIsLoading(false);
+              onToggle();
+            }}
+            title="Close Panel (Cancel Requests)"
           >
             <X className="w-4 h-4" />
           </Button>
@@ -1008,22 +1054,23 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
               </div>
 
               {/* Message Bubble */}
-              <div className={`flex-1 max-w-[300px] group ${
+              <div className={`flex-1 group ${
                 message.sender === 'user' ? 'flex flex-col items-end' : ''
-              }`}>
+              }`} style={{ maxWidth: `${messageBubbleMaxWidth}px` }}>
                 <div className={`rounded-3xl px-5 py-3.5 shadow-lg border-2 transition-all duration-300 hover:shadow-xl hover:scale-[1.02] ${
                   message.sender === 'ai'
                     ? 'bg-[#50C878] text-white border-[#50C878]/30 rounded-tl-md backdrop-blur-sm'
                     : 'bg-[#458EE2] text-white border-[#458EE2]/30 rounded-tr-md backdrop-blur-sm'
-                }`}>
-                  <div
-                    className="text-sm leading-relaxed font-medium font-inter"
-                    dangerouslySetInnerHTML={{
-                      __html: parseMarkdown(message.content)
-                    }}
-                  />
-                </div>
-                <p className="text-xs text-gray-600 mt-2 px-2 font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200 font-inter">
+                  }`}>
+                    <div
+                      className="leading-relaxed font-medium font-inter"
+                      style={{ fontSize: `${baseFontSize}px` }}
+                      dangerouslySetInnerHTML={{
+                        __html: parseMarkdown(message.content)
+                      }}
+                    />
+                  </div>
+                  <p className="text-gray-600 mt-2 px-2 font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200 font-inter" style={{ fontSize: `${smallFontSize}px` }}>
                   {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
@@ -1096,7 +1143,8 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
               onChange={(e) => setInputValue(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder="Type your message..."
-              className="h-12 bg-white backdrop-blur-sm border-2 border-gray-200 hover:border-gray-300 focus:border-[#41C185] focus-visible:ring-2 focus-visible:ring-[#41C185]/20 rounded-2xl px-4 text-sm font-medium transition-all duration-200 shadow-sm placeholder:text-gray-500/60 font-inter"
+              className="h-12 bg-white backdrop-blur-sm border-2 border-gray-200 hover:border-gray-300 focus:border-[#41C185] focus-visible:ring-2 focus-visible:ring-[#41C185]/20 rounded-2xl px-4 font-medium transition-all duration-200 shadow-sm placeholder:text-gray-500/60 font-inter"
+              style={{ fontSize: `${baseFontSize}px` }}
               disabled={isLoading}
             />
           </div>
@@ -1115,6 +1163,7 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
         </div>
       </div>
     </Card>
+    </div>
   );
 };
 
