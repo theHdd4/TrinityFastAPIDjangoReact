@@ -3003,10 +3003,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         if (!canEdit) {
           return;
         }
+
+        if (editingTextState?.type === 'text-box' && editingTextState.id === objectId) {
+          return;
+        }
+
         const object = objectsMap.get(objectId);
         if (!object || object.type !== 'text-box') {
           return;
         }
+
         const formatting = extractTextBoxFormatting(object.props as Record<string, unknown> | undefined);
         onInteract();
         focusCanvas();
@@ -3018,7 +3024,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           original: formatting.text,
         });
       },
-      [canEdit, focusCanvas, objectsMap, onInteract],
+      [canEdit, editingTextState, focusCanvas, objectsMap, onInteract],
     );
 
     const handleEditingValueChange = useCallback(

@@ -733,6 +733,31 @@ const ExhibitionMode = () => {
         return true;
       }
 
+      if (typeof document !== 'undefined') {
+        const activeElement = document.activeElement;
+        if (isEditableTarget(activeElement)) {
+          return true;
+        }
+
+        const selection = document.getSelection();
+        if (selection) {
+          const anchorNode = selection.anchorNode;
+          let selectionElement: EventTarget | null = null;
+
+          if (anchorNode) {
+            if (typeof Element !== 'undefined' && anchorNode instanceof Element) {
+              selectionElement = anchorNode;
+            } else {
+              selectionElement = anchorNode.parentElement;
+            }
+          }
+
+          if (isEditableTarget(selectionElement)) {
+            return true;
+          }
+        }
+      }
+
       if (typeof event.composedPath === 'function') {
         const path = event.composedPath();
         for (const node of path) {
