@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { AlertCircle, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 
 import { fetchSharedExhibitionLayout, type ExhibitionLayoutResponse } from '@/lib/exhibition';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
@@ -25,6 +25,7 @@ const SharedExhibition = () => {
   const [status, setStatus] = useState<LoadState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<SharedMetadata | null>(null);
+  const [activeSlideIndex, setActiveSlideIndex] = useState(0);
 
   const handleDrop = useCallback<
     (
@@ -95,6 +96,45 @@ const SharedExhibition = () => {
     };
   }, [resetStore, setCards, token]);
 
+  useEffect(() => {
+    if (status !== 'ready') {
+      setActiveSlideIndex(0);
+    }
+  }, [status]);
+
+  useEffect(() => {
+    const totalSlides = exhibitedCards.length;
+    if (totalSlides === 0) {
+      setActiveSlideIndex(0);
+      return;
+    }
+
+    setActiveSlideIndex(prevIndex => {
+      if (prevIndex < totalSlides) {
+        return prevIndex;
+      }
+      return Math.max(0, totalSlides - 1);
+    });
+  }, [exhibitedCards.length]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    const originalTitle = document.title;
+    if (status === 'ready' && metadata) {
+      const project = metadata.project_name || 'Shared Exhibition';
+      document.title = `${project} · Trinity Exhibition`;
+    } else {
+      document.title = 'Shared Exhibition · Trinity';
+    }
+
+    return () => {
+      document.title = originalTitle;
+    };
+  }, [metadata, status]);
+
   const updatedLabel = useMemo(() => {
     if (!metadata?.updated_at) {
       return null;
@@ -111,6 +151,35 @@ const SharedExhibition = () => {
   const subheading = metadata
     ? `${metadata.client_name} · ${metadata.app_name}`
     : 'Trinity Exhibition Mode';
+
+  const totalSlides = exhibitedCards.length;
+  const activeSlide = totalSlides > 0 ? exhibitedCards[Math.min(activeSlideIndex, totalSlides - 1)] : null;
+
+  const handleAdvance = useCallback(
+    (direction: 'previous' | 'next') => {
+      if (totalSlides <= 1) {
+        return;
+      }
+
+      setActiveSlideIndex(prevIndex => {
+        if (direction === 'previous') {
+          return prevIndex <= 0 ? totalSlides - 1 : prevIndex - 1;
+        }
+        return prevIndex >= totalSlides - 1 ? 0 : prevIndex + 1;
+      });
+    },
+    [totalSlides],
+  );
+
+  const handleSelectSlide = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= totalSlides) {
+        return;
+      }
+      setActiveSlideIndex(index);
+    },
+    [totalSlides],
+  );
 
   const renderContent = () => {
     if (status === 'loading' || status === 'idle') {
@@ -142,7 +211,7 @@ const SharedExhibition = () => {
       );
     }
 
-    if (exhibitedCards.length === 0) {
+    if (totalSlides === 0) {
       return (
         <div className="flex flex-col items-center justify-center py-24 text-white/70 space-y-4">
           <AlertCircle className="h-8 w-8" />
@@ -151,23 +220,77 @@ const SharedExhibition = () => {
       );
     }
 
+    if (!activeSlide) {
+      return null;
+    }
+
     return (
-      <div className="space-y-12">
-        {exhibitedCards.map((card, index) => (
-          <div key={card.id} className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-3xl p-6">
-            <div className="text-xs uppercase tracking-[0.3em] text-white/60 mb-4">Slide {index + 1}</div>
+      <div className="space-y-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-baseline gap-2 text-white/70">
+            <span className="tracking-[0.4em] uppercase text-xs">Slide {activeSlideIndex + 1}</span>
+            <span className="text-xs text-white/40">of {totalSlides}</span>
+          </div>
+          {totalSlides > 1 && (
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="ghost"
+                className="bg-white/5 text-white hover:bg-white/10"
+                onClick={() => handleAdvance('previous')}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                <span className="sr-only">Previous slide</span>
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="bg-white/5 text-white hover:bg-white/10"
+                onClick={() => handleAdvance('next')}
+              >
+                <ChevronRight className="h-4 w-4" />
+                <span className="sr-only">Next slide</span>
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <div className="relative overflow-hidden rounded-[40px] border border-white/10 bg-white/5 p-4">
+          <div className="rounded-[32px] bg-black/60 p-4">
             <SlideCanvas
-              card={card}
-              slideNumber={index + 1}
-              totalSlides={exhibitedCards.length}
+              key={activeSlide.id}
+              card={activeSlide}
+              slideNumber={activeSlideIndex + 1}
+              totalSlides={totalSlides}
               onDrop={handleDrop}
               draggedAtom={null}
               canEdit={false}
               viewMode="horizontal"
-              isActive={index === 0}
+              isActive
+              presentationMode
             />
           </div>
-        ))}
+        </div>
+
+        {totalSlides > 1 && (
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {exhibitedCards.map((card, index) => {
+              const isActive = index === activeSlideIndex;
+              return (
+                <button
+                  key={card.id}
+                  type="button"
+                  onClick={() => handleSelectSlide(index)}
+                  className={`h-2.5 w-8 rounded-full transition ${
+                    isActive ? 'bg-white' : 'bg-white/30 hover:bg-white/50'
+                  }`}
+                  aria-label={`View slide ${index + 1}`}
+                  aria-current={isActive}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
