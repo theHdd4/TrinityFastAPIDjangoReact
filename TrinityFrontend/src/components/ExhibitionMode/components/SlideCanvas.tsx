@@ -1459,6 +1459,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                     isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
                     !canEdit && !presentationMode && 'opacity-90'
                   )}
+                  data-exhibition-slide="true"
+                  data-exhibition-slide-id={card.id}
                 style={
                   presentationMode
                     ? {
