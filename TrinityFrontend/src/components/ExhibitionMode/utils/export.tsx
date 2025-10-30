@@ -199,17 +199,125 @@ const collectDocumentStyles = (): ExportDocumentStyles => {
   };
 };
 
+const parseTransformScale = (transform: string | null | undefined): { scaleX: number; scaleY: number } => {
+  if (!transform || transform === 'none') {
+    return { scaleX: 1, scaleY: 1 };
+  }
+
+  const normalise = (value: number) => {
+    if (!Number.isFinite(value) || value <= 0) {
+      return 1;
+    }
+    return value;
+  };
+
+  const matrixMatch = transform.match(/matrix\(([^)]+)\)/);
+  if (matrixMatch) {
+    const values = matrixMatch[1]
+      .split(',')
+      .map(part => Number.parseFloat(part.trim()))
+      .filter(Number.isFinite);
+    if (values.length >= 4) {
+      const [a, b, c, d] = values;
+      const scaleX = Math.sqrt(a * a + b * b);
+      const scaleY = Math.sqrt(c * c + d * d);
+      return { scaleX: normalise(scaleX), scaleY: normalise(scaleY) };
+    }
+  }
+
+  const matrix3dMatch = transform.match(/matrix3d\(([^)]+)\)/);
+  if (matrix3dMatch) {
+    const values = matrix3dMatch[1]
+      .split(',')
+      .map(part => Number.parseFloat(part.trim()))
+      .filter(Number.isFinite);
+    if (values.length >= 16) {
+      const scaleX = Math.sqrt(values[0] * values[0] + values[1] * values[1] + values[2] * values[2]);
+      const scaleY = Math.sqrt(values[4] * values[4] + values[5] * values[5] + values[6] * values[6]);
+      return { scaleX: normalise(scaleX), scaleY: normalise(scaleY) };
+    }
+  }
+
+  const scaleMatch = transform.match(/scale\(([^)]+)\)/);
+  if (scaleMatch) {
+    const parts = scaleMatch[1]
+      .split(',')
+      .map(part => Number.parseFloat(part.trim()))
+      .filter(Number.isFinite);
+    if (parts.length === 1) {
+      const scale = normalise(parts[0]);
+      return { scaleX: scale, scaleY: scale };
+    }
+    if (parts.length >= 2) {
+      return { scaleX: normalise(parts[0]), scaleY: normalise(parts[1]) };
+    }
+  }
+
+  return { scaleX: 1, scaleY: 1 };
+};
+
+const resolveSlideDimensions = (
+  element: HTMLElement,
+): { width: number; height: number; rect: DOMRect; scaleX: number; scaleY: number } => {
+  const rect = element.getBoundingClientRect();
+  const computed = window.getComputedStyle(element);
+  const vendorTransforms = computed as unknown as {
+    webkitTransform?: string;
+    mozTransform?: string;
+    msTransform?: string;
+  };
+  const vendorTransform =
+    vendorTransforms.webkitTransform ?? vendorTransforms.mozTransform ?? vendorTransforms.msTransform ?? '';
+  const { scaleX, scaleY } = parseTransformScale(computed.transform || vendorTransform);
+
+  const normalise = (value: number, fallback: number) => {
+    if (!Number.isFinite(value) || value <= 0) {
+      return fallback;
+    }
+    return value;
+  };
+
+  const baseWidth = scaleX > 0 ? rect.width / scaleX : rect.width;
+  const baseHeight = scaleY > 0 ? rect.height / scaleY : rect.height;
+
+  return {
+    width: normalise(baseWidth, FALLBACK_BASE_WIDTH),
+    height: normalise(baseHeight, FALLBACK_BASE_HEIGHT),
+    rect,
+    scaleX: scaleX > 0 ? scaleX : 1,
+    scaleY: scaleY > 0 ? scaleY : 1,
+  };
+};
+
+const serialiseSlideElement = (element: HTMLElement, width: number, height: number): string => {
+  const clone = element.cloneNode(true) as HTMLElement;
+  clone.style.transform = 'none';
+  clone.style.transformOrigin = 'top left';
+  clone.style.margin = '0';
+  clone.style.left = '0';
+  clone.style.top = '0';
+  clone.style.right = 'auto';
+  clone.style.bottom = 'auto';
+  clone.style.width = `${width}px`;
+  clone.style.height = `${height}px`;
+  if (!clone.style.position) {
+    clone.style.position = 'relative';
+  }
+  return clone.outerHTML;
+};
+
 const createDomSnapshot = (
   element: HTMLElement,
   cardId: string,
   pixelRatio: number,
+  width: number,
+  height: number,
 ): SlideDomSnapshot => {
-  const rect = element.getBoundingClientRect();
   return {
     cardId,
-    html: element.outerHTML,
-    width: rect.width || FALLBACK_BASE_WIDTH,
-    height: rect.height || FALLBACK_BASE_HEIGHT,
+    html: serialiseSlideElement(element, width, height),
+    width,
+    height,
     pixelRatio,
   };
 };
@@ -350,14 +458,18 @@ export const prepareSlidesForExport = async (
         continue;
       }
 
-      const rect = slideElement.getBoundingClientRect();
-      if ((captureImages || includeDomSnapshot) && (rect.width === 0 || rect.height === 0)) {
+      const { width: baseWidth, height: baseHeight } = resolveSlideDimensions(slideElement);
+
+      if ((captureImages || includeDomSnapshot) && (baseWidth === 0 || baseHeight === 0)) {
         failures.push(card.id);
         continue;
       }
 
       if (includeDomSnapshot) {
-        domSnapshots.set(card.id, createDomSnapshot(slideElement, card.id, pixelRatio));
+        domSnapshots.set(
+          card.id,
+          createDomSnapshot(slideElement, card.id, pixelRatio, baseWidth, baseHeight),
+        );
         if (!collectedStyles) {
           collectedStyles = collectDocumentStyles();
         }
@@ -375,9 +487,22 @@ export const prepareSlidesForExport = async (
           attempt += 1;
 
           try {
+            const targetWidth = Math.round(baseWidth);
+            const targetHeight = Math.round(baseHeight);
+
             const pngOptions = {
               pixelRatio,
               cacheBust: true,
+              width: targetWidth,
+              height: targetHeight,
+              canvasWidth: Math.round(targetWidth * pixelRatio),
+              canvasHeight: Math.round(targetHeight * pixelRatio),
+              style: {
+                transform: 'none',
+                transformOrigin: 'top left',
+                width: `${targetWidth}px`,
+                height: `${targetHeight}px`,
+              },
               ...(attempt > 1 ? { skipFonts: true } : {}),
             } as Parameters<typeof toPng>[1];
 
@@ -403,8 +528,8 @@ export const prepareSlidesForExport = async (
         captures.push({
           cardId: card.id,
           dataUrl,
-          cssWidth: rect.width,
-          cssHeight: rect.height,
+          cssWidth: baseWidth,
+          cssHeight: baseHeight,
           imageWidth,
           imageHeight,
           pixelRatio,

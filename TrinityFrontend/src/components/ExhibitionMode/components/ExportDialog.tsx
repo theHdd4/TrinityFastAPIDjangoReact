@@ -84,7 +84,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
     }
 
     return prepareSlidesForExport(exhibitedCards, {
-      captureImages: false,
+      captureImages: true,
       includeDomSnapshot: true,
       pixelRatio: format === 'PDF' ? 3 : 2,
     });

@@ -442,7 +442,10 @@ def _prepare_render_slide(slide: SlideExportPayload) -> dict:
 
 
 def _request_slide_screenshots(
-    slides: Sequence[SlideExportPayload], styles: DocumentStylesPayload
+    slides: Sequence[SlideExportPayload],
+    styles: DocumentStylesPayload,
+    *,
+    strict: bool = True,
 ) -> dict[str, dict]:
     if not slides:
         return {}
@@ -488,13 +491,49 @@ def _request_slide_screenshots(
             continue
         slide_id = entry.get("id")
         if entry.get("error"):
-            raise ExportGenerationError(
-                f"Rendering service failed to capture slide {slide_id or '?'}"
-            )
+            message = f"Rendering service failed to capture slide {slide_id or '?'}"
+            if strict:
+                raise ExportGenerationError(message)
+            logger.warning(message)
+            continue
         if isinstance(slide_id, str):
             results[slide_id] = entry
 
     return results
+
+
+def _attempt_server_screenshots(
+    payload: ExhibitionExportRequest, slides: Sequence[SlideExportPayload]
+) -> None:
+    if not slides:
+        return
+
+    styles = payload.document_styles
+    if not isinstance(styles, DocumentStylesPayload):
+        return
+
+    candidates = [
+        slide
+        for slide in slides
+        if isinstance(slide.dom_snapshot, SlideDomSnapshotPayload) and slide.dom_snapshot.html
+    ]
+    if not candidates:
+        return
+
+    try:
+        screenshots = _request_slide_screenshots(candidates, styles, strict=False)
+    except ExportGenerationError as exc:  # pragma: no cover - best effort logging
+        logger.warning('Falling back to client slide captures: %s', exc)
+        return
+
+    for slide in candidates:
+        data = screenshots.get(slide.id)
+        if not isinstance(data, dict):
+            continue
+        try:
+            slide.screenshot = SlideScreenshotPayload.model_validate(data)
+        except Exception as exc:  # pragma: no cover - validation edge cases
+            logger.warning('Skipping invalid renderer screenshot for slide %s: %s', slide.id, exc)
 
 
 def _ensure_slide_screenshots(
@@ -551,6 +590,7 @@ def build_pdf_bytes(payload: ExhibitionExportRequest) -> bytes:
 
     ordered_slides = sorted(payload.slides, key=lambda slide: slide.index)
 
+    _attempt_server_screenshots(payload, ordered_slides)
     _ensure_slide_screenshots(payload, ordered_slides)
 
     buffer = io.BytesIO()

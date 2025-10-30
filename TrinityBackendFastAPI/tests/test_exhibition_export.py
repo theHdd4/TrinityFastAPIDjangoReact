@@ -165,12 +165,13 @@ def test_build_pdf_bytes_renders_missing_screenshots(monkeypatch) -> None:
         }
     )
 
-    captured_ids: list[str] = []
+    captured_calls: list[tuple[bool, list[str]]] = []
 
-    def fake_request(slides, styles):
+    def fake_request(slides, styles, *, strict=True):
         assert isinstance(styles.inline, list)
-        for slide in slides:
-            captured_ids.append(slide.id)
+        captured_calls.append((strict, [slide.id for slide in slides]))
+        if not strict:
+            return {}
         return {
             slide.id: {
                 "id": slide.id,
@@ -188,7 +189,33 @@ def test_build_pdf_bytes_renders_missing_screenshots(monkeypatch) -> None:
 
     pdf_bytes = build_pdf_bytes(payload)
     assert pdf_bytes.startswith(b"%PDF")
-    assert captured_ids == [slide.id for slide in payload.slides]
+    assert captured_calls == [
+        (False, [slide.id for slide in payload.slides]),
+        (True, [slide.id for slide in payload.slides]),
+    ]
+
+
+def test_build_pdf_bytes_falls_back_to_client_capture(monkeypatch) -> None:
+    payload = _build_payload(include_screenshot=True)
+
+    payload.document_styles = DocumentStylesPayload.model_validate(
+        {
+            "inline": [],
+            "external": [],
+            "baseUrl": "http://localhost:3000",
+        }
+    )
+
+    class FakeError(ExportGenerationError):
+        pass
+
+    def failing_request(slides, styles, *, strict=True):
+        raise FakeError("renderer offline")
+
+    monkeypatch.setattr(export_module, "_request_slide_screenshots", failing_request)
+
+    pdf_bytes = build_pdf_bytes(payload)
+    assert pdf_bytes.startswith(b"%PDF")
 
 
 def test_build_export_filename_normalises_title() -> None:
