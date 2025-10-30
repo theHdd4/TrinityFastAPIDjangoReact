@@ -80,6 +80,19 @@ services:
       - trinity-net
     restart: always
 
+  exhibition-renderer:
+    build:
+      context: ./ExhibitionRendererService
+      dockerfile: Dockerfile
+    environment:
+      PORT: 4100
+      DEFAULT_PIXEL_RATIO: 2
+    ports:
+      - "4100:4100"
+    networks:
+      - trinity-net
+    restart: always
+
   web:
     build: ./TrinityBackendDjango
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3
@@ -157,6 +170,7 @@ services:
       FASTAPI_CORS_ORIGINS: "http://127.0.0.1:8080,http://${HOST_IP:-10.2.4.48}:8080,http://172.17.48.1:8080,http://10.2.4.48:8080,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com"
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin"
       CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
+      EXHIBITION_RENDER_SERVICE_URL: http://exhibition-renderer:4100
     ports:
       - "8001:8001"
     depends_on:
@@ -165,6 +179,7 @@ services:
       - redis
       - minio
       - flight
+      - exhibition-renderer
     networks:
       - trinity-net
     labels:

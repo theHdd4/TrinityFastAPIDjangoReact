@@ -809,8 +809,18 @@ def _request_slide_screenshots(
         with httpx.Client(base_url=base_url, timeout=60.0) as client:
             response = client.post("/render/batch", json=request_payload)
         response.raise_for_status()
-    except httpx.HTTPError as exc:  # pragma: no cover - network failure
-        raise ExportGenerationError('Unable to render slides using the rendering service.') from exc
+    except httpx.HTTPStatusError as exc:  # pragma: no cover - upstream failure
+        detail = exc.response.text if exc.response is not None else ""
+        logger.error(
+            "Rendering service responded with %s: %s", exc.response.status_code, detail
+        )
+        message = "Rendering service returned an error while capturing slides."
+        if detail:
+            message = f"{message} ({detail.strip()})"
+        raise ExportGenerationError(message) from exc
+    except httpx.RequestError as exc:  # pragma: no cover - network failure
+        logger.error("Unable to reach rendering service at %s: %s", base_url, exc)
+        raise ExportGenerationError('Unable to connect to the rendering service.') from exc
 
     try:
         payload = response.json()
