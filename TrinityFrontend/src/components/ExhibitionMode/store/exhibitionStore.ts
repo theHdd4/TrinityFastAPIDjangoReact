@@ -8,11 +8,7 @@ import {
   type ExhibitionLayoutResponse,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
-import type {
-  GradientColorId,
-  GradientColorToken,
-  SolidColorToken,
-} from '@/templates/color-tray';
+import type { GradientColorToken, SolidColorToken } from '@/templates/color-tray';
 import {
   isKnownGradientId,
   isSolidToken,
@@ -22,8 +18,15 @@ import {
   DEFAULT_EXHIBITION_THEME,
   type ExhibitionTheme,
 } from '../themes';
-
-export type CardColor = GradientColorId | SolidColorToken;
+import {
+  buildLayoutTextBoxId,
+  CardColor,
+  CardLayout,
+  DEFAULT_CARD_LAYOUT,
+  ensureCardLayout,
+  getLayoutPreset,
+} from '../layouts';
+import { createTextBoxSlideObject } from '../components/operationsPalette/textBox/constants';
 export type SlideBackgroundPreset =
   | 'default'
   | 'ivory'
@@ -35,11 +38,6 @@ export type SlideBackgroundPreset =
 export type SlideBackgroundColor = SlideBackgroundPreset | SolidColorToken | GradientColorToken;
 export type CardWidth = 'M' | 'L';
 export type ContentAlignment = 'top' | 'center' | 'bottom';
-export type CardLayout = 'none' | 'top' | 'bottom' | 'right' | 'left' | 'full';
-
-const DEFAULT_CARD_LAYOUT: CardLayout = 'right';
-
-const CARD_LAYOUTS: readonly CardLayout[] = ['none', 'top', 'bottom', 'right', 'left', 'full'] as const;
 const SLIDE_BACKGROUND_PRESETS: readonly SlideBackgroundPreset[] = [
   'default',
   'ivory',
@@ -151,29 +149,6 @@ const refreshCatalogueLocalCache = (
   } catch (error) {
     console.warn('[Exhibition] Unable to refresh exhibition catalogue local cache', error);
   }
-};
-
-const LEGACY_CARD_LAYOUTS: Record<string, CardLayout> = {
-  blank: 'none',
-  'horizontal-split': 'top',
-  'vertical-split': 'left',
-  'content-right': 'right',
-  full: 'full',
-};
-
-const ensureCardLayout = (layout: unknown): CardLayout => {
-  if (typeof layout === 'string') {
-    if ((CARD_LAYOUTS as readonly string[]).includes(layout)) {
-      return layout as CardLayout;
-    }
-
-    const legacyLayout = LEGACY_CARD_LAYOUTS[layout];
-    if (legacyLayout) {
-      return legacyLayout;
-    }
-  }
-
-  return DEFAULT_CARD_LAYOUT;
 };
 
 export type SlideshowTransition = 'fade' | 'slide' | 'zoom';
@@ -859,6 +834,16 @@ const synchroniseSlideObjects = (
   let next: SlideObject[] = [];
   const titleId = buildSlideTitleObjectId(card.id);
   const resolvedTitle = resolveCardTitle(card, atoms);
+  const cardLayout = ensureCardLayout(card.presentationSettings?.cardLayout);
+  const layoutPreset = getLayoutPreset(cardLayout);
+  const layoutTextBoxes = Array.isArray(layoutPreset.textBoxes)
+    ? layoutPreset.textBoxes
+    : [];
+  const layoutTextBoxIds = new Set(
+    layoutTextBoxes.map(definition => buildLayoutTextBoxId(card.id, definition.role)),
+  );
+  const layoutTextBoxPrefix = `${card.id}::layout-`;
+  const preservedLayoutTextBoxes = new Map<string, SlideObject>();
 
   const ensureTitleProps = (props: Record<string, unknown> | undefined): Record<string, unknown> => {
     const nextProps: Record<string, unknown> = { ...(props || {}) };
@@ -923,6 +908,14 @@ const synchroniseSlideObjects = (
         titleSource = { ...object };
       } else if (object.type === 'text-box' && object.id === titleId) {
         titleSource = { ...object };
+      } else if (object.type === 'text-box' && layoutTextBoxIds.has(object.id)) {
+        preservedLayoutTextBoxes.set(object.id, { ...object });
+      } else if (
+        object.type === 'text-box' &&
+        typeof object.id === 'string' &&
+        object.id.startsWith(layoutTextBoxPrefix)
+      ) {
+        // Drop layout placeholders from previous configurations
       } else {
         next.push({ ...object });
       }
@@ -956,6 +949,39 @@ const synchroniseSlideObjects = (
     zIndex: typeof titleObject.zIndex === 'number' ? titleObject.zIndex : next.length + 1,
   };
   next = [...next, finalTitleObject];
+
+  layoutTextBoxes.forEach(definition => {
+    const objectId = buildLayoutTextBoxId(card.id, definition.role);
+    const existingObject = preservedLayoutTextBoxes.get(objectId);
+
+    if (existingObject) {
+      next.push({
+        ...existingObject,
+        zIndex:
+          typeof existingObject.zIndex === 'number' ? existingObject.zIndex : next.length + 1,
+      });
+      return;
+    }
+
+    const formattingOverrides = {
+      text: definition.placeholder,
+      ...(definition.formatting ?? {}),
+    };
+
+    const created = createTextBoxSlideObject(
+      objectId,
+      {
+        x: definition.x,
+        y: definition.y,
+        width: definition.width,
+        height: definition.height,
+        zIndex: next.length + 1,
+      },
+      formattingOverrides,
+    );
+
+    next.push(created);
+  });
 
   return normaliseZIndices(next);
 };
